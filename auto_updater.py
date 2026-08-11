@@ -24,7 +24,7 @@
    - GITHUB_OWNER: اسم حسابك/منظمتك على GitHub.
    - GITHUB_REPO: اسم المستودع (الخاص) اللي فيه الإصدارات.
    - GITHUB_BRANCH: اسم الفرع اللي تدفع (push) عليه تحديثاتك — افتراضياً main.
-   - GITHUB_TOKEN: "Fine-grained personal access token" مربوط بهذا
+   - GITHUB_TOKEN: "github_pat_11CHVTM..." مربوط بهذا
      المستودع فقط وبصلاحية قراءة فقط (Contents: Read-only). هذا التوكن
      ينحزم داخل نسخة كل عميل حتى يقدر يقرأ الملفات من مستودعك
      الخاص، فخليه محدود الصلاحية قد الإمكان (قراءة فقط، على هذا
@@ -47,7 +47,7 @@ from datetime import datetime
 GITHUB_OWNER = "sesahmed95-web"     # 🔒 غيّرها
 GITHUB_REPO = "-lis-system-updates"    # 🔒 غيّرها
 GITHUB_BRANCH = "main"                 # 🔒 اسم الفرع اللي تدفع عليه تحديثاتك
-GITHUB_TOKEN = "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"  # 🔒 غيّرها
+GITHUB_TOKEN = "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"   # 🔒 غيّرها
 # مسار ملف VERSION داخل المستودع (لو حاطه بمجلد فرعي غيّر هذا المسار،
 # مثلاً "lis_system/VERSION"). اتركه "VERSION" لو بجذر المستودع مباشرة.
 VERSION_FILE_PATH_IN_REPO = "VERSION"
