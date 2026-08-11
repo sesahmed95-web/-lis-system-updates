@@ -1,0 +1,59 @@
+{% extends "designer/layout.html" %}
+{% block dcontent %}
+<h2>{{ t('host_interface') }}</h2>
+<p class="muted">هذا القسم خاص بالمصمم فقط — ربط البرنامج بأجهزة المختبر (ASTM/HL7). لا يظهر لأي مستخدم عادي في البرنامج.</p>
+<div class="card">
+  <h3>{{ t('host_interface_settings') }}</h3>
+  <p class="muted">{{ t('host_interface_help') }}</p>
+  <form method="POST" class="form-grid">
+    <div class="form-field">
+      <label class="checkbox-item"><input type="checkbox" name="enabled" {% if enabled %}checked{% endif %}> {{ t('enable_listener') }}</label>
+    </div>
+    <div class="form-field">
+      <label>{{ t('listen_ip') }}</label>
+      <input type="text" name="ip" value="{{ ip }}" placeholder="0.0.0.0">
+    </div>
+    <div class="form-field">
+      <label>{{ t('listen_port') }}</label>
+      <input type="number" name="port" value="{{ port }}" min="1" max="65535">
+    </div>
+    <div class="form-field" style="align-self:end;">
+      <button class="btn" type="submit">{{ t('save') }}</button>
+    </div>
+  </form>
+  <p class="muted">{{ t('host_restart_note') }}</p>
+  <p class="muted">{{ t('host_mapcode_note') }}</p>
+</div>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h3>{{ t('recent_messages') }}</h3>
+    <form method="POST" action="{{ url_for('clear_host_interface_log') }}" onsubmit="return confirm('{{ t('confirm_clear_log') }}');">
+      <button type="submit" class="btn small secondary">{{ t('clear_log') }}</button>
+    </form>
+  </div>
+  <table>
+    <thead><tr>
+      <th>{{ t('time') }}</th><th>{{ t('direction') }}</th><th>{{ t('status') }}</th><th>{{ t('summary') }}</th><th>{{ t('raw_message') }}</th>
+    </tr></thead>
+    <tbody>
+      {% for l in logs %}
+      <tr>
+        <td class="mono">{{ l['created_at'] }}</td>
+        <td>{{ l['direction'] }}</td>
+        <td>
+          {% if l['status'] == 'Processed' %}✅ {{ l['status'] }}
+          {% elif l['status'] == 'Error' %}⛔ {{ l['status'] }}
+          {% elif l['status'] == 'Unmatched' %}⚠️ {{ l['status'] }}
+          {% else %}{{ l['status'] }}{% endif %}
+        </td>
+        <td>{{ l['parsed_summary'] }}</td>
+        <td class="mono" style="max-width:400px; overflow-wrap:break-word;">{{ l['raw_message'] }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">{{ t('no_messages_yet') }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

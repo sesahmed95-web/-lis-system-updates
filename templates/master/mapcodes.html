@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('mapcodes') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ t('add_mapcode') }}</h3>
+  <form method="POST" class="form-grid">
+    <div class="form-field">
+      <label>{{ t('parameter') }}</label>
+      <select name="test_parameter_id" required>
+        {% for p in parameters %}
+        <option value="{{ p['id'] }}">{{ p['test_name'] }} — {{ p['name'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label>{{ t('machine_name') }}</label>
+      <input type="text" name="machine_name" placeholder="e.g. Access2, Au480, D10">
+    </div>
+    <div class="form-field">
+      <label>{{ t('machine_code') }}</label>
+      <input type="text" name="machine_code" required>
+    </div>
+    <div class="form-field">
+      <label class="checkbox-item"><input type="checkbox" name="send_enabled" checked> {{ t('send') }}</label>
+      <label class="checkbox-item"><input type="checkbox" name="receive_enabled" checked> {{ t('receive') }}</label>
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">{{ t('create') }}</button>
+    </div>
+  </form>
+  <p class="muted">هذه الأكواد تجهّز الربط المستقبلي مع أجهزة المختبر (HL7/ASTM) — عند توصيل الجهاز فعليًا سيُستخدم هذا الجدول لمطابقة نتائج الجهاز مع التحليل الصحيح تلقائيًا.</p>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>{{ t('test') }}</th><th>{{ t('parameter') }}</th><th>{{ t('machine_name') }}</th>
+      <th>{{ t('machine_code') }}</th><th>{{ t('send') }}</th><th>{{ t('receive') }}</th><th>{{ t('actions') }}</th>
+    </tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr id="map-view-{{ r['id'] }}">
+        <td>{{ r['test_name'] }}</td>
+        <td>{{ r['param_name'] }}</td>
+        <td>{{ r['machine_name'] }}</td>
+        <td class="mono">{{ r['machine_code'] }}</td>
+        <td>{% if r['send_enabled'] %}✅{% else %}—{% endif %}</td>
+        <td>{% if r['receive_enabled'] %}✅{% else %}—{% endif %}</td>
+        <td>
+          <button type="button" class="btn small secondary" onclick="document.getElementById('map-view-{{ r['id'] }}').style.display='none'; document.getElementById('map-edit-{{ r['id'] }}').style.display='table-row';">{{ t('edit') }}</button>
+          <form method="POST" action="{{ url_for('delete_mapcode', mapcode_id=r['id']) }}" style="display:inline" onsubmit="return confirm('{{ t('confirm_delete_mapcode') }}');">
+            <button type="submit" class="btn small danger">{{ t('delete') }}</button>
+          </form>
+        </td>
+      </tr>
+      <tr id="map-edit-{{ r['id'] }}" style="display:none">
+        <td colspan="7">
+          <form method="POST" action="{{ url_for('update_mapcode', mapcode_id=r['id']) }}" class="form-grid">
+            <div class="form-field">
+              <label>{{ t('machine_name') }}</label>
+              <input type="text" name="machine_name" value="{{ r['machine_name'] or '' }}">
+            </div>
+            <div class="form-field">
+              <label>{{ t('machine_code') }}</label>
+              <input type="text" name="machine_code" value="{{ r['machine_code'] or '' }}" required>
+            </div>
+            <div class="form-field">
+              <label class="checkbox-item"><input type="checkbox" name="send_enabled" {% if r['send_enabled'] %}checked{% endif %}> {{ t('send') }}</label>
+              <label class="checkbox-item"><input type="checkbox" name="receive_enabled" {% if r['receive_enabled'] %}checked{% endif %}> {{ t('receive') }}</label>
+            </div>
+            <div class="form-field" style="align-self:end; flex-direction:row; gap:8px;">
+              <button type="submit" class="btn small success">{{ t('save') }}</button>
+              <button type="button" class="btn small secondary" onclick="document.getElementById('map-edit-{{ r['id'] }}').style.display='none'; document.getElementById('map-view-{{ r['id'] }}').style.display='table-row';">{{ t('cancel') }}</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

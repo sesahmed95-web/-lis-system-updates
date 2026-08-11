@@ -1,0 +1,11 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+<div class="report-heading">Reticulocyte Count</div>
+
+<table style="width:100%; margin-top:10px; direction:ltr; text-align:left;">
+  <tr>
+    <td style="width:50%;"><b>Reticulocyte count:</b> {{ params.get('Reticulocyte count', '') }} %</td>
+    <td><b>Corrected Retic count:</b> {{ params.get('Corrected Retic count', '') }} %</td>
+  </tr>
+</table>
+{% endblock %}

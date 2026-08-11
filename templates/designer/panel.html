@@ -1,0 +1,209 @@
+{% extends "designer/layout.html" %}
+{% block dcontent %}
+<h2>🔧 لوحة المصمم</h2>
+
+<div class="card">
+  <h3>حالة ترخيص هذا الجهاز</h3>
+  <p>معرّف هذا الجهاز (Hardware ID):</p>
+  <div class="hw-box">{{ this_hw }}</div>
+  <p class="muted" style="margin-top:8px;">آخر IP معروف لهذا الجهاز: <span class="mono">{{ this_ip }}</span> — يُسجَّل للمعلومة فقط، القفل الفعلي يعتمد على معرّف الجهاز أعلاه.</p>
+  <p>
+    الحالة الحالية:
+    {% if lic.status == 'pending' %}🆕 بانتظار التفعيل الأولي{% elif lic.status == 'active' %}🟢 مفعّلة{% elif lic.status == 'expired' %}🔴 منتهية{% else %}{{ lic.status }}{% endif %}
+    {% if lic.days_left is not none %} — متبقي {{ lic.days_left }} يوم{% endif %}
+    {% if lic.expiry %} (تنتهي: {{ lic.expiry }}){% else %} (بدون تاريخ انتهاء — دائمة){% endif %}
+  </p>
+</div>
+
+<div class="card">
+  <h3>🌐 التحديث التلقائي عبر الإنترنت</h3>
+  <p>الإصدار المثبَّت حالياً على هذا الجهاز: <strong class="mono">{{ update_info.local_version }}</strong></p>
+
+  {% if not update_info.configured %}
+  <p class="muted">⚠️ لم يتم إعداد بيانات GitHub بعد (GITHUB_OWNER / GITHUB_REPO / GITHUB_TOKEN داخل auto_updater.py) — الزرّان تحت لن يعملا حتى تُعبَّأ هذه القيم.</p>
+  {% endif %}
+
+  <p>
+    حالة الربط بالإنترنت لهذا الجهاز:
+    {% if update_info.enabled %}🟢 مربوط — يتحقق تلقائياً كل عدة ساعات{% else %}⚪ غير مربوط — لن يتحقق من أي تحديث تلقائياً{% endif %}
+  </p>
+  {% if update_info.last_check %}
+  <p class="muted">آخر فحص: <span class="mono">{{ update_info.last_check }}</span> — {{ update_info.last_status }}</p>
+  {% endif %}
+
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+    <form method="POST" action="{{ url_for('designer_update_toggle') }}">
+      <button class="btn {{ 'secondary' if update_info.enabled else '' }}" type="submit">
+        {% if update_info.enabled %}فصل البرنامج عن الإنترنت{% else %}ربط البرنامج بالإنترنت{% endif %}
+      </button>
+    </form>
+    <form method="POST" action="{{ url_for('designer_update_check_now') }}">
+      <button class="btn secondary" type="submit">تحقق من تحديث الآن</button>
+    </form>
+  </div>
+  <p class="muted" style="margin-top:8px;">
+    "ربط البرنامج بالإنترنت" يفعّل فحصاً دورياً بالخلفية لهذا الجهاز فقط —
+    أي تعديل تنشره على GitHub بعدها يصل لهذا العميل تلقائياً بدون أي تدخل
+    منه. زر "تحقق من تحديث الآن" يشتغل فوراً بغض النظر عن حالة الربط،
+    مفيد لتجربة الاتصال أو لدفع تحديث عاجل.
+  </p>
+</div>
+
+<div class="card">
+  <h3>توليد كود تفعيل لعميل</h3>
+  <p class="muted">
+    اطلب من العميل فتح شاشة "تفعيل الترخيص" في برنامجه (تظهر تلقائياً عند انتهاء
+    التجربة أو نقل البرنامج لجهاز جديد) وإرسال معرّف الجهاز الظاهر له عبر واتساب.
+    الصق ذلك المعرّف هنا واختر مدة الترخيص، ثم أرسل له اسم المستخدم + الكود الناتجين.
+    الكود يعمل حصراً على نفس الجهاز صاحب هذا المعرّف.
+  </p>
+  <form method="POST" action="{{ url_for('designer_generate') }}" class="form-grid">
+    <div class="form-field">
+      <label>معرّف جهاز العميل (Hardware ID)</label>
+      <input type="text" name="hardware_id" placeholder="XXXX-XXXX-XXXX-XXXX" required style="direction:ltr; font-family:monospace;">
+    </div>
+    <div class="form-field">
+      <label>اسم/معرّف تعرف فيه هذا العميل</label>
+      <input type="text" name="username" placeholder="مثلاً: مختبر النور - فرع الكرادة" required>
+    </div>
+    <div class="form-field">
+      <label>مدة الترخيص</label>
+      <select name="expiry_mode" id="expiry_mode" onchange="document.getElementById('days_field').style.display = this.value==='days' ? '' : 'none';">
+        <option value="trial">تجريبي (3 أيام)</option>
+        <option value="days" selected>عدد أيام محدد (بحد أقصى سنة)</option>
+      </select>
+    </div>
+    <div class="form-field" id="days_field">
+      <label>عدد الأيام (الحد الأقصى 365)</label>
+      <input type="number" name="days" value="365" min="1" max="365">
+    </div>
+    <div class="form-field" style="align-self:end;">
+      <button class="btn" type="submit">توليد الكود</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3>سجل الأكواد التي وُلِّدت من هذا الجهاز</h3>
+  <table>
+    <thead><tr><th>التاريخ</th><th>معرّف الجهاز المستهدَف</th><th>العميل</th><th>الانتهاء</th><th></th></tr></thead>
+    <tbody>
+      {% for row in issue_log %}
+      <tr>
+        <td class="mono">{{ row['issued_at'] }}</td>
+        <td class="mono">{{ row['hardware_id'] }}</td>
+        <td>{{ row['username'] }}</td>
+        <td>{{ row['expiry'] }}</td>
+        <td style="display:flex; gap:6px;">
+          <form method="POST" action="{{ url_for('designer_delete_issue_log', log_id=row['id']) }}"
+                onsubmit="return confirm('حذف هذا السطر من السجل؟ (لا يلغي الترخيص المفعّل عند العميل، فقط ينظّف السجل هنا)');">
+            <button class="btn small secondary" type="submit">🗑 حذف السطر</button>
+          </form>
+          {% if row['hardware_id'] in revoked_licenses %}
+          <form method="POST" action="{{ url_for('designer_restore_license', hardware_id=row['hardware_id']) }}"
+                onsubmit="return confirm('رفع الإلغاء عن هذا الجهاز عن بُعد؟');">
+            <button class="btn small" type="submit">↩ رفع الإلغاء</button>
+          </form>
+          {% else %}
+          <form method="POST" action="{{ url_for('designer_revoke_license') }}"
+                onsubmit="return confirm('إلغاء ترخيص هذا الجهاز عن بُعد؟ سيتوقف عن العمل عند العميل أول ما يتصل بالنت.');">
+            <input type="hidden" name="hardware_id" value="{{ row['hardware_id'] }}">
+            <button class="btn small secondary" type="submit" style="color:#b91c1c;">🚫 إلغاء عن بُعد</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">لا يوجد أكواد بعد</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>🚫 إلغاء ترخيص عميل عن بُعد (عبر الإنترنت)</h3>
+  <p class="muted">
+    يلغي تفعيل جهاز عميل حتى لو بعيد عنك ومب أمام حاسبته — الإلغاء يُنشَر
+    بمستودع GitHub الخاص نفسه المستخدَم للتحديث التلقائي، وأي جهاز عميل
+    "مربوط بالإنترنت" يستلمه بأول فحص دوري له (أو فوراً لو ضغط عندك زر
+    "تحقق من تحديث الآن" وهو أمامك). العميل يحتاج كود تفعيل جديد منك
+    للاستمرار بعد الإلغاء.
+  </p>
+
+  {% if not github_write_token %}
+  <p class="muted">⚠️ لازم أولاً تدخل توكن GitHub بصلاحية كتابة (Contents: Read and write) على نفس المستودع الخاص — <strong>مختلف تماماً</strong> عن توكن القراءة المضمَّن بـ auto_updater.py (وهو بصلاحية قراءة فقط ومشحون مع نسخة كل عميل، ولازم يبقى كذلك لأسباب أمنية). هذا التوكن يُحفَظ فقط بجهازك أنت ولا يُشحَن أبداً مع أي نسخة تُسلَّم لعميل.</p>
+  {% endif %}
+  <form method="POST" action="{{ url_for('designer_save_github_token') }}" class="form-grid" style="margin-bottom:16px;">
+    <div class="form-field">
+      <label>توكن GitHub بصلاحية كتابة (يُحفظ بجهازك فقط)</label>
+      <input type="password" name="github_write_token" value="{{ github_write_token }}" placeholder="ghp_xxx أو github_pat_xxx" style="direction:ltr; font-family:monospace;">
+    </div>
+    <div class="form-field" style="align-self:end;">
+      <button class="btn secondary" type="submit">حفظ التوكن</button>
+    </div>
+  </form>
+
+  {% if revocation_error %}
+  <p class="login-error">⚠️ تعذر قراءة قائمة الإلغاء الحالية: {{ revocation_error }}</p>
+  {% endif %}
+
+  <form method="POST" action="{{ url_for('designer_revoke_license') }}" class="form-grid">
+    <div class="form-field">
+      <label>معرّف جهاز العميل (Hardware ID)</label>
+      <input type="text" name="hardware_id" placeholder="XXXX-XXXX-XXXX-XXXX" required style="direction:ltr; font-family:monospace;">
+    </div>
+    <div class="form-field">
+      <label>سبب الإلغاء (اختياري — يظهر للعميل)</label>
+      <input type="text" name="reason" placeholder="مثلاً: توقف الاشتراك">
+    </div>
+    <div class="form-field" style="align-self:end;">
+      <button class="btn" type="submit" style="background:#b91c1c;" onclick="return confirm('إلغاء ترخيص هذا الجهاز عن بُعد؟');">إلغاء الترخيص عن بُعد</button>
+    </div>
+  </form>
+
+  {% if revoked_licenses %}
+  <h4 style="margin-top:20px;">الأجهزة الملغاة حالياً</h4>
+  <table>
+    <thead><tr><th>معرّف الجهاز</th><th>السبب</th><th>تاريخ الإلغاء</th><th></th></tr></thead>
+    <tbody>
+      {% for hwid, info in revoked_licenses.items() %}
+      <tr>
+        <td class="mono">{{ hwid }}</td>
+        <td>{{ info.reason }}</td>
+        <td class="mono">{{ info.revoked_at }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('designer_restore_license', hardware_id=hwid) }}"
+                onsubmit="return confirm('رفع الإلغاء عن هذا الجهاز عن بُعد؟');">
+            <button class="btn small" type="submit">↩ رفع الإلغاء</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>تغيير كلمة مرور المصمم</h3>
+  <form method="POST" action="{{ url_for('designer_change_password') }}" class="form-grid">
+    <div class="form-field">
+      <label>كلمة المرور الجديدة</label>
+      <input type="password" name="new_password" required>
+    </div>
+    <div class="form-field">
+      <label>تأكيد كلمة المرور</label>
+      <input type="password" name="confirm" required>
+    </div>
+    <div class="form-field" style="align-self:end;">
+      <button class="btn secondary" type="submit">تغيير</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3>📡 ربط أجهزة المختبر (ASTM/HL7)</h3>
+  <p class="muted">إدارة وصل البرنامج بأجهزة التحاليل يتم حصراً من هنا:</p>
+  <a class="btn" href="{{ url_for('host_interface') }}">فتح إعدادات ربط الأجهزة</a>
+</div>
+{% endblock %}

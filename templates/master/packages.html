@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('packages') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ t('create') }} {{ t('packages') }}</h3>
+  <form method="POST">
+    <div class="form-grid">
+      <div class="form-field">
+        <label>{{ t('package_name') }}</label>
+        <input type="text" name="name" required>
+      </div>
+      <div class="form-field">
+        <label>{{ t('package_code') }}</label>
+        <input type="text" name="code">
+      </div>
+    </div>
+    <label class="muted">{{ t('select_tests') }}</label>
+    <div class="checkbox-grid" style="margin:8px 0 16px;">
+      {% for test in all_tests %}
+      <label class="checkbox-item">
+        <input type="checkbox" name="tests" value="{{ test['id'] }}"> {{ test['name'] }}
+      </label>
+      {% endfor %}
+    </div>
+    <button class="btn" type="submit">{{ t('create') }}</button>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>{{ t('name') }}</th><th>{{ t('package_code') }}</th><th>{{ t('tests_included') }}</th></tr></thead>
+    <tbody>
+      {% for pkg in packages %}
+      <tr>
+        <td>{{ pkg['name'] }}</td>
+        <td class="mono">{{ pkg['code'] }}</td>
+        <td>{{ pkg_tests[pkg['id']]|join(', ') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

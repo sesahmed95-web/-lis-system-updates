@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block page_title %}كشف حساب {{ lab['name'] }} - {{ month }}{% endblock %}
+{% block content %}
+<style>
+  .stmt-scope { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #1E293B; max-width: 760px; margin: 0 auto; }
+  .stmt-scope .header { text-align: center; border-bottom: 2px solid #205072; padding-bottom: 12px; margin-bottom: 18px; }
+  .stmt-scope .header .lab-name { font-size: 20px; font-weight: 700; color: #205072; }
+  .stmt-scope .header img { max-height: 60px; margin-bottom: 6px; }
+  .stmt-scope .stmt-title { font-size: 16px; font-weight: 700; margin: 4px 0 2px; }
+  .stmt-scope .stmt-sub { color: #64748B; font-size: 13px; }
+  .stmt-scope table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
+  .stmt-scope th, .stmt-scope td { border: 1px solid #E2E8F0; padding: 6px 10px; text-align: right; font-size: 13px; }
+  .stmt-scope th { background: #205072; color: #fff; }
+  .stmt-scope h4 { color: #205072; margin: 16px 0 6px; }
+  .stmt-scope .total-box { text-align: left; font-size: 16px; font-weight: 700; color: #205072; border-top: 2px solid #205072; padding-top: 10px; margin-top: 8px; }
+  .no-print { text-align: center; margin: 14px 0; }
+  @media print { .no-print { display: none; } }
+</style>
+
+<div class="no-print">
+  <button class="btn" onclick="window.print()">🖨 طباعة</button>
+</div>
+
+<div class="stmt-scope">
+  <div class="header">
+    {% if logo_url %}<img src="{{ logo_url }}" alt="logo"><br>{% endif %}
+    <div class="lab-name">{{ brand_name }}</div>
+    <div class="stmt-title">كشف حساب — {{ lab['name'] }}</div>
+    <div class="stmt-sub">شهر: {{ month }}</div>
+  </div>
+
+  <h4>الحساب اليومي</h4>
+  <table>
+    <thead><tr><th>اليوم</th><th>عدد التحاليل</th><th>المجموع</th></tr></thead>
+    <tbody>
+      {% for d in by_day %}
+      <tr>
+        <td>{{ d['date'] }}</td>
+        <td>{{ d['count'] }}</td>
+        <td>{{ "%.0f"|format(d['subtotal']) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3">لا توجد نماذج واردة هذا الشهر.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h4>إجمالي التحاليل حسب النوع</h4>
+  <table>
+    <thead><tr><th>نوع التحليل</th><th>العدد</th><th>المجموع</th></tr></thead>
+    <tbody>
+      {% for tstat in by_test %}
+      <tr>
+        <td>{{ tstat['test_name'] }}</td>
+        <td>{{ tstat['count'] }}</td>
+        <td>{{ "%.0f"|format(tstat['subtotal']) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="total-box">الإجمالي الكلي لشهر {{ month }}: {{ "%.0f"|format(total) }}</div>
+</div>
+{% endblock %}

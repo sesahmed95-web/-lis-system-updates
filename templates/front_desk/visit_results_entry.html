@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('enter_results') }} — {{ visit['patient_name'] }}{% endblock %}
+{% block content %}
+<div class="card" style="margin-bottom:14px;">
+  <h3>{{ visit['patient_name'] }} <span class="muted mono">#{{ visit['registration_number'] }}</span></h3>
+  <p class="muted">{{ visit['gender'] }} · {{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['created_at'] }}</p>
+  <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
+  <a class="btn small secondary print-link" target="_blank" id="printAllLink"
+     href="{{ url_for('print_visit_results', visit_id=visit['id'], completed_only=1) }}">🖨 طباعة كل النتائج المكتملة</a>
+  {% if visit['phone'] %}
+  <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id'], completed_only=1) }}"
+        style="display:inline;" onsubmit="return confirm('إرسال كل النتائج المكتملة لهذه الزيارة بملف PDF واحد عبر واتساب لرقم المريض؟');">
+    <button class="btn small" type="submit">📱 إرسال كل النتائج المكتملة واتساب</button>
+  </form>
+  {% else %}
+  <span class="muted" style="margin-inline-start:8px;">لا يوجد رقم واتساب مسجّل لهذا المريض</span>
+  {% endif %}
+  <label class="checkbox-item" style="margin-inline-start:10px; display:inline-flex; align-items:center; gap:4px;">
+    <input type="checkbox" id="showPrevToggle" checked onchange="lisApplyShowPrev()">
+    إظهار النتيجة السابقة بالتقارير المطبوعة (لتحاليل الكيمياء/التخثر)
+  </label>
+</div>
+
+<script>
+  window.LIS_PATIENT_HCT = {{ 'null' if patient_hct is none else patient_hct }};
+  window.LIS_PATIENT_GENDER = {{ visit['gender']|tojson }};
+</script>
+
+<script>
+  // يطبّق اختيار "إظهار النتيجة السابقة" على كل روابط الطباعة بالصفحة عبر
+  // إضافة show_prev=1/0 بالرابط قبل ما المستخدم يضغط عليه — القسم الطبي
+  // (كيمياء/تخثر) هو الوحيد المتأثر أصلاً بهذا الخيار بالتقرير نفسه.
+  function lisApplyShowPrev() {
+    var checked = document.getElementById('showPrevToggle').checked ? '1' : '0';
+    document.querySelectorAll('a.print-link').forEach(function (a) {
+      var url = new URL(a.href, window.location.origin);
+      url.searchParams.set('show_prev', checked);
+      a.href = url.toString();
+    });
+  }
+  document.addEventListener('DOMContentLoaded', lisApplyShowPrev);
+</script>
+
+<form method="POST" id="visitResultsForm">
+  <div class="rb-grid">
+    {% for box in boxes %}
+    {% set ot = box.ot %}
+    <div class="card rb-box" id="rbox_{{ ot['id'] }}">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+        <h4 style="margin:0;">{{ ot['test_name'] }}</h4>
+        <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span>
+      </div>
+      <p class="muted" style="margin:4px 0 10px;">{{ t('barcode') }}: <span class="mono">{{ ot['barcode'] }}</span></p>
+
+      {% if ot['status'] == 'Verified' %}
+        {% if current_role in ['supervisor', 'admin'] %}
+        <form method="POST" action="{{ url_for('unverify_result', order_test_id=ot['id']) }}"
+              style="margin-bottom:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
+              onsubmit="return confirm('هذه النتيجة معتمدة فعلاً. فتحها للتعديل يتطلب اعتمادها من جديد بعد الحفظ. متأكد؟')">
+          <input type="hidden" name="next_visit_id" value="{{ visit['id'] }}">
+          <input type="text" name="reason" placeholder="سبب إعادة الفتح (اختياري)" style="max-width:220px;">
+          <button class="btn small secondary" type="submit">🔓 فتح للتعديل</button>
+        </form>
+        {% else %}
+        <p class="muted">🔒 معتمدة — لا يمكن تعديلها إلا بواسطة المشرف.</p>
+        {% endif %}
+      {% endif %}
+
+      <table>
+        <thead><tr>
+          <th>{{ t('parameter') }}</th><th>{{ t('unit') }}</th><th>{{ t('range') }}</th><th>{{ t('result') }}</th><th>{{ t('flag') }}</th>
+        </tr></thead>
+        <tbody>
+          {% for p in box.parameters %}
+          {% set existing = box.results_by_param.get(p['id']) %}
+          {% set rng = box.ranges.get(p['id']) %}
+          {% set sugg = box.suggestions_map.get(p['id'], []) %}
+          {% set fid = 'p_' ~ ot['id'] ~ '_' ~ p['id'] %}
+          <tr>
+            <td>{{ p['name'] }}</td>
+            <td class="muted">{{ p['unit'] }}</td>
+            <td class="muted">
+              {% if rng %}
+                {% if rng['range_text'] %}{{ rng['range_text'] }}
+                {% elif rng['low'] is not none and rng['high'] is not none %}{{ rng['low'] }} - {{ rng['high'] }}{% endif %}
+              {% endif %}
+            </td>
+            <td>
+              {% if p['result_type'] == 'Text' %}
+              <textarea id="{{ fid }}" name="ot{{ ot['id'] }}_param_{{ p['id'] }}" dir="ltr" style="text-align:left; width:100%;"
+                        rows="2" class="lis-autoresize" data-param-name="{{ p['name'] }}"
+                        {{ 'readonly' if ot['status'] == 'Verified' else '' }}>{{ existing['value_text'] if existing else '' }}</textarea>
+              <label class="muted" style="display:flex; align-items:center; gap:4px; font-size:11px; margin-top:3px;">
+                <input type="checkbox" onchange="document.getElementById('{{ fid }}').spellcheck = this.checked;">
+                🔤 تدقيق إملائي (اختياري)
+              </label>
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
+                onclick="lisCleanupText(document.getElementById('{{ fid }}'))"
+                title="يصحح فقط المسافات وحرف البداية وعلامة الترقيم — لا يترجم ولا يغيّر أي كلمة أو مصطلح طبي">✓ تدقيق الكتابة</button>
+              {% else %}
+              <input type="text" id="{{ fid }}" name="ot{{ ot['id'] }}_param_{{ p['id'] }}" dir="ltr" style="text-align:left;"
+                     data-param-name="{{ p['name'] }}"
+                     {% if p['name'] == 'Corrected Retic count' %}data-auto-filled="{{ '0' if existing else '1' }}"{% endif %}
+                     value="{{ existing['value_numeric'] if existing and existing['value_numeric'] is not none else (existing['value_text'] if existing else '') }}"
+                     {{ 'readonly' if ot['status'] == 'Verified' else '' }}>
+              {% if p['name'] == 'Corrected Retic count' %}
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
+                onclick="lisForceRecalcCorrectedRetic(this)" title="يحسبها من Reticulocyte count وقيمة HCT لنفس الزيارة (رجال 45%، نساء 42%)">↻ إعادة الحساب التلقائي</button>
+              {% endif %}
+              {% endif %}
+              {% set hist = box.history_map.get(p['id']) %}
+              {% if hist and ot['status'] != 'Verified' %}
+              {% set prev_val = hist['prev_value_numeric'] if hist['prev_value_numeric'] is not none else hist['prev_value_text'] %}
+              <div class="muted" style="margin-top:4px; font-size:11.5px;">
+                القيمة السابقة: <span class="mono">{{ prev_val }}</span>
+                <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px;"
+                  onclick="document.getElementById('{{ fid }}').value='{{ prev_val }}'">↩ استرجاع</button>
+              </div>
+              {% endif %}
+              {% if sugg %}
+              <div style="margin-top:4px;">
+                {% for s in sugg %}
+                <button type="button" class="btn small secondary" style="margin-inline-end:4px; margin-top:4px;"
+                  onclick="document.getElementById('{{ fid }}').value='{{ s }}'">{{ s }}</button>
+                {% endfor %}
+              </div>
+              {% endif %}
+            </td>
+            <td>{% if existing %}<span class="badge badge-{{ existing['flag'] }}">{{ existing['flag'] }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="btn small secondary print-link" target="_blank" href="{{ url_for('print_report', order_test_id=ot['id']) }}">🖨 طباعة التقرير</a>
+        {% if visit['phone'] and ot['status'] in ['Completed', 'Verified'] %}
+        <form method="POST" action="{{ url_for('whatsapp_send_result', order_test_id=ot['id']) }}" style="display:inline;"
+              onsubmit="return confirm('إرسال نتيجة {{ ot['test_name'] }} فقط عبر واتساب لرقم المريض؟');">
+          <button class="btn small" type="submit">📱 إرسال هذه النتيجة واتساب</button>
+        </form>
+        {% endif %}
+        {% if current_role in ['supervisor', 'admin'] and ot['status'] == 'Completed' %}
+        <form method="POST" action="{{ url_for('verify_result', order_test_id=ot['id']) }}" onsubmit="return confirm('اعتماد هذه النتيجة؟')">
+          <input type="hidden" name="next_visit_id" value="{{ visit['id'] }}">
+          <button class="btn small success" type="submit">✔ {{ t('verify') }}</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div style="position:sticky; bottom:0; background:var(--card-bg,#fff); padding:12px 0; margin-top:16px; border-top:1px solid #E2E8F0;">
+    <button class="btn" type="submit">{{ t('save') }}</button>
+  </div>
+</form>
+
+<style>
+  .rb-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:14px; }
+  .rb-box { margin-bottom:0; }
+  .diff-panel {
+    display:flex; gap:14px; flex-wrap:wrap; align-items:center;
+    background:#F3F6F8; border:1px solid #E2E8F0; border-radius:6px;
+    padding:6px 10px; margin:8px 0; font-size:12.5px;
+  }
+  .diff-panel label { display:flex; align-items:center; gap:5px; cursor:pointer; }
+  .diff-sum-badge { font-weight:bold; font-family:monospace; }
+  .diff-sum-badge.ok { color:#15803D; }
+  .diff-sum-badge.bad { color:#C0392B; }
+</style>
+
+<script>
+// ------------------------------------------------------------------
+// التحقق من فحوصات التفريق (WBC Differential / فلم الدم):
+// مجموع خلايا الفحص (Neutrophils, Lymphocytes, Monocytes, Eosinophils,
+// Basophils, Band, Promyelocytes, Myelocytes, Metamyelocytes, Blast)
+// لازم يكون بالضبط 100 خلية قبل الحفظ.
+// - NRBC ما تدخل بمجموع الـ100 أبداً؛ فقط سؤال اختياري "عدّها؟" يتحكم
+//   بتفعيل/تعطيل حقلها.
+// - Atypical Lymphocyte و Reactive lymphocytes أحياناً تدخل ضمن الـ100
+//   وأحياناً لا، فكل وحدة منهم بشرط (checkbox) يتحكم بيه المستخدم لكل فحص.
+// ------------------------------------------------------------------
+(function () {
+  var CORE_PATTERNS = [
+    "metamyelocyte", "promyelocyte", "myelocyte", "neutrophil",
+    "lymphocyte", "monocyte", "eosinophil", "basophil", "band", "blast",
+  ];
+
+  function classifyName(rawName) {
+    var name = rawName.trim().toLowerCase();
+    if (name.indexOf("nrbc") !== -1 || name.indexOf("n.r.b.c") !== -1) return "nrbc";
+    if (name.indexOf("atypical") !== -1) return "atypical";
+    if (name.indexOf("reactive") !== -1) return "reactive";
+    for (var i = 0; i < CORE_PATTERNS.length; i++) {
+      if (name.indexOf(CORE_PATTERNS[i]) !== -1) return "core";
+    }
+    return null;
+  }
+
+  var diffBoxes = []; // { box, coreInputs:[], nrbcInput, atypicalInput, atypicalCheck, reactiveInput, reactiveCheck, sumEl }
+
+  document.querySelectorAll(".rb-box").forEach(function (box) {
+    var coreInputs = [], nrbcInput = null, atypicalInput = null, reactiveInput = null;
+    box.querySelectorAll("table tbody tr").forEach(function (tr) {
+      var firstCell = tr.querySelector("td");
+      var input = tr.querySelector("input[type=text]");
+      if (!firstCell || !input) return;
+      var kind = classifyName(firstCell.textContent);
+      if (kind === "core") coreInputs.push(input);
+      else if (kind === "nrbc") nrbcInput = input;
+      else if (kind === "atypical") atypicalInput = input;
+      else if (kind === "reactive") reactiveInput = input;
+    });
+
+    // ما نعتبره فحص تفريق إلا إذا لكيت 3 خلايا أساسية وأكثر
+    if (coreInputs.length < 3) return;
+
+    var readOnly = coreInputs[0].hasAttribute("readonly");
+    var panel = document.createElement("div");
+    panel.className = "diff-panel";
+
+    var sumEl = document.createElement("span");
+    sumEl.className = "diff-sum-badge";
+    sumEl.textContent = "المجموع: 0 / 100";
+    panel.appendChild(sumEl);
+
+    var nrbcCheck = null;
+    if (nrbcInput) {
+      var nrbcLabel = document.createElement("label");
+      nrbcCheck = document.createElement("input");
+      nrbcCheck.type = "checkbox";
+      nrbcCheck.checked = !!nrbcInput.value;
+      nrbcCheck.disabled = readOnly;
+      nrbcLabel.appendChild(nrbcCheck);
+      nrbcLabel.appendChild(document.createTextNode("عدّ NRBC؟ (لا تدخل ضمن مجموع الـ100 خلية)"));
+      panel.appendChild(nrbcLabel);
+      nrbcInput.disabled = !nrbcCheck.checked;
+      nrbcCheck.addEventListener("change", function () {
+        nrbcInput.disabled = !nrbcCheck.checked;
+        if (!nrbcCheck.checked) nrbcInput.value = "";
+      });
+    }
+
+    var atypicalCheck = null;
+    if (atypicalInput) {
+      var atLabel = document.createElement("label");
+      atypicalCheck = document.createElement("input");
+      atypicalCheck.type = "checkbox";
+      atypicalCheck.checked = true;
+      atypicalCheck.disabled = readOnly;
+      atLabel.appendChild(atypicalCheck);
+      atLabel.appendChild(document.createTextNode("تضمين Atypical Lymphocyte ضمن الـ100 خلية؟"));
+      panel.appendChild(atLabel);
+    }
+
+    var reactiveCheck = null;
+    if (reactiveInput) {
+      var reLabel = document.createElement("label");
+      reactiveCheck = document.createElement("input");
+      reactiveCheck.type = "checkbox";
+      reactiveCheck.checked = true;
+      reactiveCheck.disabled = readOnly;
+      reLabel.appendChild(reactiveCheck);
+      reLabel.appendChild(document.createTextNode("تضمين Reactive lymphocytes ضمن الـ100 خلية؟"));
+      panel.appendChild(reLabel);
+    }
+
+    var table = box.querySelector("table");
+    table.parentNode.insertBefore(panel, table);
+
+    function recompute() {
+      var sum = 0;
+      coreInputs.forEach(function (inp) { sum += parseFloat(inp.value) || 0; });
+      if (atypicalInput && atypicalCheck && atypicalCheck.checked) {
+        sum += parseFloat(atypicalInput.value) || 0;
+      }
+      if (reactiveInput && reactiveCheck && reactiveCheck.checked) {
+        sum += parseFloat(reactiveInput.value) || 0;
+      }
+      sumEl.textContent = "المجموع: " + sum + " / 100";
+      sumEl.className = "diff-sum-badge " + (sum === 100 ? "ok" : "bad");
+      return sum;
+    }
+
+    coreInputs.forEach(function (inp) { inp.addEventListener("input", recompute); });
+    if (atypicalInput) atypicalInput.addEventListener("input", recompute);
+    if (atypicalCheck) atypicalCheck.addEventListener("change", recompute);
+    if (reactiveInput) reactiveInput.addEventListener("input", recompute);
+    if (reactiveCheck) reactiveCheck.addEventListener("change", recompute);
+    recompute();
+
+    diffBoxes.push({
+      box: box, testName: box.querySelector("h4").textContent.trim(),
+      coreInputs: coreInputs, atypicalInput: atypicalInput, atypicalCheck: atypicalCheck,
+      reactiveInput: reactiveInput, reactiveCheck: reactiveCheck,
+      recompute: recompute, readOnly: readOnly,
+    });
+  });
+
+  var form = document.getElementById("visitResultsForm");
+  if (form) {
+    form.addEventListener("submit", function (e) {
+      for (var i = 0; i < diffBoxes.length; i++) {
+        var d = diffBoxes[i];
+        if (d.readOnly) continue;
+        var anyFilled = d.coreInputs.some(function (inp) { return inp.value.trim() !== ""; });
+        if (!anyFilled) continue; // الفحص ما زال فاضي، تجاوزه
+        var sum = d.recompute();
+        if (sum !== 100) {
+          e.preventDefault();
+          alert("⚠️ فحص \"" + d.testName + "\": مجموع خلايا التفريق حالياً " + sum +
+                " وليس 100. أكمل/صحّح النسب قبل الحفظ.\n(NRBC لا تحسب ضمن الـ100، وAtypical Lymphocyte وReactive lymphocytes حسب الخيار المحدد أعلى الجدول.)");
+          d.box.scrollIntoView({ behavior: "smooth", block: "center" });
+          return false;
+        }
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('samples_accession') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>{{ t('no_col') }}</th><th>{{ t('name') }}</th><th>{{ t('test') }}</th><th>{{ t('department') }}</th>
+      <th>{{ t('sample_type') }}</th><th>{{ t('barcode') }}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for ot in order_tests %}
+      <tr class="dept-bar dept-{{ ot['department']|replace(' ', '-') }}">
+        <td class="mono">{{ ot['registration_number'] }}</td>
+        <td>{{ ot['patient_name'] }}</td>
+        <td>{{ ot['test_name'] }}</td>
+        <td>{{ ot['department'] }}</td>
+        <td>{{ ot['sample_type'] }}</td>
+        <td class="mono">{{ ot['barcode'] }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('accept_sample', order_test_id=ot['id']) }}">
+            <button class="btn small success" type="submit">{{ t('accept') }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ 'rtl' if lang == 'ar' else 'ltr' }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ brand_name }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script>
+  // حتى لو نسى المستخدم يطفّي خيار "Headers and footers" بنافذة الطباعة،
+  // خلي عنوان التبويب (اللي يطلعه المتصفح بمنتصف رأس الطباعة) فاضي وقت
+  // الطباعة تحديداً، عشان ما يطلع اسم المختبر/الطبيب هناك بالإضافة لغيره
+  // من عناصر التصميم. يرجع العنوان لطبيعته بعد الطباعة مباشرة.
+  (function () {
+    var savedTitle = null;
+    window.addEventListener("beforeprint", function () {
+      savedTitle = document.title;
+      document.title = "";
+    });
+    window.addEventListener("afterprint", function () {
+      if (savedTitle !== null) document.title = savedTitle;
+    });
+  })();
+</script>
+</head>
+<body>
+<script>
+  if (localStorage.getItem("lis-theme") === "dark") document.documentElement.classList.add("dark");
+</script>
+{% if license_banner %}
+<div style="background:#fbbf24; color:#111827; text-align:center; padding:6px; font-weight:600;">
+  ⏳ {{ license_banner }}
+</div>
+{% endif %}
+{% if is_designer %}
+<a href="{{ url_for('designer_panel') }}" title="لوحة المصمم"
+   style="position:fixed; bottom:18px; {{ 'left:18px;' if lang=='ar' else 'right:18px;' }} z-index:9999;
+          width:48px; height:48px; border-radius:50%; background:#111827; color:#fbbf24;
+          display:flex; align-items:center; justify-content:center; font-size:22px;
+          box-shadow:0 4px 14px rgba(0,0,0,.35); text-decoration:none;">
+  🛠️
+</a>
+{% endif %}
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      {% if logo_url %}<img src="{{ logo_url }}" alt="logo" class="brand-logo">{% else %}🧪{% endif %}
+      <span>{{ brand_name }}</span>
+    </div>
+    <nav>
+      <div class="nav-group">
+        <a class="nav-link {{ 'active' if request.path == '/' else '' }}" href="{{ url_for('dashboard') }}">📊 {{ t('dashboard') }}</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">{{ t('front_desk') }}</div>
+        <a class="nav-link {{ 'active' if request.path == url_for('new_visit') else '' }}" href="{{ url_for('new_visit') }}">➕ {{ t('new_visit') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('visits_list') else '' }}" href="{{ url_for('visits_list') }}">📋 {{ t('visits') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('patients_list') else '' }}" href="{{ url_for('patients_list') }}">🧑‍🤝‍🧑 {{ t('patients') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('results_list') else '' }}" href="{{ url_for('results_list') }}">📄 {{ t('results') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('followups_list') else '' }}" href="{{ url_for('followups_list') }}">📞 {{ t('patients_followup') }}</a>
+        {% if current_role in ['supervisor', 'admin'] %}
+        <a class="nav-link {{ 'active' if request.path == url_for('whatsapp_queue') else '' }}" href="{{ url_for('whatsapp_queue') }}">📱 طابور واتساب</a>
+        {% endif %}
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">{{ t('workbench') }}</div>
+        <a class="nav-link {{ 'active' if request.path == url_for('orders_list') else '' }}" href="{{ url_for('orders_list') }}">🧬 {{ t('orders') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('samples_collection') else '' }}" href="{{ url_for('samples_collection') }}">🩸 {{ t('samples_collection') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('samples_accession') else '' }}" href="{{ url_for('samples_accession') }}">📥 {{ t('samples_accession') }}</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">{{ t('billing_center') }}</div>
+        <a class="nav-link {{ 'active' if request.path == url_for('registers') else '' }}" href="{{ url_for('registers') }}">💳 {{ t('registers') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('invoices_list') else '' }}" href="{{ url_for('invoices_list') }}">🧮 {{ t('invoices') }}</a>
+        {% if current_role in ['admin', 'accountant', 'supervisor'] %}
+        <a class="nav-link {{ 'active' if request.path == url_for('daily_report') else '' }}" href="{{ url_for('daily_report') }}">🗓️ {{ t('daily_report') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('monthly_report') else '' }}" href="{{ url_for('monthly_report') }}">📅 {{ t('monthly_report') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('half_year_report') else '' }}" href="{{ url_for('half_year_report') }}">📆 {{ t('half_year_report') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('annual_report') else '' }}" href="{{ url_for('annual_report') }}">📊 {{ t('annual_report') }}</a>
+        {% endif %}
+        {% if current_role in ['admin', 'accountant'] %}
+        <a class="nav-link {{ 'active' if request.path == url_for('rates') else '' }}" href="{{ url_for('rates') }}">💲 {{ t('rates') }}</a>
+        {% endif %}
+      </div>
+      {% if current_role in ['admin', 'supervisor'] %}
+      <div class="nav-group">
+        <div class="nav-group-title">{{ t('master_definitions') }}</div>
+        <a class="nav-link {{ 'active' if request.path == url_for('reference_ranges') else '' }}" href="{{ url_for('reference_ranges') }}">📐 {{ t('reference_ranges') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('packages_list') else '' }}" href="{{ url_for('packages_list') }}">📦 {{ t('packages') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('mapcodes_list') else '' }}" href="{{ url_for('mapcodes_list') }}">🔗 {{ t('mapcodes') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('quick_add_items') else '' }}" href="{{ url_for('quick_add_items') }}">⚡ {{ t('quick_add_items') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('suggestions_list') else '' }}" href="{{ url_for('suggestions_list') }}">💬 {{ t('suggestions') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('test_catalog') else '' }}" href="{{ url_for('test_catalog') }}">🧾 {{ t('test_catalog') }}</a>
+      </div>
+      {% endif %}
+      {% if current_role == 'admin' %}
+      <div class="nav-group">
+        <div class="nav-group-title">{{ t('management') }}</div>
+        <a class="nav-link {{ 'active' if request.path == url_for('doctors_list') else '' }}" href="{{ url_for('doctors_list') }}">🩺 {{ t('doctors') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('examining_doctor_rates_list') else '' }}" href="{{ url_for('examining_doctor_rates_list') }}">💰 أجور دكتور المختبر الفاحص</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('referral_labs_list') else '' }}" href="{{ url_for('referral_labs_list') }}">🧪 المختبرات المُرسِلة</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('report_designer') else '' }}" href="{{ url_for('report_designer') }}">🖨️ مصمم التقارير</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('app_settings') else '' }}" href="{{ url_for('app_settings') }}">⚙️ {{ t('settings') }}</a>
+      </div>
+      {% endif %}
+    </nav>
+    <div class="sidebar-footer">
+      {{ current_user }}<br>
+      <span style="opacity:.8">{{ current_role }}</span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="title">{% block page_title %}{{ t('dashboard') }}{% endblock %}</div>
+      <div class="controls">
+        <button class="pill-btn {{ 'active' if lang=='en' }}" onclick="location.href='{{ url_for('set_lang', lang='en') }}'">EN</button>
+        <button class="pill-btn {{ 'active' if lang=='ar' }}" onclick="location.href='{{ url_for('set_lang', lang='ar') }}'">AR</button>
+        <button class="pill-btn" onclick="toggleTheme()">🌓</button>
+        <span class="user-chip">{{ current_user }}</span>
+        <a class="pill-btn" href="{{ url_for('logout') }}">{{ t('logout') }}</a>
+      </div>
+    </div>
+    <div class="content">
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

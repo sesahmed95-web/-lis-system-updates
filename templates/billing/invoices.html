@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('invoices') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>{{ t('no_col') }}</th><th>{{ t('name') }}</th><th>{{ t('total') }}</th><th>{{ t('discount') }}</th>
+      <th>{{ t('paid') }}</th><th>{{ t('due_balance') }}</th><th>{{ t('status') }}</th><th></th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for i in rows %}
+      {% set due = i['total_amount'] - i['discount_amount'] - i['paid_amount'] %}
+      <tr>
+        <td class="mono">{{ i['registration_number'] }}</td>
+        <td>{{ i['patient_name'] }}</td>
+        <td>{{ "%.0f"|format(i['total_amount']) }}</td>
+        <td>{{ "%.0f"|format(i['discount_amount']) }}</td>
+        <td>{{ "%.0f"|format(i['paid_amount']) }}</td>
+        <td>{{ "%.0f"|format(due) }}</td>
+        <td><span class="badge badge-{{ i['status'] }}">{{ i['status'] }}</span></td>
+        <td>
+          {% if not i['is_locked'] %}
+          <form method="POST" action="{{ url_for('apply_discount', invoice_id=i['id']) }}" style="display:flex; gap:6px;">
+            <input type="number" step="0.01" name="discount_amount" value="{{ i['discount_amount'] }}" style="width:90px">
+            <button class="btn small" type="submit">{{ t('apply') }}</button>
+          </form>
+          {% endif %}
+        </td>
+        <td style="white-space:nowrap;">
+          <a class="btn small secondary" target="_blank" href="{{ url_for('print_invoice', visit_id=i['visit_id']) }}" title="طباعة الفاتورة">🧾</a>
+          <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=i['visit_id']) }}" title="تعديل الزيارة">✏️</a>
+          <form method="POST" action="{{ url_for('toggle_invoice_lock', invoice_id=i['id']) }}" style="display:inline;">
+            <button class="btn small {{ 'danger' if not i['is_locked'] else 'success' }}" type="submit" title="{{ 'قفل الفاتورة (منع التعديل)' if not i['is_locked'] else 'فتح الفاتورة للتعديل' }}">{{ '🔒' if not i['is_locked'] else '🔓' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

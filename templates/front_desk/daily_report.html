@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('daily_report') }}{% endblock %}
+{% block content %}
+<style>
+  .report-table { width: 100%; border-collapse: collapse; }
+  .report-table th, .report-table td { border: 1px solid #E2E8F0; padding: 8px 10px; text-align: right; font-size: 13px; }
+  .report-table th { background: #205072; color: #fff; }
+  .report-table tfoot td { font-weight: 700; background: #F3F6F8; }
+  .report-toolbar { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .report-toolbar a.pill { text-decoration:none; background:#F3F6F8; color:#205072; padding:6px 12px; border-radius:6px; font-size:12px; border:1px solid #E2E8F0; }
+  .report-heading { font-size: 18px; color: #205072; margin-bottom: 2px; }
+  .report-sub { color: #64748B; font-size: 13px; margin-bottom: 16px; }
+  @media print { .report-toolbar { display: none; } }
+</style>
+
+<div class="report-toolbar">
+  <form method="GET">
+    <label>التاريخ: </label>
+    <input type="date" name="date" value="{{ report_date }}" onchange="this.form.submit()">
+  </form>
+  <button class="btn" onclick="window.print()">🖨 طباعة / حفظ PDF</button>
+  <a class="pill" href="{{ url_for('monthly_report', month=report_date[:7]) }}">📅 الحسابات الشهرية</a>
+  <a class="pill" href="{{ url_for('half_year_report') }}">📆 الحسابات نصف السنوية</a>
+  <a class="pill" href="{{ url_for('annual_report') }}">📊 الحسابات السنوية</a>
+  <a class="pill" href="{{ url_for('dashboard') }}" style="margin-inline-start:auto;">🔙 الرجوع للرئيسية</a>
+</div>
+
+<div class="report-heading">{{ brand_name }} — التقرير اليومي</div>
+<div class="report-sub">التاريخ: {{ report_date }}</div>
+
+<table class="report-table">
+  <thead>
+    <tr><th>ت</th><th>اسم المريض الثلاثي</th><th>الجنس</th><th>العمر</th><th>الدكتور المرسل</th><th>التحاليل</th><th>دكتور المختبر الفاحص</th><th>الصرفيات</th><th>الملاحظات</th><th>المبلغ</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.reg }}</td>
+      <td>{{ r.name }}</td>
+      <td>{{ r.gender }}</td>
+      <td>{{ r.age }}</td>
+      <td>{{ r.doctors }}</td>
+      <td>{{ r.tests }}</td>
+      <td>{{ r.examining_doctor }}</td>
+      <td>{{ "%.0f"|format(r.expenses) }}</td>
+      <td>{{ r.notes }}</td>
+      <td>{{ "%.0f"|format(r.total) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr><td colspan="9">الإجمالي الكلي</td><td>{{ "%.0f"|format(grand_total) }}</td></tr>
+    <tr><td colspan="7">إجمالي الصرفيات</td><td>{{ "%.0f"|format(grand_expenses) }}</td><td></td><td></td></tr>
+    <tr><td colspan="9">الصافي (بعد خصم الصرفيات)</td><td>{{ "%.0f"|format(grand_net) }}</td></tr>
+  </tfoot>
+</table>
+{% endblock %}

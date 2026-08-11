@@ -1,0 +1,666 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('new_visit') }}{% endblock %}
+{% block content %}
+<style>
+  /* تصغير المسافات بهذي الصفحة فقط حتى يصير كل شي ظاهر بدون نزول للأسفل */
+  .nv-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+  .nv-row .card { margin-bottom: 0; }
+  .nv-row .card { padding: 12px 14px; }
+  .nv-row h3 { font-size: 14.5px; margin-bottom: 8px; }
+  .nv-row .form-field { margin-bottom: 6px; }
+  .nv-row textarea { min-height: 40px; }
+  .nv-orders-card { padding: 12px 14px; margin-top: 12px; }
+  .nv-orders-card h3 { font-size: 14.5px; margin-bottom: 8px; }
+  .nv-checkbox-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 10px; }
+  .nv-checkbox-grid .checkbox-item { font-size: 12.5px; }
+  @media (max-width: 1100px) {
+    .nv-row { grid-template-columns: 1fr; }
+    .nv-checkbox-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  #patientMatches { position: relative; }
+  #patientMatchesList { position: absolute; z-index: 20; top: 100%; inset-inline-start: 0; inset-inline-end: 0;
+    background: var(--card-bg, #fff); border: 1px solid #E2E8F0; border-radius: 6px; max-height: 220px;
+    overflow-y: auto; box-shadow: 0 6px 16px rgba(0,0,0,.12); }
+  #patientMatchesList .match-item { padding: 8px 10px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #EEF2F6; }
+  #patientMatchesList .match-item:hover { background: #F1F5F9; }
+  #patientMatchesList .match-item small { display: block; color: #64748B; }
+  #existingPatientBanner { display:none; margin: 6px 0 10px; padding: 8px 10px; background: #ECFDF5;
+    border: 1px solid #A7F3D0; border-radius: 6px; font-size: 12.5px; display:flex; justify-content: space-between; align-items: center; gap: 10px; }
+  #previousVisitsPanel { display: none; margin-top: 10px; }
+  #previousVisitsPanel .prev-visit-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 10px; border: 1px solid #E2E8F0; border-radius: 6px; margin-bottom: 6px; font-size: 12.5px; }
+  #previousVisitsPanel .prev-visit-row .tests-chip { color: #64748B; }
+  #previousVisitsPanel .prev-visit-row .actions { margin-inline-start: auto; display: flex; gap: 6px; align-items: center; }
+  #visitCreatedPanel { display: none; margin-top: 14px; padding: 16px; text-align: center; }
+  #visitCreatedPanel h3 { margin: 0 0 10px; font-size: 15px; color: #15803D; }
+  #visitCreatedPanel .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+</style>
+<form method="POST" id="newVisitForm">
+  <input type="hidden" name="existing_patient_id" id="existing_patient_id" value="">
+  <input type="hidden" name="include_visit_ids" id="include_visit_ids" value="">
+  <div class="nv-row">
+    <div class="card">
+      <h3>{{ t('patient_information') }}</h3>
+      <div class="form-grid">
+        <div class="form-field" id="patientMatches">
+          <label>{{ t('patient_name') }} *</label>
+          <input type="text" name="patient_name" id="patient_name" required autocomplete="off">
+          <div id="patientMatchesList"></div>
+        </div>
+        <div id="existingPatientBanner" style="grid-column: span 2;">
+          <span>✅ تم اختيار مريض مسجّل سابقًا — لن يتم إنشاء بطاقة مريض مكررة.</span>
+          <button type="button" class="btn small secondary" onclick="clearExistingPatient()">مريض جديد (إلغاء الاختيار)</button>
+        </div>
+        <div id="previousVisitsPanel" style="grid-column: span 2;">
+          <h3 style="font-size:13px;">زياراته السابقة</h3>
+          <div id="previousVisitsList"></div>
+        </div>
+        <div class="form-field">
+          <label>{{ t('gender') }}</label>
+          <select name="gender" id="gender_select">
+            <option value="Male">{{ t('male') }}</option>
+            <option value="Female">{{ t('female') }}</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>{{ t('age') }}</label>
+          <input type="number" step="any" name="age" id="age_input" min="0">
+        </div>
+        <div class="form-field">
+          <label>{{ t('age_unit') }}</label>
+          <select name="age_unit" id="age_unit_select">
+            <option value="Hours">{{ t('unit_hours') }}</option>
+            <option value="Days">{{ t('unit_days') }}</option>
+            <option value="Weeks">{{ t('unit_weeks') }}</option>
+            <option value="Months">{{ t('unit_months') }}</option>
+            <option value="Years" selected>{{ t('unit_years') }}</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>{{ t('phone') }}</label>
+          <input type="text" name="phone" id="phone_input">
+        </div>
+        <div class="form-field" style="grid-column: span 2;">
+          <label>{{ t('address') }}</label>
+          <input type="text" name="address" id="address_input">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>{{ t('reference_information') }}</h3>
+      <div class="form-grid">
+        <div class="form-field">
+          <label>{{ t('fasting') }}</label>
+          <select name="fasting">
+            <option value="Undefined">-</option>
+            <option value="Yes">{{ t('yes') }}</option>
+            <option value="No">{{ t('no') }}</option>
+          </select>
+        </div>
+        <div class="form-field" id="examiningDoctorField" style="display:none;">
+          <label>دكتور المختبر الفاحص</label>
+          <div style="display:flex; gap:6px;">
+            <select name="examining_doctor" id="examining_doctor" style="flex:1;">
+              <option value="">-</option>
+              {% for d in examining_doctors %}
+              <option value="{{ d }}">{{ d }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="btn small secondary" onclick="toggleAddDoctorBox()" title="إضافة طبيب فاحص جديد">+ طبيب</button>
+          </div>
+          <small class="muted">أجره عن الفحوصات المختارة: <span id="examFeePreview">0</span></small>
+        </div>
+        <div class="form-field">
+          <label>{{ t('referring_doctor') }}</label>
+          <input type="text" id="doctor_name" name="doctor_name" list="doctorsList" autocomplete="off"
+                 placeholder="{{ t('referring_doctor') }}">
+          <datalist id="doctorsList">
+            {% for d in doctors %}
+            <option value="{{ d['full_name'] }}">
+            {% endfor %}
+          </datalist>
+          <small class="muted">{{ t('referring_doctor_hint') }}</small>
+        </div>
+        <div class="form-field">
+          <label>نموذج وارد من مختبر آخر؟</label>
+          <input type="text" id="referral_lab_name" name="referral_lab_name" list="referralLabsList" autocomplete="off"
+                 placeholder="-- لا شيء، مراجع مباشر --">
+          <datalist id="referralLabsList">
+            {% for lab in referral_labs %}
+            <option value="{{ lab['name'] }}">
+            {% endfor %}
+          </datalist>
+          <small class="muted">اكتب اسم المختبر فقط إذا هذا النموذج مبعوث من مختبر آخر (بدل مراجع مباشر) — اختر من الاقتراحات أو اكتب اسم مختبر جديد وينحفظ تلقائيًا. اسم المختبر ما ينطبع بأي تقرير، ويُستخدم فقط لحساب المختبر يوميًا وشهريًا. اتركه فارغًا للمراجع المباشر.</small>
+        </div>
+        <div class="form-field" id="attendingDoctorField" style="display:none;">
+          <label>الدكتور الفاحص</label>
+          <div style="display:flex; gap:6px;">
+            <select name="attending_doctor" id="attending_doctor" style="flex:1;">
+              <option value="">-</option>
+              {% for d in examining_doctors %}
+              <option value="{{ d }}">{{ d }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="btn small secondary" onclick="toggleAddDoctorBox()" title="إضافة طبيب فاحص جديد">+ طبيب</button>
+          </div>
+        </div>
+        <div class="form-field" id="addDoctorBox" style="display:none; grid-column: span 2;">
+          <label>اسم الطبيب الفاحص الجديد</label>
+          <div style="display:flex; gap:6px;">
+            <input type="text" id="newDoctorNameInput" placeholder="اكتب اسم الطبيب ثم اضغط إضافة">
+            <button type="button" class="btn small" onclick="quickAddDoctor()">إضافة</button>
+            <button type="button" class="btn small secondary" onclick="toggleAddDoctorBox(false)">إلغاء</button>
+          </div>
+          <small class="muted" id="addDoctorError" style="display:none; color:#DC2626;"></small>
+        </div>
+        <div class="form-field" style="grid-column: span 2;">
+          <label>{{ t('notes') }}</label>
+          <textarea name="notes"></textarea>
+        </div>
+        <div class="form-field" style="grid-column: span 2;">
+          <label>{{ t('contact_method') }}</label>
+          <select name="contact_method">
+            {% for m in ['None', 'SMS', 'WhatsApp', 'Telegram', 'Viber'] %}
+            <option value="{{ m }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card nv-orders-card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3>{{ t('orders_section') }}</h3>
+      {% if current_role in ('admin', 'supervisor') %}
+      <button type="button" class="btn small secondary" onclick="openTestManageModal()">+ Add Test</button>
+      {% endif %}
+    </div>
+    {% if quick_items %}
+    <div style="margin-bottom:10px;">
+      <span class="muted">⚡ {{ t('quick_add_items') }}:</span>
+      {% for qi in quick_items %}
+      <button type="button" class="btn small secondary" style="margin:4px;"
+        onclick="document.getElementById('test_{{ qi['id'] }}').checked = true; refreshPrices();">{{ qi['name'] }}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="checkbox-grid nv-checkbox-grid">
+      {% for test in tests %}
+      <span class="checkbox-item-wrap" id="test_item_{{ test['id'] }}">
+      <label class="checkbox-item">
+        <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}"
+               data-exam="{{ '1' if test['id'] in examining_test_ids else '0' }}">
+        <span id="test_label_{{ test['id'] }}">{{ test['name'] }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
+      </label>
+      </span>
+      {% endfor %}
+    </div>
+    <p style="margin-top:10px; font-weight:600;">{{ t('grand_total') }}: <span id="grandTotal">0</span></p>
+  </div>
+
+  <button class="btn" type="submit" id="createVisitBtn" style="margin-top:12px;">{{ t('create_visit') }}</button>
+</form>
+
+<div id="visitCreatedPanel" class="card">
+  <h3>✅ تم إنشاء الزيارة رقم <span id="createdRegNumber"></span> بنجاح</h3>
+  <div class="actions">
+    <button type="button" class="btn" onclick="printCreatedVisitBarcode()">🏷️ طباعة الباركود</button>
+    <a class="btn secondary" id="goToVisitsBtn" href="#">📋 قائمة الزيارات</a>
+    <button type="button" class="btn secondary" onclick="startAnotherVisit()">➕ زيارة جديدة أخرى</button>
+  </div>
+</div>
+<iframe id="barcodePrintFrame" style="display:none;" title="barcode-print"></iframe>
+
+{% if current_role in ('admin', 'supervisor') %}
+<div id="testManageBackdrop" class="tm-backdrop" onclick="if(event.target===this) closeTestManageModal()">
+  <div class="tm-modal">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h3 style="margin:0;">إدارة التحاليل</h3>
+      <button type="button" class="btn small secondary" onclick="closeTestManageModal()">✕ إغلاق</button>
+    </div>
+
+    <div class="tm-section">
+      <h4>إضافة تحليل جديد</h4>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+        <div class="form-field" style="flex:2; margin-bottom:0;">
+          <label>الاسم (إنكليزي)</label>
+          <input type="text" id="tm_new_name" placeholder="e.g. Vitamin D">
+        </div>
+        <div class="form-field" style="flex:1; margin-bottom:0;">
+          <label>القسم</label>
+          <input type="text" id="tm_new_department" list="tmDepartmentsList" placeholder="Department">
+          <datalist id="tmDepartmentsList">
+            {% for dep in tests|map(attribute='department')|unique %}
+            {% if dep %}<option value="{{ dep }}">{% endif %}
+            {% endfor %}
+          </datalist>
+        </div>
+        <button type="button" class="btn small" onclick="quickAddTest()">+ إضافة</button>
+      </div>
+      <small class="muted" id="tm_add_error" style="color:#C0392B; display:none;"></small>
+    </div>
+
+    <div class="tm-section">
+      <h4>التحاليل الحالية (تعديل / إخفاء)</h4>
+      <div id="tm_existing_list"></div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .tm-backdrop { display:none; position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:100;
+    align-items:center; justify-content:center; }
+  .tm-backdrop.open { display:flex; }
+  .tm-modal { background: var(--card-bg, #fff); border-radius:10px; padding:18px 20px; width:min(560px, 92vw);
+    max-height:85vh; overflow-y:auto; }
+  .tm-section { margin-bottom:18px; }
+  .tm-section h4 { font-size:13.5px; margin-bottom:8px; color:#205072; }
+  .tm-existing-row { display:flex; align-items:center; gap:8px; padding:6px 4px; border-bottom:1px solid #EEF2F6; font-size:12.5px; }
+  .tm-existing-row .tm-name { flex:2; }
+  .tm-existing-row .tm-dept { flex:1; color:#64748B; }
+  .tm-existing-row.hidden-test { opacity:.5; }
+</style>
+{% endif %}
+
+<script>
+  const DEFAULT_PRICES = {{ test_default_prices|tojson }};
+  const DOCTOR_PRICES = {{ doctor_prices|tojson }};
+  const DOCTOR_NAME_TO_ID = {{ doctor_name_to_id|tojson }};
+  const EXAM_RATES = {{ examining_rates|tojson }};
+
+  function currentDoctorId() {
+    const typed = (document.getElementById('doctor_name').value || '').trim().toLowerCase();
+    return typed && DOCTOR_NAME_TO_ID.hasOwnProperty(typed) ? String(DOCTOR_NAME_TO_ID[typed]) : null;
+  }
+
+  function priceFor(testId, doctorId) {
+    if (doctorId && DOCTOR_PRICES[doctorId] && DOCTOR_PRICES[doctorId].hasOwnProperty(testId)) {
+      return DOCTOR_PRICES[doctorId][testId];
+    }
+    return DEFAULT_PRICES[testId] || 0;
+  }
+
+  function refreshPrices() {
+    const doctorId = currentDoctorId();
+    let total = 0;
+    let anyExamCheckedTestChecked = false;
+    document.querySelectorAll('.test-check').forEach(function (cb) {
+      const testId = cb.value;
+      const price = priceFor(testId, doctorId);
+      const label = document.getElementById('price_' + testId);
+      const wrap = document.getElementById('pricewrap_' + testId);
+      if (cb.checked) {
+        total += price;
+        if (label) label.textContent = Math.round(price);
+        if (wrap) wrap.style.display = '';
+      } else {
+        if (wrap) wrap.style.display = 'none';
+      }
+      if (cb.checked && cb.getAttribute('data-exam') === '1') anyExamCheckedTestChecked = true;
+    });
+    document.getElementById('grandTotal').textContent = Math.round(total);
+
+    // دكتور المختبر الفاحص يظهر فقط إذا كان أحد الفحوصات المؤهلة مختارًا
+    const examField = document.getElementById('examiningDoctorField');
+    if (anyExamCheckedTestChecked) {
+      examField.style.display = '';
+    } else {
+      examField.style.display = 'none';
+      document.getElementById('examining_doctor').value = '';
+    }
+
+    // حقل "الدكتور الفاحص" (attending_doctor) نفس المنطق: يظهر ويصبح
+    // إلزاميًا فقط إذا كان أحد الفحوصات المؤهلة (لطاخة الدم، عد الخلايا
+    // الشبكية، فحص السوائل، BMA، خزعة نقي العظم، تحضير الهيموغلوبين،
+    // فحص المنجلية) مختارًا — غير هيك يبقى اختياري.
+    const attendField = document.getElementById('attendingDoctorField');
+    const attendSelect = document.getElementById('attending_doctor');
+    if (anyExamCheckedTestChecked) {
+      attendField.style.display = '';
+      attendSelect.required = true;
+    } else {
+      attendField.style.display = 'none';
+      attendSelect.required = false;
+      attendSelect.value = '';
+    }
+
+    refreshExamFeePreview();
+  }
+
+  function refreshExamFeePreview() {
+    const doctorName = document.getElementById('examining_doctor').value;
+    const previewEl = document.getElementById('examFeePreview');
+    if (!doctorName || !EXAM_RATES[doctorName]) { previewEl.textContent = '0'; return; }
+    let fee = 0;
+    document.querySelectorAll('.test-check').forEach(function (cb) {
+      if (cb.checked && cb.getAttribute('data-exam') === '1' && EXAM_RATES[doctorName].hasOwnProperty(cb.value)) {
+        fee += EXAM_RATES[doctorName][cb.value];
+      }
+    });
+    previewEl.textContent = Math.round(fee);
+  }
+
+  // ------------------------------------------------------------------
+  // إضافة طبيب فاحص جديد بسرعة من نفس الصفحة (زر "+ طبيب" بجانب قائمتي
+  // "دكتور المختبر الفاحص" و"الدكتور الفاحص") — يُحفظ بقائمة الأطباء
+  // الفاحصين نفسها ويُضاف كخيار بالقائمتين معًا فورًا ويُختار تلقائيًا،
+  // دون الحاجة للذهاب إلى Management → Settings أولًا.
+  // ------------------------------------------------------------------
+  function toggleAddDoctorBox(show) {
+    const box = document.getElementById('addDoctorBox');
+    const willShow = typeof show === 'boolean' ? show : (box.style.display === 'none');
+    box.style.display = willShow ? '' : 'none';
+    document.getElementById('addDoctorError').style.display = 'none';
+    if (willShow) {
+      const input = document.getElementById('newDoctorNameInput');
+      input.value = '';
+      input.focus();
+    }
+  }
+  window.toggleAddDoctorBox = toggleAddDoctorBox;
+
+  function quickAddDoctor() {
+    const input = document.getElementById('newDoctorNameInput');
+    const errEl = document.getElementById('addDoctorError');
+    const name = input.value.trim();
+    errEl.style.display = 'none';
+    if (!name) { errEl.textContent = 'اسم الطبيب مطلوب.'; errEl.style.display = 'block'; return; }
+    const body = new URLSearchParams({ name: name });
+    fetch('/api/examining-doctors/quick-add', { method: 'POST', body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        [document.getElementById('examining_doctor'), document.getElementById('attending_doctor')].forEach(function (sel) {
+          if (!sel) return;
+          if (!Array.from(sel.options).some(function (o) { return o.value === data.name; })) {
+            const opt = document.createElement('option');
+            opt.value = data.name;
+            opt.textContent = data.name;
+            sel.appendChild(opt);
+          }
+          sel.value = data.name;
+        });
+        toggleAddDoctorBox(false);
+        refreshExamFeePreview();
+      })
+      .catch(function () {
+        errEl.textContent = 'تعذر الاتصال بالسيرفر، حاول مرة أخرى.';
+        errEl.style.display = 'block';
+      });
+  }
+  window.quickAddDoctor = quickAddDoctor;
+
+  // ------------------------------------------------------------------
+  // إرسال الفورم بـ AJAX (بدل التحويل المباشر للصفحة) حتى نقدر، بعد
+  // إنشاء الزيارة، نعرض زر "طباعة الباركود" بنفس صفحة "زيارة جديدة"
+  // ونطبع من نفس الصفحة (إطار iframe مخفي) بدون فتح تبويب/متصفح جديد.
+  // ------------------------------------------------------------------
+  const newVisitForm = document.getElementById('newVisitForm');
+  const createVisitBtn = document.getElementById('createVisitBtn');
+  const visitCreatedPanel = document.getElementById('visitCreatedPanel');
+  const barcodePrintFrame = document.getElementById('barcodePrintFrame');
+  let lastCreatedVisitId = null;
+
+  newVisitForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    createVisitBtn.disabled = true;
+    fetch(window.location.href, {
+      method: 'POST',
+      headers: { 'X-LIS-Ajax': '1' },
+      body: new FormData(newVisitForm),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        createVisitBtn.disabled = false;
+        if (!data || !data.ok) { alert('حدث خطأ أثناء إنشاء الزيارة. حاول مرة أخرى.'); return; }
+        lastCreatedVisitId = data.visit_id;
+        document.getElementById('createdRegNumber').textContent = data.registration_number;
+        document.getElementById('goToVisitsBtn').href = data.redirect_url;
+        visitCreatedPanel.style.display = 'block';
+        visitCreatedPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      })
+      .catch(function () {
+        createVisitBtn.disabled = false;
+        alert('تعذر الاتصال بالسيرفر. تحقق من الاتصال وحاول مرة أخرى.');
+      });
+  });
+
+  window.printCreatedVisitBarcode = function () {
+    if (!lastCreatedVisitId) return;
+    // نحمّل صفحة طباعة الباركود داخل iframe مخفي بنفس الصفحة؛ الصفحة
+    // نفسها تستدعي window.print() عند تحميلها (onload)، فتطبع مباشرة
+    // بدون فتح نافذة أو تبويب متصفح جديد.
+    barcodePrintFrame.src = '/front-desk/visits/' + lastCreatedVisitId + '/print/barcode';
+  };
+
+  window.startAnotherVisit = function () {
+    window.location.reload();
+  };
+
+  document.getElementById('doctor_name').addEventListener('input', refreshPrices);
+  document.getElementById('examining_doctor').addEventListener('change', refreshExamFeePreview);
+  document.querySelectorAll('.test-check').forEach(function (cb) {
+    cb.addEventListener('change', refreshPrices);
+  });
+  refreshPrices();
+
+  // ------------------------------------------------------------------
+  // بحث فوري عن مريض سبق أن راجع المختبر أثناء كتابة اسمه بشاشة "زيارة
+  // جديدة": يعرض المطابقات، وعند الضغط على واحدة تظهر زياراته السابقة مع
+  // أزرار مشاهدة / طباعة / تضمين مع الزيارة الحالية بجدول موحّد.
+  // ------------------------------------------------------------------
+  const patientNameInput = document.getElementById('patient_name');
+  const matchesListEl = document.getElementById('patientMatchesList');
+  const existingPatientIdInput = document.getElementById('existing_patient_id');
+  const includeVisitIdsInput = document.getElementById('include_visit_ids');
+  const existingPatientBanner = document.getElementById('existingPatientBanner');
+  const previousVisitsPanel = document.getElementById('previousVisitsPanel');
+  const previousVisitsList = document.getElementById('previousVisitsList');
+  let searchDebounce = null;
+  let includedVisitIds = new Set();
+
+  function clearMatches() {
+    matchesListEl.innerHTML = '';
+    matchesListEl.style.display = 'none';
+  }
+
+  patientNameInput.addEventListener('input', function () {
+    // إذا عدّل الاسم يدويًا بعد اختيار مريض موجود، نلغي الربط بذلك المريض
+    // حتى لا تُنسب الزيارة الجديدة لشخص آخر بالخطأ.
+    if (existingPatientIdInput.value) clearExistingPatient(false);
+    const q = this.value.trim();
+    clearTimeout(searchDebounce);
+    if (q.length < 2) { clearMatches(); return; }
+    searchDebounce = setTimeout(function () {
+      fetch('/api/patients/search?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(function (matches) {
+          if (!matches.length) { clearMatches(); return; }
+          matchesListEl.innerHTML = matches.map(function (m) {
+            const last = m.last_visit_at ? m.last_visit_at.slice(0, 10) : 'بدون زيارات سابقة';
+            return '<div class="match-item" data-id="' + m.id + '">' + m.full_name +
+              '<small>' + (m.gender || '') + ' · ' + (m.age || '-') + ' ' + (m.age_unit || '') +
+              ' · ' + (m.phone || '') + ' · آخر زيارة: ' + last + '</small></div>';
+          }).join('');
+          matchesListEl.style.display = 'block';
+          matchesListEl.querySelectorAll('.match-item').forEach(function (el) {
+            el.addEventListener('click', function () { selectPatient(this.getAttribute('data-id')); });
+          });
+        })
+        .catch(function () { clearMatches(); });
+    }, 300);
+  });
+
+  document.addEventListener('click', function (e) {
+    if (!document.getElementById('patientMatches').contains(e.target)) clearMatches();
+  });
+
+  function selectPatient(patientId) {
+    clearMatches();
+    fetch('/api/patients/' + patientId + '/visits-summary')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) return;
+        existingPatientIdInput.value = data.patient.id;
+        patientNameInput.value = data.patient.full_name;
+        if (data.patient.gender) document.getElementById('gender_select').value = data.patient.gender;
+        if (data.patient.age) document.getElementById('age_input').value = data.patient.age;
+        if (data.patient.age_unit) document.getElementById('age_unit_select').value = data.patient.age_unit;
+        document.getElementById('phone_input').value = data.patient.phone || '';
+        document.getElementById('address_input').value = data.patient.address || '';
+        existingPatientBanner.style.display = 'flex';
+
+        includedVisitIds = new Set();
+        includeVisitIdsInput.value = '';
+        if (!data.visits.length) {
+          previousVisitsPanel.style.display = 'none';
+          return;
+        }
+        previousVisitsList.innerHTML = data.visits.map(function (v) {
+          const testsChip = v.tests.length ? v.tests.join('، ') : 'بدون تحاليل';
+          return '<div class="prev-visit-row" data-visit-id="' + v.id + '">' +
+            '<b>' + v.created_at.slice(0, 10) + '</b>' +
+            '<span class="tests-chip">' + testsChip + '</span>' +
+            '<span class="actions">' +
+            '<button type="button" class="btn small secondary" onclick="viewPreviousVisit(' + data.patient.id + ')">مشاهدة</button>' +
+            '<button type="button" class="btn small secondary" onclick="printPreviousVisit(' + v.id + ')">طباعة</button>' +
+            '<label style="font-size:12px; display:flex; align-items:center; gap:4px;">' +
+            '<input type="checkbox" onchange="toggleIncludeVisit(' + v.id + ', this.checked)"> تضمين مع الحالية بجدول موحّد</label>' +
+            '</span></div>';
+        }).join('');
+        previousVisitsPanel.style.display = 'block';
+      });
+  }
+
+  function clearExistingPatient(clearNameToo) {
+    existingPatientIdInput.value = '';
+    includeVisitIdsInput.value = '';
+    includedVisitIds = new Set();
+    existingPatientBanner.style.display = 'none';
+    previousVisitsPanel.style.display = 'none';
+    previousVisitsList.innerHTML = '';
+    if (clearNameToo !== false) patientNameInput.focus();
+  }
+
+  window.clearExistingPatient = clearExistingPatient;
+  window.viewPreviousVisit = function (patientId) {
+    window.location.href = '/front-desk/patients/' + patientId + '/history';
+  };
+  window.printPreviousVisit = function (visitId) {
+    window.open('/front-desk/visits/' + visitId + '/print/results', '_blank');
+  };
+  window.toggleIncludeVisit = function (visitId, checked) {
+    if (checked) includedVisitIds.add(visitId); else includedVisitIds.delete(visitId);
+    includeVisitIdsInput.value = Array.from(includedVisitIds).join(',');
+  };
+
+  {% if current_role in ('admin', 'supervisor') %}
+  // ------------------------------------------------------------------
+  // "+ Add Test" — إضافة/تعديل/إخفاء تحليل من داخل نفس نافذة قسم الطلبات
+  // بدون مغادرة صفحة "زيارة جديدة" أو فقدان ما أُدخل بالفورم حتى الآن.
+  // ------------------------------------------------------------------
+  const testManageBackdrop = document.getElementById('testManageBackdrop');
+  const tmExistingList = document.getElementById('tm_existing_list');
+  const tmAddError = document.getElementById('tm_add_error');
+
+  function openTestManageModal() {
+    testManageBackdrop.classList.add('open');
+    loadExistingTestsIntoModal();
+  }
+  function closeTestManageModal() {
+    testManageBackdrop.classList.remove('open');
+  }
+  window.openTestManageModal = openTestManageModal;
+  window.closeTestManageModal = closeTestManageModal;
+
+  function loadExistingTestsIntoModal() {
+    fetch('/api/tests/active-list').then(function (r) { return r.json(); }).then(function (tests) {
+      tmExistingList.innerHTML = tests.map(function (t) {
+        return '<div class="tm-existing-row" id="tm_row_' + t.id + '">' +
+          '<span class="tm-name" id="tm_name_' + t.id + '">' + t.name + '</span>' +
+          '<span class="tm-dept" id="tm_dept_' + t.id + '">' + (t.department || '') + '</span>' +
+          '<button type="button" class="btn small secondary" onclick="startEditTest(' + t.id + ')">✎ تعديل</button>' +
+          '<button type="button" class="btn small danger" onclick="quickHideTest(' + t.id + ')">🚫 إخفاء</button>' +
+          '</div>';
+      }).join('');
+    });
+  }
+
+  function quickAddTest() {
+    const name = document.getElementById('tm_new_name').value.trim();
+    const department = document.getElementById('tm_new_department').value.trim();
+    tmAddError.style.display = 'none';
+    if (!name) { tmAddError.textContent = 'الاسم مطلوب.'; tmAddError.style.display = 'block'; return; }
+    const body = new URLSearchParams({ name: name, department: department });
+    fetch('/api/tests/quick-add', { method: 'POST', body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) { tmAddError.textContent = data.error; tmAddError.style.display = 'block'; return; }
+        // يضاف كخانة اختيار جديدة مباشرة بقسم الطلبات، وتُسجّل قيمته
+        // الافتراضية بجدول الأسعار حتى يشتغل معه حساب المجموع فورًا.
+        DEFAULT_PRICES[String(data.id)] = 0;
+        const grid = document.querySelector('.nv-checkbox-grid');
+        const wrap = document.createElement('span');
+        wrap.className = 'checkbox-item-wrap';
+        wrap.id = 'test_item_' + data.id;
+        wrap.innerHTML = '<label class="checkbox-item">' +
+          '<input type="checkbox" class="test-check" id="test_' + data.id + '" name="tests" value="' + data.id + '" data-exam="0">' +
+          '<span id="test_label_' + data.id + '">' + data.name + '</span> ' +
+          '<span class="muted" id="pricewrap_' + data.id + '" style="display:none;">(<span id="price_' + data.id + '">0</span>)</span>' +
+          '</label>';
+        grid.appendChild(wrap);
+        wrap.querySelector('.test-check').addEventListener('change', refreshPrices);
+        document.getElementById('tm_new_name').value = '';
+        document.getElementById('tm_new_department').value = '';
+        loadExistingTestsIntoModal();
+      });
+  }
+  window.quickAddTest = quickAddTest;
+
+  window.startEditTest = function (testId) {
+    const nameEl = document.getElementById('tm_name_' + testId);
+    const deptEl = document.getElementById('tm_dept_' + testId);
+    const row = document.getElementById('tm_row_' + testId);
+    const currentName = nameEl.textContent;
+    const currentDept = deptEl.textContent;
+    row.innerHTML = '<input type="text" id="tm_edit_name_' + testId + '" value="' + currentName + '" style="flex:2;">' +
+      '<input type="text" id="tm_edit_dept_' + testId + '" value="' + currentDept + '" style="flex:1;">' +
+      '<button type="button" class="btn small" onclick="saveEditTest(' + testId + ')">💾 حفظ</button>';
+  };
+
+  window.saveEditTest = function (testId) {
+    const name = document.getElementById('tm_edit_name_' + testId).value.trim();
+    const department = document.getElementById('tm_edit_dept_' + testId).value.trim();
+    if (!name) return;
+    const body = new URLSearchParams({ name: name, department: department });
+    fetch('/api/tests/' + testId + '/quick-edit', { method: 'POST', body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) return;
+        const label = document.getElementById('test_label_' + testId);
+        if (label) label.textContent = data.name;
+        loadExistingTestsIntoModal();
+      });
+  };
+
+  window.quickHideTest = function (testId) {
+    if (!confirm('إخفاء هذا التحليل من قسم الطلبات؟ يمكن إظهاره لاحقًا من كتالوج التحاليل.')) return;
+    fetch('/api/tests/' + testId + '/quick-hide', { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) return;
+        // إخفاء من قسم الطلبات: تُلغى علامة الاختيار إن كانت محدّدة قبل إزالتها
+        // حتى لا يبقى تحليل مخفي محسوبًا ضمن مجموع الفاتورة.
+        const checkbox = document.getElementById('test_' + testId);
+        if (checkbox && checkbox.checked) { checkbox.checked = false; }
+        const item = document.getElementById('test_item_' + testId);
+        if (item) item.remove();
+        refreshPrices();
+        loadExistingTestsIntoModal();
+      });
+  };
+  {% endif %}
+</script>
+{% endblock %}

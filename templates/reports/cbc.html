@@ -1,0 +1,28 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+<div class="report-heading">Complete Blood Count (CBC)</div>
+
+<table class="data-table" style="text-align:center; direction:ltr;">
+  <tr>
+    <th>Test</th><th>result</th><th>units</th><th>low</th><th>high</th>
+  </tr>
+  {% for group in cbc_groups %}
+    {% if not loop.first %}
+    <tr><td colspan="5" style="border:none; padding:4px;"></td></tr>
+    {% endif %}
+    {% for row in group %}
+    <tr{% if row.highlight %} style="background:#FFF59D;"{% endif %}>
+      <td style="text-align:left; font-weight:bold;">{{ row.name }}</td>
+      <td>{{ row.result }}{% if show_prev_values and row.previous %}<br><span class="prev-inline">Prev: {{ row.previous }}</span>{% endif %}</td>
+      <td>{{ row.unit }}</td>
+      <td>{{ row.low }}</td>
+      <td>{{ row.high }}</td>
+    </tr>
+    {% endfor %}
+  {% endfor %}
+</table>
+
+{% if params.get('Comment') %}
+<div class="box-field box-field-lg" style="margin-top:10px;"><b>Comment:</b> {{ params.get('Comment', '') }}</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block page_title %}{{ ot['test_name'] }} - {{ patient_name }}{% endblock %}
+{% block content %}
+<style>
+  @page { size: A4; margin: 12mm 12mm; }
+  .report-scope { font-family: "Times New Roman", "Traditional Arabic", Tahoma, Arial, sans-serif;
+                   font-size: {{ font_size|default(16) }}px; color: #14213D; }
+  .sheet { max-width: 760px; margin: 0 auto; padding: 6px 4px 20px 4px; }
+
+  .doc-col.logo-col { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+  .doc-col.logo-col img { width: 100px; height: auto; }
+
+  .lab-title-box {
+    text-align: center;
+    margin: 0 auto 10px auto;
+    border: 2px solid #26529C;
+    border-radius: 20px;
+    padding: 5px 14px;
+    max-width: 480px;
+    color: #26529C;
+    font-weight: bold;
+    font-size: 1.05em;
+  }
+
+  .doctors-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    border-bottom: 2px solid #333;
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+    gap: 4px;
+  }
+  .doc-col { flex: 1; text-align: center; font-size: 14px; line-height: 1.4; }
+  .doc-col .doc-title { color: #7A1F1F; font-weight: bold; }
+  .doc-col .doc-name { color: #1F3B7A; font-weight: bold; font-size: 14px; }
+  .doc-col .doc-degree { color: #1F3B7A; }
+  .doc-col .doc-eng { color: #1F3B7A; font-style: italic; }
+
+  table.meta-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; table-layout: fixed; }
+  table.meta-table td {
+    border: 1.5px solid #333;
+    padding: 10px 18px;
+    vertical-align: middle;
+    font-size: 1em;
+  }
+  table.meta-table td.meta-mid { text-align: center; width: 18%; }
+  table.meta-table td.meta-label { width: 62%; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  table.meta-table td.meta-side { width: 38%; text-align: left; direction: ltr; }
+  .patient-name-hl { font-weight: bold; font-size: 1.12em; color: #14213D; white-space: nowrap; }
+
+  .report-heading {
+    text-align: center;
+    font-weight: bold;
+    text-decoration: underline;
+    font-style: italic;
+    margin: 16px 0 20px 0;
+    font-size: 1.2em;
+  }
+  .report-heading.red { color: #C0392B; }
+
+  table.data-table { width: 100%; border-collapse: collapse; margin-top: 4px; margin-bottom: 12px; }
+  table.data-table td, table.data-table th {
+    border: 1px solid #333;
+    padding: {{ report_row_pad|default(7) }}px {{ report_col_pad|default(12) }}px;
+  }
+  table.data-table td.field-name { font-weight: bold; font-style: italic; color: #1F3B7A; }
+  table.data-table td.pct-val { width: 55px; text-align: center; direction: ltr; color: #1F3B7A; font-style: italic; }
+  table.data-table td.unit-val { width: 34px; text-align: center; direction: ltr; color: #1F3B7A; font-style: italic; background: #F3F6F8; }
+
+  .box-field {
+    border: 1px solid #333;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    min-height: 1.4em;
+    direction: ltr;
+    text-align: left;
+  }
+  .box-field.box-field-lg { min-height: 4.5em; padding: 14px 16px; }
+  .box-field b { font-style: italic; color: #1F3B7A; }
+
+  .exam-signature-row {
+    display: flex;
+    direction: ltr;
+    justify-content: flex-start;
+    margin-top: 28px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .exam-signature-box { min-width: 230px; text-align: center; }
+  .exam-signature-label {
+    font-size: 0.78em;
+    color: #1F3B7A;
+    font-weight: bold;
+    margin-bottom: 46px; /* فراغ لختم الدكتور الفاحص */
+  }
+  .exam-signature-line { border-top: 1px solid #333; padding-top: 3px; font-size: 0.72em; color: #555; }
+
+  .footer-block { margin-top: 14px; page-break-inside: avoid; break-inside: avoid; }
+  .other-lab-note { font-style: italic; font-weight: bold; margin: 6px 0; text-align: left; direction: ltr; }
+  .prev-visit-note { font-style: italic; margin: 6px 0; color: #14213D; }
+  td.prev-col { color: #7A1F1F; }
+  .prev-inline { color: #7A1F1F; font-size: 0.75em; font-style: italic; }
+  .fixed-note { font-style: italic; font-weight: bold; margin: 6px 0; }
+  .footer-address {
+    border-top: 1px dashed #333;
+    padding-top: 4px;
+    margin-top: 8px;
+    font-size: 14px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    overflow: hidden;
+  }
+  .footer-address .addr-line {
+    white-space: nowrap;
+    font-size: 14px;
+    display: inline-block;
+    transform-origin: right center;
+  }
+  .footer-address .addr-label { text-decoration: underline; font-weight: bold; }
+  .footer-address .phone { color: #C0392B; font-weight: bold; }
+  .footer-address .email-line { color: #C0392B; font-weight: bold; }
+
+  /* عند الطباعة: العنوان (تذييل الصفحة) يثبّت بأسفل كل صفحة ولا "يصعد"
+     لفوق مع باقي المحتوى إذا كان التقرير قصير. */
+  @media print {
+    .footer-address {
+      position: fixed;
+      bottom: 6mm;
+      left: 12mm;
+      right: 12mm;
+      margin-top: 0;
+    }
+    .sheet { padding-bottom: 22mm; }
+  }
+
+  .preview-bar {
+    max-width: 760px; margin: 0 auto 14px auto;
+    display: flex; gap: 10px; align-items: center; justify-content: flex-end;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  }
+  .preview-bar button {
+    text-decoration: none; border: none; cursor: pointer;
+    padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: bold;
+  }
+  .preview-bar .btn-print { background: #26529C; color: #fff; }
+  .preview-bar .btn-back {
+    display: inline-block; text-decoration: none; cursor: pointer;
+    padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: bold;
+    background: #F3F6F8; color: #26529C; border: 1px solid #E2E8F0;
+  }
+
+  .no-print { text-align: center; margin: 14px 0; }
+  @media print { .preview-bar, .no-print { display: none; } }
+</style>
+
+<div class="preview-bar">
+  {% if is_design_preview %}
+  <span style="margin-left:auto; color:#C0392B; font-size:12px; font-weight:bold;">⚠️ معاينة تصميم فقط — بيانات وهمية للتوضيح، ليست لمريض حقيقي</span>
+  <a class="btn-back" href="{{ url_for('report_designer', test_definition_id=preview_test_id) }}">⬅ رجوع لتصميم التقرير</a>
+  {% else %}
+  <span style="margin-left:auto; color:#64748B; font-size:12px;">هذي معاينة للتقرير قبل الطباعة</span>
+  {% endif %}
+  <button class="btn-print" onclick="window.print()">🖨 طباعة الآن</button>
+  <a href="{{ url_for('dashboard') }}" style="text-decoration:none; background:#F3F6F8; color:#26529C; padding:8px 16px; border-radius:6px; font-size:13px; font-weight:bold; border:1px solid #E2E8F0;">🔙 الرجوع للرئيسية</a>
+</div>
+
+<div class="report-scope">
+  <div class="sheet">
+    <div class="lab-title-box">مختبر امراض الدم التخصصي للتحليلات المرضية</div>
+
+    {% if logo_url %}
+    <div class="doctors-row">
+      <div class="doc-col logo-col"><img src="{{ logo_url }}" alt="logo"></div>
+      <div class="doc-col">
+        <div class="doc-title">الدكتور</div>
+        <div class="doc-name">خليل حمود عبد السادة</div>
+        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>طبيب ممارس امراض الدم التشخيصي</div>
+        <div class="doc-eng">M.B.Ch.B<br>Hematopathologist</div>
+      </div>
+      <div class="doc-col">
+        <div class="doc-title">الدكتورة</div>
+        <div class="doc-name">أسراء عبد الباقر جنام</div>
+        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>اختصاص امراض الدم التشخيصي</div>
+        <div class="doc-eng">M.B.Ch.B<br>F.I.B.M.S Hematopathologist</div>
+      </div>
+      <div class="doc-col">
+        <div class="doc-title">الدكتورة</div>
+        <div class="doc-name">هدى نصيف جاسم</div>
+        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>اختصاص امراض الدم التشخيصي</div>
+        <div class="doc-eng">M.B.Ch.B<br>M.SC.Hematopathologist</div>
+      </div>
+    </div>
+    {% else %}
+    <div class="doctors-row">
+      <div class="doc-col">
+        <div class="doc-title">الدكتور</div>
+        <div class="doc-name">خليل حمود عبد السادة</div>
+        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>طبيب ممارس امراض الدم التشخيصي</div>
+        <div class="doc-eng">M.B.Ch.B<br>Hematopathologist</div>
+      </div>
+      <div class="doc-col">
+        <div class="doc-title">الدكتورة</div>
+        <div class="doc-name">أسراء عبد الباقر جنام</div>
+        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>اختصاص امراض الدم التشخيصي</div>
+        <div class="doc-eng">M.B.Ch.B<br>F.I.B.M.S Hematopathologist</div>
+      </div>
+      <div class="doc-col">
+        <div class="doc-title">الدكتورة</div>
+        <div class="doc-name">هدى نصيف جاسم</div>
+        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>اختصاص امراض الدم التشخيصي</div>
+        <div class="doc-eng">M.B.Ch.B<br>M.SC.Hematopathologist</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <table class="meta-table">
+      <tr>
+        <td class="meta-label">الدكتور المرسل: {{ referring_doctor_name }}</td>
+        <td class="meta-side"><b>Date:</b> {{ visit_date }}</td>
+      </tr>
+      <tr>
+        <td class="meta-label">اسم المريض: <span class="patient-name-hl">{{ patient_name }}</span></td>
+        <td class="meta-side"><b>Age:</b> {{ age }} &nbsp;&nbsp; <b>Sex:</b> {{ sex }}</td>
+      </tr>
+    </table>
+
+    {% block report_body %}{% endblock %}
+
+    {% if show_exam_signature %}
+    <div class="exam-signature-row">
+      <div class="exam-signature-box">
+        <div class="exam-signature-label">توقيع وختم الدكتور الفاحص<br><span style="font-weight:normal; font-style:italic; color:#555;">Examining Doctor Signature &amp; Stamp</span></div>
+        <div class="exam-signature-line">التوقيع / Signature</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="footer-block">
+      {% block extra_note %}{% endblock %}
+      {% if previous_visit_date %}
+      <div class="prev-visit-note">زيارة سابقة بتاريخ: {{ previous_visit_date }}</div>
+      {% endif %}
+      {% if from_other_lab %}
+      <div class="other-lab-note">The sample received from another Lab.</div>
+      {% endif %}
+      <div class="footer-address">
+        <span class="addr-line"><span class="addr-label">العنوان</span> : كوت – شارع الأطباء/ شارع دائرة الكهرباء القديمة / خلف مصرف الرافدين // للاستفسار: <span class="phone">07827434531</span> &nbsp;|&nbsp; <span class="email-line">hematologist_lab@yahoo.com</span></span>
+      </div>
+    </div>
+
+    <div class="no-print">
+      <button onclick="window.print()">Print</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // يفرّغ عنوان الصفحة أثناء الطباعة فقط، حتى لا يظهر اسم البرنامج
+  // (مثلاً "Dr. Laith Salman Hematologist Lab") ضمن ترويسة الطباعة التلقائية
+  // التي يضيفها المتصفح بالأعلى. هذا لا يلغي وقت/تاريخ الطباعة أو رقم
+  // الصفحة اللي يضيفهم المتصفح نفسه — لإخفائها بالكامل لازم تعطيل خيار
+  // "Headers and footers" من إعدادات الطباعة بالمتصفح (More settings).
+  (function () {
+    var savedTitle = document.title;
+    window.addEventListener('beforeprint', function () { document.title = ''; });
+    window.addEventListener('afterprint', function () { document.title = savedTitle; });
+  })();
+
+  // يضمن بقاء سطر العنوان بأسفل الصفحة سطر واحد دائماً بخط 14px: إذا كان
+  // النص أعرض من عرض الورقة المتاح (نادراً، حسب طول العنوان/رقم الهاتف)
+  // يضغطه أفقياً بأقل قدر ممكن (scaleX) بدل ما يلف لسطر ثاني أو ينكسر.
+  (function () {
+    function fitAddressLine() {
+      var line = document.querySelector('.footer-address .addr-line');
+      if (!line) return;
+      line.style.transform = 'none';
+      var containerWidth = line.parentElement.clientWidth;
+      var lineWidth = line.scrollWidth;
+      if (containerWidth > 0 && lineWidth > containerWidth) {
+        var scale = containerWidth / lineWidth;
+        line.style.transform = 'scaleX(' + scale + ')';
+      }
+    }
+    window.addEventListener('load', fitAddressLine);
+    window.addEventListener('beforeprint', fitAddressLine);
+    window.addEventListener('resize', fitAddressLine);
+  })();
+</script>
+{% endblock %}

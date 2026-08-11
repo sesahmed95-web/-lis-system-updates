@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('enter_results') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ ot['test_name'] }} — {{ ot['patient_name'] }} <span class="muted mono">#{{ ot['registration_number'] }}</span></h3>
+  <p class="muted">{{ t('barcode') }}: <span class="mono">{{ ot['barcode'] }}</span> · {{ t('status') }}: <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span></p>
+  {% if ot['test_code'] in ('CBC', 'BF', 'WBCDIFF', 'FLUIDEXAM') and ot['status'] in ('Completed', 'Verified') %}
+  <p><a class="btn small" target="_blank" href="{{ url_for('print_report', order_test_id=ot['id']) }}">Print Report</a></p>
+  {% endif %}
+
+  {% if ot['status'] == 'Verified' %}
+    {% if current_role in ['supervisor', 'admin'] %}
+    <form method="POST" action="{{ url_for('unverify_result', order_test_id=ot['id']) }}" style="margin-bottom:14px; display:flex; gap:8px; align-items:center;"
+          onsubmit="return confirm('هذه النتيجة معتمدة فعلاً. فتحها للتعديل يتطلب اعتمادها من جديد بعد الحفظ. متأكد؟')">
+      <input type="text" name="reason" placeholder="سبب إعادة الفتح (اختياري)" style="max-width:260px;">
+      <button class="btn small secondary" type="submit">🔓 فتح للتعديل (إلغاء الاعتماد)</button>
+    </form>
+    {% else %}
+    <p class="muted">🔒 هذه النتيجة معتمدة ولا يمكن تعديلها. اطلب من المشرف فتحها للتعديل عند الحاجة.</p>
+    {% endif %}
+  {% endif %}
+
+  <form method="POST">
+    <table>
+      <thead><tr>
+        <th>{{ t('parameter') }}</th><th>{{ t('unit') }}</th><th>{{ t('range') }}</th><th>{{ t('result') }}</th><th>{{ t('flag') }}</th>
+      </tr></thead>
+      <tbody>
+        {% for p in parameters %}
+        {% set existing = results_by_param.get(p['id']) %}
+        {% set rng = ranges.get(p['id']) %}
+        {% set sugg = suggestions_map.get(p['id'], []) %}
+        <tr>
+          <td>{{ p['name'] }}</td>
+          <td class="muted">{{ p['unit'] }}</td>
+          <td class="muted">
+            {% if rng %}
+              {% if rng['range_text'] %}{{ rng['range_text'] }}
+              {% elif rng['low'] is not none and rng['high'] is not none %}{{ rng['low'] }} - {{ rng['high'] }}{% endif %}
+            {% endif %}
+          </td>
+          <td>
+            {% if p['result_type'] == 'Text' %}
+            <textarea id="param_{{ p['id'] }}" name="param_{{ p['id'] }}" dir="ltr" style="text-align:left; width:100%;"
+                      rows="2" class="lis-autoresize" data-param-name="{{ p['name'] }}"
+                      {{ 'readonly' if ot['status'] == 'Verified' else '' }}>{{ existing['value_text'] if existing else '' }}</textarea>
+            <label class="muted" style="display:flex; align-items:center; gap:4px; font-size:11px; margin-top:3px;">
+              <input type="checkbox" onchange="document.getElementById('param_{{ p['id'] }}').spellcheck = this.checked;">
+              🔤 تدقيق إملائي (اختياري)
+            </label>
+            <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
+              onclick="lisCleanupText(document.getElementById('param_{{ p['id'] }}'))"
+              title="يصحح فقط المسافات وحرف البداية وعلامة الترقيم — لا يترجم ولا يغيّر أي كلمة أو مصطلح طبي">✓ تدقيق الكتابة</button>
+            {% else %}
+            <input type="text" id="param_{{ p['id'] }}" name="param_{{ p['id'] }}" dir="ltr" style="text-align:left;"
+                   data-param-name="{{ p['name'] }}"
+                   {% if p['name'] == 'Corrected Retic count' %}data-auto-filled="{{ '0' if existing else '1' }}"{% endif %}
+                   value="{{ existing['value_numeric'] if existing and existing['value_numeric'] is not none else (existing['value_text'] if existing else '') }}"
+                   {{ 'readonly' if ot['status'] == 'Verified' else '' }}>
+            {% if p['name'] == 'Corrected Retic count' %}
+            <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
+              onclick="lisForceRecalcCorrectedRetic(this)" title="يحسبها من Reticulocyte count وقيمة HCT لنفس الزيارة (رجال 45%، نساء 42%)">↻ إعادة الحساب التلقائي</button>
+            {% endif %}
+            {% endif %}
+            {% set hist = history_map.get(p['id']) %}
+            {% if hist and ot['status'] != 'Verified' %}
+            {% set prev_val = hist['prev_value_numeric'] if hist['prev_value_numeric'] is not none else hist['prev_value_text'] %}
+            <div class="muted" style="margin-top:4px; font-size:11.5px;">
+              القيمة السابقة: <span class="mono">{{ prev_val }}</span>
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px;"
+                onclick="document.getElementById('param_{{ p['id'] }}').value='{{ prev_val }}'">↩ استرجاع</button>
+            </div>
+            {% endif %}
+            {% if sugg %}
+            <div style="margin-top:4px;">
+              {% for s in sugg %}
+              <button type="button" class="btn small secondary" style="margin-inline-end:4px; margin-top:4px;"
+                onclick="document.getElementById('param_{{ p['id'] }}').value='{{ s }}'">{{ s }}</button>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </td>
+          <td>{% if existing %}<span class="badge badge-{{ existing['flag'] }}">{{ existing['flag'] }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div style="margin-top:16px; display:flex; gap:10px;">
+      <a class="btn secondary" href="{{ url_for('orders_list') }}">{{ t('back') }}</a>
+      {% if ot['status'] != 'Verified' %}
+      <button class="btn" type="submit">{{ t('save') }}</button>
+      <a class="btn secondary" href="{{ url_for('result_entry', order_test_id=ot['id']) }}" title="يلغي أي تعديل لم يُحفظ بعد ويعيد تحميل آخر نسخة محفوظة">↺ تراجع عن التعديلات غير المحفوظة</a>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if current_role in ['supervisor', 'admin'] and ot['status'] == 'Completed' %}
+  <form method="POST" action="{{ url_for('verify_result', order_test_id=ot['id']) }}" style="margin-top:10px;" onsubmit="return confirmVerify()">
+    <button class="btn success" type="submit">✔ {{ t('verify') }}</button>
+  </form>
+  {% endif %}
+</div>
+<script>
+  window.LIS_PATIENT_HCT = {{ 'null' if patient_hct is none else patient_hct }};
+  window.LIS_PATIENT_GENDER = {{ ot['gender']|tojson }};
+</script>
+{% endblock %}

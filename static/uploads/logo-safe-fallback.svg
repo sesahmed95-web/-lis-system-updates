@@ -1,0 +1,37 @@
+<svg width="460" height="520" viewBox="0 0 460 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="dropGrad" cx="38%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#F05A4A"/>
+      <stop offset="55%" stop-color="#D8352A"/>
+      <stop offset="100%" stop-color="#A81F1F"/>
+    </radialGradient>
+  </defs>
+
+  <text x="230" y="56" font-family="'Segoe UI', Tahoma, Arial, sans-serif" font-size="34"
+        font-weight="700" fill="#173F6B" text-anchor="middle" direction="rtl">مختبر أمراض الدم التخصصي</text>
+  <line x1="90" y1="76" x2="370" y2="76" stroke="#173F6B" stroke-width="1.5"/>
+  <rect x="223" y="70" width="12" height="12" fill="#D8352A" transform="rotate(45 230 76)"/>
+
+  <circle cx="230" cy="260" r="176" fill="#FFFFFF" stroke="#173F6B" stroke-width="7"/>
+  <circle cx="230" cy="260" r="160" fill="none" stroke="#173F6B" stroke-width="1.5"/>
+
+  <g>
+    <path d="M230 152
+             C 278 224, 310 268, 310 308
+             C 310 355, 274 390, 230 390
+             C 186 390, 150 355, 150 308
+             C 150 268, 182 224, 230 152 Z"
+          fill="url(#dropGrad)" stroke="#8E1616" stroke-width="2"/>
+    <ellipse cx="198" cy="284" rx="16" ry="34" fill="#FFFFFF" opacity="0.32"/>
+    <ellipse cx="215" cy="246" rx="6" ry="10" fill="#FFFFFF" opacity="0.4"/>
+  </g>
+
+  <line x1="130" y1="464" x2="206" y2="464" stroke="#173F6B" stroke-width="1.5"/>
+  <rect x="223" y="459" width="14" height="10" fill="#D8352A" transform="rotate(45 230 464)"/>
+  <line x1="254" y1="464" x2="330" y2="464" stroke="#173F6B" stroke-width="1.5"/>
+
+  <text x="230" y="498" font-family="'Segoe UI', Tahoma, Arial, sans-serif" font-size="22"
+        font-weight="700" letter-spacing="3" fill="#173F6B" text-anchor="middle">
+    SPECIALIZED HEMATOLOGIST LAB
+  </text>
+</svg>

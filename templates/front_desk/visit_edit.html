@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('edit_patient') }} — #{{ visit['registration_number'] }}{% endblock %}
+{% block content %}
+{% set locked = invoice and invoice['is_locked'] %}
+{% if locked %}
+<div class="flash" style="background:#FBE1DE; color:var(--danger); border-color:#f3b8b0;">🔒 هذه الفاتورة مقفلة — لا يمكن التعديل حتى يتم فتحها من صفحة الفواتير.</div>
+{% endif %}
+<form method="POST">
+  <div class="card">
+    <h3>{{ t('patient_information') }}</h3>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>{{ t('patient_name') }}</label>
+        <input type="text" name="patient_name" value="{{ visit['full_name'] }}" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>{{ t('gender') }}</label>
+        <select name="gender" {{ 'disabled' if locked }}>
+          <option value="Male" {{ 'selected' if visit['gender']=='Male' }}>{{ t('male') }}</option>
+          <option value="Female" {{ 'selected' if visit['gender']=='Female' }}>{{ t('female') }}</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>{{ t('age') }}</label>
+        <input type="number" step="any" name="age" value="{{ visit['age'] }}" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>{{ t('age_unit') }}</label>
+        <select name="age_unit" {{ 'disabled' if locked }}>
+          {% set cur_unit = visit['age_unit'] or 'Years' %}
+          <option value="Hours" {{ 'selected' if cur_unit=='Hours' }}>{{ t('unit_hours') }}</option>
+          <option value="Days" {{ 'selected' if cur_unit=='Days' }}>{{ t('unit_days') }}</option>
+          <option value="Weeks" {{ 'selected' if cur_unit=='Weeks' }}>{{ t('unit_weeks') }}</option>
+          <option value="Months" {{ 'selected' if cur_unit=='Months' }}>{{ t('unit_months') }}</option>
+          <option value="Years" {{ 'selected' if cur_unit=='Years' }}>{{ t('unit_years') }}</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>{{ t('phone') }}</label>
+        <input type="text" name="phone" value="{{ visit['phone'] }}" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>{{ t('fasting') }}</label>
+        <select name="fasting" {{ 'disabled' if locked }}>
+          <option value="Undefined">-</option>
+          <option value="Yes" {{ 'selected' if visit['fasting']=='Yes' }}>{{ t('yes') }}</option>
+          <option value="No" {{ 'selected' if visit['fasting']=='No' }}>{{ t('no') }}</option>
+        </select>
+      </div>
+      <div class="form-field" id="examiningDoctorField" style="display:none;">
+        <label>دكتور المختبر الفاحص</label>
+        <div style="display:flex; gap:6px;">
+          <select name="examining_doctor" id="examining_doctor" style="flex:1;" {{ 'disabled' if locked }}>
+            <option value="">-</option>
+            {% for d in examining_doctors %}
+            <option value="{{ d }}" {{ 'selected' if visit['examining_doctor']==d }}>{{ d }}</option>
+            {% endfor %}
+          </select>
+          {% if not locked %}
+          <button type="button" class="btn small secondary" onclick="toggleAddDoctorBox()" title="إضافة طبيب فاحص جديد">+ طبيب</button>
+          {% endif %}
+        </div>
+        <small class="muted">أجره المحسوب حاليًا لهذه الزيارة: {{ "%.0f"|format(visit['examining_doctor_fee'] or 0) }}</small>
+      </div>
+      <div class="form-field">
+        <label>{{ t('referring_doctor') }}</label>
+        <input type="text" id="doctor_name" name="doctor_name" list="doctorsList" autocomplete="off"
+               value="{{ current_doctor_name }}" placeholder="{{ t('referring_doctor') }}" {{ 'disabled' if locked }}>
+        <datalist id="doctorsList">
+          {% for d in doctors %}
+          <option value="{{ d['full_name'] }}">
+          {% endfor %}
+        </datalist>
+        <small class="muted">{{ t('referring_doctor_hint') }}</small>
+      </div>
+      <div class="form-field">
+        <label>نموذج وارد من مختبر آخر؟</label>
+        <input type="text" id="referral_lab_name" name="referral_lab_name" list="referralLabsList" autocomplete="off"
+               value="{{ current_referral_lab_name }}" placeholder="-- لا شيء، مراجع مباشر --" {{ 'disabled' if locked }}>
+        <datalist id="referralLabsList">
+          {% for lab in referral_labs %}
+          <option value="{{ lab['name'] }}">
+          {% endfor %}
+        </datalist>
+        <small class="muted">اكتب اسم المختبر فقط إذا هذا النموذج مبعوث من مختبر آخر — اختر من الاقتراحات أو اكتب اسم مختبر جديد وينحفظ تلقائيًا. اسم المختبر ما ينطبع بأي تقرير، ويُستخدم فقط لحساب المختبر يوميًا وشهريًا. اتركه فارغًا للمراجع المباشر.</small>
+      </div>
+      <div class="form-field" id="attendingDoctorField" style="display:none;">
+        <label>الدكتور الفاحص</label>
+        <div style="display:flex; gap:6px;">
+          <select name="attending_doctor" id="attending_doctor" style="flex:1;" {{ 'disabled' if locked }}>
+            <option value="">-</option>
+            {% for d in examining_doctors %}
+            <option value="{{ d }}" {{ 'selected' if visit['attending_doctor']==d }}>{{ d }}</option>
+            {% endfor %}
+          </select>
+          {% if not locked %}
+          <button type="button" class="btn small secondary" onclick="toggleAddDoctorBox()" title="إضافة طبيب فاحص جديد">+ طبيب</button>
+          {% endif %}
+        </div>
+      </div>
+      {% if not locked %}
+      <div class="form-field" id="addDoctorBox" style="display:none; grid-column: span 2;">
+        <label>اسم الطبيب الفاحص الجديد</label>
+        <div style="display:flex; gap:6px;">
+          <input type="text" id="newDoctorNameInput" placeholder="اكتب اسم الطبيب ثم اضغط إضافة">
+          <button type="button" class="btn small" onclick="quickAddDoctor()">إضافة</button>
+          <button type="button" class="btn small secondary" onclick="toggleAddDoctorBox(false)">إلغاء</button>
+        </div>
+        <small class="muted" id="addDoctorError" style="display:none; color:#DC2626;"></small>
+      </div>
+      {% endif %}
+      <div class="form-field" style="grid-column: span 2;">
+        <label>{{ t('notes') }}</label>
+        <textarea name="notes" {{ 'disabled' if locked }}>{{ visit['notes'] or '' }}</textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>{{ t('orders_section') }}</h3>
+    {% if last_removed and not locked %}
+    <button type="submit" formaction="{{ url_for('visit_undo_remove_test', visit_id=visit['id']) }}"
+            class="btn small secondary" style="margin-bottom:12px;">↩ تراجع عن حذف: {{ last_removed['test_name'] }}</button>
+    {% endif %}
+    <table>
+      <thead><tr><th>{{ t('test') }}</th><th>{{ t('price') }}</th><th>{{ t('status') }}</th><th></th></tr></thead>
+      <tbody>
+        {% for ot in order_tests %}
+        <tr>
+          <td>{{ ot['name'] }}</td>
+          <td>
+            {% if not locked %}
+            <div style="display:flex;align-items:center;gap:6px">
+              <input type="number" step="0.01" min="0" name="price_{{ ot['id'] }}" value="{{ '%.0f'|format(ot['price']) }}" style="width:90px">
+              <button type="submit" formaction="{{ url_for('visit_update_test_price', visit_id=visit['id'], order_test_id=ot['id']) }}"
+                      class="btn small secondary" title="{{ t('save') }}">💾</button>
+            </div>
+            {% else %}
+            {{ "%.0f"|format(ot['price']) }}
+            {% endif %}
+          </td>
+          <td><span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span></td>
+          <td>
+            {% if not locked %}
+            <button type="submit" formaction="{{ url_for('visit_remove_test', visit_id=visit['id'], order_test_id=ot['id']) }}" class="btn small danger" title="حذف الفحص من الزيارة"
+                    onclick="return confirm('حذف «{{ ot['name'] }}» من الزيارة؟ (يمكن التراجع بعدها من هذه الصفحة)')">✕</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if not locked %}
+    <div class="form-field" style="max-width:360px; margin-top:14px;">
+      <label>{{ t('select_item_to_add') }}</label>
+      <select name="add_test" id="add_test">
+        <option value="">-</option>
+        {% for test in all_tests %}
+        <option value="{{ test['id'] }}">{{ test['name'] }} ({{ t('default_lab_price') }}: {{ "%.0f"|format(test['price']) }})</option>
+        {% endfor %}
+      </select>
+      <small class="muted">{{ t('doctor_price') }}: <span id="addTestPrice">-</span></small>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if invoice %}
+  <div class="card">
+    <h3>{{ t('invoices') }}</h3>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>{{ t('discount') }}</label>
+        <input type="number" step="0.01" name="discount_amount" value="{{ invoice['discount_amount'] }}" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>Extra Charges</label>
+        <input type="number" step="0.01" name="extra_charges" value="{{ invoice['extra_charges'] or 0 }}" {{ 'disabled' if locked }}>
+      </div>
+    </div>
+    <p class="muted">{{ t('total') }}: {{ "%.0f"|format(invoice['total_amount']) }} · {{ t('paid') }}: {{ "%.0f"|format(invoice['paid_amount']) }} ·
+      {{ t('due_balance') }}: {{ "%.0f"|format(invoice['total_amount'] - invoice['discount_amount'] - invoice['paid_amount']) }}</p>
+  </div>
+  {% endif %}
+
+  {% if not locked %}
+  <button class="btn" type="submit">{{ t('save') }}</button>
+  {% endif %}
+  <a class="btn secondary" href="{{ url_for('visits_list') }}">{{ t('back') }}</a>
+</form>
+
+{% if not locked %}
+<script>
+  const DEFAULT_PRICES = {{ test_default_prices|tojson }};
+  const DOCTOR_PRICES = {{ doctor_prices|tojson }};
+  const DOCTOR_NAME_TO_ID = {{ doctor_name_to_id|tojson }};
+  const EXAM_TEST_IDS = {{ examining_test_ids|tojson }};
+  const CURRENT_TEST_IDS = {{ order_tests|map(attribute='test_definition_id')|list|tojson }};
+
+  function refreshExaminingDoctorVisibility() {
+    const addSel = document.getElementById('add_test');
+    const addVal = addSel && addSel.value ? parseInt(addSel.value) : null;
+    const anyEligible = CURRENT_TEST_IDS.some((id) => EXAM_TEST_IDS.includes(id)) ||
+      (addVal !== null && EXAM_TEST_IDS.includes(addVal));
+    const field = document.getElementById('examiningDoctorField');
+    if (field) field.style.display = anyEligible ? '' : 'none';
+
+    // نفس المنطق لحقل "الدكتور الفاحص" (attending_doctor): إلزامي فقط
+    // إذا كان أحد الفحوصات المؤهلة موجودًا ضمن فحوصات الزيارة.
+    const attendField = document.getElementById('attendingDoctorField');
+    const attendSelect = document.getElementById('attending_doctor');
+    if (attendField) attendField.style.display = anyEligible ? '' : 'none';
+    if (attendSelect) attendSelect.required = anyEligible && !attendSelect.disabled;
+  }
+
+  // ------------------------------------------------------------------
+  // إضافة طبيب فاحص جديد بسرعة من نفس صفحة تعديل الزيارة (زر "+ طبيب")
+  // — نفس آلية شاشة "زيارة جديدة": يُضاف للقائمتين معًا ويُختار تلقائيًا.
+  // ------------------------------------------------------------------
+  function toggleAddDoctorBox(show) {
+    const box = document.getElementById('addDoctorBox');
+    if (!box) return;
+    const willShow = typeof show === 'boolean' ? show : (box.style.display === 'none');
+    box.style.display = willShow ? '' : 'none';
+    document.getElementById('addDoctorError').style.display = 'none';
+    if (willShow) {
+      const input = document.getElementById('newDoctorNameInput');
+      input.value = '';
+      input.focus();
+    }
+  }
+  window.toggleAddDoctorBox = toggleAddDoctorBox;
+
+  function quickAddDoctor() {
+    const input = document.getElementById('newDoctorNameInput');
+    const errEl = document.getElementById('addDoctorError');
+    const name = input.value.trim();
+    errEl.style.display = 'none';
+    if (!name) { errEl.textContent = 'اسم الطبيب مطلوب.'; errEl.style.display = 'block'; return; }
+    const body = new URLSearchParams({ name: name });
+    fetch('/api/examining-doctors/quick-add', { method: 'POST', body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        [document.getElementById('examining_doctor'), document.getElementById('attending_doctor')].forEach(function (sel) {
+          if (!sel) return;
+          if (!Array.from(sel.options).some(function (o) { return o.value === data.name; })) {
+            const opt = document.createElement('option');
+            opt.value = data.name;
+            opt.textContent = data.name;
+            sel.appendChild(opt);
+          }
+          sel.value = data.name;
+        });
+        toggleAddDoctorBox(false);
+      })
+      .catch(function () {
+        errEl.textContent = 'تعذر الاتصال بالسيرفر، حاول مرة أخرى.';
+        errEl.style.display = 'block';
+      });
+  }
+  window.quickAddDoctor = quickAddDoctor;
+
+  function currentDoctorId() {
+    const el = document.getElementById('doctor_name');
+    const typed = (el && el.value || '').trim().toLowerCase();
+    return typed && DOCTOR_NAME_TO_ID.hasOwnProperty(typed) ? String(DOCTOR_NAME_TO_ID[typed]) : null;
+  }
+
+  function priceFor(testId, doctorId) {
+    if (doctorId && DOCTOR_PRICES[doctorId] && DOCTOR_PRICES[doctorId].hasOwnProperty(testId)) {
+      return DOCTOR_PRICES[doctorId][testId];
+    }
+    return DEFAULT_PRICES[testId] || 0;
+  }
+
+  function refreshAddTestPrice() {
+    const sel = document.getElementById('add_test');
+    const priceEl = document.getElementById('addTestPrice');
+    if (!sel || !priceEl) return;
+    if (!sel.value) { priceEl.textContent = '-'; return; }
+    priceEl.textContent = Math.round(priceFor(sel.value, currentDoctorId()));
+  }
+
+  const doctorField = document.getElementById('doctor_name');
+  const addTestField = document.getElementById('add_test');
+  if (doctorField) doctorField.addEventListener('input', refreshAddTestPrice);
+  if (addTestField) addTestField.addEventListener('change', function () {
+    refreshAddTestPrice();
+    refreshExaminingDoctorVisibility();
+  });
+  refreshAddTestPrice();
+  refreshExaminingDoctorVisibility();
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+<div class="report-heading">WBCs differential</div>
+<table class="data-table" style="direction:ltr;">
+  <tr>
+    <td class="field-name">Neutrophils :</td><td class="pct-val">{{ params.get('Neutrophils', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Band :</td><td class="pct-val">{{ params.get('Band', '') }}</td><td class="unit-val">%</td>
+  </tr>
+  <tr>
+    <td class="field-name">Lymphocytes:</td><td class="pct-val">{{ params.get('Lymphocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Metamyelocytes:</td><td class="pct-val">{{ params.get('Metamyelocytes', '') }}</td><td class="unit-val">%</td>
+  </tr>
+  <tr>
+    <td class="field-name">Monocytes :</td><td class="pct-val">{{ params.get('Monocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Myelocytes:</td><td class="pct-val">{{ params.get('Myelocytes', '') }}</td><td class="unit-val">%</td>
+  </tr>
+  <tr>
+    <td class="field-name">Eosinophils :</td><td class="pct-val">{{ params.get('Eosinophils', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Promyelocytes :</td><td class="pct-val">{{ params.get('Promyelocytes', '') }}</td><td class="unit-val">%</td>
+  </tr>
+  <tr>
+    <td class="field-name">Basophils :</td><td class="pct-val">{{ params.get('Basophils', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Blast :</td><td class="pct-val">{{ params.get('Blast', '') }}</td><td class="unit-val">%</td>
+  </tr>
+  <tr>
+    <td class="field-name">Atypical Lymphocyte :</td><td class="pct-val">{{ params.get('Atypical lymphocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">/100</td>
+  </tr>
+  <tr>
+    <td class="field-name">Reactive lymphocytes :</td><td class="pct-val">{{ params.get('Reactive lymphocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name"></td><td class="pct-val"></td><td class="unit-val"></td>
+  </tr>
+</table>
+{% endblock %}

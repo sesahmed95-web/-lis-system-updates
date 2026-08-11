@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block page_title %}كشف حساب {{ lab['name'] }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ lab['name'] }}</h3>
+  <form method="GET" class="filters">
+    <div class="form-field">
+      <label>الشهر</label>
+      <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()">
+    </div>
+  </form>
+
+  <div class="stat-grid" style="margin:12px 0 20px;">
+    <div class="stat-card"><div class="label">إجمالي حساب الشهر</div><div class="value">{{ "%.0f"|format(total) }}</div></div>
+    <div class="stat-card"><div class="label">عدد النماذج الواردة</div><div class="value">{{ rows|length }}</div></div>
+  </div>
+
+  <div style="display:flex; gap:10px; margin-bottom:20px;">
+    <a class="btn secondary" href="{{ url_for('referral_lab_statement_pdf', center_id=lab['id'], month=month) }}">⬇️ تنزيل PDF</a>
+    <form method="POST" action="{{ url_for('referral_lab_statement_whatsapp', center_id=lab['id'], month=month) }}" onsubmit="return confirm('إرسال كشف حساب {{ month }} عبر واتساب لمدير {{ lab['name'] }}؟');">
+      <button class="btn" type="submit">📤 إرسال عبر واتساب لمدير المختبر</button>
+    </form>
+    {% if not lab['phone'] %}
+    <span class="muted">⚠️ ما فيه رقم واتساب مسجّل لهذا المختبر — أضِفه من صفحة <a href="{{ url_for('referral_labs_list') }}">المختبرات المُرسِلة</a>.</span>
+    {% endif %}
+  </div>
+
+  <h4>الحساب اليومي (متابعة أول بأول)</h4>
+  <table>
+    <thead><tr><th>اليوم</th><th>عدد التحاليل</th><th>المجموع</th></tr></thead>
+    <tbody>
+      {% for d in by_day %}
+      <tr>
+        <td>{{ d['date'] }}</td>
+        <td>{{ d['count'] }}</td>
+        <td>{{ "%.0f"|format(d['subtotal']) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">لا توجد نماذج واردة من هذا المختبر بهذا الشهر.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:24px;">إجمالي التحاليل حسب النوع (ملخص نهاية الشهر)</h4>
+  <table>
+    <thead><tr><th>نوع التحليل</th><th>العدد</th><th>المجموع</th></tr></thead>
+    <tbody>
+      {% for tstat in by_test %}
+      <tr>
+        <td>{{ tstat['test_name'] }}</td>
+        <td>{{ tstat['count'] }}</td>
+        <td>{{ "%.0f"|format(tstat['subtotal']) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">-</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:24px;">تفاصيل كل النماذج الواردة هذا الشهر</h4>
+  <table>
+    <thead><tr><th>رقم الزيارة</th><th>التاريخ</th><th>التحليل</th><th>السعر</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="mono">{{ r['registration_number'] }}</td>
+        <td class="muted">{{ r['created_at'] }}</td>
+        <td>{{ r['test_name'] }}</td>
+        <td>{{ "%.0f"|format(r['price'] or 0) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

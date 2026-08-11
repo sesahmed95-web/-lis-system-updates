@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('settings') }}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:640px;">
+  <h3>{{ t('branding') }}</h3>
+  <form method="POST" enctype="multipart/form-data">
+    <div class="form-field">
+      <label>{{ t('app_name_en_label') }}</label>
+      <input type="text" name="app_name" value="{{ current.app_name }}" placeholder="e.g. Al-Karama LIS">
+    </div>
+    <div class="form-field">
+      <label>{{ t('app_name_ar_label') }}</label>
+      <input type="text" name="app_name_ar" value="{{ current.app_name_ar }}" placeholder="مثال: نظام مختبر الكرامة">
+    </div>
+
+    <div class="form-field">
+      <label>{{ t('current_logo') }}</label>
+      {% if logo_url %}
+        <img src="{{ logo_url }}" alt="logo" style="max-height:70px; max-width:200px; object-fit:contain; border:1px solid var(--border); border-radius:8px; padding:6px; background:#fff;">
+      {% else %}
+        <span class="muted">{{ t('no_logo') }}</span>
+      {% endif %}
+    </div>
+
+    <div class="form-field">
+      <label>{{ t('upload_logo') }}</label>
+      <input type="file" name="logo" accept=".png,.jpg,.jpeg,.gif,.svg,.webp">
+      <span class="muted">PNG / JPG / GIF / SVG / WEBP</span>
+    </div>
+
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>دكتور المختبر الفاحص</h3>
+  <p class="muted">قائمة الأسماء التي تظهر بالاختيار عند فتح زيارة جديدة أو تعديلها. اكتب اسمًا واحدًا في كل سطر — أضف اسمًا جديدًا بإضافة سطر جديد، أو احذف اسمًا بحذف سطره.</p>
+  <form method="POST">
+    <div class="form-field">
+      <textarea name="examining_doctors" rows="6" style="width:100%; font-family:inherit;">{{ current.examining_doctors }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+  <a class="btn small secondary" style="margin-top:10px; display:inline-block;" href="{{ url_for('examining_doctor_rates_list') }}">💰 تحديد أجور دكتور المختبر الفاحص</a>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>حجم جدول النتائج بالتقارير المطبوعة</h3>
+  <p class="muted">
+    يتحكم هذا بارتفاع صفوف جدول النتائج (Test / Result / Control / Unit...) وعرض أعمدته
+    بكل التقارير المطبوعة دفعة وحدة — قلّل الرقم لتصغير الجدول وتقريب الأعمدة من بعضها،
+    أو كبّره لتوسيعه. القيم بالبكسل.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ارتفاع الصف (بكسل) — القيمة الافتراضية 7</label>
+      <input type="number" name="report_row_pad" min="2" max="30" value="{{ current.report_row_pad }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>عرض العمود (بكسل) — القيمة الافتراضية 12</label>
+      <input type="number" name="report_col_pad" min="2" max="40" value="{{ current.report_col_pad }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>📱 إرسال النتائج عبر واتساب</h3>
+  <p class="muted">
+    كود الدولة يُستخدم لتحويل أرقام الهواتف المحلية (اللي تبدأ بصفر) لصيغة
+    دولية عند الإرسال عبر واتساب — مثلاً 964 للعراق. أول مرة استخدام
+    للإرسال تحتاج مسح رمز QR من نفس واتساب المختبر — راجع ملف الشرح
+    المرفق مع البرنامج.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>كود الدولة</label>
+      <input type="text" name="whatsapp_country_code" value="{{ current.whatsapp_country_code }}" style="width:120px;" dir="ltr">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+{% endblock %}

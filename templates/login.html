@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ 'rtl' if lang == 'ar' else 'ltr' }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ t('login') }} - {{ brand_name }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<script>
+  if (localStorage.getItem("lis-theme") === "dark") document.documentElement.classList.add("dark");
+</script>
+<div class="login-wrap">
+  <div class="login-lang-toggle">
+    <a class="pill-btn light {{ 'active' if lang=='en' }}" href="{{ url_for('set_lang', lang='en') }}">EN</a>
+    <a class="pill-btn light {{ 'active' if lang=='ar' }}" href="{{ url_for('set_lang', lang='ar') }}">AR</a>
+    <button class="pill-btn light" type="button" onclick="toggleTheme()">🌓</button>
+  </div>
+
+  <div class="login-card-wide">
+    <div class="login-illustration">
+      <div class="login-illustration-brand">
+        {% if logo_url %}
+        <img src="{{ logo_url }}" alt="logo" class="login-illustration-logo">
+        {% endif %}
+        <div class="login-illustration-name">{{ brand_name }}</div>
+      </div>
+    </div>
+
+    <div class="login-form-side">
+      <div class="login-mode-tabs" style="display:flex; gap:8px; margin-bottom:16px;">
+        <button type="button" id="tabClientBtn" class="pill-btn active" onclick="lisSwitchLoginMode('client')">{{ t('login_tab_client') }}</button>
+        <button type="button" id="tabDesignerBtn" class="pill-btn" onclick="lisSwitchLoginMode('designer')">{{ t('login_tab_designer') }}</button>
+      </div>
+
+      <div id="clientPanel">
+        <h1 class="login-title">{{ t('sign_in') }}</h1>
+        {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+        <form method="POST" action="{{ url_for('login') }}">
+          <div class="form-field">
+            <input type="text" name="username" placeholder="{{ t('username') }}" required>
+          </div>
+          <div class="form-field">
+            <input type="password" name="password" placeholder="{{ t('password') }}" required>
+          </div>
+          <label class="checkbox-item login-remember">
+            <input type="checkbox" name="remember"> {{ t('remember_me') }}
+          </label>
+          <button class="btn login-submit" type="submit">{{ t('sign_in') }}</button>
+        </form>
+        <div class="demo-users">
+          Demo accounts — admin/admin123 · rec/rec123 · tech/tech123 · super/super123 · acc/acc123
+        </div>
+      </div>
+
+      <div id="designerPanel" style="display:none;">
+        <h1 class="login-title">🔧 دخول المصمم</h1>
+        <p class="muted">هذا الدخول خاص بالمصمم فقط — بعد الدخول تظهر أيقونة 🛠️ العائمة بكل صفحات البرنامج للوصول السريع للوحة المصمم (توليد أكواد التفعيل، التحديثات...).</p>
+        <form method="POST" action="{{ url_for('designer_login') }}">
+          <div class="form-field">
+            <input type="text" name="username" placeholder="اسم مستخدم المصمم" required>
+          </div>
+          <div class="form-field">
+            <input type="password" name="password" placeholder="كلمة مرور المصمم" required>
+          </div>
+          <button class="btn login-submit" type="submit">دخول كمصمم</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  function lisSwitchLoginMode(mode) {
+    var clientPanel = document.getElementById('clientPanel');
+    var designerPanel = document.getElementById('designerPanel');
+    var clientBtn = document.getElementById('tabClientBtn');
+    var designerBtn = document.getElementById('tabDesignerBtn');
+    if (mode === 'designer') {
+      clientPanel.style.display = 'none';
+      designerPanel.style.display = '';
+      clientBtn.classList.remove('active');
+      designerBtn.classList.add('active');
+      designerPanel.querySelector('input[name="username"]').focus();
+    } else {
+      designerPanel.style.display = 'none';
+      clientPanel.style.display = '';
+      designerBtn.classList.remove('active');
+      clientBtn.classList.add('active');
+      clientPanel.querySelector('input[name="username"]').focus();
+    }
+  }
+</script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

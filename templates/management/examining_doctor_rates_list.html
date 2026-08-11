@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block page_title %}أجور دكتور المختبر الفاحص{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted">
+    أجر كل دكتور فاحص يُحسب فقط عن الفحوصات المؤهلة لذلك
+    (Blood Film, Retic Count, Blood Film and Retic Count, Fluid Examination, Hb Preparation, Sickling Test, BMA, BM Biopsy)
+    — حاليًا {{ eligible_count }} فحص مُعلَّم كمؤهل. لتعديل هذه القائمة استخدم عمود «فحص مؤهل» بصفحة كتالوج الفحوصات.
+    لإضافة أو حذف اسم دكتور فاحص من القائمة أدناه، استخدم Management → Settings.
+  </p>
+</div>
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>دكتور المختبر الفاحص</th>
+        <th>عدد الفحوصات المُسعَّرة له</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in doctors_summary %}
+      <tr>
+        <td>{{ d.name }}</td>
+        <td>{{ d.configured_count }} / {{ eligible_count }}</td>
+        <td>
+          <a class="btn small secondary" href="{{ url_for('examining_doctor_rates', doctor_name=d.name) }}">تحديد الأجور</a>
+          <a class="btn small secondary" href="{{ url_for('examining_doctor_statement', doctor_name=d.name) }}">كشف الحساب الشهري</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">لا يوجد أطباء فاحصون بعد — أضفهم من Management → Settings.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block page_title %}فاتورة #{{ visit['registration_number'] }}{% endblock %}
+{% block content %}
+<style>
+  .inv-scope { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #1E293B; max-width: 800px; }
+  .inv-scope .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #205072; padding-bottom: 12px; margin-bottom: 16px; }
+  .inv-scope .header .lab-name { font-size: 20px; font-weight: 700; color: #205072; }
+  .inv-scope .header img { max-height: 60px; }
+  .inv-scope .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin-bottom: 20px; font-size: 13.5px; }
+  .inv-scope .meta-grid b { color: #64748B; font-weight: 600; }
+  .inv-scope table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  .inv-scope th, .inv-scope td { border: 1px solid #E2E8F0; padding: 8px 10px; text-align: right; font-size: 13.5px; }
+  .inv-scope th { background: #205072; color: #fff; }
+  .inv-scope .totals { width: 300px; margin-inline-start: auto; font-size: 14px; }
+  .inv-scope .totals div { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #E2E8F0; }
+  .inv-scope .totals .due { font-weight: 700; color: #C0392B; }
+  .inv-toolbar { margin-bottom: 16px; }
+  @media print { .inv-toolbar { display: none; } }
+</style>
+
+<div class="inv-toolbar" style="display:flex; gap:10px; align-items:center;">
+  <button class="btn" onclick="window.print()">🖨 طباعة</button>
+  <a class="btn" href="{{ url_for('dashboard') }}" style="text-decoration:none;">🔙 الرجوع للرئيسية</a>
+</div>
+
+<div class="inv-scope">
+  <div class="header">
+    <div class="lab-name">{{ brand_name }}</div>
+    {% if logo_url %}<img src="{{ logo_url }}" alt="logo">{% endif %}
+  </div>
+
+  <div class="meta-grid">
+    <div><b>اسم المريض:</b> {{ visit['full_name'] }}</div>
+    <div><b>رقم الزيارة:</b> {{ visit['registration_number'] }}</div>
+    <div><b>الجنس / العمر:</b> {{ visit['gender'] }} / {{ visit['age'] }}</div>
+    <div><b>الهاتف:</b> {{ visit['phone'] }}</div>
+    <div><b>التاريخ:</b> {{ visit['created_at'] }}</div>
+    {% if doctor %}<div><b>الطبيب المحيل:</b> {{ doctor['full_name'] }}</div>{% endif %}
+  </div>
+
+  <table>
+    <thead><tr><th>التحليل</th><th>السعر</th></tr></thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item['name_ar'] or item['name'] }}</td>
+        <td>{{ "%.0f"|format(item['price'] or 0) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div><span>الإجمالي</span><span>{{ "%.0f"|format(invoice['total_amount'] if invoice else 0) }}</span></div>
+    <div><span>الخصم</span><span>{{ "%.0f"|format(invoice['discount_amount'] if invoice else 0) }}</span></div>
+    <div><span>المدفوع</span><span>{{ "%.0f"|format(invoice['paid_amount'] if invoice else 0) }}</span></div>
+    <div class="due"><span>المتبقي</span><span>
+      {{ "%.0f"|format((invoice['total_amount'] - invoice['discount_amount'] - invoice['paid_amount']) if invoice else 0) }}
+    </span></div>
+  </div>
+</div>
+{% endblock %}

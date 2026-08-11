@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('visits') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <form class="filters" method="GET">
+    <div class="form-field">
+      <label>{{ t('search') }}</label>
+      <input type="search" name="q" value="{{ q }}" placeholder="Name / Phone / Reg#">
+    </div>
+    <button class="btn small" type="submit">{{ t('search') }}</button>
+    <a class="btn small secondary" href="{{ url_for('new_visit') }}">➕ {{ t('new_visit') }}</a>
+  </form>
+
+  <table>
+    <thead><tr>
+      <th>{{ t('no_col') }}</th><th>{{ t('name') }}</th><th>{{ t('gender') }}</th><th>{{ t('age') }}</th>
+      <th>{{ t('phone') }}</th><th>الدكتور الفاحص</th><th>{{ t('status') }}</th><th>{{ t('total') }}</th><th>{{ t('date') }}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for v in visits %}
+      <tr>
+        <td class="mono">{{ v['registration_number'] }}</td>
+        <td>{{ v['full_name'] }}</td>
+        <td>{{ v['gender'] }}</td>
+        <td>{{ v['age'] }}</td>
+        <td class="mono">{{ v['phone'] }}</td>
+        <td>{{ v['attending_doctor'] or '-' }}</td>
+        <td><span class="badge badge-{{ v['status'] }}">{{ v['status'] }}</span></td>
+        <td>{{ "%.0f"|format(v['total']) }}</td>
+        <td class="muted">{{ v['created_at'] }}</td>
+        <td>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=v['id']) }}" title="تعديل الزيارة">✏️</a>
+            <a class="btn small secondary" target="_blank" href="{{ url_for('print_visit_barcode', visit_id=v['id']) }}" title="طباعة ملصق باركود الزيارة">🏷️</a>
+            <a class="btn small secondary" target="_blank" href="{{ url_for('print_sample_barcodes', visit_id=v['id']) }}" title="طباعة ملصقات باركود العينات">🧪🏷️</a>
+            <a class="btn small secondary" target="_blank" href="{{ url_for('print_invoice', visit_id=v['id']) }}" title="طباعة الفاتورة">🧾</a>
+            <form method="POST" action="{{ url_for('delete_visit', visit_id=v['id']) }}" style="display:inline"
+                  onsubmit="return confirm('متأكد من حذف زيارة {{ v['full_name'] }} رقم {{ v['registration_number'] }}؟ هذا الإجراء لا يمكن التراجع عنه، وراح يحذف المريض والدكتور المرسل أيضًا إذا صاروا بلا أي زيارات أخرى مرتبطة.');">
+              <button class="btn small danger" type="submit" title="حذف الزيارة">🗑 حذف</button>
+            </form>
+          </div>
+          <form method="POST" action="{{ url_for('pay_invoice', visit_id=v['id']) }}" style="display:flex; gap:6px; margin-top:6px;">
+            <input type="number" name="amount" placeholder="{{ t('paid') }}" style="width:90px" step="0.01">
+            <button class="btn small success" type="submit">{{ t('cash') }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

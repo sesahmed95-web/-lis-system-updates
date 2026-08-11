@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block page_title %}سجل زيارات المريض — {{ patient['full_name'] }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ patient['full_name'] }}</h3>
+  <p class="muted">{{ patient['phone'] or '' }} {{ patient['national_id'] or '' }}</p>
+</div>
+
+{% if not visit_data %}
+<div class="card"><p class="muted">لا توجد زيارات سابقة لهذا المريض بعد.</p></div>
+{% else %}
+<form method="POST">
+  {% if current_role == 'admin' %}
+  <div class="card" style="position:sticky; top:0; z-index:5;">
+    <p class="muted">حدّد أي نتيجة (أو أكثر) من أي زيارة سابقة أدناه، ثم اضغط الزر لنسخها إلى أحدث زيارة حالية للمريض (وليس الزيارة القديمة كاملة).</p>
+    <button class="btn" type="submit">📋 نسخ النتائج المحددة إلى الزيارة الحالية</button>
+  </div>
+  {% endif %}
+
+  {% for vd in visit_data %}
+  <div class="card">
+    <h3>زيارة #{{ vd.visit['registration_number'] }} — {{ vd.visit['created_at'][:10] if vd.visit['created_at'] else '' }}</h3>
+    {% if not vd.tests %}
+    <p class="muted">لا توجد فحوصات مسجّلة بهذه الزيارة.</p>
+    {% endif %}
+    {% for tw in vd.tests %}
+    <table style="margin-bottom:10px;">
+      <thead><tr>
+        {% if current_role == 'admin' %}<th style="width:40px;"></th>{% endif %}
+        <th>التحليل</th><th>المؤشر</th><th>القيمة</th><th>الوحدة</th><th>الحالة</th>
+      </tr></thead>
+      <tbody>
+        {% for r in tw.results %}
+        <tr>
+          {% if current_role == 'admin' %}
+          <td><input type="checkbox" name="copy_result" value="{{ r['id'] }}"></td>
+          {% endif %}
+          <td>{{ tw.order_test['test_name'] }}</td>
+          <td>{{ r['param_name'] }}</td>
+          <td>{{ r['value_numeric'] if r['value_numeric'] is not none else r['value_text'] }}</td>
+          <td>{{ r['unit'] or '' }}</td>
+          <td><span class="badge badge-{{ r['flag'] }}">{{ r['flag'] }}</span></td>
+        </tr>
+        {% else %}
+        <tr>
+          {% if current_role == 'admin' %}<td></td>{% endif %}
+          <td>{{ tw.order_test['test_name'] }}</td>
+          <td colspan="4" class="muted">لا توجد نتيجة مُدخلة بعد لهذا التحليل.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</form>
+{% endif %}
+
+<a class="btn secondary" href="{{ url_for('patients_list') }}">{{ t('back') }}</a>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('results') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>{{ t('no_col') }}</th><th>{{ t('name') }}</th><th>عدد التحاليل</th><th>الحالة</th><th>{{ t('date') }}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="mono">{{ r['registration_number'] }}</td>
+        <td>{{ r['patient_name'] }}</td>
+        <td>{{ r['tests_count'] }}</td>
+        <td>
+          {% if r['verified_count'] == r['tests_count'] %}
+          <span class="badge badge-Verified">مكتملة ومعتمدة</span>
+          {% elif r['done_count'] == r['tests_count'] %}
+          <span class="badge badge-Completed">كل النتائج مُدخلة</span>
+          {% elif r['done_count'] > 0 %}
+          <span class="badge badge-Collected">{{ r['done_count'] }}/{{ r['tests_count'] }} مُدخلة</span>
+          {% else %}
+          <span class="badge badge-Pending">لم تُدخل بعد</span>
+          {% endif %}
+        </td>
+        <td class="muted">{{ r['created_at'] }}</td>
+        <td><a class="btn small" href="{{ url_for('visit_results_entry', visit_id=r['visit_id']) }}">{{ t('enter_results') }}</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

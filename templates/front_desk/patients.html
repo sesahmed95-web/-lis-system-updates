@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('patients') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <form class="filters" method="GET">
+    <div class="form-field">
+      <label>{{ t('search') }}</label>
+      <input type="search" name="q" value="{{ q }}" placeholder="Name / Phone / National ID">
+    </div>
+    <button class="btn small" type="submit">{{ t('search') }}</button>
+    <a class="btn small secondary" href="{{ url_for('patient_new') }}">➕ {{ t('add_patient') }}</a>
+  </form>
+  <table>
+    <thead><tr>
+      <th>{{ t('name') }}</th><th>{{ t('gender') }}</th><th>{{ t('age') }}</th><th>{{ t('phone') }}</th>
+      <th>{{ t('national_id') }}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for p in patients %}
+      <tr>
+        <td>{{ p['full_name'] }}</td>
+        <td>{{ p['gender'] }}</td>
+        <td>{{ p['age'] }}</td>
+        <td class="mono">{{ p['phone'] }}</td>
+        <td class="mono">{{ p['national_id'] }}</td>
+        <td>
+          <a class="btn small secondary" href="{{ url_for('patient_edit', patient_id=p['id']) }}">{{ t('edit_patient') }}</a>
+          <a class="btn small secondary" href="{{ url_for('patient_history', patient_id=p['id']) }}">📜 سجل الزيارات</a>
+          <form method="POST" action="{{ url_for('delete_patient', patient_id=p['id']) }}" style="display:inline"
+                onsubmit="return confirm('متأكد من حذف المريض {{ p['full_name'] }}؟ هذا الإجراء لا يمكن التراجع عنه. إذا كان مرتبطاً بزيارات لن يُحذف.');">
+            <button class="btn small danger" type="submit">🗑 حذف</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('suggestions') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <form method="POST" class="form-grid">
+    <div class="form-field">
+      <label>{{ t('parameter') }}</label>
+      <select name="test_parameter_id" required>
+        {% for p in parameters %}
+        <option value="{{ p['id'] }}">{{ p['test_name'] }} — {{ p['name'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label>{{ t('content') }}</label>
+      <input type="text" name="content" required placeholder="e.g. Positive / Negative / Trace">
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">{{ t('create') }}</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>{{ t('test') }}</th><th>{{ t('parameter') }}</th><th>{{ t('content') }}</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r['test_name'] }}</td>
+        <td>{{ r['param_name'] }}</td>
+        <td>{{ r['content'] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

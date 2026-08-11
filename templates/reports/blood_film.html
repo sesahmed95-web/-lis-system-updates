@@ -1,0 +1,51 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+<div class="report-heading">Blood film and Morphology</div>
+<table class="data-table" style="direction:ltr;">
+  <tr>
+    <td class="field-name">Neutrophils :</td><td class="pct-val">{{ params.get('Neutrophils', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Band :</td><td class="pct-val">{{ params.get('Band', '') }}</td><td class="unit-val">%</td>
+  </tr>
+  <tr>
+    <td class="field-name">Lymphocytes:</td><td class="pct-val">{{ params.get('Lymphocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Metamyelocytes:</td><td class="pct-val">{{ params.get('Metamyelocytes', '') }}</td><td class="unit-val">%</td>
+  </tr>
+  <tr>
+    <td class="field-name">Monocytes :</td><td class="pct-val">{{ params.get('Monocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Myelocytes:</td><td class="pct-val">{{ params.get('Myelocytes', '') }}</td><td class="unit-val">%</td>
+  </tr>
+  <tr>
+    <td class="field-name">Eosinophils :</td><td class="pct-val">{{ params.get('Eosinophils', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Promyelocytes :</td><td class="pct-val">{{ params.get('Promyelocytes', '') }}</td><td class="unit-val">%</td>
+  </tr>
+  <tr>
+    <td class="field-name">Basophils :</td><td class="pct-val">{{ params.get('Basophils', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">100/wbc</td>
+  </tr>
+  <tr>
+    <td class="field-name">Atypical lymphocytes :</td><td class="pct-val">{{ params.get('Atypical lymphocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Blast :</td>
+    <td class="pct-val">
+      {% set blast_val = params.get('Blast', '') %}
+      {% if blast_val %}<span style="color:#D40000; font-weight:bold;">{{ blast_val }}</span>{% else %}{{ blast_val }}{% endif %}
+    </td>
+    <td class="unit-val">%</td>
+  </tr>
+  <tr>
+    <td class="field-name">Reactive lymphocytes :</td><td class="pct-val">{{ params.get('Reactive lymphocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name"></td><td class="pct-val"></td><td class="unit-val"></td>
+  </tr>
+</table>
+
+<div class="box-field"><b>RBC:</b> {{ params.get('RBC_desc', '') }}</div>
+<div class="box-field"><b>WBC:</b> {{ params.get('WBC_desc', '') }}</div>
+<div class="box-field"><b>Platelets:</b> {{ params.get('Platelets_desc', '') }}</div>
+<div class="box-field"><b>Conclusion:</b> {{ params.get('Conclusion', '') }}</div>
+
+<table style="width:100%; margin-top:10px; direction:ltr; text-align:left;">
+  <tr>
+    <td style="width:50%;"><b>Reticulocyte count:</b> {{ params.get('Reticulocyte count', '') }} %</td>
+    <td><b>Corrected Retic count:</b> {{ params.get('Corrected Retic count', '') }} %</td>
+  </tr>
+</table>
+{% endblock %}

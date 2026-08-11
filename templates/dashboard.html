@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('dashboard') }}{% endblock %}
+{% block content %}
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="label">{{ t('today_visits') }}</div>
+    <div class="value">{{ visits_today }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">{{ t('today_revenue') }}</div>
+    <div class="value">{{ "%.0f"|format(revenue_today) }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">{{ t('pending_results') }}</div>
+    <div class="value">{{ pending_results }}</div>
+  </div>
+  <div class="stat-card {{ 'warn' if critical_count > 0 else '' }}">
+    <div class="label">{{ t('critical_alerts') }}</div>
+    <div class="value">{{ critical_count }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>{{ t('visits') }}</h3>
+  <table>
+    <thead><tr>
+      <th>{{ t('no_col') }}</th><th>{{ t('name') }}</th><th>{{ t('status') }}</th><th>{{ t('date') }}</th>
+    </tr></thead>
+    <tbody>
+      {% for v in recent_visits %}
+      <tr>
+        <td class="mono">{{ v['registration_number'] }}</td>
+        <td>{{ v['full_name'] }}</td>
+        <td><span class="badge badge-{{ v['status'] }}">{{ v['status'] }}</span></td>
+        <td>{{ v['created_at'] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

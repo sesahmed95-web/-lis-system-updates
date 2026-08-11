@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block page_title %}نتائج زيارة #{{ visit['registration_number'] }}{% endblock %}
+{% block content %}
+<style>
+  .pvr-scope { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #1E293B; max-width: 800px; }
+  .pvr-scope .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #205072; padding-bottom: 12px; margin-bottom: 16px; }
+  .pvr-scope .header .lab-name { font-size: 20px; font-weight: 700; color: #205072; }
+  .pvr-scope .header img { max-height: 60px; }
+  .pvr-scope .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin-bottom: 20px; font-size: 13.5px; }
+  .pvr-scope .meta-grid b { color: #64748B; font-weight: 600; }
+  .pvr-scope h4 { margin: 18px 0 6px; color: #205072; }
+  .pvr-scope table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  .pvr-scope th, .pvr-scope td { border: 1px solid #E2E8F0; padding: 6px 10px; text-align: right; font-size: 13px; }
+  .pvr-scope th { background: #205072; color: #fff; }
+  .pvr-scope .flag-Critical { color: #C0392B; font-weight: 700; }
+  .pvr-scope .flag-High, .pvr-scope .flag-Low { color: #B7791F; font-weight: 600; }
+  .pvr-toolbar { margin-bottom: 16px; }
+  @media print { .pvr-toolbar { display: none; } }
+</style>
+
+<div class="pvr-toolbar" style="display:flex; gap:10px; align-items:center;">
+  <button class="btn" onclick="window.print()">🖨 طباعة</button>
+</div>
+
+<div class="pvr-scope">
+  <div class="header">
+    <div class="lab-name">{{ brand_name }}</div>
+    {% if logo_url %}<img src="{{ logo_url }}" alt="logo">{% endif %}
+  </div>
+
+  <div class="meta-grid">
+    <div><b>اسم المريض:</b> {{ visit['full_name'] }}</div>
+    <div><b>رقم الزيارة:</b> {{ visit['registration_number'] }}</div>
+    <div><b>الجنس / العمر:</b> {{ visit['gender'] }} / {{ visit['age'] }} {{ visit['age_unit'] }}</div>
+    <div><b>الهاتف:</b> {{ visit['phone'] }}</div>
+    <div><b>تاريخ الزيارة:</b> {{ visit['created_at'] }}</div>
+  </div>
+
+  {% if completed_only %}
+  <p class="muted" style="font-size:12px;">(النتائج المكتملة فقط)</p>
+  {% endif %}
+
+  {% if not tests_with_results %}
+  <p class="muted">{{ 'لا توجد نتائج مكتملة بعد بهذي الزيارة.' if completed_only else 'لا توجد تحاليل مسجلة بهذي الزيارة.' }}</p>
+  {% endif %}
+
+  {% for item in tests_with_results %}
+  <h4>{{ item.order_test['test_name_ar'] or item.order_test['test_name'] }}</h4>
+  {% if item.results %}
+  <table>
+    <thead><tr><th>الفحص الفرعي</th><th>النتيجة</th><th>الوحدة</th></tr></thead>
+    <tbody>
+      {% for r in item.results %}
+      <tr>
+        <td>{{ r['param_name'] }}</td>
+        <td class="{{ 'flag-' ~ r['flag'] if r['flag'] else '' }}">{{ r['value_text'] or r['value_numeric'] or '-' }}</td>
+        <td>{{ r['unit'] or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">لا توجد نتيجة مسجلة بعد لهذا التحليل.</p>
+  {% endif %}
+  {% endfor %}
+  {% if from_other_lab %}
+  <div style="margin-top:14px; font-style:italic; font-weight:bold; color:#334155; text-align:left; direction:ltr;">The sample received from another Lab.</div>
+  {% endif %}
+</div>
+{% endblock %}

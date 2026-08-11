@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ 'rtl' if lang == 'ar' else 'ltr' }}">
+<head>
+<meta charset="UTF-8">
+<title>Sample Labels #{{ visit['registration_number'] }}</title>
+<style>
+  body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; padding: 20px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 12px; }
+  .label { border: 1px dashed #999; border-radius: 6px; padding: 10px 14px; text-align: center; width: 220px; }
+  .lab-name { font-size: 11px; font-weight: 700; }
+  .patient { font-size: 13px; font-weight: 700; margin: 4px 0; }
+  .test { font-size: 12px; color: #333; }
+  .sample-type { font-size: 11px; color: #777; }
+  img { image-rendering: pixelated; max-width: 100%; }
+  @media print { .no-print { display: none; } }
+</style>
+<script>
+  (function () {
+    var savedTitle = null;
+    window.addEventListener("beforeprint", function () { savedTitle = document.title; document.title = ""; });
+    window.addEventListener("afterprint", function () { if (savedTitle !== null) document.title = savedTitle; });
+  })();
+</script>
+</head>
+<body onload="window.print()">
+  <div class="grid">
+    {% for s in samples %}
+    <div class="label">
+      <div class="lab-name">{{ brand_name }}</div>
+      <div class="patient">{{ visit['full_name'] }} — #{{ visit['registration_number'] }}</div>
+      <div class="test">{{ s['test_name'] }}</div>
+      <div class="sample-type">{{ s['sample_type'] }}</div>
+      <img src="{{ url_for('barcode_image', code=s['barcode']) }}" alt="barcode">
+    </div>
+    {% endfor %}
+  </div>
+  <div class="no-print" style="margin-top:20px; display:flex; gap:10px; justify-content:center;">
+    <button onclick="window.print()">🖨 Print</button>
+    <a href="{{ url_for('visits_list') }}" style="text-decoration:none;">🔙 الرجوع للزيارات</a>
+    <button onclick="window.close()">❌ إغلاق النافذة</button>
+  </div>
+</body>
+</html>

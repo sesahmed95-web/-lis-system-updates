@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('test_catalog') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ t('add_test') }}</h3>
+  <form method="POST" class="form-grid">
+    <div class="form-field">
+      <label>{{ t('code') }}</label>
+      <input type="text" name="code" required>
+    </div>
+    <div class="form-field">
+      <label>{{ t('name') }}</label>
+      <input type="text" name="name" required>
+    </div>
+    <div class="form-field">
+      <label>{{ t('department') }}</label>
+      <input type="text" name="department" placeholder="Hormones / BioChemistry / Viral Screen...">
+    </div>
+    <div class="form-field">
+      <label>{{ t('sample_type') }}</label>
+      <input type="text" name="sample_type" placeholder="Serum / Blood-EDTA / Urine">
+    </div>
+    <div class="form-field">
+      <label>{{ t('price') }}</label>
+      <input type="number" step="0.01" name="price">
+    </div>
+    <div class="form-field" style="grid-column: span 2;">
+      <label>{{ t('parameters_help') }}</label>
+      <input type="text" name="parameters" placeholder="TSH,unit:uIU/mL">
+    </div>
+    <div class="form-field">
+      <label><input type="checkbox" name="is_examining_test"> فحص مؤهل لأجر دكتور المختبر الفاحص</label>
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">{{ t('create') }}</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>{{ t('code') }}</th><th>{{ t('name') }}</th><th>{{ t('department') }}</th><th>{{ t('sample_type') }}</th><th>{{ t('price') }}</th><th>فحص مؤهل لأجر دكتور فاحص</th>
+    </tr></thead>
+    <tbody>
+      {% for test in tests %}
+      <tr>
+        <td class="mono">{{ test['code'] }}</td>
+        <td>{{ test['name'] }}</td>
+        <td>{{ test['department'] }}</td>
+        <td>{{ test['sample_type'] }}</td>
+        <td>
+          <div class="price-edit-wrap" style="display:flex;align-items:center;gap:6px">
+            <input type="number" class="price-input" data-test-id="{{ test['id'] }}"
+                   value="{{ test['price']|int }}" step="500" min="0"
+                   style="width:100px">
+            <span class="price-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+          </div>
+        </td>
+        <td>
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="exam-toggle" data-test-id="{{ test['id'] }}" {{ 'checked' if test['is_examining_test'] }}>
+            <span class="exam-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+          </label>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>
+document.querySelectorAll('.exam-toggle').forEach(function (cb) {
+  cb.addEventListener('change', function () {
+    const testId = cb.getAttribute('data-test-id');
+    const status = cb.closest('label').querySelector('.exam-save-status');
+    fetch('/master/test-catalog/' + testId + '/toggle-examining', { method: 'POST' })
+      .then((r) => r.json())
+      .then((data) => {
+        status.style.visibility = 'visible';
+        status.style.color = data.ok ? '#2e7d32' : '#c62828';
+        status.textContent = data.ok ? '✓' : '✕';
+        setTimeout(() => { status.style.visibility = 'hidden'; }, 1500);
+      })
+      .catch(() => {
+        status.style.visibility = 'visible';
+        status.style.color = '#c62828';
+        status.textContent = '✕';
+      });
+  });
+});
+</script>
+<script>
+document.querySelectorAll('.price-input').forEach(function (input) {
+  let timer = null;
+  function save() {
+    const testId = input.getAttribute('data-test-id');
+    const status = input.closest('.price-edit-wrap').querySelector('.price-save-status');
+    const body = new URLSearchParams({ price: input.value });
+    fetch('/master/test-catalog/' + testId + '/price', { method: 'POST', body: body })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) {
+          status.style.visibility = 'visible';
+          status.style.color = '#2e7d32';
+          status.textContent = '✓';
+          setTimeout(() => { status.style.visibility = 'hidden'; }, 1500);
+        } else {
+          status.style.visibility = 'visible';
+          status.style.color = '#c62828';
+          status.textContent = '✕';
+        }
+      })
+      .catch(() => {
+        status.style.visibility = 'visible';
+        status.style.color = '#c62828';
+        status.textContent = '✕';
+      });
+  }
+  // Saves automatically whether the change came from typing, or from
+  // clicking the number input's own up/down spinner arrows.
+  input.addEventListener('change', save);
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(save, 600);
+  });
+});
+</script>
+{% endblock %}

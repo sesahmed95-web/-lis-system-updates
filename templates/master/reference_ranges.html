@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('reference_ranges') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>تظليل النتائج (أصفر) على التقرير المطبوع</h3>
+  <p style="color:#64748B; font-size:0.85em;">لا يوجد أي تظليل تلقائي — فعّل هذا الخيار فقط للفحوصات اللي تريد تظليلها يدويًا.</p>
+  <table>
+    <thead><tr><th>{{ t('test') }}</th><th>{{ t('parameter') }}</th><th>تظليل أصفر</th></tr></thead>
+    <tbody>
+      {% for p in parameters %}
+      <tr>
+        <td>{{ p['test_name'] }}</td>
+        <td>{{ p['name'] }}</td>
+        <td>
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="highlight-toggle" data-param-id="{{ p['id'] }}" {{ 'checked' if p['highlight'] }}>
+            <span class="highlight-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+          </label>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>
+document.querySelectorAll('.highlight-toggle').forEach(function (cb) {
+  cb.addEventListener('change', function () {
+    const paramId = cb.getAttribute('data-param-id');
+    const status = cb.closest('label').querySelector('.highlight-save-status');
+    fetch('/master/test-parameters/' + paramId + '/toggle-highlight', { method: 'POST' })
+      .then((r) => r.json())
+      .then((data) => {
+        status.style.visibility = 'visible';
+        status.style.color = data.ok ? '#2e7d32' : '#c62828';
+        status.textContent = data.ok ? '✓' : '✕';
+        setTimeout(() => { status.style.visibility = 'hidden'; }, 1500);
+      })
+      .catch(() => {
+        status.style.visibility = 'visible';
+        status.style.color = '#c62828';
+        status.textContent = '✕';
+      });
+  });
+});
+</script>
+
+<div class="card">
+  <h3>{{ t('add_range') }}</h3>
+  <form method="POST" class="form-grid">
+    <div class="form-field">
+      <label>{{ t('parameter') }}</label>
+      <select name="test_parameter_id" required>
+        {% for p in parameters %}
+        <option value="{{ p['id'] }}">{{ p['test_name'] }} — {{ p['name'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label>{{ t('gender') }}</label>
+      <select name="gender">
+        <option value="Both">{{ t('both') }}</option>
+        <option value="Male">{{ t('male') }}</option>
+        <option value="Female">{{ t('female') }}</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>{{ t('age_from') }}</label>
+      <input type="number" step="any" name="age_from" value="0" min="0">
+    </div>
+    <div class="form-field">
+      <label>{{ t('age_unit') }}</label>
+      <select name="age_from_unit">
+        <option value="Days">{{ t('unit_days') }}</option>
+        <option value="Weeks">{{ t('unit_weeks') }}</option>
+        <option value="Months">{{ t('unit_months') }}</option>
+        <option value="Years" selected>{{ t('unit_years') }}</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>{{ t('age_to') }}</label>
+      <input type="number" step="any" name="age_to" value="120" min="0">
+    </div>
+    <div class="form-field">
+      <label>{{ t('age_unit') }}</label>
+      <select name="age_to_unit">
+        <option value="Days">{{ t('unit_days') }}</option>
+        <option value="Weeks">{{ t('unit_weeks') }}</option>
+        <option value="Months">{{ t('unit_months') }}</option>
+        <option value="Years" selected>{{ t('unit_years') }}</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>{{ t('low') }}</label>
+      <input type="number" step="0.01" name="low">
+    </div>
+    <div class="form-field">
+      <label>{{ t('high') }}</label>
+      <input type="number" step="0.01" name="high">
+    </div>
+    <div class="form-field" style="grid-column: span 2;">
+      <label>{{ t('range_text') }}</label>
+      <input type="text" name="range_text" placeholder="e.g. Negative / Non-Reactive">
+    </div>
+    <div class="form-field" style="align-self:end;">
+      <button class="btn" type="submit">{{ t('create') }}</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>{{ t('test') }}</th><th>{{ t('parameter') }}</th><th>{{ t('gender') }}</th><th>{{ t('age') }}</th><th>{{ t('range') }}</th><th>{{ t('actions') }}</th>
+    </tr></thead>
+    <tbody>
+      {% for r in ranges %}
+      <tr id="row-view-{{ r['id'] }}">
+        <td>{{ r['test_name'] }}</td>
+        <td>{{ r['param_name'] }}</td>
+        <td>{{ r['gender'] }}</td>
+        <td>{{ r['age_from'] }} {{ t('unit_' ~ (r['age_from_unit'] or 'Years')|lower) }} - {{ r['age_to'] }} {{ t('unit_' ~ (r['age_to_unit'] or 'Years')|lower) }}</td>
+        <td>
+          {% if r['range_text'] %}{{ r['range_text'] }}
+          {% elif r['low'] is not none and r['high'] is not none %}{{ r['low'] }} - {{ r['high'] }}{% endif %}
+        </td>
+        <td>
+          <button type="button" class="btn small secondary" onclick="document.getElementById('row-view-{{ r['id'] }}').style.display='none'; document.getElementById('row-edit-{{ r['id'] }}').style.display='table-row';">{{ t('edit') }}</button>
+          <form method="POST" action="{{ url_for('delete_reference_range', range_id=r['id']) }}" style="display:inline" onsubmit="return confirm('{{ t('confirm_delete_range') }}');">
+            <button type="submit" class="btn small danger">{{ t('delete') }}</button>
+          </form>
+        </td>
+      </tr>
+      <tr id="row-edit-{{ r['id'] }}" style="display:none">
+        <td colspan="6">
+          <form method="POST" action="{{ url_for('update_reference_range', range_id=r['id']) }}" class="form-grid">
+            <div class="form-field">
+              <label>{{ t('gender') }}</label>
+              <select name="gender">
+                <option value="Both" {% if r['gender']=='Both' %}selected{% endif %}>{{ t('both') }}</option>
+                <option value="Male" {% if r['gender']=='Male' %}selected{% endif %}>{{ t('male') }}</option>
+                <option value="Female" {% if r['gender']=='Female' %}selected{% endif %}>{{ t('female') }}</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label>{{ t('age_from') }}</label>
+              <input type="number" step="any" name="age_from" value="{{ r['age_from'] }}" min="0">
+            </div>
+            <div class="form-field">
+              <label>{{ t('age_unit') }}</label>
+              <select name="age_from_unit">
+                {% set fu = r['age_from_unit'] or 'Years' %}
+                <option value="Days" {{ 'selected' if fu=='Days' }}>{{ t('unit_days') }}</option>
+                <option value="Weeks" {{ 'selected' if fu=='Weeks' }}>{{ t('unit_weeks') }}</option>
+                <option value="Months" {{ 'selected' if fu=='Months' }}>{{ t('unit_months') }}</option>
+                <option value="Years" {{ 'selected' if fu=='Years' }}>{{ t('unit_years') }}</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label>{{ t('age_to') }}</label>
+              <input type="number" step="any" name="age_to" value="{{ r['age_to'] }}" min="0">
+            </div>
+            <div class="form-field">
+              <label>{{ t('age_unit') }}</label>
+              <select name="age_to_unit">
+                {% set tu = r['age_to_unit'] or 'Years' %}
+                <option value="Days" {{ 'selected' if tu=='Days' }}>{{ t('unit_days') }}</option>
+                <option value="Weeks" {{ 'selected' if tu=='Weeks' }}>{{ t('unit_weeks') }}</option>
+                <option value="Months" {{ 'selected' if tu=='Months' }}>{{ t('unit_months') }}</option>
+                <option value="Years" {{ 'selected' if tu=='Years' }}>{{ t('unit_years') }}</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label>{{ t('low') }}</label>
+              <input type="number" step="0.01" name="low" value="{{ r['low'] if r['low'] is not none else '' }}">
+            </div>
+            <div class="form-field">
+              <label>{{ t('high') }}</label>
+              <input type="number" step="0.01" name="high" value="{{ r['high'] if r['high'] is not none else '' }}">
+            </div>
+            <div class="form-field" style="grid-column: span 2;">
+              <label>{{ t('range_text') }}</label>
+              <input type="text" name="range_text" value="{{ r['range_text'] or '' }}">
+            </div>
+            <div class="form-field" style="align-self:end; flex-direction:row; gap:8px;">
+              <button type="submit" class="btn small success">{{ t('save') }}</button>
+              <button type="button" class="btn small secondary" onclick="document.getElementById('row-edit-{{ r['id'] }}').style.display='none'; document.getElementById('row-view-{{ r['id'] }}').style.display='table-row';">{{ t('cancel') }}</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

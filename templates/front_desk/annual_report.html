@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('annual_report') }}{% endblock %}
+{% block content %}
+<style>
+  .report-table { width: 100%; border-collapse: collapse; }
+  .report-table th, .report-table td { border: 1px solid #E2E8F0; padding: 8px 10px; text-align: right; font-size: 13px; }
+  .report-table th { background: #205072; color: #fff; }
+  .report-table tfoot td { font-weight: 700; background: #F3F6F8; }
+  .report-toolbar { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .report-toolbar a.pill { text-decoration:none; background:#F3F6F8; color:#205072; padding:6px 12px; border-radius:6px; font-size:12px; border:1px solid #E2E8F0; }
+  .report-heading { font-size: 18px; color: #205072; margin-bottom: 2px; }
+  .report-sub { color: #64748B; font-size: 13px; margin-bottom: 16px; }
+  a.row-link { color: #205072; text-decoration: none; }
+  @media print { .report-toolbar { display: none; } }
+</style>
+
+<div class="report-toolbar">
+  <form method="GET">
+    <label>السنة: </label>
+    <input type="number" name="year" value="{{ year }}" style="width:90px;" onchange="this.form.submit()">
+  </form>
+  <button class="btn" onclick="window.print()">🖨 طباعة / حفظ PDF</button>
+  <a class="pill" href="{{ url_for('monthly_report') }}">📅 الحسابات الشهرية</a>
+  <a class="pill" href="{{ url_for('half_year_report') }}">📆 الحسابات نصف السنوية</a>
+  <a class="pill" href="{{ url_for('dashboard') }}" style="margin-inline-start:auto;">🔙 الرجوع للرئيسية</a>
+</div>
+
+<div class="report-heading">{{ brand_name }} — الحسابات السنوية</div>
+<div class="report-sub">السنة: {{ year }}</div>
+
+<table class="report-table">
+  <thead>
+    <tr><th>الشهر</th><th>عدد الزيارات</th><th>الدخل الإجمالي</th><th>الصرفيات</th><th>الصافي</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><a class="row-link" href="{{ url_for('monthly_report', month=r.period) }}">{{ r.period }}</a></td>
+      <td>{{ r.visits_count }}</td>
+      <td>{{ "%.0f"|format(r.revenue) }}</td>
+      <td>{{ "%.0f"|format(r.expenses) }}</td>
+      <td>{{ "%.0f"|format(r.net) }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">لا توجد زيارات مسجلة بهذي السنة</td></tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td>الإجمالي</td>
+      <td>{{ totals.visits_count }}</td>
+      <td>{{ "%.0f"|format(totals.revenue) }}</td>
+      <td>{{ "%.0f"|format(totals.expenses) }}</td>
+      <td>{{ "%.0f"|format(totals.net) }}</td>
+    </tr>
+  </tfoot>
+</table>
+{% endblock %}

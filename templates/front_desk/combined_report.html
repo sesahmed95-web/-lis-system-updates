@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block page_title %}جدول موحّد — {{ patient['full_name'] }}{% endblock %}
+{% block content %}
+<style>
+  .cmb-scope { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #1E293B; }
+  .cmb-scope .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #205072; padding-bottom: 12px; margin-bottom: 16px; }
+  .cmb-scope .header .lab-name { font-size: 20px; font-weight: 700; color: #205072; }
+  .cmb-scope .header img { max-height: 60px; }
+  .cmb-scope .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin-bottom: 20px; font-size: 13.5px; }
+  .cmb-scope .meta-grid b { color: #64748B; font-weight: 600; }
+  .cmb-scope table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  .cmb-scope th, .cmb-scope td { border: 1px solid #E2E8F0; padding: 7px 10px; text-align: right; font-size: 13px; }
+  .cmb-scope th { background: #205072; color: #fff; }
+  .cmb-scope td.param-name { font-weight: 600; }
+  .cmb-scope .flag-Critical { color: #C0392B; font-weight: 700; }
+  .cmb-scope .flag-High, .cmb-scope .flag-Low { color: #B7791F; font-weight: 600; }
+  .cmb-toolbar { margin-bottom: 16px; }
+  @media print { .cmb-toolbar { display: none; } }
+</style>
+
+<div class="cmb-toolbar" style="display:flex; gap:10px; align-items:center;">
+  <button class="btn" onclick="window.print()">🖨 طباعة الجدول الموحّد</button>
+  <a class="btn secondary" href="{{ url_for('visits_list') }}" style="text-decoration:none;">🔙 قائمة الزيارات</a>
+</div>
+
+<div class="cmb-scope">
+  <div class="header">
+    <div class="lab-name">{{ brand_name }}</div>
+    {% if logo_url %}<img src="{{ logo_url }}" alt="logo">{% endif %}
+  </div>
+
+  <div class="meta-grid">
+    <div><b>اسم المريض:</b> {{ patient['full_name'] }}</div>
+    <div><b>الجنس / العمر:</b> {{ patient['gender'] }} / {{ patient['age'] }} {{ patient['age_unit'] }}</div>
+  </div>
+
+  {% if not param_order %}
+  <p class="muted">لا توجد نتائج مسجلة بعد بأي من الزيارات المختارة.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th>الفحص</th>
+        {% for v in visits %}
+        <th>#{{ v['registration_number'] }}<br><span style="font-weight:400;">{{ v['created_at'][:10] }}</span></th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for param_name in param_order %}
+      <tr>
+        <td class="param-name">{{ param_name }} {% if param_rows[param_name]['unit'] %}<span class="muted">({{ param_rows[param_name]['unit'] }})</span>{% endif %}</td>
+        {% for v in visits %}
+        {% set cell = param_rows[param_name]['values'].get(v['id']) %}
+        <td class="{{ 'flag-' ~ cell['flag'] if cell and cell['flag'] else '' }}">{{ cell['value'] if cell and cell['value'] is not none else '-' }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if from_other_lab %}
+  <div style="margin-top:14px; font-style:italic; color:#334155;">The sample received from another Lab.</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('monthly_statement') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ doctor['full_name'] }} <span class="muted">({{ doctor['commission_percent'] }}%)</span></h3>
+  <form method="GET" class="filters">
+    <div class="form-field">
+      <label>Month</label>
+      <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()">
+    </div>
+  </form>
+  <table>
+    <thead><tr><th>{{ t('name') }}</th><th>{{ t('test') }}</th><th>{{ t('price') }}</th><th>{{ t('date') }}</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r['patient_name'] }}</td>
+        <td>{{ r['test_name'] }}</td>
+        <td>{{ "%.0f"|format(r['price'] or 0) }}</td>
+        <td class="muted">{{ r['created_at'] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="stat-grid" style="margin-top:16px;">
+    <div class="stat-card"><div class="label">{{ t('total') }}</div><div class="value">{{ "%.0f"|format(total) }}</div></div>
+    <div class="stat-card"><div class="label">{{ t('commission') }} {{ t('due_balance') }}</div><div class="value">{{ "%.0f"|format(commission_due) }}</div></div>
+  </div>
+</div>
+{% endblock %}

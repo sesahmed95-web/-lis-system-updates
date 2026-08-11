@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block page_title %}مصمم التقارير{% endblock %}
+{% block content %}
+
+{% if selected_test %}
+<div class="card" id="designCard">
+  <h3>تصميم تقرير: {{ selected_test['name'] }} ({{ selected_test['code'] }})</h3>
+
+  {% if selected_test['code'] in ('CBC','BF','WBCDIFF','FLUIDEXAM') %}
+    <p class="muted">هذا التحليل إله تصميم مدمج جاهز بالفعل ولا يحتاج تصميم إضافي.</p>
+    <a class="btn" href="{{ url_for('preview_report_design', test_definition_id=selected_test['id']) }}">👁️ معاينة التصميم الآن</a>
+  {% else %}
+
+  <h4>الطريقة الأولى — استيراد من ملف Word</h4>
+  <form method="POST" enctype="multipart/form-data" style="margin-bottom:22px;">
+    <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">
+    <input type="hidden" name="mode" value="docx">
+    <div class="form-field">
+      <label>ملف Word (.docx) — نفس شكل التقرير المطبوع لديكم، بدون الشعار</label>
+      <input type="file" name="docx_file" accept=".docx" required>
+    </div>
+    <button class="btn" type="submit">استيراد وربط الصفوف تلقائيًا</button>
+  </form>
+
+  <h4>الطريقة الثانية — بناء يدوي من باراميترات التحليل</h4>
+  <form method="POST">
+    <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">
+    <input type="hidden" name="mode" value="manual">
+    <div class="form-field">
+      <label>عنوان التقرير المطبوع</label>
+      <input type="text" name="heading" value="{{ selected_template['heading'] if selected_template else selected_test['name'] }}">
+    </div>
+    <div class="form-field">
+      <label>توسيط عنوان التقرير</label>
+      <select name="heading_align">
+        <option value="center" {{ 'selected' if (selected_template['heading_align'] if selected_template else 'center') == 'center' }}>توسيط</option>
+        <option value="right" {{ 'selected' if (selected_template['heading_align'] if selected_template else 'center') == 'right' }}>يمين</option>
+        <option value="left" {{ 'selected' if (selected_template['heading_align'] if selected_template else 'center') == 'left' }}>يسار</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>توسيط جدول النتائج (اسم الفحص، النتيجة، الوحدة، المدى الطبيعي)</label>
+      <select name="rows_align">
+        <option value="right" {{ 'selected' if (selected_template['rows_align'] if selected_template else 'right') == 'right' }}>يمين (الافتراضي)</option>
+        <option value="center" {{ 'selected' if (selected_template['rows_align'] if selected_template else 'right') == 'center' }}>توسيط</option>
+        <option value="left" {{ 'selected' if (selected_template['rows_align'] if selected_template else 'right') == 'left' }}>يسار</option>
+      </select>
+      <small class="muted">يتحكم بمحاذاة كل أعمدة الجدول بالتقرير المطبوع: اسم الفحص، النتيجة، الوحدة، والمدى الطبيعي.</small>
+    </div>
+    <p class="muted">حدد الباراميترات التي تظهر بالتقرير وبأي ترتيب (رتّبها بالسحب إن أمكن، أو فقط أشّر عليها بالترتيب الحالي):</p>
+    <div class="form-field">
+      {% for p in selected_parameters %}
+      <label style="display:block; padding:4px 0;">
+        <input type="checkbox" name="param_order" value="{{ p['id'] }}"
+          {% if p['name'] in selected_rows_by_param or not selected_template %}checked{% endif %}>
+        {{ p['name'] }} {% if p['unit'] %}({{ p['unit'] }}){% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    <button class="btn" type="submit">حفظ التصميم</button>
+  </form>
+
+  {% if selected_template %}
+  <p class="muted" style="margin-top:14px;">
+    آخر حفظ: {{ selected_template['updated_at'] }}
+    {% if selected_template['source_docx_name'] %} — مستورد من ملف: {{ selected_template['source_docx_name'] }}{% endif %}
+  </p>
+  <a class="btn" href="{{ url_for('preview_report_design', test_definition_id=selected_test['id']) }}">👁️ معاينة التصميم الآن</a>
+  {% endif %}
+
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>تحاليل بدون تصميم طباعة بعد</h3>
+  <p class="muted">
+    كل تحليل غير مذكور هنا (CBC, Blood film, WBCs differential, Fluid examination) ما إله شكل طباعة جاهز.
+    اختر تحليل من القائمة تحت لتصميم تقريره — إما يدويًا، أو باستيراد ملف Word (بدون شعار، وسيُضاف الشعار وترويسة الأطباء وعنوان المختبر تلقائيًا كما في بقية التقارير).
+  </p>
+  <table>
+    <thead><tr><th>الرمز</th><th>الاسم</th><th>القسم</th><th>الحالة</th><th></th></tr></thead>
+    <tbody>
+      {% for row in tests_status %}
+      <tr{% if selected_test and row.test['id']==selected_test['id'] %} style="background:rgba(0,0,0,.03)"{% endif %}>
+        <td class="mono">{{ row.test['code'] }}</td>
+        <td>{{ row.test['name'] }}</td>
+        <td>{{ row.test['department'] }}</td>
+        <td>
+          {% if row.has_builtin %}<span>✅ تصميم مدمج جاهز</span>
+          {% elif row.has_custom %}<span>🟢 مصمم من الأدمن</span>
+          {% else %}<span style="color:#C0392B;">⚠️ يحتاج تصميم</span>
+          {% endif %}
+        </td>
+        <td>
+          <a class="btn" style="padding:4px 10px;" href="{{ url_for('report_designer', test_definition_id=row.test['id']) }}#designCard">فتح</a>
+          {% if row.has_builtin or row.has_custom %}
+          <a class="btn" style="padding:4px 10px;" href="{{ url_for('preview_report_design', test_definition_id=row.test['id']) }}">👁️ معاينة</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if selected_test %}
+<script>
+  document.getElementById('designCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+</script>
+{% endif %}
+
+{% endblock %}

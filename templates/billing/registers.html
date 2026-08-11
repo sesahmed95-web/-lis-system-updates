@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('registers') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>{{ t('user') }}</th><th>{{ t('cash') }} {{ t('total') }}</th><th>Discounts</th>
+    </tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r['user'] }}</td>
+        <td>{{ "%.0f"|format(r['payments']) }}</td>
+        <td>{{ "%.0f"|format(r['discounts']) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

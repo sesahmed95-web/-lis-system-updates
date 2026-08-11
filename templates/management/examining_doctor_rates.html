@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block page_title %}أجور — {{ doctor_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted">حدد أجر «{{ doctor_name }}» عن كل فحص من الفحوصات المؤهلة. اترك الحقل فارغًا أو 0 إذا لا يوجد أجر عن هذا الفحص.</p>
+  <a class="btn small secondary" href="{{ url_for('examining_doctor_rates_list') }}">🔙 الرجوع لقائمة الأطباء الفاحصين</a>
+</div>
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>الفحص</th>
+        <th>القسم</th>
+        <th>الأجر الحالي</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for test in tests %}
+      <tr>
+        <td>{{ test['name'] }}</td>
+        <td>{{ test['department'] }}</td>
+        <td>
+          <form method="POST" style="display:flex; gap:6px;">
+            <input type="hidden" name="test_id" value="{{ test['id'] }}">
+            <input type="number" step="0.01" min="0" name="rate"
+                   value="{{ rates[test['id']|string] if test['id']|string in rates else '' }}" style="width:110px">
+            <button class="btn small" type="submit">تحديث</button>
+          </form>
+        </td>
+        <td>{% if test['id']|string in rates %}<span class="badge badge-Completed">✓</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

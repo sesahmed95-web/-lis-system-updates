@@ -1,0 +1,64 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+<div class="report-heading">Coagulation Tests</div>
+
+<table class="data-table" style="direction:ltr; text-align:center;">
+  <tr>
+    <th style="text-align:left;">Test</th><th>Result</th><th>Control</th><th>Unit</th><th>Reference range</th>
+  </tr>
+  {% if params.get('PT') %}
+  <tr>
+    <td class="field-name" style="text-align:left;">Prothrombin Time (PT):</td>
+    <td class="pct-val">{{ params.get('PT', '') }}{% if show_prev_values and previous_values.get('PT') %}<br><span class="prev-inline">Prev: {{ previous_values.get('PT') }}</span>{% endif %}</td>
+    <td class="pct-val">{{ params.get('PT Control', '') }}</td>
+    <td class="unit-val">Sec.</td>
+    <td>( 11 - 15 )</td>
+  </tr>
+  {% endif %}
+  {% if params.get('INR') %}
+  <tr>
+    <td class="field-name" style="text-align:left;">INR:</td>
+    <td class="pct-val">{{ params.get('INR', '') }}{% if show_prev_values and previous_values.get('INR') %}<br><span class="prev-inline">Prev: {{ previous_values.get('INR') }}</span>{% endif %}</td>
+    <td class="pct-val">—</td>
+    <td class="unit-val"></td>
+    <td>( 0.9 – 1.26 )</td>
+  </tr>
+  {% endif %}
+  {% if params.get('PTT') %}
+  <tr>
+    <td class="field-name" style="text-align:left;">Partial Thromboplastin Time (PTT):</td>
+    <td class="pct-val">{{ params.get('PTT', '') }}{% if show_prev_values and previous_values.get('PTT') %}<br><span class="prev-inline">Prev: {{ previous_values.get('PTT') }}</span>{% endif %}</td>
+    <td class="pct-val">{{ params.get('PTT Control', '') }}</td>
+    <td class="unit-val">Sec.</td>
+    <td>( 27 – 40 )</td>
+  </tr>
+  {% endif %}
+  {% if params.get('Bleeding time') %}
+  <tr>
+    <td class="field-name" style="text-align:left;">Bleeding Time:</td>
+    <td class="pct-val">{{ params.get('Bleeding time', '') }}{% if show_prev_values and previous_values.get('Bleeding time') %}<br><span class="prev-inline">Prev: {{ previous_values.get('Bleeding time') }}</span>{% endif %}</td>
+    <td class="pct-val">—</td>
+    <td class="unit-val">Minute</td>
+    <td>( 2 - 5 )</td>
+  </tr>
+  {% endif %}
+  {% if params.get('Plasma fibrinogen con') %}
+  <tr>
+    <td class="field-name" style="text-align:left;">Plasma Fibrinogen Con:</td>
+    <td class="pct-val">{{ params.get('Plasma fibrinogen con', '') }}{% if show_prev_values and previous_values.get('Plasma fibrinogen con') %}<br><span class="prev-inline">Prev: {{ previous_values.get('Plasma fibrinogen con') }}</span>{% endif %}</td>
+    <td class="pct-val">—</td>
+    <td class="unit-val">g/L</td>
+    <td>( 2 – 4 )</td>
+  </tr>
+  {% endif %}
+  {% if params.get('D. dimer') %}
+  <tr>
+    <td class="field-name" style="text-align:left;">D. Dimer:</td>
+    <td class="pct-val">{{ params.get('D. dimer', '') }}{% if show_prev_values and previous_values.get('D. dimer') %}<br><span class="prev-inline">Prev: {{ previous_values.get('D. dimer') }}</span>{% endif %}</td>
+    <td class="pct-val">—</td>
+    <td class="unit-val">µg/L</td>
+    <td>&lt; 500</td>
+  </tr>
+  {% endif %}
+</table>
+{% endblock %}

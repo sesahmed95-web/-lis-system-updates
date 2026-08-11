@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('samples_collection') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>{{ t('no_col') }}</th><th>{{ t('name') }}</th><th>{{ t('test') }}</th><th>{{ t('sample_type') }}</th>
+      <th>{{ t('barcode') }}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for ot in order_tests %}
+      <tr>
+        <td class="mono">{{ ot['registration_number'] }}</td>
+        <td>{{ ot['patient_name'] }}</td>
+        <td>{{ ot['test_name'] }}</td>
+        <td>{{ ot['sample_type'] }}</td>
+        <td class="mono">{{ ot['barcode'] }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('collect_sample', order_test_id=ot['id']) }}">
+            <button class="btn small success" type="submit">{{ t('collect') }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

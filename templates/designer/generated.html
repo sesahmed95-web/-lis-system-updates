@@ -1,0 +1,20 @@
+{% extends "designer/layout.html" %}
+{% block dcontent %}
+<h2>✅ تم توليد كود التفعيل</h2>
+<div class="card">
+  <p>أرسل هذين السطرين للعميل عبر واتساب (يدخلهما في شاشة "تفعيل الترخيص" في برنامجه):</p>
+
+  <p class="muted" style="margin-bottom:2px;">اسم المستخدم:</p>
+  <div class="hw-box">{{ username }}</div>
+
+  <p class="muted" style="margin:14px 0 2px;">كود التفعيل:</p>
+  <div class="hw-box">{{ code }}</div>
+
+  <p style="margin-top:16px;">
+    مربوط حصراً بمعرّف الجهاز: <span class="mono">{{ hardware_id }}</span><br>
+    الصلاحية: {% if expiry_date %}حتى {{ expiry_date }}{% else %}دائمة (بدون انتهاء){% endif %}
+  </p>
+
+  <a class="btn" style="margin-top:16px;" href="{{ url_for('designer_panel') }}">↩ رجوع للوحة المصمم</a>
+</div>
+{% endblock %}

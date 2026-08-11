@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('orders') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <form class="filters" method="GET">
+    <div class="form-field">
+      <label>{{ t('status') }}</label>
+      <select name="status" onchange="this.form.submit()">
+        <option value="">{{ t('all_statuses') }}</option>
+        {% for s in ['Accepted', 'Collected', 'Accessioned', 'In-progress', 'Completed', 'Verified'] %}
+        <option value="{{ s }}" {{ 'selected' if status == s else '' }}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
+  <table>
+    <thead><tr>
+      <th>{{ t('no_col') }}</th><th>{{ t('name') }}</th><th>{{ t('test') }}</th><th>{{ t('department') }}</th>
+      <th>{{ t('sample_type') }}</th><th>{{ t('barcode') }}</th><th>{{ t('status') }}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for ot in order_tests %}
+      <tr class="dept-bar dept-{{ ot['department']|replace(' ', '-') }}">
+        <td class="mono">{{ ot['registration_number'] }}</td>
+        <td>{{ ot['patient_name'] }}</td>
+        <td>{{ ot['test_name'] }}</td>
+        <td>{{ ot['department'] }}</td>
+        <td>{{ ot['sample_type'] }}</td>
+        <td class="mono">{{ ot['barcode'] }}</td>
+        <td><span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span></td>
+        <td>
+          <a class="btn small" href="{{ url_for('result_entry', order_test_id=ot['id']) }}">{{ t('enter_results') }}</a>
+          {% if ot['test_code'] in ('CBC', 'BF', 'WBCDIFF', 'FLUIDEXAM') and ot['status'] in ('Completed', 'Verified') %}
+          <a class="btn small" target="_blank" href="{{ url_for('print_report', order_test_id=ot['id']) }}">Print Report</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

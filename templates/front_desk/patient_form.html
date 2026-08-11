@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('edit_patient') if patient else t('add_patient') }}{% endblock %}
+{% block content %}
+<form method="POST">
+  <div class="card">
+    <div class="form-grid">
+      <div class="form-field">
+        <label>Title</label>
+        <select name="title">
+          {% for ti in ['Mr.', 'Mrs.', 'Ms.'] %}
+          <option value="{{ ti }}" {{ 'selected' if patient and patient['title']==ti }}>{{ ti }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label>{{ t('patient_name') }} *</label>
+        <input type="text" name="full_name" required value="{{ patient['full_name'] if patient else '' }}">
+      </div>
+      <div class="form-field">
+        <label>{{ t('gender') }}</label>
+        <select name="gender">
+          <option value="Male" {{ 'selected' if patient and patient['gender']=='Male' }}>{{ t('male') }}</option>
+          <option value="Female" {{ 'selected' if patient and patient['gender']=='Female' }}>{{ t('female') }}</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>{{ t('age') }}</label>
+        <input type="number" step="any" min="0" name="age" value="{{ patient['age'] if patient else '' }}">
+      </div>
+      <div class="form-field">
+        <label>{{ t('age_unit') }}</label>
+        <select name="age_unit">
+          {% set cur_unit = patient['age_unit'] if patient and patient['age_unit'] else 'Years' %}
+          <option value="Hours" {{ 'selected' if cur_unit=='Hours' }}>{{ t('unit_hours') }}</option>
+          <option value="Days" {{ 'selected' if cur_unit=='Days' }}>{{ t('unit_days') }}</option>
+          <option value="Weeks" {{ 'selected' if cur_unit=='Weeks' }}>{{ t('unit_weeks') }}</option>
+          <option value="Months" {{ 'selected' if cur_unit=='Months' }}>{{ t('unit_months') }}</option>
+          <option value="Years" {{ 'selected' if cur_unit=='Years' }}>{{ t('unit_years') }}</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>{{ t('phone') }}</label>
+        <input type="text" name="phone" value="{{ patient['phone'] if patient else '' }}">
+      </div>
+      <div class="form-field">
+        <label>Email</label>
+        <input type="text" name="email" value="{{ patient['email'] if patient else '' }}">
+      </div>
+      <div class="form-field">
+        <label>{{ t('address') }}</label>
+        <input type="text" name="address" value="{{ patient['address'] if patient else '' }}">
+      </div>
+      <div class="form-field">
+        <label>{{ t('national_id') }}</label>
+        <input type="text" name="national_id" value="{{ patient['national_id'] if patient else '' }}">
+      </div>
+      <div class="form-field">
+        <label>{{ t('passport_number') }}</label>
+        <input type="text" name="passport_number" value="{{ patient['passport_number'] if patient else '' }}">
+      </div>
+      <div class="form-field">
+        <label>{{ t('lab_card_number') }}</label>
+        <input type="text" name="lab_card_number" value="{{ patient['lab_card_number'] if patient else '' }}">
+      </div>
+      <div class="form-field">
+        <label>Travel Certificate Number</label>
+        <input type="text" name="travel_certificate_number" value="{{ patient['travel_certificate_number'] if patient else '' }}">
+      </div>
+      <div class="form-field">
+        <label>{{ t('contact_method') }}</label>
+        <select name="contact_method">
+          {% for m in ['None', 'SMS', 'WhatsApp', 'Telegram', 'Viber'] %}
+          <option value="{{ m }}" {{ 'selected' if patient and patient['contact_method']==m }}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </div>
+  <button class="btn" type="submit">{{ t('save') }}</button>
+  <a class="btn secondary" href="{{ url_for('patients_list') }}">{{ t('back') }}</a>
+</form>
+{% endblock %}
