@@ -33,10 +33,37 @@ window.lisCleanupText = function (el) {
   if (!el) return;
   var text = el.value;
   if (!text || !text.trim()) return;
-  text = text.replace(/\s+/g, " ").trim();
+  // يصحح فقط تكرار المسافات/التابات ضمن كل سطر — لا يلمس أسطر النص
+  // الجديدة (\n) أبداً، حتى لا يفكك أسطر النجمة/السهم اللي يضيفها زر
+  // التنسيق البسيط بحقل الـ Conclusion (كانت \s+ سابقاً تدمج كل الأسطر
+  // بسطر واحد وتفقد الرموز موضعها ببداية كل سطر).
+  text = text.replace(/[^\S\n]+/g, " ")
+             .split("\n").map(function (line) { return line.trim(); }).join("\n")
+             .trim();
   text = text.charAt(0).toUpperCase() + text.slice(1);
   if (!/[.!?:]$/.test(text)) text += ".";
   el.value = text;
+  window.lisAutoResize(el);
+};
+
+// ------------------------------------------------------------------
+// زر التنسيق البسيط فوق حقل الـ Conclusion: يبدأ سطراً جديداً ويضع
+// الرمز الملوّن (★ أو →) ببدايته عند موضع المؤشر الحالي، ثم يترك
+// المؤشر مباشرة بعد الرمز ليكمل المستخدم الكتابة. إذا كان المؤشر أصلاً
+// ببداية سطر فارغ (أول النص أو بعد \n مباشرة) ما يضيف سطر فاضي زيادة.
+// ------------------------------------------------------------------
+window.lisInsertConclusionMarker = function (textareaId, marker) {
+  var el = document.getElementById(textareaId);
+  if (!el || el.readOnly) return;
+  el.focus();
+  var start = el.selectionStart;
+  var end = el.selectionEnd;
+  var val = el.value;
+  var atLineStart = (start === 0) || (val.charAt(start - 1) === "\n");
+  var insertText = (atLineStart ? "" : "\n") + marker + " ";
+  el.value = val.slice(0, start) + insertText + val.slice(end);
+  var newPos = start + insertText.length;
+  el.selectionStart = el.selectionEnd = newPos;
   window.lisAutoResize(el);
 };
 

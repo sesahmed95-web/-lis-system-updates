@@ -2,7 +2,10 @@
 {% block page_title %}{{ ot['test_name'] }} - {{ patient_name }}{% endblock %}
 {% block content %}
 <style>
-  @page { size: A4; margin: 12mm 12mm; }
+  /* margin:0 على @page يمنع أغلب المتصفحات من رسم تذييل/ترويسة الطباعة
+     التلقائية (تاريخ الطباعة، رابط الصفحة، رقم الصفحة)؛ التعويض بـ padding
+     داخل .sheet (تحديداً وقت الطباعة) حتى لا يلتصق المحتوى بحواف الورقة. */
+  @media print { @page { size: A4; margin: 0; } }
   .report-scope { font-family: "Times New Roman", "Traditional Arabic", Tahoma, Arial, sans-serif;
                    font-size: {{ font_size|default(16) }}px; color: #14213D; }
   .sheet { max-width: 760px; margin: 0 auto; padding: 6px 4px 20px 4px; }
@@ -37,7 +40,10 @@
   .doc-col .doc-degree { color: #1F3B7A; }
   .doc-col .doc-eng { color: #1F3B7A; font-style: italic; }
 
-  table.meta-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; table-layout: fixed; }
+  /* اتجاه فيزيائي ثابت بالعمودين مهما كانت لغة الواجهة (dir الصفحة يتغيّر
+     تبع lang بالـ html tag من base.html): الجهة اليمنى دايماً الدكتور
+     المرسل + اسم المريض، والجهة اليسرى دايماً التاريخ + العمر والجنس. */
+  table.meta-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; table-layout: fixed; direction: rtl; }
   table.meta-table td {
     border: 1.5px solid #333;
     padding: 10px 18px;
@@ -78,6 +84,15 @@
   }
   .box-field.box-field-lg { min-height: 4.5em; padding: 14px 16px; }
   .box-field b { font-style: italic; color: #1F3B7A; }
+
+  /* رمز التمييز (نجمة/سهم) اللي يضيفه المستخدم ببداية سطر بحقل الـ
+     Conclusion من زر التنسيق البسيط — يحتفظ بلونه دائمًا بالتقرير
+     المطبوع حتى لو كان إعداد المتصفح لا يطبع الألوان بشكل افتراضي. */
+  .conclusion-marker {
+    font-weight: bold;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 
   .exam-signature-row {
     display: flex;
@@ -124,14 +139,17 @@
   /* عند الطباعة: العنوان (تذييل الصفحة) يثبّت بأسفل كل صفحة ولا "يصعد"
      لفوق مع باقي المحتوى إذا كان التقرير قصير. */
   @media print {
+    /* margin:0 على @page (فوق) يعني الحاوية نفسها لازم تعوّض بـ padding
+       داخلي (~10mm) حتى لا يلتصق المحتوى بحواف الورقة. الأسفل أكبر
+       لإفساح مجال لتذييل العنوان الثابت (footer-address) تحته. */
+    .sheet { padding: 10mm 10mm 22mm 10mm; }
     .footer-address {
       position: fixed;
       bottom: 6mm;
-      left: 12mm;
-      right: 12mm;
+      left: 10mm;
+      right: 10mm;
       margin-top: 0;
     }
-    .sheet { padding-bottom: 22mm; }
   }
 
   .preview-bar {

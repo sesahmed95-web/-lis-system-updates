@@ -23,12 +23,10 @@
     <td class="field-name">Blast :</td><td class="pct-val">{{ params.get('Blast', '') }}</td><td class="unit-val">%</td>
   </tr>
   <tr>
-    <td class="field-name">Atypical Lymphocyte :</td><td class="pct-val">{{ params.get('Atypical lymphocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">{% if params.get('Reactive lymphocytes') %}Reactive lymphocytes{% else %}Atypical Lymphocyte{% endif %} :</td>
+    <td class="pct-val">{{ params.get('Reactive lymphocytes') or params.get('Atypical lymphocytes', '') }}</td>
+    <td class="unit-val">%</td>
     <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">/100</td>
-  </tr>
-  <tr>
-    <td class="field-name">Reactive lymphocytes :</td><td class="pct-val">{{ params.get('Reactive lymphocytes', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name"></td><td class="pct-val"></td><td class="unit-val"></td>
   </tr>
 </table>
 {% endblock %}

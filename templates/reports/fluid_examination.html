@@ -16,7 +16,7 @@
 </table>
 
 <div><b>Conclusion:</b></div>
-<div class="box-field box-field-lg" style="border-color:#E8A33D;">• {{ params.get('Conclusion', '') }}</div>
+<div class="box-field box-field-lg" style="border-color:#E8A33D;">• {{ params.get('Conclusion', '') | render_conclusion }}</div>
 {% endblock %}
 
 {% block extra_note %}

@@ -23,7 +23,9 @@
     <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">100/wbc</td>
   </tr>
   <tr>
-    <td class="field-name">Atypical lymphocytes :</td><td class="pct-val">{{ params.get('Atypical lymphocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">{% if params.get('Reactive lymphocytes') %}Reactive lymphocytes{% else %}Atypical lymphocytes{% endif %} :</td>
+    <td class="pct-val">{{ params.get('Reactive lymphocytes') or params.get('Atypical lymphocytes', '') }}</td>
+    <td class="unit-val">%</td>
     <td class="field-name">Blast :</td>
     <td class="pct-val">
       {% set blast_val = params.get('Blast', '') %}
@@ -31,16 +33,12 @@
     </td>
     <td class="unit-val">%</td>
   </tr>
-  <tr>
-    <td class="field-name">Reactive lymphocytes :</td><td class="pct-val">{{ params.get('Reactive lymphocytes', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name"></td><td class="pct-val"></td><td class="unit-val"></td>
-  </tr>
 </table>
 
 <div class="box-field"><b>RBC:</b> {{ params.get('RBC_desc', '') }}</div>
 <div class="box-field"><b>WBC:</b> {{ params.get('WBC_desc', '') }}</div>
 <div class="box-field"><b>Platelets:</b> {{ params.get('Platelets_desc', '') }}</div>
-<div class="box-field"><b>Conclusion:</b> {{ params.get('Conclusion', '') }}</div>
+<div class="box-field"><b>Conclusion:</b> {{ params.get('Conclusion', '') | render_conclusion }}</div>
 
 <table style="width:100%; margin-top:10px; direction:ltr; text-align:left;">
   <tr>

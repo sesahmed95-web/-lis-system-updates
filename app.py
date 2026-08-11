@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, session, g
 from datetime import datetime, date, timedelta
 from functools import wraps
 from werkzeug.utils import secure_filename
+from markupsafe import Markup, escape
 from io import BytesIO
 import os
 import json
@@ -86,6 +87,54 @@ CBC_ROW_GROUPS = [
 ]
 
 ALLOWED_DOCX_EXT = {"docx"}
+
+# نص الكليشة الجاهز لزر "Normal" بحقول وصف RBC/WBC/Platelets بتقرير الـ Blood
+# film (شاشة إدخال النتائج المفردة والمجمّعة). عدّل النص هنا فقط وينعكس
+# تلقائيًا بكل شاشات الإدخال دون أي تعديل إضافي بالقوالب. الزر يعبّي الحقل
+# بهذا النص، ويبقى قابلاً للتعديل الكامل بعدها (نفس أي حقل نصي عادي).
+NORMAL_CLICHE_TEXT = {
+    "RBC_desc": "Normochromic normocytic",
+    "WBC_desc": "Normal count and morphology",
+    "Platelets_desc": "Within normal limits",
+}
+app.jinja_env.globals["NORMAL_CLICHE_TEXT"] = NORMAL_CLICHE_TEXT
+
+# رموز التمييز الملوّنة بحقل الـ Conclusion (نجمة حمراء وسهم) — يضيفها
+# المستخدم بنفسه من زر التنسيق فوق حقل الاستنتاج بشاشات إدخال النتائج
+# (المفردة والمجمّعة). اللون هنا هو المرجع الوحيد وقت الطباعة/العرض،
+# فتغييره هنا ينعكس تلقائيًا بكل التقارير دون لمس أي قالب.
+CONCLUSION_MARKER_COLORS = {
+    "★": "#D40000",
+    "→": "#1F3B7A",
+    "◄": "#1F3B7A",
+}
+
+
+@app.template_filter("render_conclusion")
+def render_conclusion_filter(text):
+    """يحوّل نص حقل الـ Conclusion (بأسطره كما كتبها المستخدم بالضبط) إلى
+    HTML آمن للطباعة: كل سطر يبدأ برمز نجمة/سهم يُلوَّن الرمز نفسه فقط
+    بلونه الثابت (باقي السطر يبقى بلونه الطبيعي)، والأسطر تُفصل بـ <br>
+    حتى يطبع كل سطر لحاله بدل ما ينضغط كلها بسطر وحد متل الـ HTML العادي.
+    كل النص غير الرمز يُهرَّب (escape) بشكل طبيعي — ما في أي HTML يُنفَّذ
+    من داخل النص المكتوب نفسه."""
+    if not text:
+        return ""
+    lines = str(text).split("\n")
+    rendered = []
+    for line in lines:
+        marker_html = ""
+        rest = line
+        for marker, color in CONCLUSION_MARKER_COLORS.items():
+            if line.startswith(marker):
+                marker_html = (
+                    '<span class="conclusion-marker" style="color:'
+                    + color + ';">' + str(escape(marker)) + "</span>"
+                )
+                rest = line[len(marker):]
+                break
+        rendered.append(marker_html + str(escape(rest)))
+    return Markup("<br>".join(rendered))
 
 # The department names that get the extra "previous result per parameter"
 # column on the printed report (in addition to the previous-visit date that
@@ -2444,12 +2493,21 @@ def print_report(order_test_id):
         for rd in row_defs:
             pname = rd.get("param_name", "")
             rng = ranges.get(pname)
+            normal_range = ""
+            if rng:
+                if rng["range_text"]:
+                    normal_range = rng["range_text"]
+                elif rng["low"] is not None and rng["high"] is not None:
+                    normal_range = f"{rng['low']} - {rng['high']}"
+                elif rng["low"] is not None:
+                    normal_range = f"> {rng['low']}"
+                elif rng["high"] is not None:
+                    normal_range = f"< {rng['high']}"
             custom_rows.append({
                 "label": rd.get("label") or pname,
                 "result": params.get(pname, ""),
                 "unit": units_by_name.get(pname, ""),
-                "low": rng["low"] if rng else "",
-                "high": rng["high"] if rng else "",
+                "normal_range": normal_range,
                 "previous": previous_values.get(pname, "") if show_prev_values else "",
             })
 
@@ -3508,7 +3566,7 @@ def preview_report_design(test_definition_id):
         custom_rows = [{
             "label": rd.get("label") or rd.get("param_name", ""),
             "result": "—", "unit": units_by_name.get(rd.get("param_name", ""), ""),
-            "low": "", "high": "", "previous": "—" if show_prev_values else "",
+            "normal_range": "—", "previous": "—" if show_prev_values else "",
         } for rd in row_defs]
 
     params = {p["name"]: "—" for p in parameters}

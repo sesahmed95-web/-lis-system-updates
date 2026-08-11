@@ -87,6 +87,16 @@
             </td>
             <td>
               {% if p['result_type'] == 'Text' %}
+              {% if p['name'] == 'Conclusion' %}
+              <div class="conclusion-toolbar" style="display:flex; gap:6px; margin-bottom:4px;">
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#D40000; font-weight:bold;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '★')"
+                  title="سطر جديد بنجمة حمراء">★</button>
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '→')"
+                  title="سطر جديد بسهم">→</button>
+              </div>
+              {% endif %}
               <textarea id="{{ fid }}" name="ot{{ ot['id'] }}_param_{{ p['id'] }}" dir="ltr" style="text-align:left; width:100%;"
                         rows="2" class="lis-autoresize" data-param-name="{{ p['name'] }}"
                         {{ 'readonly' if ot['status'] == 'Verified' else '' }}>{{ existing['value_text'] if existing else '' }}</textarea>
@@ -97,6 +107,11 @@
               <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
                 onclick="lisCleanupText(document.getElementById('{{ fid }}'))"
                 title="يصحح فقط المسافات وحرف البداية وعلامة الترقيم — لا يترجم ولا يغيّر أي كلمة أو مصطلح طبي">✓ تدقيق الكتابة</button>
+              {% if p['name'] in NORMAL_CLICHE_TEXT %}
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
+                onclick="document.getElementById('{{ fid }}').value = {{ NORMAL_CLICHE_TEXT[p['name']] | tojson }}; document.getElementById('{{ fid }}').focus();"
+                title="يعبّي القيمة الطبيعية القياسية — يبقى الحقل قابلاً للتعديل الكامل بعدها">✓ Normal</button>
+              {% endif %}
               {% else %}
               <input type="text" id="{{ fid }}" name="ot{{ ot['id'] }}_param_{{ p['id'] }}" dir="ltr" style="text-align:left;"
                      data-param-name="{{ p['name'] }}"

@@ -676,6 +676,53 @@ def ensure_cbc_comment_parameter(conn):
     conn.commit()
 
 
+def ensure_coag_parameters(conn):
+    """Bleeding time / Plasma fibrinogen con / D. dimer / PTT Control were
+    added to the Coagulation Tests (COAG) param list after some
+    installations already had COAG seeded with only PT/PT Control/INR/PTT —
+    the migrate() insert-COAG-if-missing block only ever runs once (skipped
+    entirely if COAG already exists), so those older installs never got the
+    newer params and their result-entry screen has no row to type a value
+    into for them at all. Same backfill pattern as ensure_nrbc_parameter:
+    inserts by name only whatever's still missing under the existing COAG
+    test, with its reference range (or none, for the two Control fields
+    that never had one). Runs on every startup; no-op once already applied."""
+    row = conn.execute("SELECT id FROM test_definitions WHERE code='COAG'").fetchone()
+    if not row:
+        return
+    test_id = row["id"]
+    coag_params = [
+        ("PT", "Sec.", "Numeric", 11, 15, None),
+        ("PT Control", "Sec.", "Numeric", None, None, None),
+        ("INR", "", "Numeric", 0.9, 1.26, None),
+        ("PTT", "Sec.", "Numeric", 27, 40, None),
+        ("PTT Control", "Sec.", "Numeric", None, None, None),
+        ("Bleeding time", "Minute", "Numeric", 2, 5, None),
+        ("Plasma fibrinogen con", "g/L", "Numeric", 2, 4, None),
+        ("D. dimer", "µg/L", "Numeric", None, 500, None),
+    ]
+    changed = False
+    for pname, unit, rtype, low, high, range_text in coag_params:
+        exists = conn.execute(
+            "SELECT id FROM test_parameters WHERE test_definition_id=? AND name=?", (test_id, pname)
+        ).fetchone()
+        if exists:
+            continue
+        pcur = conn.execute(
+            "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, ?, ?, ?)",
+            (test_id, pname, unit, rtype),
+        )
+        if low is not None or high is not None:
+            conn.execute(
+                "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_to, low, high, range_text) "
+                "VALUES (?, 'Both', 0, 120, ?, ?, ?)",
+                (pcur.lastrowid, low, high, range_text),
+            )
+        changed = True
+    if changed:
+        conn.commit()
+
+
 # Age brackets for reference ranges (and patient age) can each be entered in
 # a different unit — Days/Weeks/Months/Years — since normal values for the
 # same parameter differ hugely between, say, a 3-day-old newborn and a
@@ -819,6 +866,7 @@ def init_db():
     ensure_atypical_lymphocytes_parameter(conn)
     ensure_reactive_lymphocytes_parameter(conn)
     ensure_cbc_comment_parameter(conn)
+    ensure_coag_parameters(conn)
     conn.close()
 
 

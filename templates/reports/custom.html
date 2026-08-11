@@ -2,17 +2,19 @@
 {% block report_body %}
 <div class="report-heading" style="text-align: {{ custom_heading_align|default('center') }};">{{ custom_heading }}</div>
 
-<table class="data-table" style="text-align: {{ custom_rows_align|default('right') }};">
+<!-- dir="ltr" يثبّت ترتيب الأعمدة فيزيائياً (Test دايماً أقصى اليسار) مهما
+     كانت لغة الواجهة؛ result و Normal range محاذاتهما مركز دائماً،
+     وعمود units يبقى على محاذاته المُعدّة (custom_rows_align) بدون تغيير. -->
+<table class="data-table" dir="ltr" style="text-align: {{ custom_rows_align|default('right') }};">
   <tr>
-    <th>Test</th><th>result</th><th>units</th><th>low</th><th>high</th>
+    <th>Test</th><th style="text-align:center;">result</th><th>units</th><th style="text-align:center;">Normal range</th>
   </tr>
   {% for row in custom_rows %}
   <tr>
     <td style="text-align: {{ custom_rows_align|default('right') }}; font-weight:bold;">{{ row.label }}</td>
-    <td style="text-align: {{ custom_rows_align|default('right') }};">{{ row.result }}{% if show_prev_values and row.previous %}<br><span class="prev-inline">Prev: {{ row.previous }}</span>{% endif %}</td>
+    <td style="text-align: center;">{{ row.result }}{% if show_prev_values and row.previous %}<br><span class="prev-inline">Prev: {{ row.previous }}</span>{% endif %}</td>
     <td style="text-align: {{ custom_rows_align|default('right') }};">{{ row.unit }}</td>
-    <td style="text-align: {{ custom_rows_align|default('right') }};">{{ row.low }}</td>
-    <td style="text-align: {{ custom_rows_align|default('right') }};">{{ row.high }}</td>
+    <td style="text-align: center;">{{ row.normal_range }}</td>
   </tr>
   {% endfor %}
 </table>
