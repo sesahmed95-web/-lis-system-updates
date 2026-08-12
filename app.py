@@ -99,41 +99,78 @@ NORMAL_CLICHE_TEXT = {
 }
 app.jinja_env.globals["NORMAL_CLICHE_TEXT"] = NORMAL_CLICHE_TEXT
 
-# رموز التمييز الملوّنة بحقل الـ Conclusion (نجمة حمراء وسهم) — يضيفها
-# المستخدم بنفسه من زر التنسيق فوق حقل الاستنتاج بشاشات إدخال النتائج
-# (المفردة والمجمّعة). اللون هنا هو المرجع الوحيد وقت الطباعة/العرض،
-# فتغييره هنا ينعكس تلقائيًا بكل التقارير دون لمس أي قالب.
-CONCLUSION_MARKER_COLORS = {
-    "★": "#D40000",
-    "→": "#1F3B7A",
-    "◄": "#1F3B7A",
-}
+# رموز التمييز الملوّنة بحقل الـ Conclusion (نجمة وأسهم وعلامتي استفهام/تعجب)
+# — يضيفها المستخدم بنفسه من زر التنسيق فوق حقل الاستنتاج بشاشات إدخال
+# النتائج (المفردة والمجمّعة). "key" هو المعرّف المستخدم بجدول settings
+# و"label" هو الاسم العربي اللي يظهر بشاشة Management → Settings.
+# CONCLUSION_MARKER_DEFAULT_COLORS تحت هو اللون الافتراضي فقط — المدير يكدر
+# يغيّر أي لون من شاشة الإعدادات، والقيمة المحفوظة هناك (settings key:
+# "conclusion_marker_colors", JSON) هي اللي تُستخدم فعليًا وقت الطباعة/العرض
+# عبر get_conclusion_marker_colors(db). الأزرار تُدرج الرمز في موضع المؤشر
+# بالضبط (بدون فرض سطر جديد)، فالرمز ممكن يطلع بأي مكان بالسطر — لهيك
+# التلوين يفحص كل رمز بالسطر أينما وجد، مو بس إذا كان ببداية السطر.
+CONCLUSION_MARKERS = [
+    {"key": "star", "char": "★", "label": "نجمة حمراء", "default_color": "#D40000"},
+    {"key": "arrow", "char": "→", "label": "سهم مفرد", "default_color": "#1F3B7A"},
+    {"key": "arrow_left", "char": "◄", "label": "سهم يسار (اختياري)", "default_color": "#1F3B7A"},
+    {"key": "arrow_double", "char": "⇒", "label": "سهم مزدوج", "default_color": "#1F3B7A"},
+    {"key": "triangle", "char": "▶", "label": "سهم مثلث", "default_color": "#1F3B7A"},
+    {"key": "question", "char": "?", "label": "علامة استفهام", "default_color": "#E67E22"},
+    {"key": "exclaim", "char": "!", "label": "علامة تعجب", "default_color": "#8E44AD"},
+]
+CONCLUSION_MARKER_DEFAULT_COLORS = {m["char"]: m["default_color"] for m in CONCLUSION_MARKERS}
+_CONCLUSION_MARKER_PATTERN = re.compile(
+    "|".join(re.escape(m) for m in CONCLUSION_MARKER_DEFAULT_COLORS)
+)
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def get_conclusion_marker_colors(db):
+    """يرجع dict {رمز: لون hex} بعد دمج الألوان الافتراضية مع أي تعديل
+    حفظه المدير من شاشة Management → Settings (مخزّن كـ JSON بجدول
+    settings تحت المفتاح conclusion_marker_colors: {key: hex})."""
+    colors = dict(CONCLUSION_MARKER_DEFAULT_COLORS)
+    raw = get_setting(db, "conclusion_marker_colors", "")
+    if raw:
+        try:
+            saved = json.loads(raw)
+        except (ValueError, TypeError):
+            saved = {}
+        for m in CONCLUSION_MARKERS:
+            val = saved.get(m["key"])
+            if val and _HEX_COLOR_RE.match(val):
+                colors[m["char"]] = val
+    return colors
 
 
 @app.template_filter("render_conclusion")
 def render_conclusion_filter(text):
     """يحوّل نص حقل الـ Conclusion (بأسطره كما كتبها المستخدم بالضبط) إلى
-    HTML آمن للطباعة: كل سطر يبدأ برمز نجمة/سهم يُلوَّن الرمز نفسه فقط
-    بلونه الثابت (باقي السطر يبقى بلونه الطبيعي)، والأسطر تُفصل بـ <br>
-    حتى يطبع كل سطر لحاله بدل ما ينضغط كلها بسطر وحد متل الـ HTML العادي.
-    كل النص غير الرمز يُهرَّب (escape) بشكل طبيعي — ما في أي HTML يُنفَّذ
-    من داخل النص المكتوب نفسه."""
+    HTML آمن للطباعة: كل رمز نجمة/سهم بأي موضع بالسطر يُلوَّن الرمز نفسه
+    فقط بلونه (المحفوظ من شاشة الإعدادات أو الافتراضي)، وباقي السطر يبقى
+    بلونه الطبيعي، والأسطر تُفصل بـ <br> حتى يطبع كل سطر لحاله بدل ما
+    ينضغط كلها بسطر وحد متل الـ HTML العادي. كل النص غير الرمز يُهرَّب
+    (escape) بشكل طبيعي — ما في أي HTML يُنفَّذ من داخل النص المكتوب نفسه."""
     if not text:
         return ""
+    colors = get_conclusion_marker_colors(get_db())
     lines = str(text).split("\n")
     rendered = []
     for line in lines:
-        marker_html = ""
-        rest = line
-        for marker, color in CONCLUSION_MARKER_COLORS.items():
-            if line.startswith(marker):
-                marker_html = (
-                    '<span class="conclusion-marker" style="color:'
-                    + color + ';">' + str(escape(marker)) + "</span>"
-                )
-                rest = line[len(marker):]
-                break
-        rendered.append(marker_html + str(escape(rest)))
+        pos = 0
+        parts = []
+        for m in _CONCLUSION_MARKER_PATTERN.finditer(line):
+            if m.start() > pos:
+                parts.append(str(escape(line[pos:m.start()])))
+            color = colors[m.group()]
+            parts.append(
+                '<span class="conclusion-marker" style="color:'
+                + color + ';">' + str(escape(m.group())) + "</span>"
+            )
+            pos = m.end()
+        if pos < len(line):
+            parts.append(str(escape(line[pos:])))
+        rendered.append("".join(parts))
     return Markup("<br>".join(rendered))
 
 # The department names that get the extra "previous result per parameter"
@@ -148,6 +185,30 @@ PREVIOUS_VALUE_DEPARTMENT_KEYWORDS = ("chem", "كيمياء", "coagul", "تخث�
 def department_shows_previous_values(department):
     d = (department or "").lower()
     return any(k in d for k in PREVIOUS_VALUE_DEPARTMENT_KEYWORDS)
+
+
+# Accepts values typed with Arabic-Indic digits (٠-٩) or a comma/Arabic
+# decimal separator instead of a plain "." — common on Iraqi keyboards/
+# input methods — before trying to parse a result as a number. Falls back
+# to the original text untouched if there's nothing to normalize, so it
+# never changes behavior for already-plain values like "12.5".
+_ARABIC_INDIC_DIGITS = "٠١٢٣٤٥٦٧٨٩"
+
+
+def normalize_numeric_text(value):
+    if value is None:
+        return value
+    out = value.strip()
+    for i, d in enumerate(_ARABIC_INDIC_DIGITS):
+        if d in out:
+            out = out.replace(d, str(i))
+    out = out.replace("٫", ".").replace("،", ".")
+    # A comma is only treated as a decimal point when it's the sole
+    # separator in the value (e.g. "2,5") — not for thousands-style
+    # input — so "2,500" is left alone rather than misread as "2.500".
+    if "," in out and out.count(",") == 1 and "." not in out:
+        out = out.replace(",", ".")
+    return out
 
 
 def get_visit_hct(db, visit_id):
@@ -252,6 +313,24 @@ def inject_globals():
                 is_designer=bool(session.get("designer_id")))
 
 
+# صفحات الطباعة تُفتح كثيرًا بنفس الرابط بعد تعديل نتيجة (خصوصًا حقل
+# Conclusion ورموزه)، والمتصفح ممكن يخزّن نسخة قديمة من نفس الرابط
+# (GET) بذاكرة التخزين المؤقت بدل ما يطلبها من جديد — فيطلع بالطباعة
+# محتوى قديم رغم إن التعديل انحفظ فعليًا. هذا يجبر كل فتح لصفحة طباعة
+# يجيب أحدث نسخة من السيرفر دائمًا. لا يؤثر إطلاقاً على استدعاء
+# print_report()/print_visit_results() كدالة بايثون عادية (مسار توليد
+# PDF لواتساب) لأن after_request ما يشتغل إلا مع طلبات حقيقية عبر الشبكة.
+_NO_CACHE_ENDPOINTS = {"print_report", "print_visit_results", "preview_report_design"}
+
+
+@app.after_request
+def _no_cache_print_pages(response):
+    if request.endpoint in _NO_CACHE_ENDPOINTS:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -294,6 +373,19 @@ def enforce_license():
     # (المصمم لازم يقدر يدخلها حتى لو الترخيص منتهي عشان يولّد كود جديد)،
     # وشاشة القفل/التفعيل نفسها (وإلا صار حلقة تحويل لا نهائية).
     endpoint = request.endpoint or ""
+
+    # لو صار تحديث تلقائي بالخلفية وأعاد تشغيل البرنامج، هذا يعرض رسالة
+    # نجاح لأول مستخدم يفتح أي صفحة بعدها (بدون ما يحتاج يدخل لوحة
+    # المصمم إطلاقاً)، ثم يمسح العلامة فوراً حتى ما تتكرر بكل صفحة.
+    if endpoint != "static":
+        _db = get_db()
+        _pending = get_setting(_db, "auto_update_pending_banner", "")
+        if _pending:
+            set_setting(_db, "auto_update_pending_banner", "")
+            _db.commit()
+            flash(f"✅ تم تحديث البرنامج تلقائياً إلى الإصدار {_pending} بنجاح.")
+        _db.close()
+
     if (endpoint == "static"
             or endpoint.startswith("designer_")
             or endpoint in ("license_locked", "license_activate", "set_lang")):
@@ -462,7 +554,7 @@ def designer_panel():
     update_info = {
         "local_version": auto_updater.get_local_version(),
         "configured": auto_updater.is_configured(),
-        "enabled": get_setting(db, "auto_update_enabled", "0") == "1",
+        "enabled": get_setting(db, "auto_update_enabled", "1") == "1",
         "last_check": get_setting(db, "auto_update_last_check", ""),
         "last_status": get_setting(db, "auto_update_last_status", ""),
     }
@@ -669,7 +761,11 @@ def new_visit():
         notes = request.form.get("notes", "")
         examining_doctor = request.form.get("examining_doctor", "")
         expenses = request.form.get("expenses") or 0
-        attending_doctor = request.form.get("attending_doctor", "")
+        # حقل "الدكتور الفاحص" (attending_doctor) صار نفس "دكتور المختبر
+        # الفاحص" (examining_doctor) — كانا حقلين منفصلين بالشاشة سابقًا
+        # وصار واحد بس بناءً على طلب المستخدم، وهذا العمود يُملأ تلقائيًا
+        # بنفس القيمة حتى يبقى عمود "الزيارات" شغّالاً بدون أي تغيير.
+        attending_doctor = examining_doctor
         contact_method = request.form.get("contact_method", "None")
         test_ids = request.form.getlist("tests")
         now = datetime.now().isoformat(timespec="seconds")
@@ -1500,7 +1596,9 @@ def visit_edit(visit_id):
         doctor_changed = referring_doctor_id != visit["doctor_id"]
 
         examining_doctor = request.form.get("examining_doctor", "")
-        attending_doctor = request.form.get("attending_doctor", "")
+        # نفس منطق شاشة "زيارة جديدة" — attending_doctor يتبع examining_doctor
+        # تلقائيًا الآن بعد ما صار حقلاً واحدًا بالشاشة.
+        attending_doctor = examining_doctor
         referral_center_id = find_or_create_referral_center(db, request.form.get("referral_lab_name", ""))
         db.execute("UPDATE visits SET doctor_id=?, referral_center_id=?, fasting=?, notes=?, examining_doctor=?, expenses=?, attending_doctor=? WHERE id=?",
                    (referring_doctor_id, referral_center_id, request.form.get("fasting", "Undefined"), request.form.get("notes", ""),
@@ -2161,7 +2259,7 @@ def save_order_test_results(db, ot, parameters, form, user_id, field_prefix=""):
         value_text = None
         if param["result_type"] == "Numeric":
             try:
-                value_numeric = float(value)
+                value_numeric = float(normalize_numeric_text(value))
                 if rng and rng["low"] is not None and value_numeric < rng["low"]:
                     flag = "Low"
                 elif rng and rng["high"] is not None and value_numeric > rng["high"]:
@@ -2220,7 +2318,12 @@ def result_entry(order_test_id):
 
     if request.method == "POST":
         save_order_test_results(db, ot, parameters, request.form, session["user_id"])
-        db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (order_test_id,))
+        # التحليل المعتمد (Verified) يبقى معتمَد بعد التعديل — الحقول صارت
+        # قابلة للتعديل دائمًا حتى بعد الاعتماد (بطلب المستخدم)، وكل تعديل
+        # يبقى مسجّل بجدول result_history (القيمة القديمة + مين عدّلها ووقتها)
+        # حتى لو ما تغيّرت حالة الاعتماد ظاهريًا.
+        if ot["status"] != "Verified":
+            db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (order_test_id,))
         db.commit()
         log_action("EnterResult", "order_test", order_test_id)
         flash("Results saved.")
@@ -2286,8 +2389,10 @@ def visit_results_entry(visit_id):
     if request.method == "POST":
         any_saved = False
         for ot in order_tests:
-            if ot["status"] == "Verified":
-                continue  # نتيجة معتمدة — تحتاج فتحها للتعديل أولاً من زر إلغاء الاعتماد
+            # التحاليل المعتمدة (Verified) صارت قابلة للتعديل دائمًا هيه
+            # بعد، وتبقى معتمَدة بعد الحفظ (ما تحتاج فتح/إلغاء اعتماد أولًا)
+            # — كل تعديل يبقى مسجّل بجدول result_history (القيمة القديمة +
+            # مين عدّلها ووقتها) بغض النظر عن حالة الاعتماد.
             parameters = db.execute(
                 "SELECT * FROM test_parameters WHERE test_definition_id=?", (ot["test_definition_id"],)
             ).fetchall()
@@ -2295,8 +2400,9 @@ def visit_results_entry(visit_id):
                 db, ot, parameters, request.form, session["user_id"], field_prefix=f"ot{ot['id']}_"
             )
             if touched:
-                db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (ot["id"],))
                 any_saved = True
+                if ot["status"] != "Verified":
+                    db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (ot["id"],))
         db.commit()
         if any_saved:
             log_action("EnterResultsBulk", "visit", visit_id)
@@ -3340,6 +3446,24 @@ def app_settings():
         if wa_code:
             set_setting(db, "whatsapp_country_code", "".join(ch for ch in wa_code if ch.isdigit()))
 
+        # ألوان رموز الـ Conclusion (نجمة/أسهم/استفهام/تعجب) — كل رمز إله
+        # حقل <input type=color> باسم marker_color_<key> بشاشة الإعدادات.
+        # نحفظ فقط الألوان اللي وصلت وبصيغة hex صحيحة؛ أي حقل فاضي أو غير
+        # صالح يبقى على قيمته المحفوظة سابقًا (أو الافتراضي إذا ما انحفظ شي).
+        marker_colors = {}
+        raw_existing = get_setting(db, "conclusion_marker_colors", "")
+        if raw_existing:
+            try:
+                marker_colors = json.loads(raw_existing)
+            except (ValueError, TypeError):
+                marker_colors = {}
+        for m in CONCLUSION_MARKERS:
+            val = request.form.get("marker_color_" + m["key"], "").strip()
+            if val and _HEX_COLOR_RE.match(val):
+                marker_colors[m["key"]] = val
+        if marker_colors:
+            set_setting(db, "conclusion_marker_colors", json.dumps(marker_colors))
+
         db.commit()
         log_action("UpdateSettings", "settings", 0)
         flash("Settings saved.")
@@ -3354,7 +3478,13 @@ def app_settings():
         "report_col_pad": get_setting(db, "report_col_pad", "12"),
         "whatsapp_country_code": get_setting(db, "whatsapp_country_code", "964"),
     }
-    return render_template("management/settings.html", current=current)
+    marker_colors_by_char = get_conclusion_marker_colors(db)
+    conclusion_markers = [
+        {**m, "color": marker_colors_by_char[m["char"]]} for m in CONCLUSION_MARKERS
+    ]
+    return render_template(
+        "management/settings.html", current=current, conclusion_markers=conclusion_markers
+    )
 
 
 def _parse_docx_rows(file_storage, parameters):

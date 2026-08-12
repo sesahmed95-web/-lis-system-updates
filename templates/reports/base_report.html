@@ -1,6 +1,13 @@
-{% extends "base.html" %}
-{% block page_title %}{{ ot['test_name'] }} - {{ patient_name }}{% endblock %}
-{% block content %}
+<!DOCTYPE html>
+<!-- صفحة مستقلة تمامًا (ما تمتد base.html) — عمدًا، حتى ما تظهر القائمة
+     الجانبية ولا الشريط العلوي لبرنامج المختبر إطلاقاً بهذي الصفحة، لا
+     على الشاشة ولا بالطباعة. تفتح كنافذة/تبويب مخصص لتقرير الطباعة فقط. -->
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ ot['test_name'] }} - {{ patient_name }}</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='icon/lab-icon.ico') }}">
 <style>
   /* margin:0 على @page يمنع أغلب المتصفحات من رسم تذييل/ترويسة الطباعة
      التلقائية (تاريخ الطباعة، رابط الصفحة، رقم الصفحة)؛ التعويض بـ padding
@@ -171,6 +178,8 @@
   .no-print { text-align: center; margin: 14px 0; }
   @media print { .preview-bar, .no-print { display: none; } }
 </style>
+</head>
+<body>
 
 <div class="preview-bar">
   {% if is_design_preview %}
@@ -305,4 +314,5 @@
     window.addEventListener('resize', fitAddressLine);
   })();
 </script>
-{% endblock %}
+</body>
+</html>
