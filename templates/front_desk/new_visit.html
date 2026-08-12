@@ -133,18 +133,6 @@
           </datalist>
           <small class="muted">اكتب اسم المختبر فقط إذا هذا النموذج مبعوث من مختبر آخر (بدل مراجع مباشر) — اختر من الاقتراحات أو اكتب اسم مختبر جديد وينحفظ تلقائيًا. اسم المختبر ما ينطبع بأي تقرير، ويُستخدم فقط لحساب المختبر يوميًا وشهريًا. اتركه فارغًا للمراجع المباشر.</small>
         </div>
-        <div class="form-field" id="attendingDoctorField" style="display:none;">
-          <label>الدكتور الفاحص</label>
-          <div style="display:flex; gap:6px;">
-            <select name="attending_doctor" id="attending_doctor" style="flex:1;">
-              <option value="">-</option>
-              {% for d in examining_doctors %}
-              <option value="{{ d }}">{{ d }}</option>
-              {% endfor %}
-            </select>
-            <button type="button" class="btn small secondary" onclick="toggleAddDoctorBox()" title="إضافة طبيب فاحص جديد">+ طبيب</button>
-          </div>
-        </div>
         <div class="form-field" id="addDoctorBox" style="display:none; grid-column: span 2;">
           <label>اسم الطبيب الفاحص الجديد</label>
           <div style="display:flex; gap:6px;">
@@ -311,21 +299,6 @@
       document.getElementById('examining_doctor').value = '';
     }
 
-    // حقل "الدكتور الفاحص" (attending_doctor) نفس المنطق: يظهر ويصبح
-    // إلزاميًا فقط إذا كان أحد الفحوصات المؤهلة (لطاخة الدم، عد الخلايا
-    // الشبكية، فحص السوائل، BMA، خزعة نقي العظم، تحضير الهيموغلوبين،
-    // فحص المنجلية) مختارًا — غير هيك يبقى اختياري.
-    const attendField = document.getElementById('attendingDoctorField');
-    const attendSelect = document.getElementById('attending_doctor');
-    if (anyExamCheckedTestChecked) {
-      attendField.style.display = '';
-      attendSelect.required = true;
-    } else {
-      attendField.style.display = 'none';
-      attendSelect.required = false;
-      attendSelect.value = '';
-    }
-
     refreshExamFeePreview();
   }
 
@@ -343,10 +316,10 @@
   }
 
   // ------------------------------------------------------------------
-  // إضافة طبيب فاحص جديد بسرعة من نفس الصفحة (زر "+ طبيب" بجانب قائمتي
-  // "دكتور المختبر الفاحص" و"الدكتور الفاحص") — يُحفظ بقائمة الأطباء
-  // الفاحصين نفسها ويُضاف كخيار بالقائمتين معًا فورًا ويُختار تلقائيًا،
-  // دون الحاجة للذهاب إلى Management → Settings أولًا.
+  // إضافة طبيب فاحص جديد بسرعة من نفس الصفحة (زر "+ طبيب" بجانب قائمة
+  // "دكتور المختبر الفاحص") — يُحفظ بقائمة الأطباء الفاحصين نفسها
+  // ويُضاف كخيار بالقائمة فورًا ويُختار تلقائيًا، دون الحاجة للذهاب إلى
+  // Management → Settings أولًا.
   // ------------------------------------------------------------------
   function toggleAddDoctorBox(show) {
     const box = document.getElementById('addDoctorBox');
@@ -372,8 +345,8 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
-        [document.getElementById('examining_doctor'), document.getElementById('attending_doctor')].forEach(function (sel) {
-          if (!sel) return;
+        const sel = document.getElementById('examining_doctor');
+        if (sel) {
           if (!Array.from(sel.options).some(function (o) { return o.value === data.name; })) {
             const opt = document.createElement('option');
             opt.value = data.name;
@@ -381,7 +354,7 @@
             sel.appendChild(opt);
           }
           sel.value = data.name;
-        });
+        }
         toggleAddDoctorBox(false);
         refreshExamFeePreview();
       })
