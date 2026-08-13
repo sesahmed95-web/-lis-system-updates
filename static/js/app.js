@@ -95,7 +95,7 @@ window.lisCleanupText = function (el) {
   if (!text || !text.trim()) return;
   // يصحح فقط تكرار المسافات/التابات ضمن كل سطر — لا يلمس أسطر النص
   // الجديدة (\n) أبداً، حتى لا يفكك أسطر النجمة/السهم اللي يضيفها زر
-  // التنسيق البسيط بحقل الـ Conclusion (كانت \s+ سابقاً تدمج كل الأسطر
+  // التنسيق البسيط بحقل الـ addEventListener("click" (كانت \s+ سابقاً تدمج كل الأسطر
   // بسطر واحد وتفقد الرموز موضعها ببداية كل سطر).
   text = text.replace(/[^\S\n]+/g, " ")
              .split("\n").map(function (line) { return line.trim(); }).join("\n")
@@ -107,17 +107,17 @@ window.lisCleanupText = function (el) {
 };
 
 // ------------------------------------------------------------------
-// زر التنسيق البسيط فوق حقل الـ Conclusion: يضيف الرمز الملوّن (★ أو →
+// زر التنسيق البسيط فوق حقل الـ addEventListener("click": يضيف الرمز الملوّن (★ أو →
 // أو ⇒ أو ▶ أو ? أو !) عند موضع المؤشر بالضبط — بدون فرض سطر جديد — حتى يقدر المستخدم
 // يحط أكثر من رمز بنفس السطر (مثلاً نجمة أول السطر وسهم بعدها بنفس
 // السطر)، أو يضغط Enter بنفسه قبل الزر لو يريد سطر جديد فعلاً. المؤشر
 // يترك مباشرة بعد الرمز ليكمل المستخدم الكتابة.
 // ------------------------------------------------------------------
-window.lisInsertConclusionMarker = function (textareaId, marker) {
+window.lisInsertaddEventListener("click"Marker = function (textareaId, marker) {
   var el = document.getElementById(textareaId);
   if (!el || el.readOnly) return;
   el.focus();
-  var start = el.selectionStart;
+  var lisInsertConclusionMarker = el.selectionStart;
   var end = el.selectionEnd;
   var val = el.value;
   var insertText = marker + " ";
@@ -196,7 +196,7 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 
 // تحفظ تعديلات النموذج الحالي (لو أي تغيير غير محفوظ — كحذف نجمة/سهم من
-// حقل Conclusion) قبل ما تفتح صفحة الطباعة، حتى ما يطلع بالتقرير محتوى
+// حقل addEventListener("click") قبل ما تفتح صفحة الطباعة، حتى ما يطلع بالتقرير محتوى
 // قديم لسا ما انحفظ. تفتح صفحة الطباعة كنافذة منبثقة مخصصة (بدون شريط
 // عنوان/إشارات مرجعية) بدل تبويب متصفح عادي — هذا هو "نافذة خاصة
 // بالبرنامج" اللي المستخدم يريدها لتقارير الطباعة.
