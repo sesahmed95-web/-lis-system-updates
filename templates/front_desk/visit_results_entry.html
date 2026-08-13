@@ -5,8 +5,9 @@
   <h3>{{ visit['patient_name'] }} <span class="muted mono">#{{ visit['registration_number'] }}</span></h3>
   <p class="muted">{{ visit['gender'] }} · {{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['created_at'] }}</p>
   <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
-  <a class="btn small secondary print-link" target="_blank" id="printAllLink"
-     href="{{ url_for('print_visit_results', visit_id=visit['id'], completed_only=1) }}">🖨 طباعة كل النتائج المكتملة</a>
+  <a class="btn small secondary print-link" id="printAllLink"
+     href="{{ url_for('print_visit_results', visit_id=visit['id'], completed_only=1) }}"
+     onclick="lisSaveThenPrint(event, '#visitResultsForm', this.href); return false;">🖨 طباعة كل النتائج المكتملة</a>
   {% if visit['phone'] %}
   <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id'], completed_only=1) }}"
         style="display:inline;" onsubmit="return confirm('إرسال كل النتائج المكتملة لهذه الزيارة بملف PDF واحد عبر واتساب لرقم المريض؟');">
@@ -54,13 +55,11 @@
 
       {% if ot['status'] == 'Verified' %}
         {% if current_role in ['supervisor', 'admin'] %}
-        <form method="POST" action="{{ url_for('unverify_result', order_test_id=ot['id']) }}"
-              style="margin-bottom:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
-              onsubmit="return confirm('هذه النتيجة معتمدة فعلاً. فتحها للتعديل يتطلب اعتمادها من جديد بعد الحفظ. متأكد؟')">
-          <input type="hidden" name="next_visit_id" value="{{ visit['id'] }}">
-          <input type="text" name="reason" placeholder="سبب إعادة الفتح (اختياري)" style="max-width:220px;">
-          <button class="btn small secondary" type="submit">🔓 فتح للتعديل</button>
-        </form>
+        <div style="margin-bottom:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="text" id="unv_reason_{{ ot['id'] }}" placeholder="سبب إعادة الفتح (اختياري)" style="max-width:220px;">
+          <button type="button" class="btn small secondary"
+            onclick="lisPostAction('{{ url_for('unverify_result', order_test_id=ot['id']) }}', {next_visit_id: '{{ visit['id'] }}', reason: document.getElementById('unv_reason_{{ ot['id'] }}').value}, 'هذه النتيجة معتمدة فعلاً. فتحها للتعديل يتطلب اعتمادها من جديد بعد الحفظ. متأكد؟')">🔓 فتح للتعديل</button>
+        </div>
         {% else %}
         <p class="muted">🔒 معتمدة — لا يمكن تعديلها إلا بواسطة المشرف.</p>
         {% endif %}
@@ -91,17 +90,29 @@
               <div class="conclusion-toolbar" style="display:flex; gap:6px; margin-bottom:4px;">
                 <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#D40000; font-weight:bold;"
                   onclick="lisInsertConclusionMarker('{{ fid }}', '★')"
-                  title="سطر جديد بنجمة حمراء">★</button>
+                  title="إدراج نجمة حمراء عند موضع المؤشر">★</button>
                 <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
                   onclick="lisInsertConclusionMarker('{{ fid }}', '→')"
-                  title="سطر جديد بسهم">→</button>
+                  title="إدراج سهم عند موضع المؤشر">→</button>
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '⇒')"
+                  title="إدراج سهم عند موضع المؤشر">⇒</button>
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '▶')"
+                  title="إدراج سهم عند موضع المؤشر">▶</button>
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#E67E22; font-weight:bold;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '?')"
+                  title="إدراج علامة استفهام عند موضع المؤشر">?</button>
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#8E44AD; font-weight:bold;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '!')"
+                  title="إدراج علامة تعجب عند موضع المؤشر">!</button>
               </div>
               {% endif %}
               <textarea id="{{ fid }}" name="ot{{ ot['id'] }}_param_{{ p['id'] }}" dir="ltr" style="text-align:left; width:100%;"
-                        rows="2" class="lis-autoresize" data-param-name="{{ p['name'] }}"
-                        {{ 'readonly' if ot['status'] == 'Verified' else '' }}>{{ existing['value_text'] if existing else '' }}</textarea>
+                        rows="2" class="lis-autoresize" data-param-name="{{ p['name'] }}" spellcheck="true"
+                        >{{ existing['value_text'] if existing else '' }}</textarea>
               <label class="muted" style="display:flex; align-items:center; gap:4px; font-size:11px; margin-top:3px;">
-                <input type="checkbox" onchange="document.getElementById('{{ fid }}').spellcheck = this.checked;">
+                <input type="checkbox" checked onchange="document.getElementById('{{ fid }}').spellcheck = this.checked;">
                 🔤 تدقيق إملائي (اختياري)
               </label>
               <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
@@ -109,7 +120,8 @@
                 title="يصحح فقط المسافات وحرف البداية وعلامة الترقيم — لا يترجم ولا يغيّر أي كلمة أو مصطلح طبي">✓ تدقيق الكتابة</button>
               {% if p['name'] in NORMAL_CLICHE_TEXT %}
               <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
-                onclick="document.getElementById('{{ fid }}').value = {{ NORMAL_CLICHE_TEXT[p['name']] | tojson }}; document.getElementById('{{ fid }}').focus();"
+                data-target="{{ fid }}" data-normal-text="{{ NORMAL_CLICHE_TEXT[p['name']] }}"
+                onclick="lisFillNormalText(this)"
                 title="يعبّي القيمة الطبيعية القياسية — يبقى الحقل قابلاً للتعديل الكامل بعدها">✓ Normal</button>
               {% endif %}
               {% else %}
@@ -117,7 +129,7 @@
                      data-param-name="{{ p['name'] }}"
                      {% if p['name'] == 'Corrected Retic count' %}data-auto-filled="{{ '0' if existing else '1' }}"{% endif %}
                      value="{{ existing['value_numeric'] if existing and existing['value_numeric'] is not none else (existing['value_text'] if existing else '') }}"
-                     {{ 'readonly' if ot['status'] == 'Verified' else '' }}>
+                     >
               {% if p['name'] == 'Corrected Retic count' %}
               <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
                 onclick="lisForceRecalcCorrectedRetic(this)" title="يحسبها من Reticulocyte count وقيمة HCT لنفس الزيارة (رجال 45%، نساء 42%)">↻ إعادة الحساب التلقائي</button>
@@ -148,18 +160,16 @@
       </table>
 
       <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-        <a class="btn small secondary print-link" target="_blank" href="{{ url_for('print_report', order_test_id=ot['id']) }}">🖨 طباعة التقرير</a>
+        <a class="btn small secondary print-link"
+           href="{{ url_for('print_report', order_test_id=ot['id']) }}"
+           onclick="lisSaveThenPrint(event, '#visitResultsForm', this.href); return false;">🖨 طباعة التقرير</a>
         {% if visit['phone'] and ot['status'] in ['Completed', 'Verified'] %}
-        <form method="POST" action="{{ url_for('whatsapp_send_result', order_test_id=ot['id']) }}" style="display:inline;"
-              onsubmit="return confirm('إرسال نتيجة {{ ot['test_name'] }} فقط عبر واتساب لرقم المريض؟');">
-          <button class="btn small" type="submit">📱 إرسال هذه النتيجة واتساب</button>
-        </form>
+        <button type="button" class="btn small"
+          onclick="lisPostAction('{{ url_for('whatsapp_send_result', order_test_id=ot['id']) }}', {}, 'إرسال نتيجة {{ ot['test_name'] }} فقط عبر واتساب لرقم المريض؟')">📱 إرسال هذه النتيجة واتساب</button>
         {% endif %}
         {% if current_role in ['supervisor', 'admin'] and ot['status'] == 'Completed' %}
-        <form method="POST" action="{{ url_for('verify_result', order_test_id=ot['id']) }}" onsubmit="return confirm('اعتماد هذه النتيجة؟')">
-          <input type="hidden" name="next_visit_id" value="{{ visit['id'] }}">
-          <button class="btn small success" type="submit">✔ {{ t('verify') }}</button>
-        </form>
+        <button type="button" class="btn small success"
+          onclick="lisPostAction('{{ url_for('verify_result', order_test_id=ot['id']) }}', {next_visit_id: '{{ visit['id'] }}'}, 'اعتماد هذه النتيجة؟')">✔ {{ t('verify') }}</button>
         {% endif %}
       </div>
     </div>

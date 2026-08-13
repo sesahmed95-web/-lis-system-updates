@@ -5,7 +5,8 @@
   <h3>{{ ot['test_name'] }} — {{ ot['patient_name'] }} <span class="muted mono">#{{ ot['registration_number'] }}</span></h3>
   <p class="muted">{{ t('barcode') }}: <span class="mono">{{ ot['barcode'] }}</span> · {{ t('status') }}: <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span></p>
   {% if ot['test_code'] in ('CBC', 'BF', 'WBCDIFF', 'FLUIDEXAM') and ot['status'] in ('Completed', 'Verified') %}
-  <p><a class="btn small" target="_blank" href="{{ url_for('print_report', order_test_id=ot['id']) }}">Print Report</a></p>
+  <p><a class="btn small print-link" href="{{ url_for('print_report', order_test_id=ot['id']) }}"
+     onclick="lisSaveThenPrint(event, '#resultEntryForm', this.href); return false;">Print Report</a></p>
   {% endif %}
 
   {% if ot['status'] == 'Verified' %}
@@ -20,7 +21,7 @@
     {% endif %}
   {% endif %}
 
-  <form method="POST">
+  <form method="POST" id="resultEntryForm">
     <table>
       <thead><tr>
         <th>{{ t('parameter') }}</th><th>{{ t('unit') }}</th><th>{{ t('range') }}</th><th>{{ t('result') }}</th><th>{{ t('flag') }}</th>
@@ -45,17 +46,29 @@
             <div class="conclusion-toolbar" style="display:flex; gap:6px; margin-bottom:4px;">
               <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#D40000; font-weight:bold;"
                 onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '★')"
-                title="سطر جديد بنجمة حمراء">★</button>
+                title="إدراج نجمة حمراء عند موضع المؤشر">★</button>
               <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
                 onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '→')"
-                title="سطر جديد بسهم">→</button>
+                title="إدراج سهم عند موضع المؤشر">→</button>
+              <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '⇒')"
+                title="إدراج سهم عند موضع المؤشر">⇒</button>
+              <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '▶')"
+                title="إدراج سهم عند موضع المؤشر">▶</button>
+              <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#E67E22; font-weight:bold;"
+                onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '?')"
+                title="إدراج علامة استفهام عند موضع المؤشر">?</button>
+              <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#8E44AD; font-weight:bold;"
+                onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '!')"
+                title="إدراج علامة تعجب عند موضع المؤشر">!</button>
             </div>
             {% endif %}
             <textarea id="param_{{ p['id'] }}" name="param_{{ p['id'] }}" dir="ltr" style="text-align:left; width:100%;"
-                      rows="2" class="lis-autoresize" data-param-name="{{ p['name'] }}"
-                      {{ 'readonly' if ot['status'] == 'Verified' else '' }}>{{ existing['value_text'] if existing else '' }}</textarea>
+                      rows="2" class="lis-autoresize" data-param-name="{{ p['name'] }}" spellcheck="true"
+                      >{{ existing['value_text'] if existing else '' }}</textarea>
             <label class="muted" style="display:flex; align-items:center; gap:4px; font-size:11px; margin-top:3px;">
-              <input type="checkbox" onchange="document.getElementById('param_{{ p['id'] }}').spellcheck = this.checked;">
+              <input type="checkbox" checked onchange="document.getElementById('param_{{ p['id'] }}').spellcheck = this.checked;">
               🔤 تدقيق إملائي (اختياري)
             </label>
             <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
@@ -63,7 +76,8 @@
               title="يصحح فقط المسافات وحرف البداية وعلامة الترقيم — لا يترجم ولا يغيّر أي كلمة أو مصطلح طبي">✓ تدقيق الكتابة</button>
             {% if p['name'] in NORMAL_CLICHE_TEXT %}
             <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
-              onclick="document.getElementById('param_{{ p['id'] }}').value = {{ NORMAL_CLICHE_TEXT[p['name']] | tojson }}; document.getElementById('param_{{ p['id'] }}').focus();"
+              data-target="param_{{ p['id'] }}" data-normal-text="{{ NORMAL_CLICHE_TEXT[p['name']] }}"
+              onclick="lisFillNormalText(this)"
               title="يعبّي القيمة الطبيعية القياسية — يبقى الحقل قابلاً للتعديل الكامل بعدها">✓ Normal</button>
             {% endif %}
             {% else %}
@@ -71,7 +85,7 @@
                    data-param-name="{{ p['name'] }}"
                    {% if p['name'] == 'Corrected Retic count' %}data-auto-filled="{{ '0' if existing else '1' }}"{% endif %}
                    value="{{ existing['value_numeric'] if existing and existing['value_numeric'] is not none else (existing['value_text'] if existing else '') }}"
-                   {{ 'readonly' if ot['status'] == 'Verified' else '' }}>
+                   >
             {% if p['name'] == 'Corrected Retic count' %}
             <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
               onclick="lisForceRecalcCorrectedRetic(this)" title="يحسبها من Reticulocyte count وقيمة HCT لنفس الزيارة (رجال 45%، نساء 42%)">↻ إعادة الحساب التلقائي</button>

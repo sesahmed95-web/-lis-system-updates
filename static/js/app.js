@@ -24,11 +24,71 @@ window.lisAutoResize = function (el) {
 };
 
 // ------------------------------------------------------------------
+// إرسال طلب POST بسيط (اعتماد/فتح للتعديل/واتساب) عبر نموذج مؤقت
+// مستقل يُبنى ويُرسل ثم يُحذف فورًا — لا يُضمَّن أبداً داخل نموذج
+// آخر بالصفحة. هذا يتفادى مشكلة تداخل عناصر <form> ببعضها (غير
+// مسموح بالـ HTML أصلاً، ويكسر النموذج الأكبر المحيط بها فيسبب فقدان
+// أي تعديل بحقول تأتي بعده بنفس الصفحة، مثل حقل Conclusion).
+// ------------------------------------------------------------------
+window.lisPostAction = function (url, fields, confirmMsg) {
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  var f = document.createElement("form");
+  f.method = "POST";
+  f.action = url;
+  f.style.display = "none";
+  Object.keys(fields || {}).forEach(function (k) {
+    var inp = document.createElement("input");
+    inp.type = "hidden";
+    inp.name = k;
+    inp.value = fields[k] == null ? "" : fields[k];
+    f.appendChild(inp);
+  });
+  document.body.appendChild(f);
+  f.submit();
+};
+
+// ------------------------------------------------------------------
+// روابط الطباعة (id/class="print-link") تفتح بنافذة منبثقة صغيرة
+// بدل تبويب متصفح كامل. البرنامج نفسه يفتح بوضع "تطبيق" بدون شريط
+// تبويبات/عنوان (راجع run_windows.bat: chrome --app=...)، لكن أي
+// رابط target="_blank" يُفتح منه يطلع بنافذة Chrome عادية كاملة
+// (بتبويباتها وأشرطتها) لأن وضع "--app" ينطبق فقط على أول نافذة —
+// فتح الرابط عبر window.open بخصائص "popup" يخلي المتصفح يرسمها
+// بنافذة مجرّدة بسيطة قريبة من شكل نافذة برنامج مستقلة.
+// ------------------------------------------------------------------
+document.addEventListener("click", function (e) {
+  var a = e.target.closest && e.target.closest("a.print-link, a#printAllLink");
+  if (!a || !a.href) return;
+  e.preventDefault();
+  var w = Math.min(1000, Math.round(screen.availWidth * 0.9));
+  var h = Math.min(1200, Math.round(screen.availHeight * 0.92));
+  var left = Math.round((screen.availWidth - w) / 2);
+  var top = Math.round((screen.availHeight - h) / 2);
+  window.open(a.href, "_blank",
+    "popup=yes,width=" + w + ",height=" + h + ",left=" + left + ",top=" + top +
+    ",toolbar=no,location=no,menubar=no,status=no,scrollbars=yes,resizable=yes");
+});
+
+// ------------------------------------------------------------------
 // تدقيق كتابي اختياري لحقول النتائج النصية: يصحح فقط تباعد الأحرف
 // وحرف البداية الكبير وعلامة الترقيم بالنهاية — لا يترجم ولا يستبدل أي
 // كلمة أبدًا، فتبقى كل المصطلحات الطبية بلغتها اللاتينية الأصلية تمامًا
 // متل ما كتبها المستخدم. يُستدعى فقط لما المستخدم يضغط الزر بنفسه.
 // ------------------------------------------------------------------
+// يعبّي نص الكليشة الجاهز (زر ✓ Normal) بأمان — يقرأ النص من data-attribute
+// بدل تضمينه مباشرة بسطر onclick، حتى ما ينكسر الزر لو النص المكتوب فيه
+// علامة اقتباس مفردة (') أو أي رمز خاص ثاني.
+window.lisFillNormalText = function (btn) {
+  var el = document.getElementById(btn.dataset.target);
+  if (el) {
+    el.value = btn.dataset.normalText;
+    el.focus();
+    if (typeof el.dispatchEvent === "function") {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }
+};
+
 window.lisCleanupText = function (el) {
   if (!el) return;
   var text = el.value;
@@ -47,10 +107,11 @@ window.lisCleanupText = function (el) {
 };
 
 // ------------------------------------------------------------------
-// زر التنسيق البسيط فوق حقل الـ Conclusion: يبدأ سطراً جديداً ويضع
-// الرمز الملوّن (★ أو →) ببدايته عند موضع المؤشر الحالي، ثم يترك
-// المؤشر مباشرة بعد الرمز ليكمل المستخدم الكتابة. إذا كان المؤشر أصلاً
-// ببداية سطر فارغ (أول النص أو بعد \n مباشرة) ما يضيف سطر فاضي زيادة.
+// زر التنسيق البسيط فوق حقل الـ Conclusion: يضيف الرمز الملوّن (★ أو →
+// أو ⇒ أو ▶ أو ? أو !) عند موضع المؤشر بالضبط — بدون فرض سطر جديد — حتى يقدر المستخدم
+// يحط أكثر من رمز بنفس السطر (مثلاً نجمة أول السطر وسهم بعدها بنفس
+// السطر)، أو يضغط Enter بنفسه قبل الزر لو يريد سطر جديد فعلاً. المؤشر
+// يترك مباشرة بعد الرمز ليكمل المستخدم الكتابة.
 // ------------------------------------------------------------------
 window.lisInsertConclusionMarker = function (textareaId, marker) {
   var el = document.getElementById(textareaId);
@@ -59,8 +120,7 @@ window.lisInsertConclusionMarker = function (textareaId, marker) {
   var start = el.selectionStart;
   var end = el.selectionEnd;
   var val = el.value;
-  var atLineStart = (start === 0) || (val.charAt(start - 1) === "\n");
-  var insertText = (atLineStart ? "" : "\n") + marker + " ";
+  var insertText = marker + " ";
   el.value = val.slice(0, start) + insertText + val.slice(end);
   var newPos = start + insertText.length;
   el.selectionStart = el.selectionEnd = newPos;
@@ -134,3 +194,30 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   });
 });
+
+// تحفظ تعديلات النموذج الحالي (لو أي تغيير غير محفوظ — كحذف نجمة/سهم من
+// حقل Conclusion) قبل ما تفتح صفحة الطباعة، حتى ما يطلع بالتقرير محتوى
+// قديم لسا ما انحفظ. تفتح صفحة الطباعة كنافذة منبثقة مخصصة (بدون شريط
+// عنوان/إشارات مرجعية) بدل تبويب متصفح عادي — هذا هو "نافذة خاصة
+// بالبرنامج" اللي المستخدم يريدها لتقارير الطباعة.
+window.lisSaveThenPrint = function (evt, formSelector, printUrl) {
+  evt.preventDefault();
+  var popupFeatures = "popup,width=880,height=1000,toolbar=no,menubar=no,location=no,status=no,scrollbars=yes";
+  // نفتح النافذة فوراً (فارغة) ضمن نفس تفاعل الضغطة مباشرة — حتى
+  // المتصفح ما يحجبها كنافذة منبثقة (لازم window.open يصير مباشرة
+  // جوه معالج الضغط، مو بعد انتظار fetch). نوجّهها لرابط الطباعة
+  // بعدين لما ينخلص الحفظ.
+  var w = window.open("", "lisPrintWindow", popupFeatures);
+  var form = document.querySelector(formSelector);
+  function goToPrint() {
+    if (w && !w.closed) { w.location.href = printUrl; w.focus(); }
+    else { window.location.href = printUrl; } // المتصفح حاظر النافذة المنبثقة — رجوع للتبويب العادي
+  }
+  if (!form) { goToPrint(); return; }
+  fetch(form.action || window.location.href, {
+    method: "POST",
+    body: new FormData(form),
+    credentials: "same-origin",
+  }).catch(function () { /* حتى لو فشل الحفظ بالشبكة، نفتح الطباعة بآخر نسخة محفوظة سابقاً */ })
+    .finally(goToPrint);
+};
