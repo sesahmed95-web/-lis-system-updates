@@ -47,7 +47,7 @@ from datetime import datetime
 GITHUB_OWNER = "sesahmed95-web"     # 🔒 غيّرها
 GITHUB_REPO = "-lis-system-updates"    # 🔒 غيّرها
 GITHUB_BRANCH = "main"                 # 🔒 اسم الفرع اللي تدفع عليه تحديثاتك
-GITHUB_TOKEN = "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"  # 🔒 غيّرها
+GITHUB_TOKEN = "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"  # 🔒 غيّرها
 # مسار ملف VERSION داخل المستودع (لو حاطه بمجلد فرعي غيّر هذا المسار،
 # مثلاً "lis_system/VERSION"). اتركه "VERSION" لو بجذر المستودع مباشرة.
 VERSION_FILE_PATH_IN_REPO = "VERSION"
@@ -200,6 +200,10 @@ def check_and_apply(db, force_apply=True):
             status = f"🆕 تم العثور على إصدار جديد ({remote_version}) — جاري التحديث الآن..."
             set_setting(db, "auto_update_last_check", now)
             set_setting(db, "auto_update_last_status", status)
+            # يُقرأ هذا بعد إعادة التشغيل ويُعرض كرسالة لأول مستخدم يفتح
+            # البرنامج (راجع enforce_license بملف app.py) — ثم يُمسح فوراً
+            # حتى ما يتكرر بكل صفحة.
+            set_setting(db, "auto_update_pending_banner", remote_version)
             db.commit()
             if force_apply:
                 apply_update(silent=True)
@@ -230,7 +234,7 @@ def background_loop(get_db_func):
     while True:
         try:
             db = get_db_func()
-            enabled = get_setting(db, "auto_update_enabled", "0") == "1"
+            enabled = get_setting(db, "auto_update_enabled", "1") == "1"
             if enabled and is_configured():
                 check_and_apply(db, force_apply=True)
                 check_revocation(db)

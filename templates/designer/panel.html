@@ -71,6 +71,10 @@
       <select name="expiry_mode" id="expiry_mode" onchange="document.getElementById('days_field').style.display = this.value==='days' ? '' : 'none';">
         <option value="trial">تجريبي (3 أيام)</option>
         <option value="days" selected>عدد أيام محدد (بحد أقصى سنة)</option>
+        <option value="month1">شهر واحد (30 يوم)</option>
+        <option value="month3">3 أشهر (90 يوم)</option>
+        <option value="month6">6 أشهر (180 يوم)</option>
+        <option value="unlimited">غير محدود (بدون تاريخ انتهاء)</option>
       </select>
     </div>
     <div class="form-field" id="days_field">

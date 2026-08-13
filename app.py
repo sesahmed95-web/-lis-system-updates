@@ -669,11 +669,18 @@ def designer_generate():
         return redirect(url_for("designer_panel"))
 
     is_trial = expiry_mode == "trial"
+    is_unlimited = expiry_mode == "unlimited"
+    preset_days = {"month1": 30, "month3": 90, "month6": 180}
     if is_trial:
         expiry_date = (date.today() + timedelta(days=license_manager.TRIAL_DAYS)).isoformat()
+    elif is_unlimited:
+        # بدون تاريخ انتهاء (دائم) — يُخزَّن كـ None ويعامَل بكل مكان بنفس
+        # طريقة الترخيص الدائم القديم (راجع license_manager.generate_activation_code).
+        expiry_date = None
+    elif expiry_mode in preset_days:
+        expiry_date = (date.today() + timedelta(days=preset_days[expiry_mode])).isoformat()
     else:
-        # لا يوجد خيار "دائم" بعد الآن — أقصى مدة لأي ترخيص عميل هي سنة
-        # واحدة (365 يوم)، ثم يحتاج تجديد كود جديد.
+        # عدد أيام مخصص — أقصى مدة سنة واحدة (365 يوم) لهذا الخيار تحديداً.
         days = int(request.form.get("days", "365") or 365)
         days = max(1, min(days, 365))
         expiry_date = (date.today() + timedelta(days=days)).isoformat()
