@@ -231,6 +231,6 @@ window.lisComputeCorrectedRetic = function (reticValue, patientHct, patientGende
   var normalHct = window.lisNormalHCT ? window.lisNormalHCT(patientGender) : 45;
   var corrected = retic * (hct / normalHct);
   corrected = Math.round(corrected * 100) / 100;
-  if (Math.abs(corrected - retic) < 0.1) return null;
+  if (corrected >= retic) return null;
   return corrected;
 };
