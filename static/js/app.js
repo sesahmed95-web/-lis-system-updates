@@ -142,13 +142,6 @@ function lisNormalHCT(gender) {
   return 45;
 }
 
-window.lisComputeCorrectedRetic = function (reticVal, hct, gender) {
-  var retic = parseFloat(reticVal);
-  var h = parseFloat(hct);
-  if (isNaN(retic) || isNaN(h) || h <= 0) return null;
-  return Math.round(retic * (h / lisNormalHCT(gender)) * 10) / 10;
-};
-
 window.lisForceRecalcCorrectedRetic = function (btn) {
   var table = btn.closest("table") || document;
   var reticInput = table.querySelector('[data-param-name="Reticulocyte count"]');
@@ -220,4 +213,24 @@ window.lisSaveThenPrint = function (evt, formSelector, printUrl) {
     credentials: "same-origin",
   }).catch(function () { /* حتى لو فشل الحفظ بالشبكة، نفتح الطباعة بآخر نسخة محفوظة سابقاً */ })
     .finally(goToPrint);
+};
+
+
+// ------------------------------------------------------------
+//      Corrected Retic Count             Retic + HCT +      
+//       : Corrected Retic % = Retic % x (HCT        / HCT        )
+//                                    (    < 0.1)                 
+//       null (                /    ).                         .
+// ------------------------------------------------------------
+window.lisComputeCorrectedRetic = function (reticValue, patientHct, patientGender) {
+  var retic = parseFloat(reticValue);
+  if (isNaN(retic)) return null;
+  if (patientHct === null || patientHct === undefined || patientHct === "null") return null;
+  var hct = parseFloat(patientHct);
+  if (isNaN(hct) || hct <= 0) return null;
+  var normalHct = window.lisNormalHCT ? window.lisNormalHCT(patientGender) : 45;
+  var corrected = retic * (hct / normalHct);
+  corrected = Math.round(corrected * 100) / 100;
+  if (Math.abs(corrected - retic) < 0.1) return null;
+  return corrected;
 };
