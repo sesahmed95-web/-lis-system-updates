@@ -67,4 +67,14 @@
   <div style="margin-top:14px; font-style:italic; font-weight:bold; color:#334155; text-align:left; direction:ltr;">The sample received from another Lab.</div>
   {% endif %}
 </div>
+
+<script>
+  // نفس منطق طباعة التقرير المفرد: تسكر هذي النافذة تلقائياً بعد الطباعة
+  // أو إلغائها (afterprint تنطلق بالحالتين) لأنها دائماً تفتح كنافذة/تبويب
+  // جديد (target="_blank") من صفحة إدخال النتائج.
+  (function () {
+    if (!window.opener) return;
+    window.addEventListener('afterprint', function () { window.close(); });
+  })();
+</script>
 {% endblock %}

@@ -59,4 +59,11 @@
     </span></div>
   </div>
 </div>
+
+<script>
+  (function () {
+    if (!window.opener) return;
+    window.addEventListener('afterprint', function () { window.close(); });
+  })();
+</script>
 {% endblock %}
