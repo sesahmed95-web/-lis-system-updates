@@ -5,8 +5,7 @@
   <h3>{{ ot['test_name'] }} — {{ ot['patient_name'] }} <span class="muted mono">#{{ ot['registration_number'] }}</span></h3>
   <p class="muted">{{ t('barcode') }}: <span class="mono">{{ ot['barcode'] }}</span> · {{ t('status') }}: <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span></p>
   {% if ot['test_code'] in ('CBC', 'BF', 'WBCDIFF', 'FLUIDEXAM') and ot['status'] in ('Completed', 'Verified') %}
-  <p><a class="btn small print-link" href="{{ url_for('print_report', order_test_id=ot['id']) }}"
-     onclick="lisSaveThenPrint(event, '#resultEntryForm', this.href); return false;">Print Report</a></p>
+  <p><a class="btn small" href="{{ url_for('print_report', order_test_id=ot['id']) }}">Print Report</a></p>
   {% endif %}
 
   {% if ot['status'] == 'Verified' %}
@@ -21,7 +20,7 @@
     {% endif %}
   {% endif %}
 
-  <form method="POST" id="resultEntryForm">
+  <form method="POST">
     <table>
       <thead><tr>
         <th>{{ t('parameter') }}</th><th>{{ t('unit') }}</th><th>{{ t('range') }}</th><th>{{ t('result') }}</th><th>{{ t('flag') }}</th>

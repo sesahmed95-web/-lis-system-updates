@@ -47,7 +47,7 @@ from datetime import datetime
 GITHUB_OWNER = "sesahmed95-web"     # 🔒 غيّرها
 GITHUB_REPO = "-lis-system-updates"    # 🔒 غيّرها
 GITHUB_BRANCH = "main"                 # 🔒 اسم الفرع اللي تدفع عليه تحديثاتك
-GITHUB_TOKEN = "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"  # 🔒 غيّرها
+GITHUB_TOKEN = "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"  # 🔒 غيّرها
 # مسار ملف VERSION داخل المستودع (لو حاطه بمجلد فرعي غيّر هذا المسار،
 # مثلاً "lis_system/VERSION"). اتركه "VERSION" لو بجذر المستودع مباشرة.
 VERSION_FILE_PATH_IN_REPO = "VERSION"
@@ -93,6 +93,26 @@ def is_newer(remote_version, local_version):
     return (remote_version or "") != (local_version or "") and bool(remote_version)
 
 
+def get_update_branch(db=None):
+    """يرجّع اسم الفرع اللي هذا الجهاز بالذات يتحقق منه. الافتراضي
+    GITHUB_BRANCH (نفس الفرع لكل العملاء). لو تم ضبط update_channel
+    بجدول settings (من لوحة المصمم) يستخدمه بدلها — هذا يخلي تحديث معيّن
+    يوصل لعميل واحد فقط بدل كل العملاء: انشئ فرع خاص بهذا العميل
+    بمستودعك، ادفع (push) التعديل عليه هو فقط، وحط اسم الفرع هذا كـ
+    'قناة التحديث' لهذا العميل من لوحة المصمم عنده. باقي العملاء الباقين
+    على 'main' ما يتأثرون. لاحقاً لو تبي التعديل يوصل للكل: اعمل merge
+    للفرع داخل main."""
+    if db is not None:
+        try:
+            from database import get_setting
+            channel = (get_setting(db, "update_channel", "") or "").strip()
+            if channel:
+                return channel
+        except Exception:
+            pass
+    return GITHUB_BRANCH
+
+
 def _api_request(path, accept="application/vnd.github+json"):
     req = urllib.request.Request(f"{API_BASE}{path}")
     req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
@@ -102,20 +122,22 @@ def _api_request(path, accept="application/vnd.github+json"):
     return urllib.request.urlopen(req, timeout=20)
 
 
-def fetch_remote_version():
-    """يقرأ محتوى ملف VERSION مباشرة من فرع GITHUB_BRANCH بالمستودع —
-    بدون أي حاجة لعمل GitHub Release. أي git push عادي لهذا الفرع
-    (بملف VERSION محدّث) كافي حتى تلتقطه كل نسخ العملاء تلقائياً."""
+def fetch_remote_version(branch=None):
+    """يقرأ محتوى ملف VERSION مباشرة من الفرع المطلوب (افتراضياً
+    GITHUB_BRANCH، أو الفرع الخاص بهذا الجهاز عبر get_update_branch) —
+    بدون أي حاجة لعمل GitHub Release. أي git push عادي لهذا الفرع (بملف
+    VERSION محدّث) كافي حتى تلتقطه نسخ العملاء المتابعة له."""
+    branch = branch or GITHUB_BRANCH
     if not is_configured():
         raise RuntimeError("لم يتم إعداد بيانات GitHub بعد (auto_updater.py) — راجع المصمم")
-    path = f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{VERSION_FILE_PATH_IN_REPO}?ref={GITHUB_BRANCH}"
+    path = f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{VERSION_FILE_PATH_IN_REPO}?ref={branch}"
     with _api_request(path) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-    content = base64.b64decode(data["content"]).decode("utf-8")
-    return content.strip()
+    content_b64 = base64.b64decode(data["content"]).decode("utf-8")
+    return content_b64.strip()
 
 
-def _download_branch_zip(dest_path):
+def _download_branch_zip(dest_path, branch=None):
     """ينزّل نسخة كاملة من فرع GITHUB_BRANCH (zipball) — نفس أسلوب تنزيل
     ملف من مستودع خاص عبر GitHub API: أول طلب بتوكن يرجع تحويل (302)
     لرابط مؤقت موقّع، وهذا الرابط الثاني ما لازم نرسل معه توكن GitHub
@@ -125,7 +147,7 @@ def _download_branch_zip(dest_path):
         def redirect_request(self, *a, **k):
             return None
 
-    zipball_url = f"{API_BASE}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/zipball/{GITHUB_BRANCH}"
+    zipball_url = f"{API_BASE}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/zipball/{branch or GITHUB_BRANCH}"
     opener = urllib.request.build_opener(NoRedirect)
     req = urllib.request.Request(zipball_url)
     req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
@@ -158,8 +180,9 @@ def _extract_zip(zip_path, extract_dir):
     return extract_dir
 
 
-def apply_update(silent=True):
-    """ينزّل نسخة فرع GITHUB_BRANCH، يفكّها، ويشغّل update.ps1 (نفس سكربت
+def apply_update(silent=True, branch=None):
+    """ينزّل نسخة الفرع المطلوب (افتراضياً GITHUB_BRANCH، أو فرع هذا
+    الجهاز الخاص لو تم تمريره)، يفكّها، ويشغّل update.ps1 (نفس سكربت
     التحديث اليدوي الموجود أصلاً) بمصدر = الملف المنزّل. update.ps1 هو
     اللي يوقف السيرفر الحالي وينسخ الملفات الجديدة ويعيد التشغيل — فما
     نحتاج نعيد كتابة هذا المنطق من الصفر."""
@@ -168,7 +191,7 @@ def apply_update(silent=True):
 
     tmp_dir = tempfile.mkdtemp(prefix="lis_update_")
     zip_path = os.path.join(tmp_dir, "update.zip")
-    _download_branch_zip(zip_path)
+    _download_branch_zip(zip_path, branch=branch)
     source_dir = _extract_zip(zip_path, os.path.join(tmp_dir, "extracted"))
 
     update_script = os.path.join(APP_DIR, "update.ps1")
@@ -188,14 +211,16 @@ def apply_update(silent=True):
 
 def check_and_apply(db, force_apply=True):
     """يتحقق من وجود إصدار أحدث (مباشرة من ملف VERSION على فرع
-    GITHUB_BRANCH — بدون أي حاجة لـ GitHub Release). لو موجود ينزّله
-    ويطبّقه (البرنامج راح يعيد تشغيل نفسه تلقائياً خلال ثوان). يرجع dict
-    فيه النتيجة ويسجّلها بجدول settings حتى تنعرض بلوحة المصمم."""
+    التحديث الخاص بهذا الجهاز — راجع get_update_branch — بدون أي حاجة
+    لـ GitHub Release). لو موجود ينزّله ويطبّقه (البرنامج راح يعيد تشغيل
+    نفسه تلقائياً خلال ثوان). يرجع dict فيه النتيجة ويسجّلها بجدول
+    settings حتى تنعرض بلوحة المصمم."""
     from database import set_setting
     now = datetime.now().isoformat(timespec="seconds")
+    branch = get_update_branch(db)
     try:
         local_version = get_local_version()
-        remote_version = fetch_remote_version()
+        remote_version = fetch_remote_version(branch=branch)
         if is_newer(remote_version, local_version):
             status = f"🆕 تم العثور على إصدار جديد ({remote_version}) — جاري التحديث الآن..."
             set_setting(db, "auto_update_last_check", now)
@@ -206,7 +231,7 @@ def check_and_apply(db, force_apply=True):
             set_setting(db, "auto_update_pending_banner", remote_version)
             db.commit()
             if force_apply:
-                apply_update(silent=True)
+                apply_update(silent=True, branch=branch)
             return {"ok": True, "updated": True, "remote_version": remote_version,
                     "local_version": local_version, "message": status}
         else:

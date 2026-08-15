@@ -47,6 +47,26 @@
     منه. زر "تحقق من تحديث الآن" يشتغل فوراً بغض النظر عن حالة الربط،
     مفيد لتجربة الاتصال أو لدفع تحديث عاجل.
   </p>
+
+  <hr style="margin:16px 0; border:none; border-top:1px solid var(--border,#e5e7eb);">
+
+  <h4 style="margin-bottom:6px;">🎯 قناة التحديث لهذا الجهاز</h4>
+  <p class="muted">
+    هذا الجهاز يتابع حالياً فرع: <strong class="mono">{{ update_info.branch }}</strong>
+    {% if update_info.custom_channel %}<span style="color:#c0392b;">(قناة خاصة — مو الفرع العام)</span>{% else %}(الفرع العام — نفس كل العملاء الآخرين){% endif %}
+  </p>
+  <p class="muted">
+    اترك الحقل فاضي حتى يبقى هذا الجهاز على الفرع العام (<span class="mono">{{ update_info.default_branch }}</span>)
+    ويستلم نفس التحديثات مثل بقية العملاء. لو تبي تحديث يوصل لهذا العميل
+    فقط دون البقية: أنشئ فرع خاص فيه بمستودعك على GitHub (مثلاً
+    <span class="mono">client-alkut</span>)، ادفع تعديله عليه هو فقط،
+    واكتب اسم هذا الفرع بالحقل تحت واحفظ. لاحقاً لو تبي التعديل يوصل
+    للجميع: اعمل merge لهذا الفرع داخل الفرع العام.
+  </p>
+  <form method="POST" action="{{ url_for('designer_update_channel') }}" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <input type="text" name="update_channel" value="{{ update_info.custom_channel }}" placeholder="{{ update_info.default_branch }}" class="mono" style="min-width:220px;">
+    <button class="btn secondary" type="submit">حفظ قناة التحديث</button>
+  </form>
 </div>
 
 <div class="card">
@@ -71,10 +91,6 @@
       <select name="expiry_mode" id="expiry_mode" onchange="document.getElementById('days_field').style.display = this.value==='days' ? '' : 'none';">
         <option value="trial">تجريبي (3 أيام)</option>
         <option value="days" selected>عدد أيام محدد (بحد أقصى سنة)</option>
-        <option value="month1">شهر واحد (30 يوم)</option>
-        <option value="month3">3 أشهر (90 يوم)</option>
-        <option value="month6">6 أشهر (180 يوم)</option>
-        <option value="unlimited">غير محدود (بدون تاريخ انتهاء)</option>
       </select>
     </div>
     <div class="form-field" id="days_field">

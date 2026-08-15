@@ -32,7 +32,7 @@
         <td>
           <a class="btn small" href="{{ url_for('result_entry', order_test_id=ot['id']) }}">{{ t('enter_results') }}</a>
           {% if ot['test_code'] in ('CBC', 'BF', 'WBCDIFF', 'FLUIDEXAM') and ot['status'] in ('Completed', 'Verified') %}
-          <a class="btn small" target="_blank" href="{{ url_for('print_report', order_test_id=ot['id']) }}">Print Report</a>
+          <a class="btn small" href="{{ url_for('print_report', order_test_id=ot['id']) }}">Print Report</a>
           {% endif %}
         </td>
       </tr>

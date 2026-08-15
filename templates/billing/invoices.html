@@ -27,7 +27,7 @@
           {% endif %}
         </td>
         <td style="white-space:nowrap;">
-          <a class="btn small secondary" target="_blank" href="{{ url_for('print_invoice', visit_id=i['visit_id']) }}" title="طباعة الفاتورة">🧾</a>
+          <a class="btn small secondary" href="{{ url_for('print_invoice', visit_id=i['visit_id']) }}" title="طباعة الفاتورة">🧾</a>
           <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=i['visit_id']) }}" title="تعديل الزيارة">✏️</a>
           <form method="POST" action="{{ url_for('toggle_invoice_lock', invoice_id=i['id']) }}" style="display:inline;">
             <button class="btn small {{ 'danger' if not i['is_locked'] else 'success' }}" type="submit" title="{{ 'قفل الفاتورة (منع التعديل)' if not i['is_locked'] else 'فتح الفاتورة للتعديل' }}">{{ '🔒' if not i['is_locked'] else '🔓' }}</button>

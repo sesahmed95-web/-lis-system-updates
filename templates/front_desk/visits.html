@@ -31,9 +31,9 @@
         <td>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
             <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=v['id']) }}" title="تعديل الزيارة">✏️</a>
-            <a class="btn small secondary" target="_blank" href="{{ url_for('print_visit_barcode', visit_id=v['id']) }}" title="طباعة ملصق باركود الزيارة">🏷️</a>
-            <a class="btn small secondary" target="_blank" href="{{ url_for('print_sample_barcodes', visit_id=v['id']) }}" title="طباعة ملصقات باركود العينات">🧪🏷️</a>
-            <a class="btn small secondary" target="_blank" href="{{ url_for('print_invoice', visit_id=v['id']) }}" title="طباعة الفاتورة">🧾</a>
+            <a class="btn small secondary" href="{{ url_for('print_visit_barcode', visit_id=v['id']) }}" title="طباعة ملصق باركود الزيارة">🏷️</a>
+            <a class="btn small secondary" href="{{ url_for('print_sample_barcodes', visit_id=v['id']) }}" title="طباعة ملصقات باركود العينات">🧪🏷️</a>
+            <a class="btn small secondary" href="{{ url_for('print_invoice', visit_id=v['id']) }}" title="طباعة الفاتورة">🧾</a>
             <form method="POST" action="{{ url_for('delete_visit', visit_id=v['id']) }}" style="display:inline"
                   onsubmit="return confirm('متأكد من حذف زيارة {{ v['full_name'] }} رقم {{ v['registration_number'] }}؟ هذا الإجراء لا يمكن التراجع عنه، وراح يحذف المريض والدكتور المرسل أيضًا إذا صاروا بلا أي زيارات أخرى مرتبطة.');">
               <button class="btn small danger" type="submit" title="حذف الزيارة">🗑 حذف</button>

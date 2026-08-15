@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "print_base.html" %}
 {% block page_title %}نتائج زيارة #{{ visit['registration_number'] }}{% endblock %}
 {% block content %}
 <style>
@@ -20,6 +20,7 @@
 
 <div class="pvr-toolbar" style="display:flex; gap:10px; align-items:center;">
   <button class="btn" onclick="window.print()">🖨 طباعة</button>
+  <a class="btn secondary" href="{{ url_for('visit_results_entry', visit_id=visit['id']) }}" style="text-decoration:none;">🔙 الرجوع</a>
 </div>
 
 <div class="pvr-scope">
@@ -67,14 +68,4 @@
   <div style="margin-top:14px; font-style:italic; font-weight:bold; color:#334155; text-align:left; direction:ltr;">The sample received from another Lab.</div>
   {% endif %}
 </div>
-
-<script>
-  // نفس منطق طباعة التقرير المفرد: تسكر هذي النافذة تلقائياً بعد الطباعة
-  // أو إلغائها (afterprint تنطلق بالحالتين) لأنها دائماً تفتح كنافذة/تبويب
-  // جديد (target="_blank") من صفحة إدخال النتائج.
-  (function () {
-    if (!window.opener) return;
-    window.addEventListener('afterprint', function () { window.close(); });
-  })();
-</script>
 {% endblock %}

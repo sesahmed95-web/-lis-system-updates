@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ 'rtl' if lang == 'ar' else 'ltr' }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block page_title %}{{ brand_name }}{% endblock %}</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='icon/lab-icon.ico') }}">
+<link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='icon/lab-icon.ico') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script>
+  // نفس منطق تفريغ عنوان التبويب وقت الطباعة الموجود بـ base.html، منقول
+  // هنا لأن صفحات الطباعة صارت تستخدم قالب مستقل بدون الشريط الجانبي.
+  (function () {
+    var savedTitle = null;
+    window.addEventListener("beforeprint", function () {
+      savedTitle = document.title;
+      document.title = "";
+    });
+    window.addEventListener("afterprint", function () {
+      if (savedTitle !== null) document.title = savedTitle;
+    });
+  })();
+</script>
+</head>
+<body>
+<script>
+  if (localStorage.getItem("lis-theme") === "dark") document.documentElement.classList.add("dark");
+</script>
+{% block content %}{% endblock %}
+</body>
+</html>

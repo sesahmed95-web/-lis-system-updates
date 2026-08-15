@@ -187,30 +187,6 @@ def department_shows_previous_values(department):
     return any(k in d for k in PREVIOUS_VALUE_DEPARTMENT_KEYWORDS)
 
 
-# Accepts values typed with Arabic-Indic digits (٠-٩) or a comma/Arabic
-# decimal separator instead of a plain "." — common on Iraqi keyboards/
-# input methods — before trying to parse a result as a number. Falls back
-# to the original text untouched if there's nothing to normalize, so it
-# never changes behavior for already-plain values like "12.5".
-_ARABIC_INDIC_DIGITS = "٠١٢٣٤٥٦٧٨٩"
-
-
-def normalize_numeric_text(value):
-    if value is None:
-        return value
-    out = value.strip()
-    for i, d in enumerate(_ARABIC_INDIC_DIGITS):
-        if d in out:
-            out = out.replace(d, str(i))
-    out = out.replace("٫", ".").replace("،", ".")
-    # A comma is only treated as a decimal point when it's the sole
-    # separator in the value (e.g. "2,5") — not for thousands-style
-    # input — so "2,500" is left alone rather than misread as "2.500".
-    if "," in out and out.count(",") == 1 and "." not in out:
-        out = out.replace(",", ".")
-    return out
-
-
 def get_visit_hct(db, visit_id):
     """يجيب آخر قيمة HCT مُدخلة ضمن تحليل CBC لنفس الزيارة (إن وجدت)، تُستخدم
     لحساب Corrected Retic count تلقائيًا من Reticulocyte count. يرجع None إذا
@@ -311,24 +287,6 @@ def inject_globals():
                 # المستخدمين العاديين (admin, reception...) ما عندهم هذا
                 # المفتاح بالسيشن أبداً، فالأيقونة ما تظهر عندهم إطلاقاً.
                 is_designer=bool(session.get("designer_id")))
-
-
-# صفحات الطباعة تُفتح كثيرًا بنفس الرابط بعد تعديل نتيجة (خصوصًا حقل
-# Conclusion ورموزه)، والمتصفح ممكن يخزّن نسخة قديمة من نفس الرابط
-# (GET) بذاكرة التخزين المؤقت بدل ما يطلبها من جديد — فيطلع بالطباعة
-# محتوى قديم رغم إن التعديل انحفظ فعليًا. هذا يجبر كل فتح لصفحة طباعة
-# يجيب أحدث نسخة من السيرفر دائمًا. لا يؤثر إطلاقاً على استدعاء
-# print_report()/print_visit_results() كدالة بايثون عادية (مسار توليد
-# PDF لواتساب) لأن after_request ما يشتغل إلا مع طلبات حقيقية عبر الشبكة.
-_NO_CACHE_ENDPOINTS = {"print_report", "print_visit_results", "preview_report_design"}
-
-
-@app.after_request
-def _no_cache_print_pages(response):
-    if request.endpoint in _NO_CACHE_ENDPOINTS:
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-    return response
 
 
 def login_required(view):
@@ -557,6 +515,9 @@ def designer_panel():
         "enabled": get_setting(db, "auto_update_enabled", "1") == "1",
         "last_check": get_setting(db, "auto_update_last_check", ""),
         "last_status": get_setting(db, "auto_update_last_status", ""),
+        "branch": auto_updater.get_update_branch(db),
+        "default_branch": auto_updater.GITHUB_BRANCH,
+        "custom_channel": get_setting(db, "update_channel", ""),
     }
     github_write_token = get_setting(db, "github_write_token", "")
     revoked_licenses = {}
@@ -624,6 +585,25 @@ def designer_restore_license(hardware_id):
     return redirect(url_for("designer_panel"))
 
 
+@app.route("/designer/update/channel", methods=["POST"])
+@designer_required
+def designer_update_channel():
+    """يضبط 'قناة التحديث' (اسم الفرع بمستودع GitHub) لهذا الجهاز بالذات.
+    اتركه فاضي حتى يرجع يتابع الفرع العام (GITHUB_BRANCH، افتراضياً main)
+    زي باقي العملاء. عبّي اسم فرع خاص (مثلاً client-alkut) حتى يستلم هذا
+    الجهاز فقط تحديثات ذلك الفرع دون بقية العملاء."""
+    db = get_db()
+    channel = request.form.get("update_channel", "").strip()
+    set_setting(db, "update_channel", channel)
+    db.commit()
+    db.close()
+    if channel:
+        flash(f"تم ضبط هذا الجهاز على قناة تحديث خاصة: {channel} — لن يتأثر بتحديثات main العامة إلا هذا الفرع.")
+    else:
+        flash("تم إرجاع هذا الجهاز لمتابعة قناة التحديث العامة (main) مثل بقية العملاء.")
+    return redirect(url_for("designer_panel"))
+
+
 @app.route("/designer/update/toggle", methods=["POST"])
 @designer_required
 def designer_update_toggle():
@@ -669,18 +649,11 @@ def designer_generate():
         return redirect(url_for("designer_panel"))
 
     is_trial = expiry_mode == "trial"
-    is_unlimited = expiry_mode == "unlimited"
-    preset_days = {"month1": 30, "month3": 90, "month6": 180}
     if is_trial:
         expiry_date = (date.today() + timedelta(days=license_manager.TRIAL_DAYS)).isoformat()
-    elif is_unlimited:
-        # بدون تاريخ انتهاء (دائم) — يُخزَّن كـ None ويعامَل بكل مكان بنفس
-        # طريقة الترخيص الدائم القديم (راجع license_manager.generate_activation_code).
-        expiry_date = None
-    elif expiry_mode in preset_days:
-        expiry_date = (date.today() + timedelta(days=preset_days[expiry_mode])).isoformat()
     else:
-        # عدد أيام مخصص — أقصى مدة سنة واحدة (365 يوم) لهذا الخيار تحديداً.
+        # لا يوجد خيار "دائم" بعد الآن — أقصى مدة لأي ترخيص عميل هي سنة
+        # واحدة (365 يوم)، ثم يحتاج تجديد كود جديد.
         days = int(request.form.get("days", "365") or 365)
         days = max(1, min(days, 365))
         expiry_date = (date.today() + timedelta(days=days)).isoformat()
@@ -2266,7 +2239,7 @@ def save_order_test_results(db, ot, parameters, form, user_id, field_prefix=""):
         value_text = None
         if param["result_type"] == "Numeric":
             try:
-                value_numeric = float(normalize_numeric_text(value))
+                value_numeric = float(value)
                 if rng and rng["low"] is not None and value_numeric < rng["low"]:
                     flag = "Low"
                 elif rng and rng["high"] is not None and value_numeric > rng["high"]:
