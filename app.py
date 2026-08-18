@@ -3010,6 +3010,43 @@ def suggestions_list():
 
 
 
+@app.route("/master/mapcodes/bulk_add_test", methods=["POST"])
+@roles_required("supervisor")
+def mapcodes_bulk_add_test():
+    """يضيف مرة وحدة سطر Mapcode لكل عناصر تحليل معيّن دفعة وحدة (مثلاً كل
+    الـ 21 عنصر بتحليل CBC) بدل ما تضيفهم واحد واحد يدوياً من القائمة.
+    الكود الافتراضي المكتوب بـ machine_code هو اسم العنصر نفسه كبداية —
+    لازم بعدها تراجعه وتصححه بالكود الحقيقي اللي يرسله جهازك بالذات (شوف
+    صفحة Host Interface بعد أول عينة تجريبية). العناصر النصية (Text، مثل
+    Comment أو Conclusion) تُستثنى لأنه الأجهزة لا ترسل نصوص حرة عادةً،
+    وأي عنصر عنده Mapcode موجود مسبقاً يُتخطّى حتى ما يتكرر."""
+    db = get_db()
+    test_definition_id = request.form.get("test_definition_id")
+    machine_name = request.form.get("bulk_machine_name", "").strip()
+    params = db.execute(
+        "SELECT id, name FROM test_parameters WHERE test_definition_id=? AND result_type='Numeric' ORDER BY id",
+        (test_definition_id,),
+    ).fetchall()
+    added = 0
+    skipped = 0
+    for p in params:
+        exists = db.execute(
+            "SELECT 1 FROM mapcodes WHERE test_parameter_id=? LIMIT 1", (p["id"],)
+        ).fetchone()
+        if exists:
+            skipped += 1
+            continue
+        db.execute(
+            "INSERT INTO mapcodes (test_parameter_id, machine_name, machine_code, send_enabled, receive_enabled) "
+            "VALUES (?, ?, ?, 1, 1)",
+            (p["id"], machine_name, p["name"]),
+        )
+        added += 1
+    db.commit()
+    flash(f"تمت إضافة {added} عنصر — راجع وصحّح الأكواد بالأكواد الحقيقية من جهازك. ({skipped} كانوا موجودين مسبقاً وتُخطّوا)" if added or skipped else "هذا التحليل ما عنده عناصر رقمية.")
+    return redirect(url_for("mapcodes_list"))
+
+
 @app.route("/master/mapcodes", methods=["GET", "POST"])
 @roles_required("supervisor")
 def mapcodes_list():
@@ -3038,7 +3075,10 @@ def mapcodes_list():
         "SELECT tp.id, tp.name, td.name as test_name FROM test_parameters tp "
         "JOIN test_definitions td ON td.id = tp.test_definition_id ORDER BY td.name"
     ).fetchall()
-    return render_template("master/mapcodes.html", rows=rows, parameters=parameters)
+    tests = db.execute(
+        "SELECT id, name FROM test_definitions ORDER BY name"
+    ).fetchall()
+    return render_template("master/mapcodes.html", rows=rows, parameters=parameters, tests=tests)
 
 
 @app.route("/master/mapcodes/<int:mapcode_id>/edit", methods=["POST"])

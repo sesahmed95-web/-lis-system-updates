@@ -2,6 +2,34 @@
 {% block page_title %}{{ t('mapcodes') }}{% endblock %}
 {% block content %}
 <div class="card">
+  <h3>إضافة كل عناصر تحليل دفعة واحدة</h3>
+  <p class="muted">
+    بدل ما تضيف كل عنصر لحاله (مثلاً 21 عنصر بتحليل CBC)، اختر التحليل، اكتب اسم الجهاز، واضغط
+    إضافة — راح تنضاف كل عناصره دفعة وحدة بكود مبدئي (اسم العنصر نفسه). بعدها راجع وصحّح كل
+    كود بالكود الحقيقي اللي يرسله جهازك (شوف صفحة Host Interface بعد أول عينة تجريبية).
+    العناصر النصية (زي Comment أو Conclusion) تُستثنى تلقائياً، وأي عنصر عنده Mapcode موجود
+    مسبقاً يتخطّى بدون تكرار.
+  </p>
+  <form method="POST" action="{{ url_for('mapcodes_bulk_add_test') }}" class="form-grid">
+    <div class="form-field">
+      <label>التحليل</label>
+      <select name="test_definition_id" required>
+        {% for tdef in tests %}
+        <option value="{{ tdef['id'] }}">{{ tdef['name'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label>{{ t('machine_name') }}</label>
+      <input type="text" name="bulk_machine_name" placeholder="e.g. DxH 520">
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">إضافة كل عناصر هذا التحليل دفعة واحدة</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
   <h3>{{ t('add_mapcode') }}</h3>
   <form method="POST" class="form-grid">
     <div class="form-field">
