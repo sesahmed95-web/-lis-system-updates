@@ -47,7 +47,7 @@ from datetime import datetime
 GITHUB_OWNER = "sesahmed95-web"     # 🔒 غيّرها
 GITHUB_REPO = "-lis-system-updates"    # 🔒 غيّرها
 GITHUB_BRANCH = "main"                 # 🔒 اسم الفرع اللي تدفع عليه تحديثاتك
-GITHUB_TOKEN = "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"  # 🔒 غيّرها
+GITHUB_TOKEN = "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"  # 🔒 غيّرها
 # مسار ملف VERSION داخل المستودع (لو حاطه بمجلد فرعي غيّر هذا المسار،
 # مثلاً "lis_system/VERSION"). اتركه "VERSION" لو بجذر المستودع مباشرة.
 VERSION_FILE_PATH_IN_REPO = "VERSION"
