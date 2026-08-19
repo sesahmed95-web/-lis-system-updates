@@ -24,6 +24,7 @@
 <script>
   window.LIS_PATIENT_HCT = {{ 'null' if patient_hct is none else patient_hct }};
   window.LIS_PATIENT_GENDER = {{ visit['gender']|tojson }};
+  window.LIS_HCT_NORMAL = {{ 'null' if patient_hct_normal is none else patient_hct_normal }};
 </script>
 
 <script>

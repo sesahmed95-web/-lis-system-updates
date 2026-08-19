@@ -40,10 +40,13 @@
 <div class="box-field"><b>Platelets:</b> {{ params.get('Platelets_desc', '') }}</div>
 <div class="box-field"><b>Conclusion:</b> {{ params.get('Conclusion', '') | render_conclusion }}</div>
 
+{% set corrected_retic = params.get('Corrected Retic count', '') %}
 <table style="width:100%; margin-top:10px; direction:ltr; text-align:left;">
   <tr>
-    <td style="width:50%;"><b>Reticulocyte count:</b> {{ params.get('Reticulocyte count', '') }} %</td>
-    <td><b>Corrected Retic count:</b> {{ params.get('Corrected Retic count', '') }} %</td>
+    <td style="width:{{ '50%' if corrected_retic else '100%' }};"><b>Reticulocyte count:</b> {{ params.get('Reticulocyte count', '') }} %</td>
+    {% if corrected_retic %}
+    <td><b>Corrected Retic count:</b> {{ corrected_retic }} %</td>
+    {% endif %}
   </tr>
 </table>
 {% endblock %}

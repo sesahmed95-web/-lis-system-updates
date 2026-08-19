@@ -5,14 +5,14 @@
 <title>Barcode #{{ visit['registration_number'] }}</title>
 <style>
   * { box-sizing: border-box; }
-  /* ملصق 50مم × 20مم — كل المحتوى يجب أن يبقى ضمن صفحة واحدة فقط */
-  @page { size: 50mm 20mm; margin: 0; }
+  /* ملصق 50مم × 30مم — كل المحتوى يجب أن يبقى ضمن صفحة واحدة فقط */
+  @page { size: 50mm 30mm; margin: 0; }
   html, body {
-    width: 50mm; height: 20mm; margin: 0; padding: 0;
+    width: 50mm; height: 30mm; margin: 0; padding: 0;
     font-family: "Segoe UI", Tahoma, Arial, sans-serif; overflow: hidden;
   }
   .label {
-    width: 50mm; height: 20mm; padding: 1mm 1.5mm;
+    width: 50mm; height: 30mm; padding: 1mm 1.5mm;
     display: flex; flex-direction: column; justify-content: flex-start;
     direction: ltr; text-align: left; overflow: hidden;
   }
@@ -40,11 +40,10 @@
 <body onload="window.print()">
   {% set draw_date = (draw_time.split(' ')[0] if draw_time and ' ' in draw_time else draw_time) or '' %}
   {% set draw_hm = (draw_time.split(' ')[1][:5] if draw_time and ' ' in draw_time else '') %}
-  {% set ar_names = tests|map(attribute='name_ar')|select|list %}
   <div class="label">
     <div class="patient">{{ visit['full_name'] }}</div>
     {% if tests %}
-    <div class="tests">{{ ar_names|join('، ') if ar_names else tests|map(attribute='name')|join(', ') }}</div>
+    <div class="tests">{{ tests|map(attribute='name')|join(', ') }}</div>
     {% endif %}
     <div class="meta-line">{{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['gender'] }}</div>
     <div class="meta-line">{{ draw_date }}{% if draw_hm %} {{ draw_hm }}{% endif %}</div>

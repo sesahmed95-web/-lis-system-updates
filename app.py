@@ -204,6 +204,22 @@ def get_visit_hct(db, visit_id):
     ).fetchone()
     return row["value_numeric"] if row else None
 
+def get_normal_hct(db, gender, age, age_unit):
+    """يجيب متوسط المدى الطبيعي لـ HCT (من جدول القيم المرجعية reference_ranges)
+    حسب عمر وجنس المريض — يُستخدم أساسًا لحساب Corrected Retic count بدل رقم
+    ثابت واحد لكل الأعمار. يرجع None إذا ما كان فيه مدى مرجعي مطابق."""
+    param = db.execute(
+        "SELECT tp.id FROM test_parameters tp "
+        "JOIN test_definitions td ON td.id = tp.test_definition_id "
+        "WHERE td.code = 'CBC' AND tp.name = 'HCT' LIMIT 1"
+    ).fetchone()
+    if not param:
+        return None
+    rng = find_reference_range(db, param["id"], gender, age, age_unit)
+    if not rng or rng["low"] is None or rng["high"] is None:
+        return None
+    return (rng["low"] + rng["high"]) / 2.0
+
 
 def find_previous_reference(db, full_name, age, gender, test_definition_id, department,
                              exclude_visit_id, before_created_at):
@@ -2420,7 +2436,8 @@ def visit_results_entry(visit_id):
         })
 
     return render_template("front_desk/visit_results_entry.html", visit=visit, boxes=boxes,
-                            patient_hct=get_visit_hct(db, visit_id))
+                            patient_hct=get_visit_hct(db, visit_id),
+                            patient_hct_normal=get_normal_hct(db, visit["gender"], visit["age"], visit["age_unit"]))
 
 
 @app.route("/reports/print/<int:order_test_id>")

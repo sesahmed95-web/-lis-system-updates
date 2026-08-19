@@ -131,16 +131,25 @@ window.lisInsertConclusionMarker = function (textareaId, marker) {
 // حساب Corrected Reticulocyte Count تلقائيًا من Reticulocyte count
 // وقيمة HCT الخاصة بنفس المريض/الزيارة (من تحليل CBC):
 //   Corrected Retic % = Retic % × (HCT المريض ÷ HCT الطبيعي)
-//   HCT الطبيعي: 45% للرجال، 42% للنساء.
+//   HCT الطبيعي: يُجلب من جدول القيم المرجعية حسب عمر/جنس المريض
+//   (window.LIS_HCT_NORMAL، يحقنه الخادم) — وإذا ما توفر، رجوع احتياطي
+//   لقيمة ثابتة تقريبية: 45% للرجال، 42% للنساء.
 // القيمة تبقى قابلة للتعديل اليدوي دائمًا؛ بمجرد ما المستخدم يعدلها
 // يدويًا يتوقف الحساب التلقائي عن الكتابة فوقها إلا إذا ضغط زر
 // "إعادة الحساب" بنفسه.
+// إذا القيمة المصححة قريبة جداً من الرتك العادي (الفرق بينهما ضئيل)،
+// ما فيها فائدة سريرية إضافية — نترك الحقل فاضياً بدل تعبئته، وبالتالي
+// يختفي "Corrected Retic count" تلقائيًا من التقرير المطبوع (القوالب
+// لا تعرض الحقل أصلاً إذا كان فاضياً).
 // ------------------------------------------------------------------
-function lisNormalHCT(gender) {
+window.lisNormalHCT = function (gender) {
+  if (typeof window.LIS_HCT_NORMAL === "number" && !isNaN(window.LIS_HCT_NORMAL) && window.LIS_HCT_NORMAL > 0) {
+    return window.LIS_HCT_NORMAL;
+  }
   var g = (gender || "").toString().trim().toLowerCase();
   if (g.indexOf("f") === 0 || g.indexOf("أنث") === 0 || g.indexOf("انث") === 0) return 42;
   return 45;
-}
+};
 
 window.lisForceRecalcCorrectedRetic = function (btn) {
   var table = btn.closest("table") || document;
@@ -149,32 +158,148 @@ window.lisForceRecalcCorrectedRetic = function (btn) {
   if (!reticInput || !correctedInput) return;
   var val = window.lisComputeCorrectedRetic(reticInput.value, window.LIS_PATIENT_HCT, window.LIS_PATIENT_GENDER);
   if (val === null) {
-    alert("تأكد من إدخال Reticulocyte count أولاً، ومن توفر قيمة HCT لهذا المريض (من نتيجة CBC بنفس الزيارة).");
+    correctedInput.value = "";
+    correctedInput.dataset.autoFilled = "1";
+    alert("تأكد من إدخال Reticulocyte count أولاً، ومن توفر قيمة HCT لهذا المريض (من نتيجة CBC بنفس الزيارة). لو القيمتان متوفرتان، فالقيمة المصححة قريبة جداً من الرتك العادي ولا داعي لإظهارها.");
     return;
   }
   correctedInput.value = val;
   correctedInput.dataset.autoFilled = "1";
 };
 
+// ------------------------------------------------------------------
+// حساب القيم المطلقة (Absolute Counts) لأنواع كريات الدم البيضاء
+// (LY#/MO#/NE#/EO#/BA#) تلقائيًا من نسبتها المئوية × عدد WBCs الكلي:
+//   القيمة المطلقة = (النسبة% ÷ 100) × WBCs
+// نفس آلية الحقول الأخرى: تبقى قابلة للتعديل اليدوي، ولمسها من المستخدم
+// يوقف الحساب التلقائي عنها.
+// ------------------------------------------------------------------
+var LIS_DIFF_PAIRS = [
+  ["Ly", "LY#"],
+  ["MO", "MO#"],
+  ["NE", "NE#"],
+  ["EO", "EO#"],
+  ["BA", "BA#"],
+];
+
+function lisRoundAbs(n) {
+  return n >= 1 ? Math.round(n * 100) / 100 : Math.round(n * 1000) / 1000;
+}
+
+window.lisComputeAbsoluteDiff = function (pctValue, wbcValue) {
+  var pct = parseFloat(pctValue);
+  var wbc = parseFloat(wbcValue);
+  if (isNaN(pct) || isNaN(wbc) || wbc <= 0) return null;
+  return lisRoundAbs((pct / 100) * wbc);
+};
+
+function lisRecalcAllDiffAbsolutes(table) {
+  var wbcInput = table.querySelector('[data-param-name="WBCs"]');
+  if (!wbcInput) return;
+  LIS_DIFF_PAIRS.forEach(function (pair) {
+    var pctInput = table.querySelector('[data-param-name="' + pair[0] + '"]');
+    var absInput = table.querySelector('[data-param-name="' + pair[1] + '"]');
+    if (!pctInput || !absInput) return;
+    if (absInput.dataset.autoFilled === "0") return; // المستخدم عدّلها يدويًا — ما نكتب فوقها
+    var val = window.lisComputeAbsoluteDiff(pctInput.value, wbcInput.value);
+    if (val !== null) {
+      absInput.value = val;
+      absInput.dataset.autoFilled = "1";
+    }
+  });
+}
+
+function lisRecalcAllDiffAbsolutesInitial(table) {
+  var wbcInput = table.querySelector('[data-param-name="WBCs"]');
+  if (!wbcInput || !wbcInput.value) return;
+  LIS_DIFF_PAIRS.forEach(function (pair) {
+    var pctInput = table.querySelector('[data-param-name="' + pair[0] + '"]');
+    var absInput = table.querySelector('[data-param-name="' + pair[1] + '"]');
+    if (!pctInput || !absInput || absInput.value || !pctInput.value) return;
+    var val = window.lisComputeAbsoluteDiff(pctInput.value, wbcInput.value);
+    if (val !== null) absInput.value = val;
+  });
+}
+
+// ------------------------------------------------------------------
+// حساب HCT تقديريًا تلقائيًا من RBC × MCV (المعادلة الطبية القياسية):
+//   HCT % = (RBC بوحدة X10^12/uL) × (MCV بوحدة fL) ÷ 10
+// نفس آلية الحقول الأخرى: يبقى الحقل قابلاً للتعديل اليدوي، ولمسه من
+// المستخدم يوقف الحساب التلقائي عنه.
+// ------------------------------------------------------------------
+window.lisComputeHct = function (rbcValue, mcvValue) {
+  var rbc = parseFloat(rbcValue);
+  var mcv = parseFloat(mcvValue);
+  if (isNaN(rbc) || isNaN(mcv) || rbc <= 0 || mcv <= 0) return null;
+  return Math.round((rbc * mcv / 10) * 10) / 10; // خانة عشرية واحدة
+};
+
+function lisRecalcHct(table) {
+  var rbcInput = table.querySelector('[data-param-name="RBC"]');
+  var mcvInput = table.querySelector('[data-param-name="MCV"]');
+  var hctInput = table.querySelector('[data-param-name="HCT"]');
+  if (!rbcInput || !mcvInput || !hctInput) return;
+  if (hctInput.dataset.autoFilled === "0") return; // المستخدم عدّلها يدويًا — ما نكتب فوقها
+  var val = window.lisComputeHct(rbcInput.value, mcvInput.value);
+  if (val !== null) {
+    hctInput.value = val;
+    hctInput.dataset.autoFilled = "1";
+  }
+}
+
+function lisRecalcHctInitial(table) {
+  var rbcInput = table.querySelector('[data-param-name="RBC"]');
+  var mcvInput = table.querySelector('[data-param-name="MCV"]');
+  var hctInput = table.querySelector('[data-param-name="HCT"]');
+  if (!rbcInput || !mcvInput || !hctInput) return;
+  if (hctInput.value || !rbcInput.value || !mcvInput.value) return;
+  var val = window.lisComputeHct(rbcInput.value, mcvInput.value);
+  if (val !== null) hctInput.value = val;
+}
+
 document.addEventListener("input", function (e) {
   var el = e.target;
   if (!el || !el.matches) return;
   if (el.classList.contains("lis-autoresize")) window.lisAutoResize(el);
+
+  // Corrected Retic count
   if (el.matches('[data-param-name="Reticulocyte count"]')) {
     var table = el.closest("table");
     var correctedInput = table && table.querySelector('[data-param-name="Corrected Retic count"]');
     if (correctedInput && correctedInput.dataset.autoFilled !== "0") {
       var val = window.lisComputeCorrectedRetic(el.value, window.LIS_PATIENT_HCT, window.LIS_PATIENT_GENDER);
-      if (val !== null) { correctedInput.value = val; correctedInput.dataset.autoFilled = "1"; }
+      correctedInput.value = val === null ? "" : val;
+      correctedInput.dataset.autoFilled = "1";
     }
   }
   if (el.matches('[data-param-name="Corrected Retic count"]')) {
     el.dataset.autoFilled = "0"; // المستخدم لمسها يدويًا — نتوقف عن الكتابة فوقها
   }
+
+  // القيم المطلقة لأنواع الكريات البيضاء (من النسبة% + WBCs)
+  if (el.matches('[data-param-name="Ly"], [data-param-name="MO"], [data-param-name="NE"], '
+                + '[data-param-name="EO"], [data-param-name="BA"], [data-param-name="WBCs"]')) {
+    var diffTable = el.closest("table");
+    if (diffTable) lisRecalcAllDiffAbsolutes(diffTable);
+  }
+  if (el.matches('[data-param-name="LY#"], [data-param-name="MO#"], [data-param-name="NE#"], '
+                + '[data-param-name="EO#"], [data-param-name="BA#"]')) {
+    el.dataset.autoFilled = "0"; // المستخدم لمسها يدويًا
+  }
+
+  // HCT من RBC × MCV
+  if (el.matches('[data-param-name="RBC"], [data-param-name="MCV"]')) {
+    var hctTable = el.closest("table");
+    if (hctTable) lisRecalcHct(hctTable);
+  }
+  if (el.matches('[data-param-name="HCT"]')) {
+    el.dataset.autoFilled = "0"; // المستخدم لمسها يدويًا
+  }
 });
 
 document.addEventListener("DOMContentLoaded", function () {
   document.querySelectorAll("textarea.lis-autoresize").forEach(window.lisAutoResize);
+
   // أول تحميل للصفحة: إذا Reticulocyte count فيها قيمة محفوظة وCorrected
   // Retic count لسا فاضية، نحسبها مباشرة بدون ما ينتظر المستخدم يكتب شي.
   document.querySelectorAll('[data-param-name="Corrected Retic count"]').forEach(function (correctedInput) {
@@ -185,6 +310,12 @@ document.addEventListener("DOMContentLoaded", function () {
       var val = window.lisComputeCorrectedRetic(reticInput.value, window.LIS_PATIENT_HCT, window.LIS_PATIENT_GENDER);
       if (val !== null) correctedInput.value = val;
     }
+  });
+
+  // أول تحميل: تعبئة القيم المطلقة الفاضية من النسب المئوية المحفوظة + WBCs
+  document.querySelectorAll(".rb-box table").forEach(function (table) {
+    lisRecalcAllDiffAbsolutesInitial(table);
+    lisRecalcHctInitial(table);
   });
 });
 
@@ -219,8 +350,10 @@ window.lisSaveThenPrint = function (evt, formSelector, printUrl) {
 // ------------------------------------------------------------
 // دالة مساعدة مشتركة لحساب Corrected Retic Count من Retic + HCT +
 // جنس المريض: Corrected Retic % = Retic % × (HCT المريض ÷ HCT الطبيعي)
-// (النتيجة تُقرَّب لخانتين عشريتين، وتُرفض إذا كانت < 0.1 غير منطقية)
-// وترجع null إذا أي قيمة مدخلة (رتك/HCT) ناقصة أو غير رقمية.
+// (النتيجة تُقرَّب لخانتين عشريتين). ترجع null إذا أي قيمة مدخلة
+// (رتك/HCT) ناقصة أو غير رقمية، أو إذا التصحيح غير ذي دلالة سريرية
+// (HCT المريض قريب من الطبيعي، فالفرق بين الرتك العادي والمصحح ضئيل
+// جداً ولا داعي لعرضه أصلاً).
 // ------------------------------------------------------------
 window.lisComputeCorrectedRetic = function (reticValue, patientHct, patientGender) {
   var retic = parseFloat(reticValue);
@@ -232,5 +365,8 @@ window.lisComputeCorrectedRetic = function (reticValue, patientHct, patientGende
   var corrected = retic * (hct / normalHct);
   corrected = Math.round(corrected * 100) / 100;
   if (corrected >= retic) return null;
+  // فرق ضئيل جداً بين الرتك العادي والمصحح (أقل من 0.05) — لا قيمة
+  // سريرية إضافية، فنخفي الحقل بدل عرض رقم شبه مطابق للرتك العادي.
+  if (Math.abs(retic - corrected) < 0.05) return null;
   return corrected;
 };
