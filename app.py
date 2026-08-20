@@ -3383,6 +3383,38 @@ def api_quick_add_test():
     return jsonify({"id": cur.lastrowid, "name": name, "department": department, "code": code})
 
 
+# إضافة تحليل غير موجود بالقائمة مباشرة من قسم "الطلبات" بشاشة "زيارة
+# جديدة" — متاحة لأي مستخدم مسجّل دخول (وليس فقط admin/supervisor مثل
+# نافذة "إدارة التحاليل" وراوت /api/tests/quick-add أعلاه)، لأن موظف
+# الاستقبال هو من يواجه هذا الموقف يوميًا (مريض طلب تحليل غير مُدرج بعد).
+# يُطلب السعر إجباريًا هنا (بعكس /api/tests/quick-add اللي يحفظه 0 مؤقتًا
+# بانتظار أن يعدّله المدير لاحقًا من كتالوج التحاليل) حتى يدخل التحليل
+# فورًا بجدول الفاتورة/المجموع بسعره الصحيح دون انتظار أحد.
+@app.route("/api/tests/quick-add-priced", methods=["POST"])
+@login_required
+def api_quick_add_test_priced():
+    db = get_db()
+    name = (request.form.get("name") or "").strip()
+    price_raw = (request.form.get("price") or "").strip()
+    if not name:
+        return jsonify({"error": "الاسم مطلوب"}), 400
+    try:
+        price = float(price_raw)
+        if price < 0:
+            raise ValueError
+    except ValueError:
+        return jsonify({"error": "السعر يجب أن يكون رقمًا (0 أو أكثر)"}), 400
+    code = unique_test_code(db, name)
+    cur = db.execute(
+        "INSERT INTO test_definitions (code, name, department, sample_type, price, is_active, is_examining_test) "
+        "VALUES (?, ?, '', '', ?, 1, 0)",
+        (code, name, price),
+    )
+    db.commit()
+    log_action("QuickAddTestPriced", "test_definition", cur.lastrowid, f"{name} ({price})")
+    return jsonify({"id": cur.lastrowid, "name": name, "price": price, "code": code})
+
+
 # إضافة اسم طبيب فاحص جديد بسرعة من نفس شاشة "زيارة جديدة" (القائمتين
 # "دكتور المختبر الفاحص" و"الدكتور الفاحص") — يُحفظ بنفس قائمة الإعدادات
 # التي يديرها المدير من Management → Settings، فيظهر لاحقًا هناك أيضًا.
