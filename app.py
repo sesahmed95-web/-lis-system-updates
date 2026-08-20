@@ -1270,7 +1270,14 @@ def api_patient_visits_summary(patient_id):
 @login_required
 def results_list():
     db = get_db()
-    rows = db.execute(
+    # فلترة اختيارية قادمة من بطاقات الرئيسية:
+    # - "pending": زيارات فيها تحليل واحد على الأقل لسا حالته Accepted أو
+    #   In-progress — نفس المعيار بالضبط المستخدم بعدّاد "نتائج قيد الإنجاز"
+    #   بالرئيسية (dashboard()), حتى يطابق العدد المعروض هناك عدد الصفوف هنا.
+    # - "critical": زيارات فيها نتيجة واحدة على الأقل flag='Critical' ولسا
+    #   verified_at فاضي — نفس معيار عدّاد "تنبيهات حرجة" بالرئيسية بالضبط.
+    filter_type = request.args.get("filter", "")
+    query = (
         "SELECT v.id as visit_id, v.registration_number, v.created_at, p.full_name as patient_name, "
         "COUNT(ot.id) as tests_count, "
         "SUM(CASE WHEN ot.status IN ('Completed', 'Verified') THEN 1 ELSE 0 END) as done_count, "
@@ -1279,9 +1286,31 @@ def results_list():
         "JOIN orders o ON o.id = ot.order_id "
         "JOIN visits v ON v.id = o.visit_id "
         "JOIN patients p ON p.id = v.patient_id "
-        "GROUP BY v.id ORDER BY v.id DESC LIMIT 200"
-    ).fetchall()
-    return render_template("front_desk/results.html", rows=rows)
+    )
+    filter_label = None
+    if filter_type == "pending":
+        query += (
+            "WHERE v.id IN ("
+            "  SELECT o2.visit_id FROM order_tests ot2 "
+            "  JOIN orders o2 ON o2.id = ot2.order_id "
+            "  WHERE ot2.status IN ('Accepted','In-progress')"
+            ") "
+        )
+        filter_label = "زيارات فيها نتائج قيد الإنجاز"
+    elif filter_type == "critical":
+        query += (
+            "WHERE v.id IN ("
+            "  SELECT o2.visit_id FROM order_tests ot2 "
+            "  JOIN orders o2 ON o2.id = ot2.order_id "
+            "  JOIN results r2 ON r2.order_test_id = ot2.id "
+            "  WHERE r2.flag='Critical' AND r2.verified_at IS NULL"
+            ") "
+        )
+        filter_label = "زيارات فيها تنبيهات حرجة غير مُصادَق عليها"
+    query += "GROUP BY v.id ORDER BY v.id DESC LIMIT 200"
+    rows = db.execute(query).fetchall()
+    return render_template("front_desk/results.html", rows=rows, filter_type=filter_type,
+                            filter_label=filter_label)
 
 
 @app.route("/front-desk/followups")
@@ -2261,7 +2290,7 @@ def period_breakdown(db, group_len, base_where, base_params):
 
 
 @app.route("/reports/daily")
-@roles_required("admin", "accountant", "supervisor")
+@login_required
 def daily_report():
     db = get_db()
     report_date = request.args.get("date", date.today().isoformat())

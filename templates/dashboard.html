@@ -14,6 +14,12 @@
   #dashSearchResults .ds-item:hover { background: #F1F5F9; }
   #dashSearchResults .ds-item small { display: block; color: #64748B; }
   #dashSearchResults .ds-empty { padding: 10px; font-size: 12.5px; color: #64748B; }
+  /* بطاقات الرئيسية أصبحت روابط فعلية — نفس شكل stat-card تماماً بس
+     بدون خط تحت وبلون نص موروث، وتأثير بسيط عند المرور يوضّح أنها قابلة
+     للنقر بدون ما نغيّر التصميم العام. */
+  a.stat-card-link { text-decoration: none; color: inherit; display: block; cursor: pointer;
+    transition: transform .12s ease, box-shadow .12s ease; }
+  a.stat-card-link:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,.08); }
 </style>
 <div id="dashSearchWrap">
   <input type="text" id="dashSearchInput" autocomplete="off"
@@ -21,22 +27,30 @@
   <div id="dashSearchResults"></div>
 </div>
 <div class="stat-grid">
-  <div class="stat-card">
-    <div class="label">{{ t('today_visits') }}</div>
-    <div class="value">{{ visits_today }}</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">{{ t('today_revenue') }}</div>
-    <div class="value">{{ "%.0f"|format(revenue_today) }}</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">{{ t('pending_results') }}</div>
-    <div class="value">{{ pending_results }}</div>
-  </div>
-  <div class="stat-card {{ 'warn' if critical_count > 0 else '' }}">
-    <div class="label">{{ t('critical_alerts') }}</div>
-    <div class="value">{{ critical_count }}</div>
-  </div>
+  <a class="stat-card-link" href="{{ url_for('visits_list') }}">
+    <div class="stat-card">
+      <div class="label">{{ t('today_visits') }}</div>
+      <div class="value">{{ visits_today }}</div>
+    </div>
+  </a>
+  <a class="stat-card-link" href="{{ url_for('daily_report') }}">
+    <div class="stat-card">
+      <div class="label">{{ t('today_revenue') }}</div>
+      <div class="value">{{ "%.0f"|format(revenue_today) }}</div>
+    </div>
+  </a>
+  <a class="stat-card-link" href="{{ url_for('results_list', filter='pending') }}">
+    <div class="stat-card">
+      <div class="label">{{ t('pending_results') }}</div>
+      <div class="value">{{ pending_results }}</div>
+    </div>
+  </a>
+  <a class="stat-card-link" href="{{ url_for('results_list', filter='critical') }}">
+    <div class="stat-card {{ 'warn' if critical_count > 0 else '' }}">
+      <div class="label">{{ t('critical_alerts') }}</div>
+      <div class="value">{{ critical_count }}</div>
+    </div>
+  </a>
 </div>
 
 <div class="card">
