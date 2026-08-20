@@ -14,7 +14,8 @@ from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_examining_doctors, set_examining_doctors, add_examining_doctor,
                        get_examining_tests, get_examining_rates_map,
                        set_examining_doctor_rate, compute_examining_doctor_fee,
-                       find_reference_range)
+                       find_reference_range,
+                       save_saved_report, get_saved_report, search_saved_reports)
 from translations import t
 from barcode_gen import generate_code39, generate_code128, generate_qr
 import astm_host
@@ -98,6 +99,37 @@ NORMAL_CLICHE_TEXT = {
     "Platelets_desc": "Within normal limits",
 }
 app.jinja_env.globals["NORMAL_CLICHE_TEXT"] = NORMAL_CLICHE_TEXT
+
+# أسماء الأشهر بالتسمية العراقية/الشامية المتداولة (بدل كانون الثاني/يناير
+# الرسمية أو January/February الإنكليزية) — نقطة #11. تُستخدم كـ Jinja
+# filter بأي قالب: {{ "2026-08"|iraqi_month }} أو {{ 8|iraqi_month }} تعطي
+# "آب"، و IRAQI_MONTHS متاح كـ global لبناء قوائم اختيار الأشهر (dropdown)
+# بنفس التسمية مباشرة من القالب.
+IRAQI_MONTHS = {
+    1: "كانون الثاني", 2: "شباط", 3: "آذار", 4: "نيسان",
+    5: "أيار", 6: "حزيران", 7: "تموز", 8: "آب",
+    9: "أيلول", 10: "تشرين الأول", 11: "تشرين الثاني", 12: "كانون الأول",
+}
+app.jinja_env.globals["IRAQI_MONTHS"] = IRAQI_MONTHS
+
+
+@app.template_filter("iraqi_month")
+def iraqi_month_filter(value):
+    """يحوّل شهرًا لاسمه العراقي. يقبل: رقم شهر مباشر (1-12)، أو نص تاريخ
+    يبدأ بصيغة 'YYYY-MM' (مثل قيمة ?month المستخدمة بالتقارير الشهرية)،
+    أو أي نص تاريخ/ISO يبدأ بنفس الصيغة. أي قيمة غير مفهومة تُرجع فاضية
+    بدل ما تكسر الصفحة."""
+    if value in (None, ""):
+        return ""
+    if isinstance(value, int):
+        return IRAQI_MONTHS.get(value, "")
+    s = str(value)
+    try:
+        if len(s) >= 7 and s[4] == "-":
+            return IRAQI_MONTHS.get(int(s[5:7]), "")
+        return IRAQI_MONTHS.get(int(s), "")
+    except (ValueError, IndexError):
+        return ""
 
 # رموز التمييز الملوّنة بحقل الـ Conclusion (نجمة وأسهم وعلامتي استفهام/تعجب)
 # — يضيفها المستخدم بنفسه من زر التنسيق فوق حقل الاستنتاج بشاشات إدخال
@@ -280,6 +312,11 @@ def inject_globals():
     brand_name = get_setting(db, "app_name_ar" if lang == "ar" else "app_name", t(lang, "app_name"))
     logo_path = get_setting(db, "logo_path", "")
     logo_url = url_for("static", filename=logo_path) if logo_path else None
+    # عنوان وهاتف المختبر — اختياريان، يُضبطان مرة وحدة من الإعدادات (بطاقة
+    # العلامة التجارية) ويظهران تلقائيًا بأي قالب يحتاجهم (خصوصًا فاتورة
+    # A5 — نقطة #10) بدون تمريرهما يدويًا من كل route.
+    lab_address = get_setting(db, "lab_address", "")
+    lab_phone = get_setting(db, "lab_phone", "")
     # ارتفاع/عرض خلايا جدول نتائج التقرير (Test/Result/Control/Unit...) — يتحكم
     # بيها الأدمن من Management → Settings، تنطبق تلقائيًا على كل التقارير
     # لأنها محقونة هنا بدل تمريرها يدويًا بكل route.
@@ -296,6 +333,7 @@ def inject_globals():
     return dict(t=lambda key: t(lang, key), lang=lang,
                 current_user=session.get("full_name"), current_role=session.get("role"),
                 brand_name=brand_name, logo_url=logo_url,
+                lab_address=lab_address, lab_phone=lab_phone,
                 report_row_pad=report_row_pad, report_col_pad=report_col_pad,
                 license_banner=license_banner,
                 # أيقونة المصمم العائمة: تظهر فقط لمن سجّل دخوله فعلاً من
@@ -747,6 +785,22 @@ def dashboard():
 def new_visit():
     db = get_db()
     if request.method == "POST":
+        # زر "✅ تم سحب العينة" إلزامي بهذي الصفحة (نقطة #9) — يمثّل تأكيد
+        # الاستقبال إنه سحب العينة فعليًا وقت تسجيل الزيارة (حالة شائعة
+        # بالمختبرات الصغيرة حيث الاستقبال هو نفسه يسحب العينة). لو ما
+        # انضغط، نرفض الحفظ من السيرفر (مو بس تحقق JS بالواجهة) قبل أي
+        # INSERT بقاعدة البيانات. تأثيره: order_tests تُنشأ مباشرة بحالة
+        # 'Collected' (بدل 'Accepted' الافتراضية) فتتخطى طابور "سحب
+        # العينة" وتظهر مباشرة بطابور "استلام العينة" — راجع
+        # samples_collection/samples_accession لنفس منطق الحالتين.
+        sample_collected = request.form.get("sample_collected") == "1"
+        if not sample_collected:
+            error_msg = "لازم تأكيد \"تم سحب العينة\" قبل حفظ الزيارة."
+            if request.headers.get("X-LIS-Ajax") == "1":
+                return jsonify({"ok": False, "error": error_msg}), 400
+            flash(error_msg)
+            return redirect(url_for("new_visit"))
+
         name = request.form.get("patient_name", "").strip()
         gender = request.form.get("gender", "")
         age = request.form.get("age") or None
@@ -820,10 +874,13 @@ def new_visit():
                 continue
             price = get_test_price(db, tid, referring_doctor_id)
             barcode = f"{reg_number}{tid.zfill(3)}"
+            # الحالة تبدأ 'Collected' مباشرة (مو 'Accepted') لأن زر "تم سحب
+            # العينة" الإلزامي فوق تأكد إنها انسحبت فعليًا هذي اللحظة —
+            # فتتخطى طابور "سحب العينة" وتظهر مباشرة بطابور "استلام العينة".
             db.execute(
-                "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, created_at) "
-                "VALUES (?, ?, 'Accepted', ?, ?, ?, ?)",
-                (order_id, tid, barcode, price, referring_doctor_id, now),
+                "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, "
+                "collected_at, created_at) VALUES (?, ?, 'Collected', ?, ?, ?, ?, ?)",
+                (order_id, tid, barcode, price, referring_doctor_id, now, now),
             )
             total += price or 0
 
@@ -842,6 +899,7 @@ def new_visit():
 
         db.commit()
         log_action("Create", "visit", visit_id, f"reg#{reg_number}")
+        log_action("Collect", "visit", visit_id, f"sample_collected_at_registration reg#{reg_number}")
         flash(f"Visit #{reg_number} created successfully.")
 
         # إذا اختار موظف الاستقبال تضمين زيارة/زيارات سابقة مع هذي الزيارة
@@ -1998,8 +2056,11 @@ def print_sample_barcodes(visit_id):
 def print_invoice(visit_id):
     db = get_db()
     visit = db.execute(
-        "SELECT v.*, p.full_name, p.age, p.gender, p.phone FROM visits v "
-        "JOIN patients p ON p.id = v.patient_id WHERE v.id=?",
+        "SELECT v.*, p.full_name, p.age, p.gender, p.phone, "
+        "rc.name as referral_center_name "
+        "FROM visits v JOIN patients p ON p.id = v.patient_id "
+        "LEFT JOIN referral_centers rc ON rc.id = v.referral_center_id "
+        "WHERE v.id=?",
         (visit_id,),
     ).fetchone()
     if not visit:
@@ -2398,6 +2459,8 @@ def result_entry(order_test_id):
         if ot["status"] != "Verified":
             db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (order_test_id,))
         db.commit()
+        _maybe_auto_whatsapp_send(db, ot["visit_id"])
+        _maybe_archive_visit_pdf(db, ot["visit_id"])
         log_action("EnterResult", "order_test", order_test_id)
         flash("Results saved.")
         return redirect(url_for("orders_list"))
@@ -2478,6 +2541,8 @@ def visit_results_entry(visit_id):
                     db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (ot["id"],))
         db.commit()
         if any_saved:
+            _maybe_auto_whatsapp_send(db, visit_id)
+            _maybe_archive_visit_pdf(db, visit_id)
             log_action("EnterResultsBulk", "visit", visit_id)
             flash("تم حفظ النتائج.")
         else:
@@ -2758,6 +2823,136 @@ def _whatsapp_generate_and_queue(db, visit_row, patient_id, patient_name, phone,
         return False, str(exc)
 
 
+def _maybe_auto_whatsapp_send(db, visit_id):
+    """إرسال تلقائي عبر واتساب لكل نتائج الزيارة دفعة واحدة (بملف PDF واحد،
+    نفس أسلوب زر 'إرسال كل النتائج' اليدوي) — بس إذا تحققت الشروط الثلاثة:
+    (1) رقم هاتف المريض مسجّل بملفه، (2) كل تحليل مطلوب بهذي الزيارة صار
+    Completed أو Verified (ولا تحليل واحد لسا ناقص نتيجة)، و(3) ما سبق
+    إرسال (تلقائي أو يدوي) لكل نتائج هذي الزيارة مجموعة من قبل — تفاديًا
+    لتكرار الإرسال في كل مرة تُعدَّل فيها نتيجة بعد اكتمال الزيارة.
+    تُستدعى بعد أي حفظ نتيجة (مفردة من result_entry، أو مُجمّعة من
+    visit_results_entry). أي خطأ بتوليد الـPDF أو الإرسال لا يوقف حفظ
+    النتائج أبدًا — يُسجَّل بطابور واتساب كـ pending/failed مثل أي محاولة
+    إرسال يدوية عادية، وتلتقطه المهمة الخلفية أو زر 'إعادة المحاولة' لاحقًا."""
+    visit = db.execute(
+        "SELECT v.*, p.id as patient_id, p.full_name, p.phone FROM visits v "
+        "JOIN patients p ON p.id = v.patient_id WHERE v.id=?",
+        (visit_id,),
+    ).fetchone()
+    if not visit or not (visit["phone"] or "").strip():
+        return False
+
+    statuses = [row["status"] for row in db.execute(
+        "SELECT ot.status FROM order_tests ot JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
+        (visit_id,),
+    ).fetchall()]
+    if not statuses or any(s not in ("Completed", "Verified") for s in statuses):
+        return False  # لسا فيه تحليل ناقص نتيجة — ما نرسل شي بعد
+
+    already = db.execute(
+        "SELECT id FROM whatsapp_sends WHERE visit_id=? AND order_test_id IS NULL "
+        "AND status IN ('pending', 'sent')",
+        (visit_id,),
+    ).fetchone()
+    if already:
+        return False  # سبق إرسال/طابور كل نتائج هذي الزيارة مجموعة من قبل
+
+    try:
+        html_content = print_visit_results(visit_id)
+    except Exception:
+        return False
+    if not isinstance(html_content, str):
+        return False  # print_visit_results رجّع redirect/خطأ بدل HTML — نتجاهل بصمت
+
+    ok, error = _whatsapp_generate_and_queue(
+        db, visit, visit["patient_id"], visit["full_name"], visit["phone"],
+        "كل نتائج الزيارة (إرسال تلقائي)", html_content, order_test_id=None,
+    )
+    log_action("WhatsAppAutoSend", "visit", visit_id, "OK" if ok else f"queued: {error}")
+    if ok:
+        flash("📱 النتائج مكتملة — تم إرسالها تلقائيًا عبر واتساب للمريض.")
+    else:
+        flash(f"📱 النتائج مكتملة لكن تعذّر الإرسال الفوري — انضافت لطابور واتساب وسترسل تلقائيًا عند توفر الإنترنت. ({error})")
+    return True
+
+
+def _get_pdf_archive_dir(db):
+    """مجلد أرشفة الـPDF الدائم كما ظبطه المدير من Management → Settings
+    (settings.pdf_archive_dir). يرجّع None إذا لسا فاضي (غير مُعد بعد) —
+    وبهذي الحالة الأرشفة التلقائية تُتجاهل بصمت بدل ما تكسر حفظ النتائج."""
+    d = (get_setting(db, "pdf_archive_dir", "") or "").strip()
+    if not d:
+        return None
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        return None
+    return d
+
+
+def _maybe_archive_visit_pdf(db, visit_id):
+    """يحفظ نسخة PDF دائمة (موحّدة لكل نتائج الزيارة) بمجلد الأرشيف الثابت،
+    بس إذا: (1) المدير ظبط مجلد أرشفة من الإعدادات، و(2) كل تحليل مطلوب
+    بهذي الزيارة صار Completed أو Verified. تُستدعى من نفس نقطتي حفظ
+    النتائج اللي تستدعي _maybe_auto_whatsapp_send (مفردة ومُجمّعة)، وتُعيد
+    توليد/استبدال نفس الملف (upsert بـ visit_id) في كل مرة — حتى يبقى
+    الملف المؤرشف مطابقًا دائمًا لآخر تعديل على النتائج، حتى لو تم تعديلها
+    بعد الاكتمال. أي خطأ بالتوليد لا يوقف حفظ النتائج أبدًا."""
+    archive_dir = _get_pdf_archive_dir(db)
+    if not archive_dir:
+        return False
+
+    visit = db.execute(
+        "SELECT v.*, p.id as patient_id, p.full_name, p.registration_number as _unused, "
+        "d.full_name as referring_doctor_name, rc.name as referral_center_name "
+        "FROM visits v JOIN patients p ON p.id = v.patient_id "
+        "LEFT JOIN doctors d ON d.id = v.doctor_id "
+        "LEFT JOIN referral_centers rc ON rc.id = v.referral_center_id "
+        "WHERE v.id=?",
+        (visit_id,),
+    ).fetchone()
+    if not visit:
+        return False
+
+    statuses = [row["status"] for row in db.execute(
+        "SELECT ot.status FROM order_tests ot JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
+        (visit_id,),
+    ).fetchall()]
+    if not statuses or any(s not in ("Completed", "Verified") for s in statuses):
+        return False  # لسا فيه تحليل ناقص نتيجة — ما نؤرشف بعد
+
+    try:
+        html_content = print_visit_results(visit_id)
+    except Exception:
+        return False
+    if not isinstance(html_content, str):
+        return False
+
+    import pdf_export
+    try:
+        # اسم ملف واضح للبحث اليدوي بمجلد الأرشيف نفسه من خارج البرنامج:
+        # رقم_التسجيل - اسم المريض - تاريخ الزيارة.pdf (كل رمز غير آمن
+        # بالاسم يُستبدل بشرطة سفلية).
+        safe_name = secure_filename(visit["full_name"] or "patient") or "patient"
+        try:
+            dt = datetime.fromisoformat(visit["created_at"])
+            date_part = dt.strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            date_part = datetime.now().strftime("%Y-%m-%d")
+        filename = f"{visit['registration_number']}_{safe_name}_{date_part}.pdf"
+        pdf_path = os.path.join(archive_dir, filename)
+        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+    except Exception:
+        return False
+
+    save_saved_report(
+        db, visit_id, visit["patient_id"], visit["full_name"], visit["registration_number"],
+        pdf_path, referring_doctor_name=visit["referring_doctor_name"],
+        referral_center_name=visit["referral_center_name"],
+    )
+    return True
+
+
 @app.route("/whatsapp/send-result/<int:order_test_id>", methods=["POST"])
 @login_required
 def whatsapp_send_result(order_test_id):
@@ -2831,6 +3026,33 @@ def whatsapp_send_visit(visit_id):
         flash(f"⏳ تعذّر الإرسال الآن، تمت إضافتها للطابور وستُرسل تلقائيًا عند توفر الإنترنت. ({error})")
     log_action("WhatsAppSend", "visit", visit_id, "OK" if ok else f"queued: {error}")
     return redirect(url_for("visit_results_entry", visit_id=visit_id))
+
+
+@app.route("/reports/archive")
+@login_required
+def pdf_archive():
+    """بحث سريع بأرشيف الـPDF الدائم (باسم المريض أو رقم التسجيل)، من داخل
+    البرنامج مباشرة — بدل ما يفتّش المستخدم يدويًا بمجلد الأرشيف بالحاسبة."""
+    db = get_db()
+    q = request.args.get("q", "").strip()
+    archive_dir = _get_pdf_archive_dir(db)
+    rows = search_saved_reports(db, q) if archive_dir else []
+    return render_template("pdf_archive.html", rows=rows, q=q, archive_configured=bool(archive_dir))
+
+
+@app.route("/reports/archive/<int:visit_id>/open")
+@login_required
+def pdf_archive_open(visit_id):
+    """يفتح/يحمّل نسخة الأرشيف الدائمة مباشرة (نفس ملف مجلد الأرشفة بالضبط،
+    وليس توليدًا جديدًا) — لو الملف انمسح يدويًا من مجلد الأرشيف من خارج
+    البرنامج (نقل/حذف)، نرجّع رسالة واضحة بدل خطأ سيرفر غامض."""
+    db = get_db()
+    row = get_saved_report(db, visit_id)
+    if not row or not row["pdf_path"] or not os.path.exists(row["pdf_path"]):
+        flash("الملف غير موجود بمجلد الأرشيف — يمكن انحذف أو انقل يدويًا من خارج البرنامج.")
+        return redirect(url_for("pdf_archive"))
+    return send_file(row["pdf_path"], as_attachment=False,
+                      download_name=os.path.basename(row["pdf_path"]))
 
 
 @app.route("/whatsapp/queue")
@@ -3552,6 +3774,13 @@ def app_settings():
         if name_ar:
             set_setting(db, "app_name_ar", name_ar)
 
+        lab_address_raw = request.form.get("lab_address", "").strip()
+        if lab_address_raw:
+            set_setting(db, "lab_address", lab_address_raw)
+        lab_phone_raw = request.form.get("lab_phone", "").strip()
+        if lab_phone_raw:
+            set_setting(db, "lab_phone", lab_phone_raw)
+
         file = request.files.get("logo")
         if file and file.filename:
             ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
@@ -3592,6 +3821,14 @@ def app_settings():
         if wa_code:
             set_setting(db, "whatsapp_country_code", "".join(ch for ch in wa_code if ch.isdigit()))
 
+        # مجلد أرشفة الـPDF الدائم (نقطة #8) — يُضبط مرة وحدة هنا وقت
+        # التنصيب/الإعداد الأولي، ويُعاد استخدامه تلقائيًا بعدها لكل زيارة
+        # تكتمل نتائجها. لا نتحقق من وجوده هنا (os.makedirs لاحقًا وقت
+        # الأرشفة الفعلية يكفي) حتى يقدر المدير يكتب مسار جهاز آخر بالشبكة.
+        archive_dir_raw = request.form.get("pdf_archive_dir", "").strip()
+        if archive_dir_raw:
+            set_setting(db, "pdf_archive_dir", archive_dir_raw)
+
         # ألوان رموز الـ Conclusion (نجمة/أسهم/استفهام/تعجب) — كل رمز إله
         # حقل <input type=color> باسم marker_color_<key> بشاشة الإعدادات.
         # نحفظ فقط الألوان اللي وصلت وبصيغة hex صحيحة؛ أي حقل فاضي أو غير
@@ -3618,11 +3855,14 @@ def app_settings():
     current = {
         "app_name": get_setting(db, "app_name", ""),
         "app_name_ar": get_setting(db, "app_name_ar", ""),
+        "lab_address": get_setting(db, "lab_address", ""),
+        "lab_phone": get_setting(db, "lab_phone", ""),
         "logo_path": get_setting(db, "logo_path", ""),
         "examining_doctors": "\n".join(get_examining_doctors(db)),
         "report_row_pad": get_setting(db, "report_row_pad", "5"),
         "report_col_pad": get_setting(db, "report_col_pad", "12"),
         "whatsapp_country_code": get_setting(db, "whatsapp_country_code", "964"),
+        "pdf_archive_dir": get_setting(db, "pdf_archive_dir", ""),
     }
     marker_colors_by_char = get_conclusion_marker_colors(db)
     conclusion_markers = [

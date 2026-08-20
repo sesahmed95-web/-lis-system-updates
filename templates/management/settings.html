@@ -14,6 +14,15 @@
     </div>
 
     <div class="form-field">
+      <label>عنوان المختبر</label>
+      <input type="text" name="lab_address" value="{{ current.lab_address }}" placeholder="مثال: بغداد - الكرادة - شارع كذا">
+    </div>
+    <div class="form-field">
+      <label>هاتف المختبر</label>
+      <input type="text" name="lab_phone" value="{{ current.lab_phone }}" placeholder="مثال: 07701234567" dir="ltr">
+    </div>
+
+    <div class="form-field">
       <label>{{ t('current_logo') }}</label>
       {% if logo_url %}
         <img src="{{ logo_url }}" alt="logo" style="max-height:70px; max-width:200px; object-fit:contain; border:1px solid var(--border); border-radius:8px; padding:6px; background:#fff;">
@@ -76,6 +85,24 @@
     <div class="form-field">
       <label>كود الدولة</label>
       <input type="text" name="whatsapp_country_code" value="{{ current.whatsapp_country_code }}" style="width:120px;" dir="ltr">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🗄️ أرشيف PDF الدائم</h3>
+  <p class="muted">
+    مجلد ثابت على هذا الجهاز (أو مجلد مشترك بالشبكة) تُحفظ فيه تلقائيًا نسخة
+    PDF من نتائج كل زيارة فور اكتمالها، حتى تقدر ترجع لها لاحقًا من صفحة
+    "أرشيف PDF" أو تفتّش عنها يدويًا من خارج البرنامج. يكفي تحدده مرة وحدة —
+    إذا تركته فاضي، الأرشفة التلقائية تبقى معطّلة.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>مسار مجلد الأرشفة</label>
+      <input type="text" name="pdf_archive_dir" value="{{ current.pdf_archive_dir }}"
+             placeholder="مثال: D:\LabArchive\Reports" style="width:100%;" dir="ltr">
     </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>

@@ -74,6 +74,7 @@
         <a class="nav-link {{ 'active' if request.path == url_for('visits_list') else '' }}" href="{{ url_for('visits_list') }}">📋 {{ t('visits') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('patients_list') else '' }}" href="{{ url_for('patients_list') }}">🧑‍🤝‍🧑 {{ t('patients') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('results_list') else '' }}" href="{{ url_for('results_list') }}">📄 {{ t('results') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('pdf_archive') else '' }}" href="{{ url_for('pdf_archive') }}">🗄️ أرشيف PDF</a>
         <a class="nav-link {{ 'active' if request.path == url_for('followups_list') else '' }}" href="{{ url_for('followups_list') }}">📞 {{ t('patients_followup') }}</a>
         {% if current_role in ['supervisor', 'admin'] %}
         <a class="nav-link {{ 'active' if request.path == url_for('whatsapp_queue') else '' }}" href="{{ url_for('whatsapp_queue') }}">📱 طابور واتساب</a>

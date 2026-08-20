@@ -384,6 +384,27 @@ CREATE TABLE IF NOT EXISTS whatsapp_sends (
     FOREIGN KEY (order_test_id) REFERENCES order_tests(id),
     FOREIGN KEY (patient_id) REFERENCES patients(id)
 );
+
+-- أرشيف PDF دائم لكل زيارة (نسخة واحدة موحّدة تجمع كل نتائج الزيارة، نفس
+-- شكل تقرير print_visit_results) — يُحفظ بمجلد ثابت يحدده المدير من
+-- Management → Settings (settings.pdf_archive_dir)، ويُعاد توليده ويستبدل
+-- نفسه (upsert بـ visit_id) في كل مرة تُحفظ فيها نتائج بعد اكتمال الزيارة،
+-- حتى يبقى الملف المؤرشف مطابقًا دائمًا لآخر تعديل. صف واحد فقط لكل زيارة.
+-- يُستخدم لصفحة البحث السريع عن نتائج قديمة من داخل البرنامج.
+CREATE TABLE IF NOT EXISTS saved_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visit_id INTEGER UNIQUE NOT NULL,
+    patient_id INTEGER NOT NULL,
+    patient_name TEXT,
+    registration_number INTEGER,
+    referring_doctor_name TEXT,
+    referral_center_name TEXT,
+    pdf_path TEXT NOT NULL,
+    created_at TEXT,
+    updated_at TEXT,
+    FOREIGN KEY (visit_id) REFERENCES visits(id),
+    FOREIGN KEY (patient_id) REFERENCES patients(id)
+);
 """
 
 
@@ -499,6 +520,11 @@ def migrate(conn):
     # (INSERT OR IGNORE) حتى لا نطغى على شعار رفعه الأدمن بنفسه، ولا يتعارض
     # مع seed() لو كانت هذي قاعدة بيانات جديدة تمامًا (migrate يشتغل قبلها).
     conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('logo_path', 'uploads/logo.png')")
+    # فاضي بشكل افتراضي — يعني المدير لسا ما ظبط مجلد أرشفة الـPDF الدائم من
+    # صفحة الإعدادات؛ ما دام فاضي، الأرشفة التلقائية (نقطة #8) تبقى معطّلة
+    # بصمت (لا تولّد أي ملف) لحد ما يُدخل مسارًا حقيقيًا. راجع
+    # app._get_pdf_archive_dir().
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('pdf_archive_dir', '')")
     conn.commit()
 
 
@@ -1190,6 +1216,57 @@ def compute_examining_doctor_fee(db, doctor_name, test_ids):
         if row is not None:
             total += row["rate"] or 0
     return total
+
+
+def save_saved_report(db, visit_id, patient_id, patient_name, registration_number,
+                       pdf_path, referring_doctor_name=None, referral_center_name=None):
+    """يحفظ/يحدّث صف أرشيف الـPDF الموحّد لهذي الزيارة (صف واحد فقط لكل
+    visit_id — upsert). يُستدعى من app._maybe_archive_visit_pdf بعد كل حفظ
+    نتائج تكتمل فيه الزيارة."""
+    now = datetime.now().isoformat(timespec="seconds")
+    existing = db.execute("SELECT id FROM saved_reports WHERE visit_id=?", (visit_id,)).fetchone()
+    if existing:
+        db.execute(
+            "UPDATE saved_reports SET patient_name=?, registration_number=?, "
+            "referring_doctor_name=?, referral_center_name=?, pdf_path=?, updated_at=? "
+            "WHERE visit_id=?",
+            (patient_name, registration_number, referring_doctor_name, referral_center_name,
+             pdf_path, now, visit_id),
+        )
+    else:
+        db.execute(
+            "INSERT INTO saved_reports (visit_id, patient_id, patient_name, registration_number, "
+            "referring_doctor_name, referral_center_name, pdf_path, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (visit_id, patient_id, patient_name, registration_number,
+             referring_doctor_name, referral_center_name, pdf_path, now, now),
+        )
+    db.commit()
+
+
+def get_saved_report(db, visit_id):
+    return db.execute("SELECT * FROM saved_reports WHERE visit_id=?", (visit_id,)).fetchone()
+
+
+def search_saved_reports(db, query="", limit=100):
+    """بحث سريع بأرشيف الـPDF: باسم المريض (جزئي) أو رقم التسجيل (تطابق
+    كامل)، مرتب بالأحدث أولًا. query فاضي يرجّع آخر limit ملف مؤرشف."""
+    query = (query or "").strip()
+    if not query:
+        return db.execute(
+            "SELECT * FROM saved_reports ORDER BY updated_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    like = f"%{query}%"
+    if query.isdigit():
+        return db.execute(
+            "SELECT * FROM saved_reports WHERE patient_name LIKE ? OR registration_number = ? "
+            "ORDER BY updated_at DESC LIMIT ?",
+            (like, int(query), limit),
+        ).fetchall()
+    return db.execute(
+        "SELECT * FROM saved_reports WHERE patient_name LIKE ? ORDER BY updated_at DESC LIMIT ?",
+        (like, limit),
+    ).fetchall()
 
 
 if __name__ == "__main__":

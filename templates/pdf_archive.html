@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block page_title %}🗄️ أرشيف PDF{% endblock %}
+{% block content %}
+<div style="max-width:900px;">
+
+  {% if not archive_configured %}
+  <div class="flash" style="background:#fef3c7; color:#92400e;">
+    ⚠️ ما ضبط مجلد الأرشفة الدائم بعد. المدير لازم يحدده مرة وحدة من
+    <a href="{{ url_for('app_settings') }}">الإدارة ← الإعدادات</a>، وبعدها راح
+    تنحفظ نسخة PDF تلقائيًا لكل زيارة تكتمل نتائجها.
+  </div>
+  {% endif %}
+
+  <form method="get" style="display:flex; gap:10px; margin-bottom:20px;">
+    <input type="text" name="q" value="{{ q }}" placeholder="اسم المريض أو رقم التسجيل..."
+           style="flex:1; padding:10px 12px; border:1px solid #E2E8F0; border-radius:8px; font-size:14px;">
+    <button class="btn" type="submit">🔍 بحث</button>
+  </form>
+
+  {% if rows %}
+  <table style="width:100%; border-collapse:collapse;">
+    <thead>
+      <tr style="background:#205072; color:#fff;">
+        <th style="padding:8px 10px; text-align:right;">رقم التسجيل</th>
+        <th style="padding:8px 10px; text-align:right;">اسم المريض</th>
+        <th style="padding:8px 10px; text-align:right;">الطبيب/المختبر المُرسِل</th>
+        <th style="padding:8px 10px; text-align:right;">آخر تحديث</th>
+        <th style="padding:8px 10px; text-align:right;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr style="border-bottom:1px solid #E2E8F0;">
+        <td style="padding:8px 10px;">{{ row['registration_number'] }}</td>
+        <td style="padding:8px 10px;">{{ row['patient_name'] }}</td>
+        <td style="padding:8px 10px;">{{ row['referring_doctor_name'] or row['referral_center_name'] or '—' }}</td>
+        <td style="padding:8px 10px;">{{ row['updated_at'] }}</td>
+        <td style="padding:8px 10px;">
+          <a class="btn" href="{{ url_for('pdf_archive_open', visit_id=row['visit_id']) }}" target="_blank">📄 فتح</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif archive_configured %}
+  <p style="color:#64748B;">
+    {% if q %}لا توجد نتائج مطابقة لـ "{{ q }}".{% else %}لا يوجد أي ملف مؤرشف بعد.{% endif %}
+  </p>
+  {% endif %}
+
+</div>
+{% endblock %}

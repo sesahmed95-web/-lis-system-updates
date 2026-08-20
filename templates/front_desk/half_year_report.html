@@ -42,7 +42,7 @@
   <tbody>
     {% for r in rows %}
     <tr>
-      <td><a class="row-link" href="{{ url_for('monthly_report', month=r.period) }}">{{ r.period }}</a></td>
+      <td><a class="row-link" href="{{ url_for('monthly_report', month=r.period) }}">{{ r.period|iraqi_month }}</a></td>
       <td>{{ r.visits_count }}</td>
       <td>{{ "%.0f"|format(r.revenue) }}</td>
       <td>{{ "%.0f"|format(r.expenses) }}</td>

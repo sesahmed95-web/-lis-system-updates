@@ -222,6 +222,23 @@
       {% endfor %}
     </div>
     <p style="margin-top:10px; font-weight:600;">{{ t('grand_total') }}: <span id="grandTotal">0</span></p>
+
+    <!-- تأكيد إلزامي (نقطة #9): الاستقبال يشيك هالمربع فقط إذا سحب العينة
+         فعليًا هذي اللحظة. بدونه الفورم ما ينحفظ (تحقق JS هنا + تحقق مطابق
+         بالسيرفر كخط دفاع ثاني). عند التأكيد، order_tests تُنشأ مباشرة
+         بحالة "تم سحبها" فتتخطى طابور 🩸 سحب العينة وتطلع مباشرة بطابور
+         📥 استلام العينة. -->
+    <div id="sampleCollectedBox" style="margin-top:14px; padding:10px 12px; background:#FEF9C3;
+         border:2px solid #FDE68A; border-radius:8px;">
+      <label style="display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer; margin:0;">
+        <input type="checkbox" id="sample_collected_checkbox" style="width:18px; height:18px;">
+        ✅ تم سحب العينة *
+      </label>
+      <input type="hidden" name="sample_collected" id="sample_collected_hidden" value="0">
+      <small id="sampleCollectedError" style="display:none; color:#C0392B; font-weight:600;">
+        لازم تأكيد "تم سحب العينة" قبل حفظ الزيارة.
+      </small>
+    </div>
   </div>
 </form>
 
@@ -474,10 +491,30 @@
   const createVisitBtn = document.getElementById('createVisitBtn');
   const visitCreatedPanel = document.getElementById('visitCreatedPanel');
   const barcodePrintFrame = document.getElementById('barcodePrintFrame');
+  const sampleCollectedCheckbox = document.getElementById('sample_collected_checkbox');
+  const sampleCollectedHidden = document.getElementById('sample_collected_hidden');
+  const sampleCollectedBox = document.getElementById('sampleCollectedBox');
+  const sampleCollectedError = document.getElementById('sampleCollectedError');
   let lastCreatedVisitId = null;
+
+  sampleCollectedCheckbox.addEventListener('change', function () {
+    sampleCollectedHidden.value = sampleCollectedCheckbox.checked ? '1' : '0';
+    if (sampleCollectedCheckbox.checked) {
+      sampleCollectedError.style.display = 'none';
+      sampleCollectedBox.style.borderColor = '#FDE68A';
+    }
+  });
 
   newVisitForm.addEventListener('submit', function (e) {
     e.preventDefault();
+    // تحقق إلزامي بالواجهة قبل حتى نبعث الطلب للسيرفر (نقطة #9) — تحقق
+    // مطابق موجود بالسيرفر أيضًا كخط دفاع ثاني لو JS معطّل أو تجاوزه أحد.
+    if (!sampleCollectedCheckbox.checked) {
+      sampleCollectedError.style.display = 'block';
+      sampleCollectedBox.style.borderColor = '#DC2626';
+      sampleCollectedBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     createVisitBtn.disabled = true;
     fetch(window.location.href, {
       method: 'POST',
@@ -487,7 +524,10 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         createVisitBtn.disabled = false;
-        if (!data || !data.ok) { alert('حدث خطأ أثناء إنشاء الزيارة. حاول مرة أخرى.'); return; }
+        if (!data || !data.ok) {
+          alert(data && data.error ? data.error : 'حدث خطأ أثناء إنشاء الزيارة. حاول مرة أخرى.');
+          return;
+        }
         lastCreatedVisitId = data.visit_id;
         document.getElementById('createdRegNumber').textContent = data.registration_number;
         document.getElementById('goToVisitsBtn').href = data.redirect_url;

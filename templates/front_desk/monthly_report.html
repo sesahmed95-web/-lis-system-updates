@@ -27,7 +27,7 @@
 </div>
 
 <div class="report-heading">{{ brand_name }} — الحسابات الشهرية</div>
-<div class="report-sub">الشهر: {{ month }}</div>
+<div class="report-sub">الشهر: {{ month|iraqi_month }} {{ month[:4] }}</div>
 
 <table class="report-table">
   <thead>

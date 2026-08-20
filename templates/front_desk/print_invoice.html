@@ -2,30 +2,57 @@
 {% block page_title %}فاتورة #{{ visit['registration_number'] }}{% endblock %}
 {% block content %}
 <style>
-  .inv-scope { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #1E293B; max-width: 800px; }
-  .inv-scope .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #205072; padding-bottom: 12px; margin-bottom: 16px; }
-  .inv-scope .header .lab-name { font-size: 20px; font-weight: 700; color: #205072; }
-  .inv-scope .header img { max-height: 60px; }
-  .inv-scope .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin-bottom: 20px; font-size: 13.5px; }
+  /* حجم الطباعة A5 (نقطة #10) — مُعرَّف هنا فقط داخل قالب الفاتورة نفسه
+     حتى لا يؤثر على بقية التقارير المطبوعة (CBC، مسحة الدم...) اللي
+     تبقى بحجمها الطبيعي A4. */
+  @page { size: A5 portrait; margin: 8mm; }
+
+  .inv-scope { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #1E293B; max-width: 148mm; margin: 0 auto; }
+  .inv-scope .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #205072; padding-bottom: 10px; margin-bottom: 12px; }
+  .inv-scope .header .lab-name { font-size: 18px; font-weight: 700; color: #205072; }
+  .inv-scope .header .lab-contact { font-size: 11px; color: #64748B; margin-top: 3px; line-height: 1.5; }
+  .inv-scope .header img { max-height: 52px; }
+  .inv-scope .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 20px; margin-bottom: 14px; font-size: 12.5px; }
   .inv-scope .meta-grid b { color: #64748B; font-weight: 600; }
-  .inv-scope table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-  .inv-scope th, .inv-scope td { border: 1px solid #E2E8F0; padding: 8px 10px; text-align: right; font-size: 13.5px; }
+  .inv-scope table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  .inv-scope th, .inv-scope td { border: 1px solid #E2E8F0; padding: 6px 8px; text-align: right; font-size: 12.5px; }
   .inv-scope th { background: #205072; color: #fff; }
-  .inv-scope .totals { width: 300px; margin-inline-start: auto; font-size: 14px; }
-  .inv-scope .totals div { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #E2E8F0; }
+  .inv-scope .totals { width: 220px; margin-inline-start: auto; font-size: 13px; }
+  .inv-scope .totals div { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #E2E8F0; }
   .inv-scope .totals .due { font-weight: 700; color: #C0392B; }
-  .inv-toolbar { margin-bottom: 16px; }
+
+  /* وضع "تصغير الحجم" — زر بشريط الأدوات يبدّل هذا الكلاس على .inv-scope
+     فيصغّر الخط والحشوات دفعة وحدة (مفيد لو المستخدم يريد يحشر الفاتورة
+     بمساحة أصغر من A5 نفسها، أو يطبعها على ورق أصغر). التبديل فوري بدون
+     أي إعادة تحميل، ويرجع للحجم الطبيعي بنفس الزر. */
+  .inv-scope.compact { max-width: 120mm; font-size: 92%; }
+  .inv-scope.compact .header .lab-name { font-size: 15px; }
+  .inv-scope.compact .header img { max-height: 40px; }
+  .inv-scope.compact th, .inv-scope.compact td { padding: 4px 6px; font-size: 11px; }
+  .inv-scope.compact .meta-grid { font-size: 11px; gap: 3px 14px; }
+  .inv-scope.compact .totals { font-size: 11.5px; }
+
+  .inv-toolbar { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
   @media print { .inv-toolbar { display: none; } }
 </style>
 
-<div class="inv-toolbar" style="display:flex; gap:10px; align-items:center;">
+<div class="inv-toolbar">
   <button class="btn" onclick="window.print()">🖨 طباعة</button>
+  <button class="btn" type="button" id="invShrinkBtn" onclick="toggleInvoiceCompact()">🔎 تصغير الحجم</button>
   <a class="btn" href="{{ url_for('dashboard') }}" style="text-decoration:none;">🔙 الرجوع للرئيسية</a>
 </div>
 
-<div class="inv-scope">
+<div class="inv-scope" id="invScope">
   <div class="header">
-    <div class="lab-name">{{ brand_name }}</div>
+    <div>
+      <div class="lab-name">{{ brand_name }}</div>
+      {% if lab_address or lab_phone %}
+      <div class="lab-contact">
+        {% if lab_address %}{{ lab_address }}<br>{% endif %}
+        {% if lab_phone %}هاتف: {{ lab_phone }}{% endif %}
+      </div>
+      {% endif %}
+    </div>
     {% if logo_url %}<img src="{{ logo_url }}" alt="logo">{% endif %}
   </div>
 
@@ -36,6 +63,9 @@
     <div><b>الهاتف:</b> {{ visit['phone'] }}</div>
     <div><b>التاريخ:</b> {{ visit['created_at'] }}</div>
     {% if doctor %}<div><b>الطبيب المحيل:</b> {{ doctor['full_name'] }}</div>{% endif %}
+    {% if visit['referral_center_name'] and visit['referral_center_name'] != 'Walk-in' %}
+    <div><b>المختبر المُرسِل:</b> {{ visit['referral_center_name'] }}</div>
+    {% endif %}
   </div>
 
   <table>
@@ -59,4 +89,13 @@
     </span></div>
   </div>
 </div>
+
+<script>
+  function toggleInvoiceCompact() {
+    var el = document.getElementById("invScope");
+    var btn = document.getElementById("invShrinkBtn");
+    var isCompact = el.classList.toggle("compact");
+    btn.textContent = isCompact ? "🔍 الحجم الطبيعي" : "🔎 تصغير الحجم";
+  }
+</script>
 {% endblock %}
