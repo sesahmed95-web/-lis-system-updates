@@ -1476,6 +1476,7 @@ def referral_lab_statement_whatsapp(center_id):
 def visits_list():
     db = get_db()
     q = request.args.get("q", "").strip()
+    show_all = request.args.get("all") == "1"
     query = (
         "SELECT v.id, v.registration_number, p.full_name, p.gender, p.age, p.phone, "
         "v.status, v.created_at, v.attending_doctor, "
@@ -1484,13 +1485,22 @@ def visits_list():
         "FROM visits v JOIN patients p ON p.id = v.patient_id "
     )
     params = []
+    conditions = []
     if q:
-        query += "WHERE p.full_name LIKE ? OR p.phone LIKE ? OR v.registration_number LIKE ? "
-        params = [f"%{q}%", f"%{q}%", f"%{q}%"]
+        conditions.append("(p.full_name LIKE ? OR p.phone LIKE ? OR v.registration_number LIKE ?)")
+        params += [f"%{q}%", f"%{q}%", f"%{q}%"]
+    elif not show_all:
+        # الصفحة تعرض زيارات اليوم الحالي فقط افتراضيًا — تُصفَّر تلقائيًا كل
+        # يوم جديد. السجل الكامل لكل الأيام السابقة يبقى متوفرًا دائمًا عبر
+        # صفحة "السجلات" (التقرير اليومي)، أو بالبحث بالاسم/الرقم هنا.
+        today = date.today().isoformat()
+        conditions.append("substr(v.created_at,1,10)=?")
+        params.append(today)
+    if conditions:
+        query += "WHERE " + " AND ".join(conditions) + " "
     query += "ORDER BY v.id DESC LIMIT 100"
     visits = db.execute(query, params).fetchall()
-    return render_template("front_desk/visits.html", visits=visits, q=q)
-
+    return render_template("front_desk/visits.html", visits=visits, q=q, show_all=show_all)
 
 @app.route("/front-desk/visits/<int:visit_id>/delete", methods=["POST"])
 @roles_required("admin")

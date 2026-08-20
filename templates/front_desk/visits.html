@@ -7,9 +7,23 @@
       <label>{{ t('search') }}</label>
       <input type="search" name="q" value="{{ q }}" placeholder="Name / Phone / Reg#">
     </div>
+    {% if show_all %}<input type="hidden" name="all" value="1">{% endif %}
     <button class="btn small" type="submit">{{ t('search') }}</button>
     <a class="btn small secondary" href="{{ url_for('new_visit') }}">➕ {{ t('new_visit') }}</a>
   </form>
+
+  <p class="muted" style="margin:6px 0 0;">
+    {% if q %}
+      🔎 نتائج البحث (بكل الأيام)
+    {% elif show_all %}
+      🗂️ تُعرض كل الزيارات (كل الأيام) —
+      <a href="{{ url_for('visits_list') }}">عرض زيارات اليوم فقط</a>
+    {% else %}
+      📅 زيارات اليوم فقط — تُصفَّر هذه الصفحة تلقائيًا كل يوم جديد. لعرض الأيام
+      السابقة استخدم صفحة "السجلات"، أو
+      <a href="{{ url_for('visits_list', all=1) }}">اعرض كل الزيارات هنا</a>.
+    {% endif %}
+  </p>
 
   <table>
     <thead><tr>
