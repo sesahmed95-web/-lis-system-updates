@@ -263,6 +263,7 @@ def background_loop(get_db_func):
             if enabled and is_configured():
                 check_and_apply(db, force_apply=True)
                 check_revocation(db)
+                check_update_signal(db)
             db.close()
         except Exception:
             pass
@@ -376,3 +377,106 @@ def check_revocation(db):
     entry = revoked_map.get(hw)
     if entry:
         license_manager.mark_revoked(db, entry.get("reason", ""))
+
+
+# ================================================ إرسال تحديث فوري لعميل ==
+# آلية مستقلة عن قناة التحديث (update_channel/branch) وعن الإلغاء — تخلي
+# المصمم "يدفع" تحديثاً فورياً لجهاز عميل واحد بالذات دون انتظار دورة
+# الفحص الدورية (قد تصل CHECK_INTERVAL_HOURS ساعات) ودون التأثير على بقية
+# العملاء. تستخدم نفس أسلوب ملف JSON على GitHub المستخدَم بقائمة الإلغاء
+# أعلاه (نفس توكن القراءة للفحص، وتوكن الكتابة الذي يدخله المصمم للنشر).
+UPDATE_SIGNAL_FILE_PATH = "update_signals.json"
+
+
+def fetch_update_signals():
+    """يرجع dict {hardware_id: {requested_at}}. يرجع {} بهدوء لو الملف
+    غير موجود بعد (لا يوجد أي أمر تحديث فوري صادر لحد الآن)."""
+    if not is_configured():
+        raise RuntimeError("لم يتم إعداد بيانات GitHub بعد (auto_updater.py) — راجع المصمم")
+    try:
+        with _api_request(_contents_url(UPDATE_SIGNAL_FILE_PATH)) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {}
+        raise
+    content_b64 = data.get("content", "")
+    raw = base64.b64decode(content_b64.replace("\n", "")).decode("utf-8")
+    parsed = json.loads(raw) if raw.strip() else {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def push_update_signal(write_token, hardware_id):
+    """يسجّل طلب تحديث فوري لجهاز عميل واحد بالذات. write_token يُمرَّر من
+    المتصل (لوحة المصمم)، نفس توكن الكتابة المستخدَم لإلغاء التراخيص عن
+    بُعد. لا يحتاج "سحب" لاحقاً — كل جهاز يتحقق من الطابع الزمني
+    (requested_at) الخاص به محلياً (راجع check_update_signal) فما يعيد
+    تطبيق نفس أمر التحديث مرتين."""
+    if not is_configured():
+        raise RuntimeError("لم يتم إعداد بيانات GitHub بعد (auto_updater.py) — راجع المصمم")
+    if not write_token:
+        raise RuntimeError("أدخل توكن GitHub بصلاحية كتابة أولاً (قسم الإعدادات بلوحة المصمم)")
+
+    hardware_id = hardware_id.strip().upper()
+    sha = None
+    current = {}
+    try:
+        with _api_request(_contents_url(UPDATE_SIGNAL_FILE_PATH)) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        sha = data.get("sha")
+        raw = base64.b64decode(data.get("content", "").replace("\n", "")).decode("utf-8")
+        current = json.loads(raw) if raw.strip() else {}
+        if not isinstance(current, dict):
+            current = {}
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+        # الملف غير موجود بعد — أول أمر تحديث فوري ينشئه
+
+    current[hardware_id] = {"requested_at": datetime.now().isoformat(timespec="seconds")}
+    commit_msg = f"Push update signal: {hardware_id}"
+
+    new_content_b64 = base64.b64encode(json.dumps(current, ensure_ascii=False, indent=2).encode("utf-8")).decode("ascii")
+    body = {"message": commit_msg, "content": new_content_b64}
+    if sha:
+        body["sha"] = sha
+
+    req = urllib.request.Request(
+        f"{API_BASE}{_contents_url(UPDATE_SIGNAL_FILE_PATH)}",
+        data=json.dumps(body).encode("utf-8"), method="PUT",
+    )
+    req.add_header("Authorization", f"Bearer {write_token}")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    req.add_header("User-Agent", "LIS-Auto-Updater")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=20):
+        pass
+
+
+def check_update_signal(db):
+    """يُستدعى بنفس دورة فحص التحديثات (خلفية دورية أو يدوياً بزر 'تحقق من
+    تحديث الآن'). لو صدر أمر تحديث فوري لهذا الجهاز بالذات ولم يُطبَّق
+    سابقاً (يقارن الطابع الزمني المحفوظ محلياً)، يفرض check_and_apply
+    فوراً بغض النظر عن دورة الـ CHECK_INTERVAL_HOURS العادية. لا يحتاج
+    توكن كتابة (فحص فقط بتوكن القراءة)، ولا يحذف نفسه من القائمة البعيدة —
+    الحماية من التكرار محلية بالكامل عبر settings.last_applied_update_signal."""
+    from database import get_setting, set_setting
+    import license_manager
+    try:
+        signals = fetch_update_signals()
+    except Exception:
+        return  # فشل الاتصال لا يوقف بقية الفحص أبداً
+    hw = license_manager.get_hardware_id()
+    entry = signals.get(hw)
+    if not entry:
+        return
+    requested_at = entry.get("requested_at", "")
+    if not requested_at:
+        return
+    last_applied = get_setting(db, "last_applied_update_signal", "")
+    if requested_at == last_applied:
+        return  # نفس أمر التحديث هذا اتطبّق سابقاً على هذا الجهاز
+    set_setting(db, "last_applied_update_signal", requested_at)
+    db.commit()
+    check_and_apply(db, force_apply=True)

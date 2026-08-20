@@ -88,19 +88,21 @@
     </div>
     <div class="form-field">
       <label>مدة الترخيص</label>
-      <select name="expiry_mode" id="expiry_mode" onchange="document.getElementById('days_field').style.display = this.value==='days' ? '' : 'none';">
-        <option value="trial">تجريبي (3 أيام)</option>
-        <option value="days" selected>عدد أيام محدد (بحد أقصى سنة)</option>
+      <select name="expiry_mode" required>
+        {% for key, preset in LICENSE_DURATION_PRESETS.items() %}
+        <option value="{{ key }}" {{ 'selected' if key == '1year' else '' }}>{{ preset[0] }}</option>
+        {% endfor %}
       </select>
-    </div>
-    <div class="form-field" id="days_field">
-      <label>عدد الأيام (الحد الأقصى 365)</label>
-      <input type="number" name="days" value="365" min="1" max="365">
     </div>
     <div class="form-field" style="align-self:end;">
       <button class="btn" type="submit">توليد الكود</button>
     </div>
   </form>
+  <p class="muted" style="margin-top:8px;">
+    ⚠️ الخيار "دائم" لا يحمل تاريخ انتهاء إطلاقاً — الطريقة الوحيدة لإيقافه لاحقاً
+    هي "إلغاء عن بُعد" (بالأسفل)، وهذا يحتاج الجهاز يكون متصل بالنت فعلياً
+    ليستلم الإلغاء.
+  </p>
 </div>
 
 <div class="card">
@@ -114,7 +116,12 @@
         <td class="mono">{{ row['hardware_id'] }}</td>
         <td>{{ row['username'] }}</td>
         <td>{{ row['expiry'] }}</td>
-        <td style="display:flex; gap:6px;">
+        <td style="display:flex; gap:6px; flex-wrap:wrap;">
+          <form method="POST" action="{{ url_for('designer_push_update') }}"
+                onsubmit="return confirm('إرسال أمر تحديث فوري لهذا الجهاز بالذات (مستقل عن بقية العملاء)؟');">
+            <input type="hidden" name="hardware_id" value="{{ row['hardware_id'] }}">
+            <button class="btn small secondary" type="submit">📤 تحديث فوري</button>
+          </form>
           <form method="POST" action="{{ url_for('designer_delete_issue_log', log_id=row['id']) }}"
                 onsubmit="return confirm('حذف هذا السطر من السجل؟ (لا يلغي الترخيص المفعّل عند العميل، فقط ينظّف السجل هنا)');">
             <button class="btn small secondary" type="submit">🗑 حذف السطر</button>
@@ -138,6 +145,27 @@
       {% endfor %}
     </tbody>
   </table>
+</div>
+
+<div class="card">
+  <h3>📤 إرسال تحديث فوري لعميل عن بُعد (عبر الإنترنت)</h3>
+  <p class="muted">
+    يدفع تحديثاً فورياً لجهاز عميل واحد بالذات — مستقل تماماً عن بقية
+    العملاء ولا ينتظر دورة الفحص التلقائي الدورية. يُنشَر عبر نفس
+    مستودع GitHub الخاص (بتوكن الكتابة أدناه)، ويُطبَّق عند العميل أول ما
+    يتصل بالنت (أو فوراً لو ضغط عنده زر "تحقق من تحديث الآن"). لازم
+    "قناة التحديث" لهذا الجهاز (فوق) تكون مضبوطة على الفرع اللي فيه
+    التحديث المطلوب قبل الإرسال.
+  </p>
+  <form method="POST" action="{{ url_for('designer_push_update') }}" class="form-grid">
+    <div class="form-field">
+      <label>معرّف جهاز العميل (Hardware ID)</label>
+      <input type="text" name="hardware_id" placeholder="XXXX-XXXX-XXXX-XXXX" required style="direction:ltr; font-family:monospace;">
+    </div>
+    <div class="form-field" style="align-self:end;">
+      <button class="btn secondary" type="submit">إرسال تحديث فوري</button>
+    </div>
+  </form>
 </div>
 
 <div class="card">

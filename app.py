@@ -44,6 +44,24 @@ ROLE_LABELS = {
     "accountant": "Accountant",
 }
 
+# مدد الترخيص الجاهزة المعروضة بلوحة المصمم عند توليد كود لعميل — نقطة
+# #12. المفتاح هو قيمة <option value="..."> بفورم designer_generate،
+# والقيمة (label, days): days=None تعني ترخيص دائم فعلي (بدون تاريخ
+# انتهاء إطلاقاً، يُخزَّن كـ "PERM" داخل الكود نفسه — راجع
+# license_manager.generate_activation_code). التعديل هنا فقط ينعكس تلقائياً
+# على القائمة المنسدلة بـ designer/panel.html.
+LICENSE_DURATION_PRESETS = {
+    "trial": ("تجريبي (3 أيام)", license_manager.TRIAL_DAYS),
+    "1day": ("يوم واحد", 1),
+    "3days": ("3 أيام", 3),
+    "1month": ("شهر", 30),
+    "3months": ("3 أشهر", 90),
+    "6months": ("6 أشهر", 180),
+    "1year": ("سنة", 365),
+    "permanent": ("دائم (بدون تاريخ انتهاء)", None),
+}
+app.jinja_env.globals["LICENSE_DURATION_PRESETS"] = LICENSE_DURATION_PRESETS
+
 # دكتور المختبر الفاحص — the examining lab doctor for a visit (separate from
 # the external "referring" doctor already tracked via doctor_id/doctors
 # table). Editable now from Management → Settings; this constant is only the
@@ -639,6 +657,30 @@ def designer_restore_license(hardware_id):
     return redirect(url_for("designer_panel"))
 
 
+@app.route("/designer/update/push", methods=["POST"])
+@designer_required
+def designer_push_update():
+    """يرسل أمر تحديث فوري لجهاز عميل واحد بالذات (مستقل عن بقية العملاء)
+    — لا ينتظر دورة الفحص التلقائي (كل CHECK_INTERVAL_HOURS)، بل يُطبَّق أول
+    ما يتصل ذلك الجهاز بالنت (أو فوراً لو ضغط عنده زر 'تحقق من تحديث
+    الآن'). يعتمد فعلياً على أن يكون ذلك الجهاز 'مربوط بالإنترنت' من لوحة
+    المصمم عنده، ويستخدم نفس توكن الكتابة المستخدَم لإلغاء التراخيص عن بُعد."""
+    db = get_db()
+    write_token = get_setting(db, "github_write_token", "")
+    hardware_id = request.form.get("hardware_id", "").strip()
+    if not hardware_id:
+        flash("أدخل معرّف جهاز العميل المطلوب إرسال التحديث له")
+    else:
+        try:
+            auto_updater.push_update_signal(write_token, hardware_id)
+            flash(f"تم إرسال أمر تحديث فوري لجهاز {hardware_id} — راح يُطبَّق أول ما يتصل بالنت "
+                  f"(لازم يكون \"مربوط بالإنترنت\" مفعّل عنده، أو يضغط هو زر \"تحقق من تحديث الآن\").")
+        except Exception as e:
+            flash(f"⚠️ تعذر إرسال أمر التحديث: {e}")
+    db.close()
+    return redirect(url_for("designer_panel"))
+
+
 @app.route("/designer/update/channel", methods=["POST"])
 @designer_required
 def designer_update_channel():
@@ -686,6 +728,7 @@ def designer_update_check_now():
     else:
         result = auto_updater.check_and_apply(db, force_apply=True)
         auto_updater.check_revocation(db)
+        auto_updater.check_update_signal(db)
         flash(result["message"])
     db.close()
     return redirect(url_for("designer_panel"))
@@ -702,15 +745,18 @@ def designer_generate():
         flash("أدخل معرّف الجهاز واسم المستخدم")
         return redirect(url_for("designer_panel"))
 
+    preset = LICENSE_DURATION_PRESETS.get(expiry_mode)
+    if not preset:
+        flash("مدة ترخيص غير صالحة — اختر مدة من القائمة")
+        return redirect(url_for("designer_panel"))
+
+    _label, days = preset
     is_trial = expiry_mode == "trial"
-    if is_trial:
-        expiry_date = (date.today() + timedelta(days=license_manager.TRIAL_DAYS)).isoformat()
-    else:
-        # لا يوجد خيار "دائم" بعد الآن — أقصى مدة لأي ترخيص عميل هي سنة
-        # واحدة (365 يوم)، ثم يحتاج تجديد كود جديد.
-        days = int(request.form.get("days", "365") or 365)
-        days = max(1, min(days, 365))
-        expiry_date = (date.today() + timedelta(days=days)).isoformat()
+    # days=None يعني ترخيص دائم فعلي (بدون تاريخ انتهاء) — license_manager
+    # يخزّنه كـ "PERM" داخل الكود نفسه ويتحقق منه محلياً دون أي اعتماد على
+    # تاريخ. الإلغاء عن بُعد (designer_revoke_license) يبقى شغّال بنفس
+    # الطريقة حتى مع ترخيص دائم، فهو ليس "بلا رجعة".
+    expiry_date = None if days is None else (date.today() + timedelta(days=days)).isoformat()
 
     code = license_manager.generate_activation_code(hardware_id, expiry_date, is_trial=is_trial)
     db = get_db()
