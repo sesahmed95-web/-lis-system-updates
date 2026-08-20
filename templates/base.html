@@ -8,6 +8,22 @@
 <link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='icon/lab-icon.ico') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 <script>
+  // "⬅️ رجوع" بشريط العنوان العلوي (كل الصفحات ما عدا الرئيسية): يرجع
+  // لنفس الصفحة/القسم اللي جاي منه المستخدم (history.back())، وإذا ما
+  // كان فيه تاريخ تصفح حقيقي بنفس الموقع (مثلاً فتح الرابط مباشرة بتبويب
+  // جديد، أو جاي من موقع خارجي) يرجعه للرئيسية بدل ما يطلع بصفحة فاضية
+  // أو يطلع برّا الموقع بالغلط.
+  var DASHBOARD_URL = "{{ url_for('dashboard') }}";
+  function smartGoBack() {
+    var sameSiteReferrer = document.referrer && document.referrer.indexOf(window.location.origin) === 0;
+    if (sameSiteReferrer && window.history.length > 1) {
+      window.history.back();
+    } else {
+      window.location.href = DASHBOARD_URL;
+    }
+  }
+</script>
+<script>
   // حتى لو نسى المستخدم يطفّي خيار "Headers and footers" بنافذة الطباعة،
   // خلي عنوان التبويب (اللي يطلعه المتصفح بمنتصف رأس الطباعة) فاضي وقت
   // الطباعة تحديداً، عشان ما يطلع اسم المختبر/الطبيب هناك بالإضافة لغيره
@@ -113,7 +129,15 @@
 
   <div class="main">
     <div class="topbar">
-      <div class="title">{% block page_title %}{{ t('dashboard') }}{% endblock %}</div>
+      <div class="title">
+        {% if request.path != '/' %}
+        <button class="pill-btn" type="button" onclick="smartGoBack()" title="رجوع لنفس الصفحة/القسم السابق"
+                style="margin-inline-end:8px;">⬅️ رجوع</button>
+        <a class="pill-btn" href="{{ url_for('dashboard') }}" title="الرئيسية"
+           style="margin-inline-end:8px;">🏠 الرئيسية</a>
+        {% endif %}
+        {% block page_title %}{{ t('dashboard') }}{% endblock %}
+      </div>
       <div class="controls">
         <button class="pill-btn {{ 'active' if lang=='en' }}" onclick="location.href='{{ url_for('set_lang', lang='en') }}'">EN</button>
         <button class="pill-btn {{ 'active' if lang=='ar' }}" onclick="location.href='{{ url_for('set_lang', lang='ar') }}'">AR</button>

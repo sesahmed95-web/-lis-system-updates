@@ -13,7 +13,10 @@
   </form>
 
   <p class="muted" style="margin:6px 0 0;">
-    {% if q %}
+    {% if filter_label %}
+      🔎 {{ filter_label }} — مرتبة بالأحدث تاريخًا ووقتًا (كل الأيام) —
+      <a href="{{ url_for('visits_list') }}">رجوع لزيارات اليوم</a>
+    {% elif q %}
       🔎 نتائج البحث (بكل الأيام)
     {% elif show_all %}
       🗂️ تُعرض كل الزيارات (كل الأيام) —
@@ -28,10 +31,13 @@
   <table>
     <thead><tr>
       <th>{{ t('no_col') }}</th><th>{{ t('name') }}</th><th>{{ t('gender') }}</th><th>{{ t('age') }}</th>
-      <th>{{ t('phone') }}</th><th>الدكتور الفاحص</th><th>{{ t('status') }}</th><th>{{ t('total') }}</th><th>{{ t('date') }}</th><th></th>
+      <th>{{ t('phone') }}</th><th>الدكتور الفاحص</th><th>{{ t('status') }}</th><th>{{ t('total') }}</th>
+      <th>الواصل / الباقي</th><th>{{ t('date') }}</th><th></th>
     </tr></thead>
     <tbody>
       {% for v in visits %}
+      {% set owed = v['invoice_total'] if v['invoice_total'] is not none else v['total'] %}
+      {% set remaining = owed - v['paid_amount'] %}
       <tr>
         <td class="mono">{{ v['registration_number'] }}</td>
         <td>{{ v['full_name'] }}</td>
@@ -41,6 +47,12 @@
         <td>{{ v['attending_doctor'] or '-' }}</td>
         <td><span class="badge badge-{{ v['status'] }}">{{ v['status'] }}</span></td>
         <td>{{ "%.0f"|format(v['total']) }}</td>
+        <td>
+          <div>الواصل: {{ "%.0f"|format(v['paid_amount']) }}</div>
+          {% if remaining > 0.01 %}
+          <div style="color:#C0392B; font-weight:600;">الباقي: {{ "%.0f"|format(remaining) }}</div>
+          {% endif %}
+        </td>
         <td class="muted">{{ v['created_at'] }}</td>
         <td>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -53,10 +65,12 @@
               <button class="btn small danger" type="submit" title="حذف الزيارة">🗑 حذف</button>
             </form>
           </div>
+          {% if remaining > 0.01 %}
           <form method="POST" action="{{ url_for('pay_invoice', visit_id=v['id']) }}" style="display:flex; gap:6px; margin-top:6px;">
-            <input type="number" name="amount" placeholder="{{ t('paid') }}" style="width:90px" step="0.01">
+            <input type="number" name="amount" placeholder="دفعة جديدة" style="width:90px" step="0.01" max="{{ remaining }}">
             <button class="btn small success" type="submit">{{ t('cash') }}</button>
           </form>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

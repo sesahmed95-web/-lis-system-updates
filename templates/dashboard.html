@@ -1,6 +1,25 @@
 {% extends "base.html" %}
 {% block page_title %}{{ t('dashboard') }}{% endblock %}
 {% block content %}
+<style>
+  #dashSearchWrap { position: relative; margin-bottom: 14px; }
+  #dashSearchInput { width: 100%; max-width: 420px; padding: 9px 12px; font-size: 14px;
+    border: 1px solid #E2E8F0; border-radius: 8px; }
+  #dashSearchResults { position: absolute; z-index: 20; top: 100%; margin-top: 4px;
+    width: 100%; max-width: 420px; background: var(--card-bg, #fff); border: 1px solid #E2E8F0;
+    border-radius: 8px; max-height: 360px; overflow-y: auto; box-shadow: 0 6px 16px rgba(0,0,0,.12); display: none; }
+  #dashSearchResults .ds-group-title { padding: 6px 10px; font-size: 11.5px; font-weight: 700;
+    color: #64748B; background: #F8FAFC; }
+  #dashSearchResults .ds-item { padding: 8px 10px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #EEF2F6; }
+  #dashSearchResults .ds-item:hover { background: #F1F5F9; }
+  #dashSearchResults .ds-item small { display: block; color: #64748B; }
+  #dashSearchResults .ds-empty { padding: 10px; font-size: 12.5px; color: #64748B; }
+</style>
+<div id="dashSearchWrap">
+  <input type="text" id="dashSearchInput" autocomplete="off"
+         placeholder="🔎 بحث باسم المريض، أو الطبيب المُحيل، أو المختبر المُرسِل...">
+  <div id="dashSearchResults"></div>
+</div>
 <div class="stat-grid">
   <div class="stat-card">
     <div class="label">{{ t('today_visits') }}</div>
@@ -38,4 +57,87 @@
     </tbody>
   </table>
 </div>
+
+<script>
+  // بحث موحّد بالرئيسية: اسم مريض (يودّي لسجله الكامل)، أو اسم طبيب
+  // مُحيل / مختبر مُرسِل (يودّي لقائمة زياراته مرتبة بالأحدث تاريخًا
+  // ووقتًا عبر /front-desk/visits؟doctor_id= أو ؟referral_center_id=).
+  (function () {
+    const input = document.getElementById('dashSearchInput');
+    const resultsEl = document.getElementById('dashSearchResults');
+    const VISITS_URL = "{{ url_for('visits_list') }}";
+    const PATIENT_HISTORY_TEMPLATE = "{{ url_for('patient_history', patient_id=999999) }}";
+    let debounceTimer = null;
+
+    function hideResults() {
+      resultsEl.style.display = 'none';
+      resultsEl.innerHTML = '';
+    }
+
+    function escapeHtml(s) {
+      return (s || '').replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    function renderGroup(title, items, buildLine) {
+      if (!items.length) return '';
+      let html = '<div class="ds-group-title">' + title + '</div>';
+      items.forEach(function (it) {
+        html += buildLine(it);
+      });
+      return html;
+    }
+
+    input.addEventListener('input', function () {
+      const q = this.value.trim();
+      clearTimeout(debounceTimer);
+      if (q.length < 2) { hideResults(); return; }
+      debounceTimer = setTimeout(function () {
+        fetch('/api/dashboard/search?q=' + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            const totalCount = (data.patients || []).length + (data.doctors || []).length + (data.referral_labs || []).length;
+            if (!totalCount) {
+              resultsEl.innerHTML = '<div class="ds-empty">لا توجد نتائج مطابقة.</div>';
+              resultsEl.style.display = 'block';
+              return;
+            }
+            let html = '';
+            html += renderGroup('🧑‍🤝‍🧑 مرضى', data.patients, function (p) {
+              const last = p.last_visit_at ? p.last_visit_at.slice(0, 16).replace('T', ' ') : 'بدون زيارات سابقة';
+              return '<div class="ds-item" data-href="' + PATIENT_HISTORY_TEMPLATE.replace('999999', p.id) + '">' +
+                escapeHtml(p.full_name) +
+                '<small>' + (p.gender || '') + ' · ' + (p.age || '-') + ' ' + (p.age_unit || '') +
+                ' · ' + (p.phone || '') + ' · آخر زيارة: ' + last + '</small></div>';
+            });
+            html += renderGroup('🩺 أطباء مُحيلون', data.doctors, function (d) {
+              const last = d.last_visit_at ? d.last_visit_at.slice(0, 16).replace('T', ' ') : 'بدون زيارات';
+              return '<div class="ds-item" data-href="' + VISITS_URL + '?doctor_id=' + d.id + '">' +
+                escapeHtml(d.full_name) +
+                '<small>' + (d.phone || '') + ' · آخر زيارة: ' + last + '</small></div>';
+            });
+            html += renderGroup('🧪 مختبرات مُرسِلة', data.referral_labs, function (l) {
+              const last = l.last_visit_at ? l.last_visit_at.slice(0, 16).replace('T', ' ') : 'بدون زيارات';
+              return '<div class="ds-item" data-href="' + VISITS_URL + '?referral_center_id=' + l.id + '">' +
+                escapeHtml(l.name) +
+                '<small>' + (l.phone || '') + ' · آخر زيارة: ' + last + '</small></div>';
+            });
+            resultsEl.innerHTML = html;
+            resultsEl.style.display = 'block';
+            resultsEl.querySelectorAll('.ds-item').forEach(function (el) {
+              el.addEventListener('click', function () {
+                window.location.href = this.getAttribute('data-href');
+              });
+            });
+          })
+          .catch(hideResults);
+      }, 300);
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!document.getElementById('dashSearchWrap').contains(e.target)) hideResults();
+    });
+  })();
+</script>
 {% endblock %}

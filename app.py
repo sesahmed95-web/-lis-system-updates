@@ -1061,6 +1061,44 @@ def patient_history(patient_id):
     return render_template("front_desk/patient_history.html", patient=patient, visit_data=visit_data)
 
 
+# بحث موحّد بالصفحة الرئيسية: يبحث بثلاث فئات مرة وحدة — اسم مريض (يظهر
+# تفاصيله عبر رابط سجله)، اسم طبيب مُحيل، واسم مختبر مُرسِل (الأخيرين
+# يوديان لقائمة زياراتهما مرتبة بالأحدث تاريخًا ووقتًا عبر فلتر
+# doctor_id/referral_center_id بصفحة "الزيارات" — راجع visits_list أعلاه).
+@app.route("/api/dashboard/search")
+@login_required
+def api_dashboard_search():
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify({"patients": [], "doctors": [], "referral_labs": []})
+    db = get_db()
+    patients = db.execute(
+        "SELECT p.id, p.full_name, p.gender, p.age, p.age_unit, p.phone, "
+        "(SELECT MAX(v.created_at) FROM visits v WHERE v.patient_id = p.id) as last_visit_at "
+        "FROM patients p WHERE p.full_name LIKE ? ORDER BY p.full_name LIMIT 6",
+        (f"%{q}%",),
+    ).fetchall()
+    doctors = db.execute(
+        "SELECT d.id, d.full_name, d.phone, "
+        "(SELECT MAX(v.created_at) FROM visits v WHERE v.doctor_id = d.id) as last_visit_at "
+        "FROM doctors d WHERE d.full_name LIKE ? "
+        "ORDER BY last_visit_at IS NULL, last_visit_at DESC LIMIT 6",
+        (f"%{q}%",),
+    ).fetchall()
+    referral_labs = db.execute(
+        "SELECT rc.id, rc.name, rc.phone, "
+        "(SELECT MAX(v.created_at) FROM visits v WHERE v.referral_center_id = rc.id) as last_visit_at "
+        "FROM referral_centers rc WHERE rc.name LIKE ? AND rc.name != 'Walk-in' "
+        "ORDER BY last_visit_at IS NULL, last_visit_at DESC LIMIT 6",
+        (f"%{q}%",),
+    ).fetchall()
+    return jsonify({
+        "patients": [dict(r) for r in patients],
+        "doctors": [dict(r) for r in doctors],
+        "referral_labs": [dict(r) for r in referral_labs],
+    })
+
+
 # بحث فوري (Live search) يُستخدم من شاشة "زيارة جديدة": بمجرد كتابة اسم
 # المريض يبحث عن أي مطابقة سابقة بجدول المرضى، حتى لا تنفتح بطاقة مريض
 # مكررة لشخص سبق أن راجع المختبر.
@@ -1477,16 +1515,44 @@ def visits_list():
     db = get_db()
     q = request.args.get("q", "").strip()
     show_all = request.args.get("all") == "1"
+    # فلترة اختيارية بطبيب مُحيل أو مختبر مُرسِل — تُستخدم من نتائج بحث
+    # الرئيسية (بحث باسم طبيب/مختبر) لعرض كل زياراته مرتبة بالأحدث تاريخًا
+    # ووقتًا، بغض النظر عن يوم الزيارة (بعكس الوضع الافتراضي المقتصر على
+    # اليوم الحالي فقط).
+    doctor_id = request.args.get("doctor_id", type=int)
+    referral_center_id = request.args.get("referral_center_id", type=int)
+    filter_label = None
+    if doctor_id:
+        row = db.execute("SELECT full_name FROM doctors WHERE id=?", (doctor_id,)).fetchone()
+        if row:
+            filter_label = f"زيارات الدكتور المُحيل: {row['full_name']}"
+    elif referral_center_id:
+        row = db.execute("SELECT name FROM referral_centers WHERE id=?", (referral_center_id,)).fetchone()
+        if row:
+            filter_label = f"زيارات المختبر المُرسِل: {row['name']}"
+
     query = (
         "SELECT v.id, v.registration_number, p.full_name, p.gender, p.age, p.phone, "
         "v.status, v.created_at, v.attending_doctor, "
         "(SELECT COALESCE(SUM(ot.price),0) FROM order_tests ot "
-        " JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=v.id) as total "
+        " JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=v.id) as total, "
+        # الواصل (المبلغ المدفوع فعليًا) والإجمالي الفعلي بالفاتورة (بعد أي
+        # خصم/رسوم إضافية) — يُستخدمان بالقالب لعرض "الواصل" و"الباقي" بدل
+        # حقل "المدفوع" القديم. LEFT JOIN لأن بعض الزيارات القديمة قد لا
+        # تملك صف فاتورة.
+        "COALESCE(i.paid_amount, 0) as paid_amount, i.total_amount as invoice_total "
         "FROM visits v JOIN patients p ON p.id = v.patient_id "
+        "LEFT JOIN invoices i ON i.visit_id = v.id "
     )
     params = []
     conditions = []
-    if q:
+    if doctor_id:
+        conditions.append("v.doctor_id=?")
+        params.append(doctor_id)
+    elif referral_center_id:
+        conditions.append("v.referral_center_id=?")
+        params.append(referral_center_id)
+    elif q:
         conditions.append("(p.full_name LIKE ? OR p.phone LIKE ? OR v.registration_number LIKE ?)")
         params += [f"%{q}%", f"%{q}%", f"%{q}%"]
     elif not show_all:
@@ -1498,9 +1564,10 @@ def visits_list():
         params.append(today)
     if conditions:
         query += "WHERE " + " AND ".join(conditions) + " "
-    query += "ORDER BY v.id DESC LIMIT 100"
+    query += "ORDER BY v.created_at DESC, v.id DESC LIMIT 100"
     visits = db.execute(query, params).fetchall()
-    return render_template("front_desk/visits.html", visits=visits, q=q, show_all=show_all)
+    return render_template("front_desk/visits.html", visits=visits, q=q, show_all=show_all,
+                            filter_label=filter_label)
 
 @app.route("/front-desk/visits/<int:visit_id>/delete", methods=["POST"])
 @roles_required("admin")
