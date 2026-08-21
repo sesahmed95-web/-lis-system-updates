@@ -1281,11 +1281,13 @@ def results_list():
         "SELECT v.id as visit_id, v.registration_number, v.created_at, p.full_name as patient_name, "
         "COUNT(ot.id) as tests_count, "
         "SUM(CASE WHEN ot.status IN ('Completed', 'Verified') THEN 1 ELSE 0 END) as done_count, "
-        "SUM(CASE WHEN ot.status = 'Verified' THEN 1 ELSE 0 END) as verified_count "
+        "SUM(CASE WHEN ot.status = 'Verified' THEN 1 ELSE 0 END) as verified_count, "
+        "GROUP_CONCAT(ot.id || ':' || td.name, '||') as tests_list "
         "FROM order_tests ot "
         "JOIN orders o ON o.id = ot.order_id "
         "JOIN visits v ON v.id = o.visit_id "
         "JOIN patients p ON p.id = v.patient_id "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
     )
     filter_label = None
     if filter_type == "pending":
@@ -3746,6 +3748,37 @@ def api_quick_add_test():
     log_action("QuickAddTest", "test_definition", cur.lastrowid, name)
     return jsonify({"id": cur.lastrowid, "name": name, "department": department, "code": code})
 
+@app.route("/api/tests/quick-add-with-price", methods=["POST"])
+@login_required
+def api_quick_add_test_with_price():
+    """يسمح لأي مستخدم مسجّل دخول (مو بس admin/supervisor) بإضافة تحليل غير
+    موجود بالقائمة مباشرة أثناء إنشاء زيارة جديدة، مع تحديد سعره فورًا —
+    يبقى هذا التحليل محفوظًا بالكتالوج بشكل دائم لأي زيارة قادمة. لو التحليل
+    موجود مسبقًا بنفس الاسم، نرجع بياناته الحالية بدل ما ننشئ نسخة مكررة."""
+    db = get_db()
+    name = (request.form.get("name") or "").strip()
+    try:
+        price = float(request.form.get("price") or 0)
+    except ValueError:
+        price = 0
+    if not name:
+        return jsonify({"error": "اسم التحليل مطلوب"}), 400
+    if price < 0:
+        return jsonify({"error": "السعر يجب أن يكون رقمًا موجبًا"}), 400
+    existing = db.execute(
+        "SELECT id, price FROM test_definitions WHERE LOWER(TRIM(name))=LOWER(TRIM(?))", (name,)
+    ).fetchone()
+    if existing:
+        return jsonify({"id": existing["id"], "name": name, "price": existing["price"], "existed": True})
+    code = unique_test_code(db, name)
+    cur = db.execute(
+        "INSERT INTO test_definitions (code, name, department, sample_type, price, is_active, is_examining_test) "
+        "VALUES (?, ?, '', '', ?, 1, 0)",
+        (code, name, price),
+    )
+    db.commit()
+    log_action("QuickAddTestWithPrice", "test_definition", cur.lastrowid, f"{name} ({price})")
+    return jsonify({"id": cur.lastrowid, "name": name, "price": price, "existed": False})
 
 # إضافة تحليل غير موجود بالقائمة مباشرة من قسم "الطلبات" بشاشة "زيارة
 # جديدة" — متاحة لأي مستخدم مسجّل دخول (وليس فقط admin/supervisor مثل

@@ -34,15 +34,8 @@
   #visitCreatedPanel { display: none; margin-top: 14px; padding: 16px; text-align: center; }
   #visitCreatedPanel h3 { margin: 0 0 10px; font-size: 15px; color: #15803D; }
   #visitCreatedPanel .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-  /* صندوق إضافة تحليل غير موجود من نفس شاشة الطلبات (متاح لكل المستخدمين) */
-  #missingTestBox { margin: 4px 0 10px; padding: 8px 10px; background: #FFF7ED; border: 1px solid #FED7AA;
-    border-radius: 6px; display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
-  #missingTestBox .mt-field { display: flex; flex-direction: column; gap: 2px; }
-  #missingTestBox .mt-field label { font-size: 11.5px; color: #64748B; }
-  #missingTestBox input { padding: 5px 8px; font-size: 12.5px; border: 1px solid #E2E8F0; border-radius: 5px; }
-  #missingTestBox input#mt_name { width: 220px; }
-  #missingTestBox input#mt_price { width: 100px; }
-  #missingTestError { color: #C0392B; font-size: 12px; display: none; width: 100%; }
+  #customTestRow { display:flex; gap:6px; align-items:flex-end; margin-bottom:10px; flex-wrap:wrap; }
+  #customTestRow .form-field { margin-bottom:0; }
 </style>
 <form method="POST" id="newVisitForm">
   <input type="hidden" name="existing_patient_id" id="existing_patient_id" value="">
@@ -187,28 +180,18 @@
     </div>
     {% endif %}
 
-    <!-- تحليل غير موجود بالقائمة؟ متاح لأي موظف (استقبال وغيره)، وليس
-         فقط admin/supervisor مثل نافذة "إدارة التحاليل" أعلاه. يُطلب
-         السعر مباشرة، وعند الحفظ يُضاف كخانة اختيار جديدة ومحدّدة تلقائيًا
-         ضمن طلبات هذي الزيارة. -->
-    <div style="margin-bottom:8px;">
-      <button type="button" class="btn small secondary" onclick="toggleMissingTestBox()" id="missingTestToggleBtn">
-        ➕ تحليل غير موجود بالقائمة؟
-      </button>
-    </div>
-    <div id="missingTestBox" style="display:none;">
-      <div class="mt-field">
-        <label>اسم التحليل</label>
-        <input type="text" id="mt_name" placeholder="اكتب اسم التحليل">
+    <div id="customTestRow">
+      <div class="form-field" style="flex:2; min-width:180px;">
+        <label style="font-size:12px;">تحليل غير موجود بالقائمة؟ اكتب اسمه هنا</label>
+        <input type="text" id="customTestName" placeholder="اسم التحليل" autocomplete="off">
       </div>
-      <div class="mt-field">
-        <label>السعر</label>
-        <input type="number" id="mt_price" min="0" step="any" placeholder="0">
+      <div class="form-field" style="width:110px;">
+        <label style="font-size:12px;">السعر</label>
+        <input type="number" id="customTestPrice" step="any" min="0" placeholder="0">
       </div>
-      <button type="button" class="btn small" onclick="quickAddPricedTest()">💾 إضافة وتحديد للزيارة</button>
-      <button type="button" class="btn small secondary" onclick="toggleMissingTestBox(false)">إلغاء</button>
-      <small id="missingTestError"></small>
+      <button type="button" class="btn small" onclick="addCustomTest()">+ إضافة وتحديد</button>
     </div>
+    <small class="muted" id="customTestError" style="display:none; color:#DC2626; display:none;"></small>
 
     <div class="checkbox-grid nv-checkbox-grid">
       {% for test in tests %}
@@ -222,23 +205,6 @@
       {% endfor %}
     </div>
     <p style="margin-top:10px; font-weight:600;">{{ t('grand_total') }}: <span id="grandTotal">0</span></p>
-
-    <!-- تأكيد إلزامي (نقطة #9): الاستقبال يشيك هالمربع فقط إذا سحب العينة
-         فعليًا هذي اللحظة. بدونه الفورم ما ينحفظ (تحقق JS هنا + تحقق مطابق
-         بالسيرفر كخط دفاع ثاني). عند التأكيد، order_tests تُنشأ مباشرة
-         بحالة "تم سحبها" فتتخطى طابور 🩸 سحب العينة وتطلع مباشرة بطابور
-         📥 استلام العينة. -->
-    <div id="sampleCollectedBox" style="margin-top:14px; padding:10px 12px; background:#FEF9C3;
-         border:2px solid #FDE68A; border-radius:8px;">
-      <label style="display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer; margin:0;">
-        <input type="checkbox" id="sample_collected_checkbox" style="width:18px; height:18px;">
-        ✅ تم سحب العينة *
-      </label>
-      <input type="hidden" name="sample_collected" id="sample_collected_hidden" value="0">
-      <small id="sampleCollectedError" style="display:none; color:#C0392B; font-weight:600;">
-        لازم تأكيد "تم سحب العينة" قبل حفظ الزيارة.
-      </small>
-    </div>
   </div>
 </form>
 
@@ -278,7 +244,7 @@
         </div>
         <button type="button" class="btn small" onclick="quickAddTest()">+ إضافة</button>
       </div>
-      <small class="muted" id="tm_add_error" style="display:none;"></small>
+      <small class="muted" id="tm_add_error" style="color:#C0392B; display:none;"></small>
     </div>
 
     <div class="tm-section">
@@ -417,70 +383,52 @@
   window.quickAddDoctor = quickAddDoctor;
 
   // ------------------------------------------------------------------
-  // "تحليل غير موجود بالقائمة؟" — متاح لكل المستخدمين (استقبال وغيرهم)
-  // من نفس قسم الطلبات: يكتب اسم التحليل وسعره، فيُحفظ بكتالوج التحاليل
-  // فورًا (/api/tests/quick-add-priced، بلا قيد admin/supervisor) ويُضاف
-  // كخانة اختيار جديدة محدَّدة تلقائيًا ضمن هذي الزيارة، فيدخل بحساب
-  // المجموع مباشرة دون الحاجة لفتح نافذة "إدارة التحاليل" أو انتظار مدير.
+  // إضافة تحليل غير موجود بالقائمة مباشرة (متاحة لكل المستخدمين، مو بس
+  // admin/supervisor): يكتب الموظف اسم التحليل وسعره، ينحفظ فورًا
+  // بكتالوج التحاليل بشكل دائم، ويُضاف كخانة اختيار جديدة مُحدَّدة تلقائيًا
+  // ضمن هذي الزيارة — بدون فتح أي نافذة إدارة منفصلة.
   // ------------------------------------------------------------------
-  function toggleMissingTestBox(show) {
-    const box = document.getElementById('missingTestBox');
-    const willShow = typeof show === 'boolean' ? show : (box.style.display === 'none');
-    box.style.display = willShow ? 'flex' : 'none';
-    const errEl = document.getElementById('missingTestError');
-    errEl.style.display = 'none';
-    if (willShow) {
-      document.getElementById('mt_name').value = '';
-      document.getElementById('mt_price').value = '';
-      document.getElementById('mt_name').focus();
-    }
-  }
-  window.toggleMissingTestBox = toggleMissingTestBox;
-
-  function quickAddPricedTest() {
-    const nameInput = document.getElementById('mt_name');
-    const priceInput = document.getElementById('mt_price');
-    const errEl = document.getElementById('missingTestError');
+  window.addCustomTest = function () {
+    const nameInput = document.getElementById('customTestName');
+    const priceInput = document.getElementById('customTestPrice');
+    const errEl = document.getElementById('customTestError');
     const name = nameInput.value.trim();
-    const priceStr = priceInput.value.trim();
+    const price = parseFloat(priceInput.value || '0');
     errEl.style.display = 'none';
-
-    if (!name) {
-      errEl.textContent = 'اكتب اسم التحليل أولاً.'; errEl.style.display = 'block'; return;
-    }
-    if (priceStr === '' || isNaN(Number(priceStr)) || Number(priceStr) < 0) {
-      errEl.textContent = 'اكتب سعرًا صحيحًا (0 أو أكثر).'; errEl.style.display = 'block'; return;
-    }
-
-    const body = new URLSearchParams({ name: name, price: priceStr });
-    fetch('/api/tests/quick-add-priced', { method: 'POST', body: body })
+    if (!name) { errEl.textContent = 'اكتب اسم التحليل أولاً.'; errEl.style.display = 'block'; return; }
+    if (isNaN(price) || price < 0) { errEl.textContent = 'أدخل سعرًا صحيحًا (رقم موجب).'; errEl.style.display = 'block'; return; }
+    const body = new URLSearchParams({ name: name, price: String(price) });
+    fetch('/api/tests/quick-add-with-price', { method: 'POST', body: body })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
-
-        DEFAULT_PRICES[String(data.id)] = data.price;
-
-        const grid = document.querySelector('.nv-checkbox-grid');
-        const wrap = document.createElement('span');
-        wrap.className = 'checkbox-item-wrap';
-        wrap.id = 'test_item_' + data.id;
-        wrap.innerHTML = '<label class="checkbox-item">' +
-          '<input type="checkbox" class="test-check" id="test_' + data.id + '" name="tests" value="' + data.id + '" data-exam="0" checked>' +
-          '<span id="test_label_' + data.id + '">' + data.name + '</span> ' +
-          '<span class="muted" id="pricewrap_' + data.id + '"> (<span id="price_' + data.id + '">' + Math.round(data.price) + '</span>)</span>' +
-          '</label>';
-        grid.appendChild(wrap);
-        wrap.querySelector('.test-check').addEventListener('change', refreshPrices);
-
-        toggleMissingTestBox(false);
+        const idStr = String(data.id);
+        DEFAULT_PRICES[idStr] = data.price;
+        let checkbox = document.getElementById('test_' + idStr);
+        if (!checkbox) {
+          const grid = document.querySelector('.nv-checkbox-grid');
+          const wrap = document.createElement('span');
+          wrap.className = 'checkbox-item-wrap';
+          wrap.id = 'test_item_' + idStr;
+          wrap.innerHTML = '<label class="checkbox-item">' +
+            '<input type="checkbox" class="test-check" id="test_' + idStr + '" name="tests" value="' + idStr + '" data-exam="0">' +
+            '<span id="test_label_' + idStr + '">' + data.name + '</span> ' +
+            '<span class="muted" id="pricewrap_' + idStr + '" style="display:none;">(<span id="price_' + idStr + '">0</span>)</span>' +
+            '</label>';
+          grid.appendChild(wrap);
+          checkbox = wrap.querySelector('.test-check');
+          checkbox.addEventListener('change', refreshPrices);
+        }
+        checkbox.checked = true;
+        nameInput.value = '';
+        priceInput.value = '';
         refreshPrices();
       })
       .catch(function () {
-        errEl.textContent = 'تعذر الاتصال بالسيرفر. حاول مرة أخرى.';
+        errEl.textContent = 'تعذر الاتصال بالسيرفر، حاول مرة أخرى.';
         errEl.style.display = 'block';
       });
-  }
-  window.quickAddPricedTest = quickAddPricedTest;
+  };
 
   // ------------------------------------------------------------------
   // إرسال الفورم بـ AJAX (بدل التحويل المباشر للصفحة) حتى نقدر، بعد
@@ -491,28 +439,16 @@
   const createVisitBtn = document.getElementById('createVisitBtn');
   const visitCreatedPanel = document.getElementById('visitCreatedPanel');
   const barcodePrintFrame = document.getElementById('barcodePrintFrame');
-  const sampleCollectedCheckbox = document.getElementById('sample_collected_checkbox');
-  const sampleCollectedHidden = document.getElementById('sample_collected_hidden');
-  const sampleCollectedBox = document.getElementById('sampleCollectedBox');
-  const sampleCollectedError = document.getElementById('sampleCollectedError');
   let lastCreatedVisitId = null;
-
-  sampleCollectedCheckbox.addEventListener('change', function () {
-    sampleCollectedHidden.value = sampleCollectedCheckbox.checked ? '1' : '0';
-    if (sampleCollectedCheckbox.checked) {
-      sampleCollectedError.style.display = 'none';
-      sampleCollectedBox.style.borderColor = '#FDE68A';
-    }
-  });
 
   newVisitForm.addEventListener('submit', function (e) {
     e.preventDefault();
-    // تحقق إلزامي بالواجهة قبل حتى نبعث الطلب للسيرفر (نقطة #9) — تحقق
-    // مطابق موجود بالسيرفر أيضًا كخط دفاع ثاني لو JS معطّل أو تجاوزه أحد.
-    if (!sampleCollectedCheckbox.checked) {
-      sampleCollectedError.style.display = 'block';
-      sampleCollectedBox.style.borderColor = '#DC2626';
-      sampleCollectedBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // إلزامية اختيار تحليل واحد على الأقل قبل حفظ الزيارة — يشمل أي
+    // تحليل من القائمة الأصلية أو تحليل جديد أُضيف عبر الحقل أعلاه
+    // (لأنه بمجرد إضافته يصير خانة اختيار محدَّدة تلقائيًا بنفس الشبكة).
+    const anyTestChecked = document.querySelectorAll('.test-check:checked').length > 0;
+    if (!anyTestChecked) {
+      alert('الرجاء اختيار تحليل واحد على الأقل قبل حفظ الزيارة، أو إضافة تحليل جديد من الحقل الموجود فوق قائمة التحاليل.');
       return;
     }
     createVisitBtn.disabled = true;
@@ -524,10 +460,7 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         createVisitBtn.disabled = false;
-        if (!data || !data.ok) {
-          alert(data && data.error ? data.error : 'حدث خطأ أثناء إنشاء الزيارة. حاول مرة أخرى.');
-          return;
-        }
+        if (!data || !data.ok) { alert('حدث خطأ أثناء إنشاء الزيارة. حاول مرة أخرى.'); return; }
         lastCreatedVisitId = data.visit_id;
         document.getElementById('createdRegNumber').textContent = data.registration_number;
         document.getElementById('goToVisitsBtn').href = data.redirect_url;
