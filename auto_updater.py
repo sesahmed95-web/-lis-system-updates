@@ -24,11 +24,18 @@
    - GITHUB_OWNER: اسم حسابك/منظمتك على GitHub.
    - GITHUB_REPO: اسم المستودع (الخاص) اللي فيه الإصدارات.
    - GITHUB_BRANCH: اسم الفرع اللي تدفع (push) عليه تحديثاتك — افتراضياً main.
-   - GITHUB_TOKEN: "Fine-grained personal access token" مربوط بهذا
-     المستودع فقط وبصلاحية قراءة فقط (Contents: Read-only). هذا التوكن
-     ينحزم داخل نسخة كل عميل حتى يقدر يقرأ الملفات من مستودعك
-     الخاص، فخليه محدود الصلاحية قد الإمكان (قراءة فقط، على هذا
-     المستودع تحديداً)، وما تستخدم توكن شخصي كامل الصلاحيات أبداً.
+
+🔒 توكن القراءة (GITHUB_TOKEN) — لا يُكتب هنا أبداً بعد اليوم
+   ------------------------------------------------------------
+   قديماً كان هذا التوكن مكتوب صراحة بهذا الملف. المشكلة: هذا الملف نفسه
+   جزء من المستودع اللي يترفع (git push) مع كل تحديث — يعني أي توكن
+   تكتبه هنا يترفع لـ GitHub مكشوفاً، وGitHub يكتشف تلقائياً أي توكن من
+   صيغته (github_pat_...) بأي مستودع (خاص أو عام) ويُلغيه فوراً كحماية —
+   ولذلك كان يموت التوكن بشكل متكرر بغض النظر كم مرة تجدده.
+   الحل: التوكن الحين يُخزَّن فقط محلياً بجدول settings (بقاعدة بيانات
+   كل جهاز)، ويُدخَل من لوحة المصمم (قسم "توكن القراءة" بجانب "توكن
+   الكتابة" الموجود أصلاً) — أبداً لا يُكتب هنا بالكود ولا يدخل أي
+   git commit. راجع configure_token()/_get_token() تحت.
 """
 import json
 import os
@@ -47,7 +54,6 @@ from datetime import datetime
 GITHUB_OWNER = "sesahmed95-web"     # 🔒 غيّرها
 GITHUB_REPO = "-lis-system-updates"    # 🔒 غيّرها
 GITHUB_BRANCH = "main"                 # 🔒 اسم الفرع اللي تدفع عليه تحديثاتك
-GITHUB_TOKEN = "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"  # 🔒 غيّرها
 # مسار ملف VERSION داخل المستودع (لو حاطه بمجلد فرعي غيّر هذا المسار،
 # مثلاً "lis_system/VERSION"). اتركه "VERSION" لو بجذر المستودع مباشرة.
 VERSION_FILE_PATH_IN_REPO = "VERSION"
@@ -60,14 +66,42 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 VERSION_FILE = os.path.join(APP_DIR, "VERSION")
 API_BASE = "https://api.github.com"
 
+# ------------------------------------------------------- توكن القراءة -----
+# يُخزَّن فقط بالذاكرة أثناء تشغيل البرنامج + بجدول settings المحلي —
+# أبداً لا يُكتب هنا بالكود المصدري (راجع الشرح بأعلى الملف عن سبب هذا
+# التغيير). load_token_from_db() تُستدعى مرة وحدة عند إقلاع البرنامج
+# (app.py)، وconfigure_token() تُستدعى فوراً كل مرة يغيّره المصمم من
+# لوحته بدون الحاجة لإعادة تشغيل البرنامج.
+_runtime_token = None
+
+
+def configure_token(token):
+    """يضبط توكن القراءة بذاكرة هذا التشغيل فقط. يُستدعى عند الإقلاع
+    (بعد قراءته من settings) وأيضاً فوراً بعد أي حفظ جديد له من لوحة
+    المصمم، حتى يسري أثره فوراً بدون إعادة تشغيل."""
+    global _runtime_token
+    _runtime_token = (token or "").strip() or None
+
+
+def load_token_from_db(db):
+    """يقرأ توكن القراءة المحفوظ بجدول settings (المفتاح github_read_token)
+    ويحمّله بالذاكرة. تُستدعى مرة وحدة عند إقلاع البرنامج."""
+    from database import get_setting
+    configure_token(get_setting(db, "github_read_token", ""))
+
+
+def _get_token():
+    return _runtime_token
+
 
 def is_configured():
-    """يرجع False لو المصمم نسى يعبّي القيم أعلاه — يمنع أي محاولة اتصال
-    عبثية بقيم placeholder."""
+    """يرجع False لو المصمم نسى يعبّي القيم أعلاه، أو لو توكن القراءة
+    لسا ما انضبط من لوحة المصمم (settings.github_read_token) — يمنع أي
+    محاولة اتصال عبثية بدون بيانات كاملة."""
     return (
         GITHUB_OWNER and "YOUR-" not in GITHUB_OWNER
         and GITHUB_REPO and "YOUR-" not in GITHUB_REPO
-        and GITHUB_TOKEN and "YOUR-" not in GITHUB_TOKEN
+        and bool(_get_token())
     )
 
 
@@ -115,7 +149,7 @@ def get_update_branch(db=None):
 
 def _api_request(path, accept="application/vnd.github+json"):
     req = urllib.request.Request(f"{API_BASE}{path}")
-    req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
+    req.add_header("Authorization", f"Bearer {_get_token()}")
     req.add_header("Accept", accept)
     req.add_header("X-GitHub-Api-Version", "2022-11-28")
     req.add_header("User-Agent", "LIS-Auto-Updater")
@@ -150,7 +184,7 @@ def _download_branch_zip(dest_path, branch=None):
     zipball_url = f"{API_BASE}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/zipball/{branch or GITHUB_BRANCH}"
     opener = urllib.request.build_opener(NoRedirect)
     req = urllib.request.Request(zipball_url)
-    req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
+    req.add_header("Authorization", f"Bearer {_get_token()}")
     req.add_header("User-Agent", "LIS-Auto-Updater")
     try:
         resp = opener.open(req, timeout=30)
@@ -280,9 +314,9 @@ def background_loop(get_db_func):
 # النشر (كتابة الملف على GitHub) يحتاج توكن مختلف بصلاحية كتابة، ولا
 # يُخزَّن هذا التوكن أبداً داخل هذا الملف ولا يُشحَن مع نسخة أي عميل —
 # المصمم يدخله بنفسه من لوحة المصمم (يُحفَظ محلياً بجهازه فقط، بجدول
-# settings)، فيبقى توكن القراءة المضمَّن أعلاه (GITHUB_TOKEN) بصلاحية
-# قراءة فقط دائماً كما أوصينا بالتعليق بأعلى الملف — حتى لو استخرجه أي
-# عميل من نسخته ما يقدر يعدّل شي بمستودعك.
+# settings)، فيبقى توكن القراءة (المضبوط بنفس الطريقة عبر settings —
+# راجع configure_token أعلى الملف) بصلاحية قراءة فقط دائماً — حتى لو
+# استخرجه أي عميل من نسخته ما يقدر يعدّل شي بمستودعك.
 REVOCATION_FILE_PATH = "revoked_licenses.json"
 
 

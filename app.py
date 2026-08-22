@@ -629,6 +629,7 @@ def designer_panel():
         "custom_channel": get_setting(db, "update_channel", ""),
     }
     github_write_token = get_setting(db, "github_write_token", "")
+    github_read_token = get_setting(db, "github_read_token", "")
     revoked_licenses = {}
     revocation_error = None
     if github_write_token and auto_updater.is_configured():
@@ -646,6 +647,7 @@ def designer_panel():
         "designer/panel.html", lic=lic, issue_log=issue_log,
         this_hw=license_manager.get_hardware_id(), this_ip=license_manager.get_local_ip(),
         update_info=update_info, github_write_token=github_write_token,
+        github_read_token=github_read_token,
         revoked_licenses=revoked_licenses, revocation_error=revocation_error,
         branding=branding,
     )
@@ -655,15 +657,35 @@ def designer_panel():
 @designer_required
 def designer_save_github_token():
     """يحفظ توكن GitHub بصلاحية كتابة محلياً بجدول settings بجهاز المصمم
-    فقط — منفصل تماماً عن GITHUB_TOKEN المضمَّن بـ auto_updater.py (وهو
-    بصلاحية قراءة فقط ومشحون مع نسخة كل عميل). هذا التوكن لا يُشحن أبداً
-    مع أي نسخة تُسلَّم لعميل، فيبقى فقط بقاعدة بيانات جهاز المصمم نفسه."""
+    فقط — منفصل تماماً عن توكن القراءة (settings.github_read_token، راجع
+    /designer/github-read-token تحت) المشحون مع نسخة كل عميل. هذا التوكن
+    لا يُشحن أبداً مع أي نسخة تُسلَّم لعميل، فيبقى فقط بقاعدة بيانات جهاز
+    المصمم نفسه."""
     db = get_db()
     token = request.form.get("github_write_token", "").strip()
     set_setting(db, "github_write_token", token)
     db.commit()
     db.close()
     flash("تم حفظ توكن الكتابة." if token else "تم مسح توكن الكتابة.")
+    return redirect(url_for("designer_panel"))
+
+
+@app.route("/designer/github-read-token", methods=["POST"])
+@designer_required
+def designer_save_github_read_token():
+    """يحفظ توكن القراءة (اللي يستخدمه هذا الجهاز بالذات لفحص/تنزيل
+    التحديثات من GitHub) بجدول settings المحلي فقط — أبداً لا يُكتب بأي
+    ملف كود يدخل بـ git push، حتى لا يكتشفه GitHub تلقائياً كسر مسرّب
+    ويُلغيه (هذا بالضبط سبب انقطاع التحديث المتكرر قبل هذا التعديل).
+    يُطبَّق فوراً بذاكرة هذا التشغيل عبر configure_token() بدون أي حاجة
+    لإعادة تشغيل البرنامج."""
+    db = get_db()
+    token = request.form.get("github_read_token", "").strip()
+    set_setting(db, "github_read_token", token)
+    db.commit()
+    db.close()
+    auto_updater.configure_token(token)
+    flash("تم حفظ توكن القراءة وتفعيله فوراً." if token else "تم مسح توكن القراءة.")
     return redirect(url_for("designer_panel"))
 
 
@@ -4662,6 +4684,13 @@ if __name__ == "__main__":
 
     import threading
     threading.Thread(target=whatsapp_background_worker, daemon=True).start()
+    # يحمّل توكن قراءة GitHub من الإعدادات المحلية (settings.github_read_token)
+    # إلى الذاكرة قبل تشغيل خيط التحديث — التوكن نفسه ما يُكتب أبداً بكود
+    # auto_updater.py حتى ما يترفع مع git push ويُلغى تلقائياً من GitHub
+    # (راجع الشرح المفصّل بأعلى auto_updater.py).
+    _startup_db = get_db()
+    auto_updater.load_token_from_db(_startup_db)
+    _startup_db.close()
     # خيط فحص التحديث التلقائي — يشتغل دائماً بالخلفية، لكن ما يتحقق فعلياً
     # من GitHub إلا إذا كان هذا الجهاز "مربوط بالإنترنت" من لوحة المصمم
     # (settings.auto_update_enabled = 1). راجع auto_updater.py.
