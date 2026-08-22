@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block page_title %}📏 تعديل الوحدات{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>📏 وحدات القياس</h3>
+  <p class="muted">
+    لكل باراميتر رقمي هنا أداتين منفصلتين تمامًا:
+  </p>
+  <p class="muted">
+    <b>1) تغيير/تحويل الوحدة الأساسية</b> — يغيّر اسم الوحدة نفسها ويحوّل معه كل المديات المرجعية
+    المحفوظة لهذا الباراميتر بنفس المعامل (مرة وحدة فقط، عملية تحويل فعلية بالأرقام).
+    اترك "الوحدة الجديدة" فاضية إذا تريد بس تحوّل المديات المرجعية بدون تغيير اسم الوحدة.
+  </p>
+  <p class="muted">
+    <b>2) الوحدة الثانية (تُطبع تلقائيًا جنب النتيجة)</b> — إعداد دائم، لا يغيّر الوحدة الأساسية
+    ولا المديات المرجعية إطلاقًا. كل مرة تُطبع نتيجة هذا الباراميتر، تُحسب قيمة الوحدة الثانية
+    تلقائيًا = القيمة المُدخلة × المعامل، وتُطبع جنب النتيجة الأصلية. اترك "الوحدة الثانية" فاضية
+    وحفظ لإلغائها.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>القسم</th>
+        <th>التحليل</th>
+        <th>الباراميتر</th>
+        <th>الوحدة الحالية</th>
+        <th>تغيير/تحويل الوحدة الأساسية</th>
+        <th>الوحدة الثانية (تُطبع تلقائيًا)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in parameters %}
+      <tr>
+        <td class="muted">{{ p['department'] or '-' }}</td>
+        <td>{{ p['test_name'] }}</td>
+        <td><b>{{ p['name'] }}</b></td>
+        <td class="mono">{{ p['unit'] or '-' }}</td>
+
+        <td>
+          <form method="POST" action="{{ url_for('unit_converter_apply', param_id=p['id']) }}"
+                onsubmit="return confirm('تحويل مديات {{ p[\'name\'] }} المرجعية وتحديث وحدتها؟');"
+                style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+            <input type="text" name="new_unit" placeholder="الوحدة الجديدة (اختياري)" class="mono" style="width:110px;">
+            <select name="direction" style="width:90px;">
+              <option value="multiply">× ضرب</option>
+              <option value="divide">÷ قسمة</option>
+            </select>
+            <input type="number" step="any" name="factor" placeholder="المعامل" required class="mono" style="width:90px;">
+            <button class="btn small secondary" type="submit">تحويل</button>
+          </form>
+        </td>
+
+        <td>
+          <form method="POST" action="{{ url_for('unit_converter_set_dual', param_id=p['id']) }}"
+                style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+            <input type="text" name="unit2" placeholder="الوحدة الثانية" value="{{ p['unit2'] or '' }}" class="mono" style="width:100px;">
+            <span class="muted" style="font-size:12px;">= القيمة ×</span>
+            <input type="number" step="any" name="unit2_factor" placeholder="المعامل"
+                   value="{{ p['unit2_factor'] if p['unit2_factor'] is not none else '' }}" class="mono" style="width:80px;">
+            <button class="btn small secondary" type="submit">حفظ</button>
+          </form>
+          {% if p['unit2'] %}
+          <span class="muted" style="font-size:12px;">حاليًا: {{ p['unit'] or '' }} → {{ p['unit2'] }} (×{{ p['unit2_factor'] }})</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">لا يوجد باراميترات رقمية بعد.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

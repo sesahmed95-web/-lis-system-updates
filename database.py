@@ -91,6 +91,8 @@ CREATE TABLE IF NOT EXISTS test_parameters (
     unit TEXT,
     result_type TEXT DEFAULT 'Numeric',   -- Numeric, Text
     highlight INTEGER DEFAULT 0,          -- 1 = shade this row yellow on printed reports (admin-chosen, not automatic)
+    unit2 TEXT,                           -- optional second unit shown alongside the result on printed reports
+    unit2_factor REAL,                    -- value2 = value1 * unit2_factor, computed at print time only
     FOREIGN KEY (test_definition_id) REFERENCES test_definitions(id)
 );
 
@@ -348,6 +350,23 @@ CREATE TABLE IF NOT EXISTS examining_doctor_rates (
     FOREIGN KEY (test_definition_id) REFERENCES test_definitions(id)
 );
 
+-- قائمة (دكتور المختبر الفاحص) الكاملة — تحل محل التخزين القديم كنص JSON
+-- بسيط داخل جدول settings. name يبقى هو المفتاح اللي تعتمد عليه بقية
+-- الجداول (examining_doctor_rates.doctor_name، visits.examining_doctor)
+-- كنص وليس مفتاحاً أجنبياً، فتغيير الاسم هنا لازم ينعكس يدوياً إذا احتجت
+-- تطابق أجور/زيارات قديمة. title/degree_ar/degree_en تُطبع بترويسة كل
+-- تقرير (راجع get_letterhead_doctors)، وshow_on_letterhead يتحكم هل هذا
+-- الدكتور يظهر بالترويسة أصلاً أو هو فقط بقائمة اختيار الفاحص بالزيارات.
+CREATE TABLE IF NOT EXISTS examining_doctors_list (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    title TEXT DEFAULT 'الدكتور',
+    degree_ar TEXT,
+    degree_en TEXT,
+    sort_order INTEGER DEFAULT 0,
+    show_on_letterhead INTEGER DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS report_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     test_definition_id INTEGER UNIQUE NOT NULL,
@@ -384,27 +403,6 @@ CREATE TABLE IF NOT EXISTS whatsapp_sends (
     FOREIGN KEY (order_test_id) REFERENCES order_tests(id),
     FOREIGN KEY (patient_id) REFERENCES patients(id)
 );
-
--- أرشيف PDF دائم لكل زيارة (نسخة واحدة موحّدة تجمع كل نتائج الزيارة، نفس
--- شكل تقرير print_visit_results) — يُحفظ بمجلد ثابت يحدده المدير من
--- Management → Settings (settings.pdf_archive_dir)، ويُعاد توليده ويستبدل
--- نفسه (upsert بـ visit_id) في كل مرة تُحفظ فيها نتائج بعد اكتمال الزيارة،
--- حتى يبقى الملف المؤرشف مطابقًا دائمًا لآخر تعديل. صف واحد فقط لكل زيارة.
--- يُستخدم لصفحة البحث السريع عن نتائج قديمة من داخل البرنامج.
-CREATE TABLE IF NOT EXISTS saved_reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    visit_id INTEGER UNIQUE NOT NULL,
-    patient_id INTEGER NOT NULL,
-    patient_name TEXT,
-    registration_number INTEGER,
-    referring_doctor_name TEXT,
-    referral_center_name TEXT,
-    pdf_path TEXT NOT NULL,
-    created_at TEXT,
-    updated_at TEXT,
-    FOREIGN KEY (visit_id) REFERENCES visits(id),
-    FOREIGN KEY (patient_id) REFERENCES patients(id)
-);
 """
 
 
@@ -428,9 +426,21 @@ def migrate(conn):
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
         "visits": [("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
                     ("examining_doctor_fee", "REAL DEFAULT 0"), ("attending_doctor", "TEXT")],
-        "test_definitions": [("is_examining_test", "INTEGER DEFAULT 0")],
+        "test_definitions": [("is_examining_test", "INTEGER DEFAULT 0"),
+                               # report_group: اسم "الريبورت المجمّع" اللي ينتمي له هذا
+                               # التحليل (مثلاً "Thyroid function test" أو "Viral study")،
+                               # مستقل تماماً عن حقل department. يُستخدم فقط بلوحة الطباعة
+                               # المجمّعة (print_combined_panel) لتجميع التحاليل تحت عنوان
+                               # فرعي محدد بدل الاعتماد على القسم العام. فاضي = يرجع
+                               # للسلوك القديم (تجميع حسب department كالمعتاد).
+                               ("report_group", "TEXT")],
         "reference_ranges": [("age_from_unit", "TEXT DEFAULT 'Years'"), ("age_to_unit", "TEXT DEFAULT 'Years'")],
-        "test_parameters": [("highlight", "INTEGER DEFAULT 0")],
+        # unit2 / unit2_factor: وحدة ثانية اختيارية تُعرض تلقائيًا جنب النتيجة
+        # الأصلية وقت الطباعة (مثلاً mg/dL بالإضافة لـ mmol/L). القيمة الثانية
+        # تُحسب دائمًا = القيمة الأصلية × unit2_factor، ولا تُخزَّن بجدول
+        # results أبدًا — تُحسب لحظة الطباعة فقط. فاضي = بدون وحدة ثانية
+        # (السلوك القديم كما هو).
+        "test_parameters": [("highlight", "INTEGER DEFAULT 0"), ("unit2", "TEXT"), ("unit2_factor", "REAL")],
         # is_trial: يميّز الترخيص التجريبي عن ترخيص العميل العادي (بالأيام)،
         # حتى يظهر شريط "متبقي كم يوم" فقط للتجريبي وليس لكل ترخيص له تاريخ انتهاء.
         # revoked_reason: سبب الإلغاء عن بُعد (يُعبّى تلقائياً لو المصمم ألغى
@@ -454,6 +464,33 @@ def migrate(conn):
             if col_name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
     conn.commit()
+
+    # ترحيل قائمة (دكتور المختبر الفاحص) من التخزين القديم (نص JSON بسيط
+    # داخل جدول settings) إلى جدول examining_doctors_list الجديد — مرة وحدة
+    # فقط (لو الجدول الجديد فاضي أصلاً)، حتى لا تضيع أسماء محفوظة سابقًا عند
+    # الترقية. الشهادات (degree_ar/degree_en) تبقى فاضية بعد الترحيل — يعبّيها
+    # المدير يدويًا من الشاشة الجديدة، لأن التخزين القديم أصلاً ما كان فيه
+    # هذا الحقل إطلاقًا.
+    already_migrated = conn.execute("SELECT COUNT(*) as c FROM examining_doctors_list").fetchone()["c"]
+    if not already_migrated:
+        legacy_names = []
+        legacy_row = conn.execute("SELECT value FROM settings WHERE key='examining_doctors'").fetchone()
+        if legacy_row and legacy_row["value"]:
+            try:
+                parsed = json.loads(legacy_row["value"])
+                if isinstance(parsed, list):
+                    legacy_names = [str(n).strip() for n in parsed if str(n).strip()]
+            except (ValueError, TypeError):
+                pass
+        if not legacy_names:
+            legacy_names = list(DEFAULT_EXAMINING_DOCTORS)
+        for i, n in enumerate(legacy_names):
+            conn.execute(
+                "INSERT INTO examining_doctors_list (name, title, sort_order, show_on_letterhead) "
+                "VALUES (?, 'الدكتور', ?, 1)",
+                (n, i),
+            )
+        conn.commit()
 
     # Backfill: any order_tests row created before the "price" column existed
     # gets the test's current default price locked in, so nothing breaks.
@@ -520,11 +557,6 @@ def migrate(conn):
     # (INSERT OR IGNORE) حتى لا نطغى على شعار رفعه الأدمن بنفسه، ولا يتعارض
     # مع seed() لو كانت هذي قاعدة بيانات جديدة تمامًا (migrate يشتغل قبلها).
     conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('logo_path', 'uploads/logo.png')")
-    # فاضي بشكل افتراضي — يعني المدير لسا ما ظبط مجلد أرشفة الـPDF الدائم من
-    # صفحة الإعدادات؛ ما دام فاضي، الأرشفة التلقائية (نقطة #8) تبقى معطّلة
-    # بصمت (لا تولّد أي ملف) لحد ما يُدخل مسارًا حقيقيًا. راجع
-    # app._get_pdf_archive_dir().
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('pdf_archive_dir', '')")
     conn.commit()
 
 
@@ -1132,41 +1164,118 @@ def set_setting(db, key, value):
 DEFAULT_EXAMINING_DOCTORS = ["د.خليل حمود", "د.هدى نصيف", "د.اسراء عبد الاقر"]
 
 
+def get_examining_doctors_full(db):
+    """كل دكاترة الفحص بكل تفاصيلهم (اسم/لقب/شهادة عربي/شهادة انكليزي/ترتيب/
+    هل يظهر بترويسة التقرير) مرتبين حسب الترتيب اليدوي (sort_order)."""
+    return db.execute(
+        "SELECT * FROM examining_doctors_list ORDER BY sort_order, id"
+    ).fetchall()
+
+
 def get_examining_doctors(db):
-    """قائمة (دكتور المختبر الفاحص) — قابلة للتعديل من Management → Settings.
-    تُخزَّن بصيغة JSON داخل جدول settings؛ إذا لم تُحفظ من قبل تُستخدم القائمة
-    الافتراضية القديمة."""
-    raw = get_setting(db, "examining_doctors", "")
-    if not raw:
-        return list(DEFAULT_EXAMINING_DOCTORS)
-    try:
-        names = json.loads(raw)
-        if isinstance(names, list) and names:
-            return [str(n).strip() for n in names if str(n).strip()]
-    except (ValueError, TypeError):
-        pass
+    """قائمة (دكتور المختبر الفاحص) — أسماء فقط، بنفس التوقيع القديم، لقوائم
+    الاختيار السريع بشاشات الزيارات والفواتير. مصدرها الآن جدول
+    examining_doctors_list (مرتبة sort_order)؛ إذا كان فاضي تمامًا (حالة
+    نادرة) ترجع القائمة الافتراضية القديمة بدل قائمة فاضية."""
+    rows = get_examining_doctors_full(db)
+    if rows:
+        return [r["name"] for r in rows]
     return list(DEFAULT_EXAMINING_DOCTORS)
 
 
+def get_letterhead_doctors(db):
+    """فقط الدكاترة اللي يُفعَّل لهم عرض بترويسة التقرير المطبوع، مرتبين
+    حسب الترتيب اليدوي — تُستخدم بـ inject_globals لحقن letterhead_doctors
+    بكل قوالب reports/* تلقائيًا."""
+    return db.execute(
+        "SELECT * FROM examining_doctors_list WHERE show_on_letterhead=1 ORDER BY sort_order, id"
+    ).fetchall()
+
+
 def set_examining_doctors(db, names):
-    cleaned = []
-    for n in names:
-        n = (n or "").strip()
-        if n and n not in cleaned:
-            cleaned.append(n)
-    set_setting(db, "examining_doctors", json.dumps(cleaned, ensure_ascii=False))
+    """يستبدل القائمة كاملة بأسماء فقط (يبقى موجود للتوافق القديم فقط).
+    يحافظ على شهادة/لقب/ظهور بالترويسة لأي اسم موجود مسبقًا بنفس الحروف."""
+    existing = {r["name"]: r for r in get_examining_doctors_full(db)}
+    db.execute("DELETE FROM examining_doctors_list")
+    cleaned = list(dict.fromkeys(n.strip() for n in names if (n or "").strip()))
+    for i, n in enumerate(cleaned):
+        old = existing.get(n)
+        db.execute(
+            "INSERT INTO examining_doctors_list (name, title, degree_ar, degree_en, sort_order, show_on_letterhead) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (n, old["title"] if old else "الدكتور", old["degree_ar"] if old else None,
+             old["degree_en"] if old else None, i, old["show_on_letterhead"] if old else 1),
+        )
+    db.commit()
 
 
 def add_examining_doctor(db, name):
     """يضيف اسم طبيب جديد لقائمة (دكتور المختبر الفاحص) إن لم يكن موجودًا أصلاً،
     حتى يظهر فورًا بقوائم اختيار الطبيب الفاحص بشاشة (زيارة جديدة) دون
-    الحاجة للذهاب لإعدادات النظام أولًا."""
+    الحاجة للذهاب لإعدادات النظام أولًا. يُضاف بدون شهادة ومن دون إظهار
+    بترويسة التقرير تلقائيًا (المدير يفعّلها يدويًا لاحقًا إذا أراد)."""
     name = (name or "").strip()
-    names = get_examining_doctors(db)
-    if name and name not in names:
-        names.append(name)
-        set_examining_doctors(db, names)
-    return names
+    if name and name not in get_examining_doctors(db):
+        max_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) as m FROM examining_doctors_list"
+        ).fetchone()["m"]
+        db.execute(
+            "INSERT INTO examining_doctors_list (name, title, sort_order, show_on_letterhead) "
+            "VALUES (?, 'الدكتور', ?, 0)",
+            (name, max_order + 1),
+        )
+        db.commit()
+    return get_examining_doctors(db)
+
+
+def add_examining_doctor_full(db, name, title, degree_ar, degree_en, show_on_letterhead):
+    """يضيف دكتور فحص جديد بكامل تفاصيله من شاشة إدارة الدكاترة."""
+    name = (name or "").strip()
+    if not name:
+        return
+    max_order = db.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) as m FROM examining_doctors_list"
+    ).fetchone()["m"]
+    db.execute(
+        "INSERT INTO examining_doctors_list (name, title, degree_ar, degree_en, sort_order, show_on_letterhead) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (name, (title or "").strip() or "الدكتور", degree_ar, degree_en,
+         max_order + 1, 1 if show_on_letterhead else 0),
+    )
+    db.commit()
+
+
+def update_examining_doctor(db, doctor_id, name, title, degree_ar, degree_en, show_on_letterhead):
+    db.execute(
+        "UPDATE examining_doctors_list SET name=?, title=?, degree_ar=?, degree_en=?, show_on_letterhead=? "
+        "WHERE id=?",
+        ((name or "").strip(), (title or "").strip() or "الدكتور", degree_ar, degree_en,
+         1 if show_on_letterhead else 0, doctor_id),
+    )
+    db.commit()
+
+
+def delete_examining_doctor(db, doctor_id):
+    db.execute("DELETE FROM examining_doctors_list WHERE id=?", (doctor_id,))
+    db.commit()
+
+
+def move_examining_doctor(db, doctor_id, direction):
+    """يبدّل ترتيب هذا الدكتور مع جاره بالقائمة (فوق أو تحت) —
+    direction: 'up' أو 'down'. يُستخدم بدل السحب-والإفلات لتفادي الاعتماد
+    على مكتبة جافاسكربت خارجية بأداة تعمل بدون إنترنت."""
+    rows = list(get_examining_doctors_full(db))
+    ids = [r["id"] for r in rows]
+    if doctor_id not in ids:
+        return
+    idx = ids.index(doctor_id)
+    swap_idx = idx - 1 if direction == "up" else idx + 1
+    if swap_idx < 0 or swap_idx >= len(rows):
+        return
+    a, b = rows[idx], rows[swap_idx]
+    db.execute("UPDATE examining_doctors_list SET sort_order=? WHERE id=?", (b["sort_order"], a["id"]))
+    db.execute("UPDATE examining_doctors_list SET sort_order=? WHERE id=?", (a["sort_order"], b["id"]))
+    db.commit()
 
 
 def get_examining_tests(db):
@@ -1216,57 +1325,6 @@ def compute_examining_doctor_fee(db, doctor_name, test_ids):
         if row is not None:
             total += row["rate"] or 0
     return total
-
-
-def save_saved_report(db, visit_id, patient_id, patient_name, registration_number,
-                       pdf_path, referring_doctor_name=None, referral_center_name=None):
-    """يحفظ/يحدّث صف أرشيف الـPDF الموحّد لهذي الزيارة (صف واحد فقط لكل
-    visit_id — upsert). يُستدعى من app._maybe_archive_visit_pdf بعد كل حفظ
-    نتائج تكتمل فيه الزيارة."""
-    now = datetime.now().isoformat(timespec="seconds")
-    existing = db.execute("SELECT id FROM saved_reports WHERE visit_id=?", (visit_id,)).fetchone()
-    if existing:
-        db.execute(
-            "UPDATE saved_reports SET patient_name=?, registration_number=?, "
-            "referring_doctor_name=?, referral_center_name=?, pdf_path=?, updated_at=? "
-            "WHERE visit_id=?",
-            (patient_name, registration_number, referring_doctor_name, referral_center_name,
-             pdf_path, now, visit_id),
-        )
-    else:
-        db.execute(
-            "INSERT INTO saved_reports (visit_id, patient_id, patient_name, registration_number, "
-            "referring_doctor_name, referral_center_name, pdf_path, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (visit_id, patient_id, patient_name, registration_number,
-             referring_doctor_name, referral_center_name, pdf_path, now, now),
-        )
-    db.commit()
-
-
-def get_saved_report(db, visit_id):
-    return db.execute("SELECT * FROM saved_reports WHERE visit_id=?", (visit_id,)).fetchone()
-
-
-def search_saved_reports(db, query="", limit=100):
-    """بحث سريع بأرشيف الـPDF: باسم المريض (جزئي) أو رقم التسجيل (تطابق
-    كامل)، مرتب بالأحدث أولًا. query فاضي يرجّع آخر limit ملف مؤرشف."""
-    query = (query or "").strip()
-    if not query:
-        return db.execute(
-            "SELECT * FROM saved_reports ORDER BY updated_at DESC LIMIT ?", (limit,)
-        ).fetchall()
-    like = f"%{query}%"
-    if query.isdigit():
-        return db.execute(
-            "SELECT * FROM saved_reports WHERE patient_name LIKE ? OR registration_number = ? "
-            "ORDER BY updated_at DESC LIMIT ?",
-            (like, int(query), limit),
-        ).fetchall()
-    return db.execute(
-        "SELECT * FROM saved_reports WHERE patient_name LIKE ? ORDER BY updated_at DESC LIMIT ?",
-        (like, limit),
-    ).fetchall()
 
 
 if __name__ == "__main__":

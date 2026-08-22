@@ -17,6 +17,14 @@
       <input type="text" name="department" placeholder="Hormones / BioChemistry / Viral Screen...">
     </div>
     <div class="form-field">
+      <label>الريبورت المجمّع (اختياري)</label>
+      <input type="text" name="report_group" list="reportGroupsList" placeholder="مثلاً: Thyroid function test">
+      <small class="muted">تحاليل بنفس الاسم هذا تُطبع مع بعض بورقة واحدة (لوحة الطباعة المجمّعة) تحت هذا العنوان بالذات، بغض النظر عن القسم.</small>
+    </div>
+    <datalist id="reportGroupsList">
+      {% for g in report_groups %}<option value="{{ g }}">{% endfor %}
+    </datalist>
+    <div class="form-field">
       <label>{{ t('sample_type') }}</label>
       <input type="text" name="sample_type" placeholder="Serum / Blood-EDTA / Urine">
     </div>
@@ -40,7 +48,7 @@
 <div class="card">
   <table>
     <thead><tr>
-      <th>{{ t('code') }}</th><th>{{ t('name') }}</th><th>{{ t('department') }}</th><th>{{ t('sample_type') }}</th><th>{{ t('price') }}</th><th>فحص مؤهل لأجر دكتور فاحص</th>
+      <th>{{ t('code') }}</th><th>{{ t('name') }}</th><th>{{ t('department') }}</th><th>الريبورت المجمّع</th><th>{{ t('sample_type') }}</th><th>{{ t('price') }}</th><th>فحص مؤهل لأجر دكتور فاحص</th>
     </tr></thead>
     <tbody>
       {% for test in tests %}
@@ -48,6 +56,14 @@
         <td class="mono">{{ test['code'] }}</td>
         <td>{{ test['name'] }}</td>
         <td>{{ test['department'] }}</td>
+        <td>
+          <div class="rg-edit-wrap" style="display:flex;align-items:center;gap:6px">
+            <input type="text" class="report-group-input" data-test-id="{{ test['id'] }}"
+                   value="{{ test['report_group'] or '' }}" list="reportGroupsList"
+                   placeholder="(يتبع القسم)" style="width:150px">
+            <span class="rg-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+          </div>
+        </td>
         <td>{{ test['sample_type'] }}</td>
         <td>
           <div class="price-edit-wrap" style="display:flex;align-items:center;gap:6px">
@@ -118,6 +134,34 @@ document.querySelectorAll('.price-input').forEach(function (input) {
   }
   // Saves automatically whether the change came from typing, or from
   // clicking the number input's own up/down spinner arrows.
+  input.addEventListener('change', save);
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(save, 600);
+  });
+});
+</script>
+<script>
+document.querySelectorAll('.report-group-input').forEach(function (input) {
+  let timer = null;
+  function save() {
+    const testId = input.getAttribute('data-test-id');
+    const status = input.closest('.rg-edit-wrap').querySelector('.rg-save-status');
+    const body = new URLSearchParams({ report_group: input.value });
+    fetch('/master/test-catalog/' + testId + '/report-group', { method: 'POST', body: body })
+      .then((r) => r.json())
+      .then((data) => {
+        status.style.visibility = 'visible';
+        status.style.color = data.ok ? '#2e7d32' : '#c62828';
+        status.textContent = data.ok ? '✓' : '✕';
+        setTimeout(() => { status.style.visibility = 'hidden'; }, 1500);
+      })
+      .catch(() => {
+        status.style.visibility = 'visible';
+        status.style.color = '#c62828';
+        status.textContent = '✕';
+      });
+  }
   input.addEventListener('change', save);
   input.addEventListener('input', function () {
     clearTimeout(timer);

@@ -7,6 +7,8 @@
   <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
   <a class="btn small secondary print-link" id="printAllLink"
      href="{{ url_for('print_visit_results', visit_id=visit['id'], completed_only=1) }}">🖨 طباعة كل النتائج المكتملة</a>
+  <a class="btn small secondary" href="{{ url_for('print_combined_panel', visit_id=visit['id']) }}" target="_blank"
+     title="يجمع تحاليل الكيمياء/الفايروسات/الهرمونات/الفيتامينات وأي قسم آخر بورقة A4 وحدة، مرتّبة حسب القسم">🧾 طباعة اللوحة المجمّعة</a>
   {% if visit['phone'] %}
   <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id'], completed_only=1) }}"
         style="display:inline;" onsubmit="return confirm('إرسال كل النتائج المكتملة لهذه الزيارة بملف PDF واحد عبر واتساب لرقم المريض؟');">
@@ -25,6 +27,61 @@
   window.LIS_PATIENT_HCT = {{ 'null' if patient_hct is none else patient_hct }};
   window.LIS_PATIENT_GENDER = {{ visit['gender']|tojson }};
   window.LIS_HCT_NORMAL = {{ 'null' if patient_hct_normal is none else patient_hct_normal }};
+</script>
+
+<script>
+  // ------------------------------------------------------------------
+  // حساب MCH وMCHC تلقائيًا من HGB وRBC وHCT — بنفس منطق شاشة الإدخال
+  // المفردة، بس هنا كل صندوق تحليل (rb-box) يُفحص لحاله (لأن هذي الصفحة
+  // تعرض كل تحاليل الزيارة معًا، وقد يتكرر اسم معيار بأكثر من صندوق):
+  //   MCH  = HGB ÷ RBC × 10     (pg)
+  //   MCHC = HGB ÷ HCT × 100    (g/dL)
+  // الحقلين يبقيان قابلين للتعديل اليدوي — بمجرد ما يكتب المستخدم بأحدهما
+  // مباشرة يتوقف التحديث التلقائي له، مع زر "↻ إعادة الحساب التلقائي".
+  // ------------------------------------------------------------------
+  (function () {
+    function fieldIn(box, paramName) {
+      return box.querySelector('[data-param-name="' + paramName + '"]');
+    }
+    function numIn(box, paramName) {
+      var el = fieldIn(box, paramName);
+      if (!el) return null;
+      var v = parseFloat(el.value);
+      return isNaN(v) ? null : v;
+    }
+    document.querySelectorAll('.rb-box').forEach(function (box) {
+      var hasCbcFields = fieldIn(box, 'HGB') && (fieldIn(box, 'MCH') || fieldIn(box, 'MCHC'));
+      if (!hasCbcFields) return;
+      function recalc() {
+        var hgb = numIn(box, 'HGB');
+        var rbc = numIn(box, 'RBC');
+        var hct = numIn(box, 'HCT');
+        var mchEl = fieldIn(box, 'MCH');
+        var mchcEl = fieldIn(box, 'MCHC');
+        if (mchEl && mchEl.dataset.userEdited !== '1' && hgb !== null && rbc) {
+          mchEl.value = ((hgb / rbc) * 10).toFixed(1);
+        }
+        if (mchcEl && mchcEl.dataset.userEdited !== '1' && hgb !== null && hct) {
+          mchcEl.value = ((hgb / hct) * 100).toFixed(1);
+        }
+      }
+      window.lisForceRecalcMchMchc = function (btn) {
+        var wrap = btn.closest('td');
+        var input = wrap ? wrap.querySelector('input[data-param-name]') : null;
+        if (input) delete input.dataset.userEdited;
+        recalc();
+      };
+      ['HGB', 'RBC', 'HCT'].forEach(function (name) {
+        var el = fieldIn(box, name);
+        if (el) el.addEventListener('input', recalc);
+      });
+      ['MCH', 'MCHC'].forEach(function (name) {
+        var el = fieldIn(box, name);
+        if (el) el.addEventListener('input', function () { el.dataset.userEdited = '1'; });
+      });
+      recalc();
+    });
+  })();
 </script>
 
 <script>
@@ -135,6 +192,9 @@
               {% if p['name'] == 'Corrected Retic count' %}
               <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
                 onclick="lisForceRecalcCorrectedRetic(this)" title="يحسبها من Reticulocyte count وقيمة HCT لنفس الزيارة (رجال 45%، نساء 42%)">↻ إعادة الحساب التلقائي</button>
+              {% elif p['name'] in ('MCH', 'MCHC') %}
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
+                onclick="lisForceRecalcMchMchc(this)" title="يعيد حسابها تلقائيًا من HGB وRBC/HCT لنفس التحليل">↻ إعادة الحساب التلقائي</button>
               {% endif %}
               {% endif %}
               {% set hist = box.history_map.get(p['id']) %}

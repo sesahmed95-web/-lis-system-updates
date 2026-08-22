@@ -12,7 +12,7 @@
   {% for row in custom_rows %}
   <tr>
     <td style="text-align: {{ custom_rows_align|default('right') }}; font-weight:bold;">{{ row.label }}</td>
-    <td style="text-align: center;">{{ row.result }}{% if show_prev_values and row.previous %}<br><span class="prev-inline">Prev: {{ row.previous }}</span>{% endif %}</td>
+    <td style="text-align: center;">{{ row.result }}{% if row.result2 %}<br><span class="prev-inline" style="color:#1F3B7A;">≈ {{ row.result2 }} {{ row.unit2 }}</span>{% endif %}{% if show_prev_values and row.previous %}<br><span class="prev-inline">Prev: {{ row.previous }}</span>{% endif %}</td>
     <td style="text-align: {{ custom_rows_align|default('right') }};">{{ row.unit }}</td>
     <td style="text-align: center;">{{ row.normal_range }}</td>
   </tr>

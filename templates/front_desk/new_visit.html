@@ -45,9 +45,18 @@
       <h3>{{ t('patient_information') }}</h3>
       <div class="form-grid">
         <div class="form-field" id="patientMatches">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
             <label>{{ t('patient_name') }} *</label>
-            <button class="btn" type="submit" id="createVisitBtn" style="padding:4px 14px; font-size:12.5px; white-space:nowrap;">💾 {{ t('create_visit') }}</button>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; background:#FEF9C3; border:1px solid #FDE047; border-radius:6px; padding:4px 8px; white-space:nowrap;">
+                <input type="checkbox" name="sample_collected" id="sample_collected" value="1">
+                ✅ تم سحب العينة
+              </label>
+              <a class="btn small secondary" id="printBarcodeBtn" href="#" target="_blank"
+                 style="padding:4px 10px; font-size:12.5px; white-space:nowrap; pointer-events:none; opacity:.5;"
+                 title="يفعّل بعد حفظ الزيارة">🖨️ طباعة الباركود</a>
+              <button class="btn" type="submit" id="createVisitBtn" style="padding:4px 14px; font-size:12.5px; white-space:nowrap;">💾 {{ t('create_visit') }}</button>
+            </div>
           </div>
           <input type="text" name="patient_name" id="patient_name" required autocomplete="off">
           <div id="patientMatchesList"></div>
@@ -88,6 +97,18 @@
         <div class="form-field" style="grid-column: span 2;">
           <label>{{ t('address') }}</label>
           <input type="text" name="address" id="address_input">
+        </div>
+        <div class="form-field">
+          <label>المبلغ الكلي</label>
+          <input type="text" inputmode="decimal" id="totalAmountInput" name="total_amount_input" value="0">
+        </div>
+        <div class="form-field">
+          <label>الواصل</label>
+          <input type="text" inputmode="decimal" id="paidAmountInput" name="paid_amount" value="0">
+        </div>
+        <div class="form-field" style="grid-column: span 2;">
+          <label>الباقي</label>
+          <input type="text" inputmode="decimal" id="remainingAmountInput" value="0" readonly>
         </div>
       </div>
     </div>
@@ -287,6 +308,33 @@
     return DEFAULT_PRICES[testId] || 0;
   }
 
+  // ------------------------------------------------------------------
+  // "المبلغ الكلي / الواصل / الباقي" أسفل حقل العنوان — الكلي يتحدّث
+  // تلقائيًا بمجموع أسعار التحاليل المختارة (نفس رقم "grandTotal")، بس
+  // موظف الاستقبال يقدر يعدّله يدويًا (مثلاً لخصم)؛ بمجرد ما يعدّله
+  // يدويًا، يتوقف عن التحديث التلقائي حتى ما تُفقَد قيمته المكتوبة.
+  // "الواصل" يكتبه الموظف يدويًا (كم استلم فعليًا)، و"الباقي" = الكلي -
+  // الواصل، يُحسب تلقائيًا دائمًا وحقله للعرض فقط (readonly).
+  const totalAmountInput = document.getElementById('totalAmountInput');
+  const paidAmountInput = document.getElementById('paidAmountInput');
+  const remainingAmountInput = document.getElementById('remainingAmountInput');
+
+  function updateBilling() {
+    const computedTotal = parseFloat(document.getElementById('grandTotal').textContent) || 0;
+    if (!totalAmountInput.dataset.userEdited) {
+      totalAmountInput.value = computedTotal;
+    }
+    const total = parseFloat(totalAmountInput.value) || 0;
+    const paid = parseFloat(paidAmountInput.value) || 0;
+    remainingAmountInput.value = Math.max(0, total - paid);
+  }
+
+  totalAmountInput.addEventListener('input', function () {
+    totalAmountInput.dataset.userEdited = '1';
+    updateBilling();
+  });
+  paidAmountInput.addEventListener('input', updateBilling);
+
   function refreshPrices() {
     const doctorId = currentDoctorId();
     let total = 0;
@@ -306,6 +354,7 @@
       if (cb.checked && cb.getAttribute('data-exam') === '1') anyExamCheckedTestChecked = true;
     });
     document.getElementById('grandTotal').textContent = Math.round(total);
+    updateBilling();
 
     // دكتور المختبر الفاحص يظهر فقط إذا كان أحد الفحوصات المؤهلة مختارًا
     const examField = document.getElementById('examiningDoctorField');
@@ -451,6 +500,14 @@
       alert('الرجاء اختيار تحليل واحد على الأقل قبل حفظ الزيارة، أو إضافة تحليل جديد من الحقل الموجود فوق قائمة التحاليل.');
       return;
     }
+    // إلزامية تأكيد "تم سحب العينة" قبل حفظ الزيارة (يطابق نفس الشرط
+    // المفروض من السيرفر بمسار new-visit) — نتحقق منه هنا أيضًا حتى
+    // يظهر تنبيه واضح للمستخدم بدل خطأ عام من السيرفر.
+    const sampleCollectedChecked = document.getElementById('sample_collected').checked;
+    if (!sampleCollectedChecked) {
+      alert('الرجاء تأكيد خانة "✅ تم سحب العينة" قبل حفظ الزيارة.');
+      return;
+    }
     createVisitBtn.disabled = true;
     fetch(window.location.href, {
       method: 'POST',
@@ -464,6 +521,11 @@
         lastCreatedVisitId = data.visit_id;
         document.getElementById('createdRegNumber').textContent = data.registration_number;
         document.getElementById('goToVisitsBtn').href = data.redirect_url;
+        const printBarcodeBtn = document.getElementById('printBarcodeBtn');
+        printBarcodeBtn.href = '/front-desk/visits/' + data.visit_id + '/print/barcode';
+        printBarcodeBtn.style.pointerEvents = 'auto';
+        printBarcodeBtn.style.opacity = '1';
+        printBarcodeBtn.title = '';
         visitCreatedPanel.style.display = 'block';
         visitCreatedPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
       })

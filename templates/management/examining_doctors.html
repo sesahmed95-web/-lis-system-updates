@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block page_title %}دكاترة المختبر الفاحص{% endblock %}
+{% block content %}
+<div class="card" style="max-width:760px;">
+  <h3>➕ إضافة دكتور فحص جديد</h3>
+  <form method="POST" action="{{ url_for('examining_doctor_add') }}" class="form-grid">
+    <div class="form-field">
+      <label>اللقب</label>
+      <select name="title">
+        <option value="الدكتور">الدكتور</option>
+        <option value="الدكتورة">الدكتورة</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>الاسم الكامل</label>
+      <input type="text" name="name" required placeholder="مثال: خليل حمود عبد السادة">
+    </div>
+    <div class="form-field">
+      <label>الشهادة (عربي) — سطر لكل مسمى</label>
+      <textarea name="degree_ar" rows="2" style="width:100%;" placeholder="بكالوريوس طب وجراحة عامة&#10;طبيب ممارس امراض الدم التشخيصي"></textarea>
+    </div>
+    <div class="form-field">
+      <label>الشهادة (انكليزي) — سطر لكل مسمى</label>
+      <textarea name="degree_en" rows="2" style="width:100%;" dir="ltr" placeholder="M.B.Ch.B&#10;Hematopathologist"></textarea>
+    </div>
+    <div class="form-field">
+      <label><input type="checkbox" name="show_on_letterhead" checked> إظهار بترويسة التقرير المطبوع</label>
+      <span class="muted">إذا معطّل، الاسم يظهر فقط بقائمة اختيار الدكتور الفاحص عند تسجيل زيارة، بدون طباعته أعلى كل تقرير.</span>
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">إضافة</button>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <h3>القائمة الحالية</h3>
+  <p class="muted">الترتيب هنا هو نفس ترتيب ظهورهم بترويسة التقرير المطبوع (من اليمين لليسار) وبقوائم الاختيار.</p>
+  {% for doc in doctors %}
+  <div class="card" style="background:var(--panel-2, #F8FAFC); margin-bottom:10px;">
+    <form method="POST" action="{{ url_for('examining_doctor_update', doctor_id=doc['id']) }}" class="form-grid">
+      <div class="form-field">
+        <label>اللقب</label>
+        <select name="title">
+          <option value="الدكتور" {{ 'selected' if doc['title']=='الدكتور' }}>الدكتور</option>
+          <option value="الدكتورة" {{ 'selected' if doc['title']=='الدكتورة' }}>الدكتورة</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>الاسم الكامل</label>
+        <input type="text" name="name" required value="{{ doc['name'] }}">
+      </div>
+      <div class="form-field">
+        <label>الشهادة (عربي)</label>
+        <textarea name="degree_ar" rows="2" style="width:100%;">{{ doc['degree_ar'] or '' }}</textarea>
+      </div>
+      <div class="form-field">
+        <label>الشهادة (انكليزي)</label>
+        <textarea name="degree_en" rows="2" style="width:100%;" dir="ltr">{{ doc['degree_en'] or '' }}</textarea>
+      </div>
+      <div class="form-field">
+        <label><input type="checkbox" name="show_on_letterhead" {{ 'checked' if doc['show_on_letterhead'] }}> إظهار بترويسة التقرير المطبوع</label>
+      </div>
+      <div class="form-field" style="display:flex; gap:8px; align-items:center;">
+        <button class="btn small" type="submit">حفظ التعديلات</button>
+      </div>
+    </form>
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <form method="POST" action="{{ url_for('examining_doctor_move', doctor_id=doc['id']) }}">
+        <input type="hidden" name="direction" value="up">
+        <button class="btn small secondary" type="submit" title="تحريك لأعلى">⬆️</button>
+      </form>
+      <form method="POST" action="{{ url_for('examining_doctor_move', doctor_id=doc['id']) }}">
+        <input type="hidden" name="direction" value="down">
+        <button class="btn small secondary" type="submit" title="تحريك لأسفل">⬇️</button>
+      </form>
+      <form method="POST" action="{{ url_for('examining_doctor_delete', doctor_id=doc['id']) }}"
+            onsubmit="return confirm('حذف \'{{ doc['name'] }}\' نهائيًا من القائمة؟');">
+        <button class="btn small secondary" type="submit" title="حذف">🗑️ حذف</button>
+      </form>
+    </div>
+  </div>
+  {% else %}
+  <p class="muted">لا يوجد دكاترة فحص مضافين بعد.</p>
+  {% endfor %}
+</div>
+{% endblock %}

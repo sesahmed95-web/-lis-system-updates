@@ -196,50 +196,23 @@
   <div class="sheet">
     <div class="lab-title-box">مختبر امراض الدم التخصصي للتحليلات المرضية</div>
 
-    {% if logo_url %}
+    <!-- ترويسة الدكاترة: تُبنى تلقائيًا من قائمة (دكتور المختبر الفاحص)
+         المُفعَّل لهم "إظهار بترويسة التقرير" (Management → الإعدادات →
+         إدارة قائمة الدكاترة)، بنفس الترتيب اليدوي المحفوظ هناك. الشعار
+         (إن وجد) يُدرج كعمود إضافي بنفس الصف. -->
     <div class="doctors-row">
+      {% if logo_url %}
       <div class="doc-col logo-col"><img src="{{ logo_url }}" alt="logo"></div>
+      {% endif %}
+      {% for doc in letterhead_doctors %}
       <div class="doc-col">
-        <div class="doc-title">الدكتور</div>
-        <div class="doc-name">خليل حمود عبد السادة</div>
-        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>طبيب ممارس امراض الدم التشخيصي</div>
-        <div class="doc-eng">M.B.Ch.B<br>Hematopathologist</div>
+        <div class="doc-title">{{ doc['title'] or 'الدكتور' }}</div>
+        <div class="doc-name">{{ doc['name'] }}</div>
+        {% if doc['degree_ar'] %}<div class="doc-degree">{{ doc['degree_ar']|replace('\n', '<br>')|safe }}</div>{% endif %}
+        {% if doc['degree_en'] %}<div class="doc-eng">{{ doc['degree_en']|replace('\n', '<br>')|safe }}</div>{% endif %}
       </div>
-      <div class="doc-col">
-        <div class="doc-title">الدكتورة</div>
-        <div class="doc-name">أسراء عبد الباقر جنام</div>
-        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>اختصاص امراض الدم التشخيصي</div>
-        <div class="doc-eng">M.B.Ch.B<br>F.I.B.M.S Hematopathologist</div>
-      </div>
-      <div class="doc-col">
-        <div class="doc-title">الدكتورة</div>
-        <div class="doc-name">هدى نصيف جاسم</div>
-        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>اختصاص امراض الدم التشخيصي</div>
-        <div class="doc-eng">M.B.Ch.B<br>M.SC.Hematopathologist</div>
-      </div>
+      {% endfor %}
     </div>
-    {% else %}
-    <div class="doctors-row">
-      <div class="doc-col">
-        <div class="doc-title">الدكتور</div>
-        <div class="doc-name">خليل حمود عبد السادة</div>
-        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>طبيب ممارس امراض الدم التشخيصي</div>
-        <div class="doc-eng">M.B.Ch.B<br>Hematopathologist</div>
-      </div>
-      <div class="doc-col">
-        <div class="doc-title">الدكتورة</div>
-        <div class="doc-name">أسراء عبد الباقر جنام</div>
-        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>اختصاص امراض الدم التشخيصي</div>
-        <div class="doc-eng">M.B.Ch.B<br>F.I.B.M.S Hematopathologist</div>
-      </div>
-      <div class="doc-col">
-        <div class="doc-title">الدكتورة</div>
-        <div class="doc-name">هدى نصيف جاسم</div>
-        <div class="doc-degree">بكالوريوس طب وجراحة عامة<br>اختصاص امراض الدم التشخيصي</div>
-        <div class="doc-eng">M.B.Ch.B<br>M.SC.Hematopathologist</div>
-      </div>
-    </div>
-    {% endif %}
 
     <table class="meta-table">
       <tr>

@@ -12,6 +12,9 @@ from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_test_price, find_or_create_doctor, find_or_create_referral_center,
                        get_report_template, save_report_template,
                        get_examining_doctors, set_examining_doctors, add_examining_doctor,
+                       get_examining_doctors_full, add_examining_doctor_full,
+                       update_examining_doctor, delete_examining_doctor, move_examining_doctor,
+                       get_letterhead_doctors,
                        get_examining_tests, get_examining_rates_map,
                        set_examining_doctor_rate, compute_examining_doctor_fee,
                        find_reference_range,
@@ -104,6 +107,26 @@ CBC_ROW_GROUPS = [
     ["RBC", "HGB", "HCT", "MCV", "MCH", "MCHC", "RDW", "RDW-SD"],
     ["PLT", "MPV"],
 ]
+
+# الوحدة الثانية لنتيجة التحليل (مثلاً mg/dL بالإضافة لـ mmol/L) — بعض
+# التحاليل تُكتب نتيجتها بوحدتين بنفس الوقت (خصوصًا الكيمياء والهرمونات).
+# tp.unit2 و tp.unit2_factor يُضبطان مرة وحدة من صفحة إدارة الوحدات لكل
+# باراميتر (اختياري تمامًا)، والقيمة الثانية تُحسب تلقائيًا وقت الطباعة:
+# value2 = value1 * unit2_factor. لتحويل عكسي (وحدة أساسية أصغر لوحدة ثانية
+# أكبر) استخدم معامل أصغر من 1 بدل قسمة منفصلة — النتيجة نفسها رياضيًا.
+def format_unit2_value(value, factor):
+    """يرجع نص القيمة المحوّلة للوحدة الثانية، أو None إذا ما ينطبق التحويل
+    (نتيجة غير رقمية، أو ما فيه معامل محفوظ لهذا الباراميتر)."""
+    if factor in (None, "") or value in (None, ""):
+        return None
+    try:
+        converted = float(value) * float(factor)
+    except (TypeError, ValueError):
+        return None
+    if converted == int(converted):
+        return str(int(converted))
+    return f"{converted:.3f}".rstrip("0").rstrip(".")
+
 
 ALLOWED_DOCX_EXT = {"docx"}
 
@@ -225,11 +248,20 @@ def render_conclusion_filter(text):
 
 # The department names that get the extra "previous result per parameter"
 # column on the printed report (in addition to the previous-visit date that
-# every report shows). Everything else (Hematology/CBC, Blood Film, viral
-# screens...) only ever shows the previous visit's date, never its values —
-# per the lab's request. Matches loosely (Arabic or English, any casing) so
-# it keeps working no matter how an admin later spells a new department.
-PREVIOUS_VALUE_DEPARTMENT_KEYWORDS = ("chem", "كيمياء", "coagul", "تخثر")
+# every report shows). Covers Chemistry, Hormones, Vitamins, Virology and
+# Coagulation — the quantifiable/serology departments the lab wants
+# tracked over time. Hematology/CBC, Blood Film, and the other big
+# dedicated-template reports never go through this at all (they don't call
+# find_previous_reference), so they're unaffected either way. Matches
+# loosely (Arabic or English, any casing) so it keeps working no matter how
+# an admin later spells a new department.
+PREVIOUS_VALUE_DEPARTMENT_KEYWORDS = (
+    "chem", "كيمياء",
+    "coagul", "تخثر",
+    "hormone", "هرمون",
+    "vitamin", "فيتامين",
+    "virology", "viral", "فايروس", "فيروس",
+)
 
 
 def department_shows_previous_values(department):
@@ -340,6 +372,10 @@ def inject_globals():
     # لأنها محقونة هنا بدل تمريرها يدويًا بكل route.
     report_row_pad = get_setting(db, "report_row_pad", "5")
     report_col_pad = get_setting(db, "report_col_pad", "12")
+    # دكاترة الفحص المُفعَّل لهم "إظهار بترويسة التقرير" — تُحقن هنا تلقائيًا
+    # حتى تنعرض بترويسة أي تقرير مطبوع (reports/*.html) بدون تمريرها يدويًا
+    # من كل route. راجع Management → الإعدادات → إدارة قائمة الدكاترة.
+    letterhead_doctors = get_letterhead_doctors(db)
     license_banner = None
     if "user_id" in session:
         lic = license_manager.check_license(db)
@@ -353,6 +389,7 @@ def inject_globals():
                 brand_name=brand_name, logo_url=logo_url,
                 lab_address=lab_address, lab_phone=lab_phone,
                 report_row_pad=report_row_pad, report_col_pad=report_col_pad,
+                letterhead_doctors=letterhead_doctors,
                 license_banner=license_banner,
                 # أيقونة المصمم العائمة: تظهر فقط لمن سجّل دخوله فعلاً من
                 # /designer/login بنفس المتصفح (session['designer_id']).
@@ -599,12 +636,18 @@ def designer_panel():
             revoked_licenses = auto_updater.fetch_revocation_list()
         except Exception as e:
             revocation_error = str(e)
+    branding = {
+        "app_name": get_setting(db, "app_name", ""),
+        "app_name_ar": get_setting(db, "app_name_ar", ""),
+        "logo_path": get_setting(db, "logo_path", ""),
+    }
     db.close()
     return render_template(
         "designer/panel.html", lic=lic, issue_log=issue_log,
         this_hw=license_manager.get_hardware_id(), this_ip=license_manager.get_local_ip(),
         update_info=update_info, github_write_token=github_write_token,
         revoked_licenses=revoked_licenses, revocation_error=revocation_error,
+        branding=branding,
     )
 
 
@@ -621,6 +664,43 @@ def designer_save_github_token():
     db.commit()
     db.close()
     flash("تم حفظ توكن الكتابة." if token else "تم مسح توكن الكتابة.")
+    return redirect(url_for("designer_panel"))
+
+
+# تعديل سريع لاسم المختبر (عربي/إنكليزي) والشعار مباشرة من لوحة المصمم —
+# بعد رفع تحديث لعميل معيّن، يضبط المصمم هويته الصحيحة بنفس الصفحة اللي
+# رفع منها التحديث، بدون ما يحتاج يفتح "الإدارة ← الإعدادات" كخطوة منفصلة.
+# يستخدم بالضبط نفس مفاتيح settings (app_name, app_name_ar, logo_path)
+# ونفس منطق حفظ الشعار المستخدم بصفحة الإعدادات العادية (app_settings)،
+# فالقيمتين مصدرهما واحد بغض النظر من وين تُعدَّل.
+@app.route("/designer/branding", methods=["POST"])
+@designer_required
+def designer_save_branding():
+    db = get_db()
+    name_en = request.form.get("app_name", "").strip()
+    name_ar = request.form.get("app_name_ar", "").strip()
+    if name_en:
+        set_setting(db, "app_name", name_en)
+    if name_ar:
+        set_setting(db, "app_name_ar", name_ar)
+
+    file = request.files.get("logo")
+    if file and file.filename:
+        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+        if ext in ALLOWED_LOGO_EXT:
+            filename = secure_filename(f"logo.{ext}")
+            for old_ext in ALLOWED_LOGO_EXT:
+                old_path = os.path.join(UPLOAD_DIR, f"logo.{old_ext}")
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+            file.save(os.path.join(UPLOAD_DIR, filename))
+            set_setting(db, "logo_path", f"uploads/{filename}")
+        else:
+            flash("امتداد الشعار غير مدعوم. استخدم PNG, JPG, GIF, SVG أو WEBP.")
+
+    db.commit()
+    db.close()
+    flash("تم حفظ اسم المختبر/الشعار.")
     return redirect(url_for("designer_panel"))
 
 
@@ -930,11 +1010,50 @@ def new_visit():
             )
             total += price or 0
 
-        db.execute(
-            "INSERT INTO invoices (visit_id, total_amount, status, created_by, created_at) "
-            "VALUES (?, ?, 'Unpaid', ?, ?)",
-            (visit_id, total, session["user_id"], now),
+        # "المبلغ الكلي" بصفحة الزيارة الجديدة يبدأ محسوبًا تلقائيًا من
+        # مجموع أسعار التحاليل المختارة، بس موظف الاستقبال يقدر يعدّله يدويًا
+        # (مثلاً لخصم أو تسوية) — الفرق بين المجموع الفعلي والمبلغ المُعدَّل
+        # يُسجَّل بعمودي discount_amount/extra_charges حتى يبقى مجموع أسعار
+        # التحاليل الأصلي محفوظًا للمراجعة.
+        computed_total = total
+        total_override_raw = request.form.get("total_amount_input")
+        try:
+            total_override = float(total_override_raw) if total_override_raw not in (None, "") else None
+        except ValueError:
+            total_override = None
+        invoice_total = total_override if (total_override is not None and total_override >= 0) else computed_total
+        discount_amount = max(0.0, computed_total - invoice_total)
+        extra_charges = max(0.0, invoice_total - computed_total)
+
+        # "الواصل" — أي مبلغ استلمه الاستقبال نقدًا وقت تسجيل الزيارة نفسها.
+        # يُسجَّل كدفعة فعلية بجدول payments (نفس آلية /billing/pay) حتى يظهر
+        # بسجلات المحاسبة والتقارير، و"الباقي" يُحسب تلقائيًا من الفرق.
+        try:
+            paid_amount = float(request.form.get("paid_amount") or 0)
+        except ValueError:
+            paid_amount = 0.0
+        paid_amount = max(0.0, paid_amount)
+        if invoice_total > 0:
+            paid_amount = min(paid_amount, invoice_total)
+            invoice_status = "Paid" if paid_amount >= invoice_total else ("Partial" if paid_amount > 0 else "Unpaid")
+        else:
+            invoice_status = "Paid" if paid_amount <= 0 else "Partial"
+
+        inv_cur = db.execute(
+            "INSERT INTO invoices (visit_id, total_amount, discount_amount, extra_charges, paid_amount, status, "
+            "created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (visit_id, invoice_total, discount_amount, extra_charges, paid_amount, invoice_status,
+             session["user_id"], now),
         )
+        invoice_id = inv_cur.lastrowid
+
+        if paid_amount > 0:
+            db.execute(
+                "INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) VALUES (?, ?, 'Cash', ?, ?)",
+                (invoice_id, paid_amount, session["user_id"], now),
+            )
+            log_action("Payment", "invoice", invoice_id, f"amount={paid_amount} (at registration)")
+
 
         if contact_method != "None":
             db.execute(
@@ -2659,6 +2778,123 @@ def visit_results_entry(visit_id):
                             patient_hct_normal=get_normal_hct(db, visit["gender"], visit["age"], visit["age_unit"]))
 
 
+# ------------------------------------------------------------------------
+# "اللوحة المجمّعة" — تجمع كل التحاليل "البسيطة" لنفس الزيارة (أي تحليل
+# ماله تقرير مخصص كبير بـ REPORT_TEMPLATE_MAP، يعني كل شي غير CBC/Blood
+# Film/WBC Differential/Fluid exam/Coagulation) بورقة A4 وحدة، مرتّبة
+# حسب القسم (Department) اللي حدده الأدمن لكل تحليل بكتالوج التحاليل —
+# مثلاً كل تحاليل قسم "Biochemical Test" تحت عنوان وحد، وتحتها "Virology
+# screen"، وتحتها "Hormones"، وتحتها "Vitamins"، وهكذا لأي قسم إضافي،
+# بنفس ترويسة الشعار والأطباء المشتركة (reports/base_report.html) بدون
+# أي تكرار لها. تحليل بدون أي نتيجة مُدخلة بعد يُستبعد من اللوحة تلقائيًا
+# حتى ما تطلع أسطر فاضية.
+# ------------------------------------------------------------------------
+@app.route("/front-desk/visits/<int:visit_id>/print/combined-panel")
+@login_required
+def print_combined_panel(visit_id):
+    db = get_db()
+    visit = db.execute(
+        "SELECT v.*, p.full_name as patient_name, p.age, p.age_unit, p.gender, "
+        "d.full_name as referring_doctor_name, rc.name as referral_center_name "
+        "FROM visits v JOIN patients p ON p.id = v.patient_id "
+        "LEFT JOIN doctors d ON d.id = v.doctor_id "
+        "LEFT JOIN referral_centers rc ON rc.id = v.referral_center_id WHERE v.id=?",
+        (visit_id,),
+    ).fetchone()
+    if not visit:
+        return "Not found", 404
+
+    order_tests = db.execute(
+        "SELECT ot.*, td.code as test_code, td.name as test_name, td.department as department, "
+        "td.report_group as report_group "
+        "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "JOIN orders o ON o.id = ot.order_id "
+        "WHERE o.visit_id=? AND ot.status IN ('Completed', 'Verified') "
+        "ORDER BY COALESCE(NULLIF(TRIM(td.report_group), ''), td.department), td.name",
+        (visit_id,),
+    ).fetchall()
+
+    groups_by_dept = {}
+    dept_order = []
+    for ot in order_tests:
+        if ot["test_code"] in REPORT_TEMPLATE_MAP:
+            continue  # لهذا التحليل تقريره الكبير الخاص، ما يدخل باللوحة المجمّعة
+        params = db.execute(
+            "SELECT * FROM test_parameters WHERE test_definition_id=?", (ot["test_definition_id"],)
+        ).fetchall()
+        if not params:
+            continue
+        results = db.execute(
+            "SELECT r.*, tp.name as pname FROM results r "
+            "JOIN test_parameters tp ON tp.id = r.test_parameter_id WHERE order_test_id=?",
+            (ot["id"],),
+        ).fetchall()
+        results_by_name = {r["pname"]: r for r in results}
+        multi_param = len(params) > 1
+        rows = []
+        # نفس منطق التقرير الفردي (print_report/find_previous_reference):
+        # يجيب آخر زيارة سابقة لنفس هذا التحليل مطابقة بالاسم الثلاثي +
+        # العمر + الجنس، وتُضاف قيمها لكل صف فقط إذا كان قسم التحليل من
+        # الأقسام المفعّلة بـ PREVIOUS_VALUE_DEPARTMENT_KEYWORDS. تُستدعى
+        # مرة وحدة لكل تحليل (مو لكل باراميتر) لتفادي تكرار الاستعلام.
+        previous_visit_date, previous_values = find_previous_reference(
+            db, visit["patient_name"], visit["age"], visit["gender"],
+            ot["test_definition_id"], ot["department"], visit_id, visit["created_at"],
+        )
+        for p in params:
+            r = results_by_name.get(p["name"])
+            if r is None:
+                continue
+            value = r["value_text"] if r["value_text"] not in (None, "") else r["value_numeric"]
+            if value in (None, ""):
+                continue
+            rng = find_reference_range(db, p["id"], visit["gender"], visit["age"], visit["age_unit"])
+            rows.append({
+                "name": p["name"] if multi_param else ot["test_name"],
+                "result": value,
+                "unit": p["unit"] or "",
+                "low": rng["low"] if rng else None,
+                "high": rng["high"] if rng else None,
+                "range_text": rng["range_text"] if rng else None,
+                "previous_value": previous_values.get(p["name"]),
+                "previous_date": previous_visit_date,
+            })
+        if not rows:
+            continue
+        # الأولوية دائماً لاسم "الريبورت المجمّع" المخصص (report_group) إذا
+        # الأدمن حدده لهذا التحليل من كتالوج التحاليل — وإلا نرجع لاسم
+        # القسم (department) القديم كما كان الوضع قبل هذي الميزة.
+        dept = (ot["report_group"] or "").strip() or ot["department"] or "Other"
+        if dept not in groups_by_dept:
+            groups_by_dept[dept] = []
+            dept_order.append(dept)
+        groups_by_dept[dept].extend(rows)
+
+    panel_groups = [{"department": d, "rows": groups_by_dept[d]} for d in dept_order]
+
+    logo_path = get_setting(db, "logo_path", "")
+    logo_url = url_for("static", filename=logo_path) if logo_path else None
+    from_other_lab = bool(visit["referral_center_id"]) and visit["referral_center_name"] not in (None, "", "Walk-in")
+
+    try:
+        dt = datetime.fromisoformat(visit["created_at"])
+        visit_date = f"{dt.day}/{dt.month}/{dt.year}"
+    except (TypeError, ValueError):
+        visit_date = visit["created_at"] or ""
+
+    age_unit_abbr = {"Hours": "H", "Days": "D", "Weeks": "W", "Months": "M", "Years": "Y"}
+    age_display = f"{visit['age']}{age_unit_abbr.get(visit['age_unit'] or 'Years', 'Y')}" if visit["age"] not in (None, "") else ""
+
+    return render_template(
+        "reports/combined_panel.html",
+        panel_groups=panel_groups, logo_url=logo_url, from_other_lab=from_other_lab,
+        visit_date=visit_date, sex=visit["gender"] or "", age=age_display,
+        patient_name=visit["patient_name"], patient_id=visit["registration_number"],
+        referring_doctor_name=visit["referring_doctor_name"] or "",
+        show_exam_signature=False,
+    )
+
+
 @app.route("/reports/print/<int:order_test_id>")
 @login_required
 def print_report(order_test_id):
@@ -2807,6 +3043,8 @@ def print_report(order_test_id):
     custom_rows_align = "right"
     if custom_template:
         units_by_name = {p["name"]: p["unit"] for p in parameters}
+        unit2_by_name = {p["name"]: p["unit2"] for p in parameters}
+        unit2_factor_by_name = {p["name"]: p["unit2_factor"] for p in parameters}
         custom_heading = custom_template["heading"] or ot["test_name"]
         custom_heading_align = custom_template["heading_align"] or "center"
         custom_rows_align = custom_template["rows_align"] or "right"
@@ -2825,12 +3063,15 @@ def print_report(order_test_id):
                     normal_range = f"> {rng['low']}"
                 elif rng["high"] is not None:
                     normal_range = f"< {rng['high']}"
+            result_val = params.get(pname, "")
             custom_rows.append({
                 "label": rd.get("label") or pname,
-                "result": params.get(pname, ""),
+                "result": result_val,
                 "unit": units_by_name.get(pname, ""),
                 "normal_range": normal_range,
                 "previous": previous_values.get(pname, "") if show_prev_values else "",
+                "result2": format_unit2_value(result_val, unit2_factor_by_name.get(pname)),
+                "unit2": unit2_by_name.get(pname) or "",
             })
 
     age_unit_abbr = {"Hours": "H", "Days": "D", "Weeks": "W", "Months": "M", "Years": "Y"}
@@ -3659,6 +3900,22 @@ def toggle_examining_test(test_id):
     return {"ok": True, "is_examining_test": new_val}
 
 
+# اسم "الريبورت المجمّع" (report_group) اللي يظهر عنوانًا فرعيًا للوحة
+# الطباعة المجمّعة (print_combined_panel) — فاضي يرجّع التحليل يعتمد على
+# اسم القسم (department) العام كالمعتاد بدل عنوان مخصص.
+@app.route("/master/test-catalog/<int:test_id>/report-group", methods=["POST"])
+@roles_required("supervisor")
+def update_test_report_group(test_id):
+    db = get_db()
+    value = (request.form.get("report_group") or "").strip()
+    row = db.execute("SELECT id FROM test_definitions WHERE id=?", (test_id,)).fetchone()
+    if not row:
+        return {"ok": False}, 404
+    db.execute("UPDATE test_definitions SET report_group=? WHERE id=?", (value, test_id))
+    db.commit()
+    return {"ok": True, "report_group": value}
+
+
 @app.route("/master/test-parameters/<int:param_id>/toggle-highlight", methods=["POST"])
 @roles_required("supervisor")
 def toggle_parameter_highlight(param_id):
@@ -3674,6 +3931,118 @@ def toggle_parameter_highlight(param_id):
     return {"ok": True, "highlight": new_val}
 
 
+# ------------------------------------------------------------------------
+# أداة "تعديل وحدة القياس" — تسمح للمشرف/الأدمن يغيّر وحدة أي معيار
+# (test_parameter) مباشرة (مثل NRBC، أو أي معيار يحتاج تغيير وحدته لاحقًا)
+# دون لمس قاعدة البيانات يدويًا. لو التغيير يمثّل تحويل قياس فعلي (مو مجرد
+# إعادة تسمية)، تقدر تعطيها معامل تحويل (factor) واتجاه (ضرب/قسمة) فتتحول
+# كل المدايات المرجعية (reference_ranges) المرتبطة بهذا المعيار تلقائيًا
+# بنفس المعامل والاتجاه، حتى تبقى متوافقة مع الوحدة الجديدة. لإعادة تسمية
+# بدون أي تغيير بالأرقام (مثل NRBC من "100/wbc" إلى "/100WBC")، اترك
+# المعامل = 1.
+# ------------------------------------------------------------------------
+@app.route("/master/unit-converter", methods=["GET"])
+@roles_required("supervisor")
+def unit_converter():
+    db = get_db()
+    parameters = db.execute(
+        "SELECT tp.id, tp.name, tp.unit, tp.unit2, tp.unit2_factor, td.name as test_name, td.department "
+        "FROM test_parameters tp JOIN test_definitions td ON td.id = tp.test_definition_id "
+        "WHERE tp.result_type = 'Numeric' "
+        "ORDER BY td.department, td.name, tp.name"
+    ).fetchall()
+    return render_template("master/unit_converter.html", parameters=parameters)
+
+
+# ------------------------------------------------------------------------
+# الوحدة الثانية الدائمة لعرض النتيجة بوحدتين بنفس الوقت وقت الطباعة
+# (مثلاً mg/dL و mmol/L لنفس الباراميتر) — بخلاف "تحويل الوحدة" أعلاه اللي
+# يغيّر الوحدة الأساسية مرة وحدة ويحوّل المديات المرجعية معها، هذا الإعداد
+# دائم ولا يلمس الوحدة الأساسية ولا المديات المرجعية إطلاقًا: فقط يضيف قيمة
+# محسوبة تلقائيًا (value2 = value1 × factor) تُطبع جنب النتيجة الأصلية.
+# اترك حقل "الوحدة الثانية" فاضي لإلغاء/تعطيل الوحدة الثانية لهذا الباراميتر.
+# ------------------------------------------------------------------------
+@app.route("/master/unit-converter/<int:param_id>/set-dual-unit", methods=["POST"])
+@roles_required("supervisor")
+def unit_converter_set_dual(param_id):
+    db = get_db()
+    param = db.execute("SELECT * FROM test_parameters WHERE id=?", (param_id,)).fetchone()
+    if not param:
+        flash("المعيار غير موجود.")
+        return redirect(url_for("unit_converter"))
+
+    unit2 = (request.form.get("unit2") or "").strip()
+    if not unit2:
+        db.execute("UPDATE test_parameters SET unit2=NULL, unit2_factor=NULL WHERE id=?", (param_id,))
+        db.commit()
+        log_action("SetDualUnit", "test_parameter", param_id, "cleared")
+        flash(f"تم إلغاء الوحدة الثانية لـ \"{param['name']}\".")
+        return redirect(url_for("unit_converter"))
+
+    factor_raw = (request.form.get("unit2_factor") or "").strip()
+    try:
+        factor = float(factor_raw)
+        if factor <= 0:
+            raise ValueError
+    except ValueError:
+        flash("معامل التحويل للوحدة الثانية يجب أن يكون رقمًا أكبر من صفر.")
+        return redirect(url_for("unit_converter"))
+
+    db.execute("UPDATE test_parameters SET unit2=?, unit2_factor=? WHERE id=?", (unit2, factor, param_id))
+    db.commit()
+    log_action("SetDualUnit", "test_parameter", param_id, f"{param['unit']} -> {unit2} (x{factor})")
+    flash(f"تم حفظ الوحدة الثانية لـ \"{param['name']}\": {unit2} (يُحسب تلقائيًا = القيمة × {factor}).")
+    return redirect(url_for("unit_converter"))
+
+
+@app.route("/master/unit-converter/<int:param_id>/apply", methods=["POST"])
+@roles_required("supervisor")
+def unit_converter_apply(param_id):
+    db = get_db()
+    param = db.execute("SELECT * FROM test_parameters WHERE id=?", (param_id,)).fetchone()
+    if not param:
+        flash("المعيار غير موجود.")
+        return redirect(url_for("unit_converter"))
+
+    new_unit = (request.form.get("new_unit") or "").strip()
+    direction = request.form.get("direction", "multiply")
+    try:
+        factor = float(request.form.get("factor") or 1)
+    except ValueError:
+        factor = 1.0
+    if factor <= 0:
+        flash("معامل التحويل يجب أن يكون رقمًا أكبر من صفر.")
+        return redirect(url_for("unit_converter"))
+
+    old_unit = param["unit"]
+    ranges = db.execute("SELECT id, low, high FROM reference_ranges WHERE test_parameter_id=?", (param_id,)).fetchall()
+    for r in ranges:
+        new_low = r["low"]
+        new_high = r["high"]
+        if direction == "divide":
+            if new_low is not None:
+                new_low = new_low / factor
+            if new_high is not None:
+                new_high = new_high / factor
+        else:
+            if new_low is not None:
+                new_low = new_low * factor
+            if new_high is not None:
+                new_high = new_high * factor
+        db.execute("UPDATE reference_ranges SET low=?, high=? WHERE id=?", (new_low, new_high, r["id"]))
+
+    if new_unit:
+        db.execute("UPDATE test_parameters SET unit=? WHERE id=?", (new_unit, param_id))
+
+    db.commit()
+    log_action(
+        "UnitConvert", "test_parameter", param_id,
+        f"{old_unit!r} -> {new_unit!r} ({direction} x{factor}, {len(ranges)} ranges updated)",
+    )
+    flash(f"تم تحديث وحدة \"{param['name']}\" وتحويل {len(ranges)} مدى مرجعي.")
+    return redirect(url_for("unit_converter"))
+
+
 @app.route("/master/test-catalog", methods=["GET", "POST"])
 @roles_required("supervisor")
 def test_catalog():
@@ -3682,15 +4051,16 @@ def test_catalog():
         code = request.form.get("code", "").strip()
         name = request.form.get("name", "").strip()
         department = request.form.get("department", "").strip()
+        report_group = request.form.get("report_group", "").strip()
         sample_type = request.form.get("sample_type", "").strip()
         price = float(request.form.get("price") or 0)
         is_examining_test = 1 if request.form.get("is_examining_test") else 0
         params_raw = request.form.get("parameters", "").strip()
 
         cur = db.execute(
-            "INSERT INTO test_definitions (code, name, department, sample_type, price, is_examining_test) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (code, name, department, sample_type, price, is_examining_test),
+            "INSERT INTO test_definitions (code, name, department, report_group, sample_type, price, is_examining_test) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (code, name, department, report_group, sample_type, price, is_examining_test),
         )
         test_id = cur.lastrowid
         for chunk in params_raw.split(","):
@@ -3712,7 +4082,14 @@ def test_catalog():
         return redirect(url_for("test_catalog"))
 
     tests = db.execute("SELECT * FROM test_definitions ORDER BY department, name").fetchall()
-    return render_template("master/test_catalog.html", tests=tests)
+    # أسماء "الريبورت المجمّع" المستخدمة أصلاً بأي تحليل — تُعرض كاقتراحات
+    # بحقل الإدخال (datalist) حتى يعيد الأدمن استخدام نفس الاسم بالضبط بدل
+    # ما يكتبه بصيغة مختلفة شوي فينفصل عن مجموعته بالخطأ (مثلاً "Viral
+    # study" مرة و"Viral Study" مرة ثانية تصيران مجموعتين منفصلتين).
+    report_groups = sorted({
+        row["report_group"].strip() for row in tests if row["report_group"] and row["report_group"].strip()
+    })
+    return render_template("master/test_catalog.html", tests=tests, report_groups=report_groups)
 
 
 def unique_test_code(db, name):
@@ -3903,10 +4280,10 @@ def app_settings():
                 set_setting(db, "logo_path", f"uploads/{filename}")
             else:
                 flash("Unsupported logo file type. Use PNG, JPG, GIF, SVG or WEBP.")
-        names_raw = request.form.get("examining_doctors", "")
-        if names_raw.strip():
-            names = [ln.strip() for ln in names_raw.splitlines() if ln.strip()]
-            set_examining_doctors(db, names)
+
+        # ملاحظة: إدارة أسماء وشهادات دكاترة الفحص انتقلت لشاشة مستقلة
+        # (management/examining_doctors.html عبر الرابط بهذي الصفحة) — ما عاد
+        # فيها فورم هنا.
 
         # ارتفاع/عرض خلايا جدول نتائج التقرير — رقم صحيح بين 2 و30 بكسل فقط،
         # أي قيمة غير صالحة تُتجاهل ويبقى المحفوظ سابقًا كما هو.
@@ -3966,7 +4343,6 @@ def app_settings():
         "lab_address": get_setting(db, "lab_address", ""),
         "lab_phone": get_setting(db, "lab_phone", ""),
         "logo_path": get_setting(db, "logo_path", ""),
-        "examining_doctors": "\n".join(get_examining_doctors(db)),
         "report_row_pad": get_setting(db, "report_row_pad", "5"),
         "report_col_pad": get_setting(db, "report_col_pad", "12"),
         "whatsapp_country_code": get_setting(db, "whatsapp_country_code", "964"),
@@ -3979,6 +4355,77 @@ def app_settings():
     return render_template(
         "management/settings.html", current=current, conclusion_markers=conclusion_markers
     )
+
+
+# ------------------------------------------------------------------------
+# إدارة قائمة (دكتور المختبر الفاحص) — اسم/لقب/شهادة عربي/شهادة انكليزي
+# وترتيب يدوي (فوق/تحت)، بالإضافة لمفتاح "إظهار بترويسة التقرير" لكل واحد
+# منهم. مفتوحة من بطاقة "دكتور المختبر الفاحص" بصفحة الإعدادات. الأسماء
+# نفسها تبقى تُستخدم كنص بجداول أخرى (أجور الفحص، الزيارات) فتغيير الاسم
+# هنا لا يحدّث تلقائيًا سجلات قديمة محفوظة بالاسم السابق.
+# ------------------------------------------------------------------------
+@app.route("/management/examining-doctors", methods=["GET"])
+@roles_required("admin")
+def examining_doctors_manage():
+    db = get_db()
+    doctors = get_examining_doctors_full(db)
+    return render_template("management/examining_doctors.html", doctors=doctors)
+
+
+@app.route("/management/examining-doctors/add", methods=["POST"])
+@roles_required("admin")
+def examining_doctor_add():
+    db = get_db()
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("اسم الدكتور مطلوب.")
+        return redirect(url_for("examining_doctors_manage"))
+    title = request.form.get("title", "الدكتور").strip()
+    degree_ar = request.form.get("degree_ar", "").strip() or None
+    degree_en = request.form.get("degree_en", "").strip() or None
+    show_on_letterhead = bool(request.form.get("show_on_letterhead"))
+    add_examining_doctor_full(db, name, title, degree_ar, degree_en, show_on_letterhead)
+    log_action("AddExaminingDoctor", "examining_doctor", 0, name)
+    flash(f"تمت إضافة \"{name}\".")
+    return redirect(url_for("examining_doctors_manage"))
+
+
+@app.route("/management/examining-doctors/<int:doctor_id>/update", methods=["POST"])
+@roles_required("admin")
+def examining_doctor_update(doctor_id):
+    db = get_db()
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("اسم الدكتور مطلوب.")
+        return redirect(url_for("examining_doctors_manage"))
+    title = request.form.get("title", "الدكتور").strip()
+    degree_ar = request.form.get("degree_ar", "").strip() or None
+    degree_en = request.form.get("degree_en", "").strip() or None
+    show_on_letterhead = bool(request.form.get("show_on_letterhead"))
+    update_examining_doctor(db, doctor_id, name, title, degree_ar, degree_en, show_on_letterhead)
+    log_action("UpdateExaminingDoctor", "examining_doctor", doctor_id, name)
+    flash(f"تم حفظ تعديلات \"{name}\".")
+    return redirect(url_for("examining_doctors_manage"))
+
+
+@app.route("/management/examining-doctors/<int:doctor_id>/delete", methods=["POST"])
+@roles_required("admin")
+def examining_doctor_delete(doctor_id):
+    db = get_db()
+    delete_examining_doctor(db, doctor_id)
+    log_action("DeleteExaminingDoctor", "examining_doctor", doctor_id)
+    flash("تم الحذف.")
+    return redirect(url_for("examining_doctors_manage"))
+
+
+@app.route("/management/examining-doctors/<int:doctor_id>/move", methods=["POST"])
+@roles_required("admin")
+def examining_doctor_move(doctor_id):
+    db = get_db()
+    direction = request.form.get("direction", "")
+    if direction in ("up", "down"):
+        move_examining_doctor(db, doctor_id, direction)
+    return redirect(url_for("examining_doctors_manage"))
 
 
 def _parse_docx_rows(file_storage, parameters):

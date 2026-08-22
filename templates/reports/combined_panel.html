@@ -1,0 +1,60 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+<style>
+  /* عنوان كل قسم (Biochemical Test / Virology screen / Hormones / Vitamins...)
+     — خط أصغر من عنوان التقرير الرئيسي، بلون مميز، مع خط تحته يفصله عن
+     الجدول اللي تحته، حتى تبقى الأقسام واضحة ومرتبة بورقة وحدة بدون خبطة. */
+  .panel-dept-heading {
+    font-weight: bold;
+    font-size: 1.05em;
+    color: #26529C;
+    border-bottom: 1.5px solid #26529C;
+    padding-bottom: 3px;
+    margin: 14px 0 6px 0;
+  }
+  .panel-dept-heading:first-child { margin-top: 0; }
+  /* نفس نسبة عرض عمود اسم التحليل (ضعف باقي الأعمدة) بكل أقسام اللوحة،
+     حتى تبقى الأعمدة مصطفّة بنفس القياس بدون أي فرق بين قسم وآخر. عمود
+     "Previous" أعرض شوي من الأعمدة الجانبية حتى يتّسع للقيمة + التاريخ. */
+  .panel-table col.col-name { width: 32%; }
+  .panel-table col.col-result,
+  .panel-table col.col-unit,
+  .panel-table col.col-low,
+  .panel-table col.col-high { width: 13%; }
+  .panel-table col.col-prev { width: 16%; }
+</style>
+
+{% for group in panel_groups %}
+<div class="panel-dept-heading">{{ group.department }}</div>
+<table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;">
+  <colgroup>
+    <col class="col-name"><col class="col-result"><col class="col-unit"><col class="col-low"><col class="col-high"><col class="col-prev">
+  </colgroup>
+  <tr>
+    <th>Test</th><th>Result</th><th>Unit</th><th>Low</th><th>High</th><th>Previous</th>
+  </tr>
+  {% for row in group.rows %}
+  <tr>
+    <td style="text-align:left; font-weight:bold;">{{ row.name }}</td>
+    <td>{{ row.result }}</td>
+    <td>{{ row.unit }}</td>
+    {% if row.range_text %}
+    <td colspan="2">{{ row.range_text }}</td>
+    {% else %}
+    <td>{{ row.low if row.low is not none else '' }}</td>
+    <td>{{ row.high if row.high is not none else '' }}</td>
+    {% endif %}
+    <td class="prev-col">
+      {% if row.previous_value not in (None, '') %}
+        {{ row.previous_value }}{% if row.previous_date %}<span class="prev-inline"><br>{{ row.previous_date }}</span>{% endif %}
+      {% else %}
+        &nbsp;
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted" style="text-align:center;">لا توجد نتائج مكتملة بعد لأي تحليل ضمن هذي اللوحة.</p>
+{% endfor %}
+{% endblock %}
