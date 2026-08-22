@@ -39,7 +39,7 @@
 
         <td>
           <form method="POST" action="{{ url_for('unit_converter_apply', param_id=p['id']) }}"
-                onsubmit="return confirm('تحويل مديات {{ p[\'name\'] }} المرجعية وتحديث وحدتها؟');"
+                onsubmit="return confirm('تحويل مديات {{ p['name'] }} المرجعية وتحديث وحدتها؟');"
                 style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
             <input type="text" name="new_unit" placeholder="الوحدة الجديدة (اختياري)" class="mono" style="width:110px;">
             <select name="direction" style="width:90px;">
