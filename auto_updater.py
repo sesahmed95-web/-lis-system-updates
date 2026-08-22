@@ -284,18 +284,24 @@ def check_and_apply(db, force_apply=True):
 
 
 def background_loop(get_db_func):
-    """خيط خلفية دائم — ينام ثم يتحقق كل CHECK_INTERVAL_HOURS، وفقط إذا
-    كان هذا الجهاز "مربوط بالإنترنت" (auto_update_enabled=1) من لوحة
-    المصمم. يشتغل نفس شكل خيط واتساب الموجود أصلاً بالبرنامج."""
+    """خيط خلفية دائم — ينام ثم يتحقق كل CHECK_INTERVAL_HOURS. ملاحظة مهمة:
+    check_revocation و check_update_signal يفحصان دائمًا طالما فيه توكن
+    قراءة صالح (is_configured())، بغض النظر عن auto_update_enabled —
+    هذا الأخير يتحكم فقط بتحديثات النسخة العادية (check_and_apply) وهو
+    الزر اللي يقدر العميل نفسه يبدّله من شريط الأعلى بالبرنامج (بعكس
+    الإلغاء عن بُعد أو أمر التحديث الفوري، اللي لازم يضلّان تحت سيطرة
+    المصمم دائمًا حتى لو العميل عطّل التحديث التلقائي عنده)."""
     from database import get_setting
     # فحص أول بعد 30 ثانية من الإقلاع (مو فوري حتى ما يبطّئ الإقلاع)
     time.sleep(30)
     while True:
         try:
             db = get_db_func()
-            enabled = get_setting(db, "auto_update_enabled", "1") == "1"
-            if enabled and is_configured():
-                check_and_apply(db, force_apply=True)
+            if is_configured():
+                enabled = get_setting(db, "auto_update_enabled", "1") == "1"
+                if enabled:
+                    check_and_apply(db, force_apply=True)
+                # هذولا يفحصان دائمًا — لا يتأثران بزر العميل إطلاقًا.
                 check_revocation(db)
                 check_update_signal(db)
             db.close()
