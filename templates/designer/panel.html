@@ -22,7 +22,15 @@
   {% if not update_info.configured %}
   <p class="muted">⚠️ لم يتم إعداد بيانات GitHub بعد (GITHUB_OWNER / GITHUB_REPO / GITHUB_TOKEN داخل auto_updater.py) — الزرّان تحت لن يعملا حتى تُعبَّأ هذه القيم.</p>
   {% endif %}
-
+  <form method="POST" action="{{ url_for('designer_save_github_read_token') }}" class="form-grid" style="margin:12px 0;">
+    <div class="form-field">
+      <label>توكن GitHub بصلاحية قراءة فقط (يُحفظ بجهازك فقط، ويُطبَّق فوراً بدون إعادة تشغيل)</label>
+      <input type="password" name="github_read_token" value="{{ github_read_token }}" placeholder="ghp_xxx أو github_pat_xxx" style="direction:ltr; font-family:monospace;">
+    </div>
+    <div class="form-field" style="align-self:end;">
+      <button class="btn secondary" type="submit">حفظ توكن القراءة</button>
+    </div>
+  </form>
   <p>
     حالة الربط بالإنترنت لهذا الجهاز:
     {% if update_info.enabled %}🟢 مربوط — يتحقق تلقائياً كل عدة ساعات{% else %}⚪ غير مربوط — لن يتحقق من أي تحديث تلقائياً{% endif %}
