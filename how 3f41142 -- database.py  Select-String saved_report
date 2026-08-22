@@ -1,0 +1,110 @@
+[33mcommit 3f411427a513d44480928ec7f402c72b2090e8f4[m
+Author: Ahmed H Salman <sesahmed95@gmail.com>
+Date:   Sat Aug 22 12:08:26 2026 +0300
+
+    مجموعة تعديلات
+
+[1mdiff --git a/database.py b/database.py[m
+[1mindex 98bbe64..43951cb 100644[m
+[1m--- a/database.py[m
+[1m+++ b/database.py[m
+[36m@@ -91,6 +91,8 @@[m [mCREATE TABLE IF NOT EXISTS test_parameters ([m
+     unit TEXT,[m
+     result_type TEXT DEFAULT 'Numeric',   -- Numeric, Text[m
+     highlight INTEGER DEFAULT 0,          -- 1 = shade this row yellow on printed reports (admin-chosen, not automatic)[m
+[32m+[m[32m    unit2 TEXT,                           -- optional second unit shown alongside the result on printed reports[m
+[32m+[m[32m    unit2_factor REAL,                    -- value2 = value1 * unit2_factor, computed at print time only[m
+     FOREIGN KEY (test_definition_id) REFERENCES test_definitions(id)[m
+ );[m
+ [m
+[36m@@ -348,6 +350,23 @@[m [mCREATE TABLE IF NOT EXISTS examining_doctor_rates ([m
+     FOREIGN KEY (test_definition_id) REFERENCES test_definitions(id)[m
+ );[m
+ [m
+[32m+[m[32m-- قائمة (دكتور المختبر الفاحص) الكاملة — تحل محل التخزين القديم كنص JSON[m
+[32m+[m[32m-- بسيط داخل جدول settings. name يبقى هو المفتاح اللي تعتمد عليه بقية[m
+[32m+[m[32m-- الجداول (examining_doctor_rates.doctor_name، visits.examining_doctor)[m
+[32m+[m[32m-- كنص وليس مفتاحاً أجنبياً، فتغيير الاسم هنا لازم ينعكس يدوياً إذا احتجت[m
+[32m+[m[32m-- تطابق أجور/زيارات قديمة. title/degree_ar/degree_en تُطبع بترويسة كل[m
+[32m+[m[32m-- تقرير (راجع get_letterhead_doctors)، وshow_on_letterhead يتحكم هل هذا[m
+[32m+[m[32m-- الدكتور يظهر بالترويسة أصلاً أو هو فقط بقائمة اختيار الفاحص بالزيارات.[m
+[32m+[m[32mCREATE TABLE IF NOT EXISTS examining_doctors_list ([m
+[32m+[m[32m    id INTEGER PRIMARY KEY AUTOINCREMENT,[m
+[32m+[m[32m    name TEXT NOT NULL,[m
+[32m+[m[32m    title TEXT DEFAULT 'الدكتور',[m
+[32m+[m[32m    degree_ar TEXT,[m
+[32m+[m[32m    degree_en TEXT,[m
+[32m+[m[32m    sort_order INTEGER DEFAULT 0,[m
+[32m+[m[32m    show_on_letterhead INTEGER DEFAULT 1[m
+[32m+[m[32m);[m
+[32m+[m
+ CREATE TABLE IF NOT EXISTS report_templates ([m
+     id INTEGER PRIMARY KEY AUTOINCREMENT,[m
+     test_definition_id INTEGER UNIQUE NOT NULL,[m
+[36m@@ -384,27 +403,6 @@[m [mCREATE TABLE IF NOT EXISTS whatsapp_sends ([m
+     FOREIGN KEY (order_test_id) REFERENCES order_tests(id),[m
+     FOREIGN KEY (patient_id) REFERENCES patients(id)[m
+ );[m
+[31m-[m
+[31m--- أرشيف PDF دائم لكل زيارة (نسخة واحدة موحّدة تجمع كل نتائج الزيارة، نفس[m
+[31m--- شكل تقرير print_visit_results) — يُحفظ بمجلد ثابت يحدده المدير من[m
+[31m--- Management → Settings (settings.pdf_archive_dir)، ويُعاد توليده ويستبدل[m
+[31m--- نفسه (upsert بـ visit_id) في كل مرة تُحفظ فيها نتائج بعد اكتمال الزيارة،[m
+[31m--- حتى يبقى الملف المؤرشف مطابقًا دائمًا لآخر تعديل. صف واحد فقط لكل زيارة.[m
+[31m--- يُستخدم لصفحة البحث السريع عن نتائج قديمة من داخل البرنامج.[m
+[31m-CREATE TABLE IF NOT EXISTS saved_reports ([m
+[31m-    id INTEGER PRIMARY KEY AUTOINCREMENT,[m
+[31m-    visit_id INTEGER UNIQUE NOT NULL,[m
+[31m-    patient_id INTEGER NOT NULL,[m
+[31m-    patient_name TEXT,[m
+[31m-    registration_number INTEGER,[m
+[31m-    referring_doctor_name TEXT,[m
+[31m-    referral_center_name TEXT,[m
+[31m-    pdf_path TEXT NOT NULL,[m
+[31m-    created_at TEXT,[m
+[31m-    updated_at TEXT,[m
+[31m-    FOREIGN KEY (visit_id) REFERENCES visits(id),[m
+[31m-    FOREIGN KEY (patient_id) REFERENCES patients(id)[m
+[31m-);[m
+ """[m
+ [m
+ [m
+[36m@@ -428,9 +426,21 @@[m [mdef migrate(conn):[m
+         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],[m
+         "visits": [("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),[m
+                     ("examining_doctor_fee", "REAL DEFAULT 0"), ("attending_doctor", "TEXT")],[m
+[31m-        "test_definitions": [("is_examining_test", "INTEGER DEFAULT 0")],[m
+[32m+[m[32m        "test_definitions": [("is_examining_test", "INTEGER DEFAULT 0"),[m
+[32m+[m[32m                               # report_group: اسم "الريبورت المجمّع" اللي ينتمي له هذا[m
+[32m+[m[32m                               # التحليل (مثلاً "Thyroid function test" أو "Viral study")،[m
+[32m+[m[32m                               # مستقل تماماً عن حقل department. يُستخدم فقط بلوحة الطباعة[m
+[32m+[m[32m                               # المجمّعة (print_combined_panel) لتجميع التحاليل تحت عنوان[m
+[32m+[m[32m                               # فرعي محدد بدل الاعتماد على القسم العام. فاضي = يرجع[m
+[32m+[m[32m                               # للسلوك القديم (تجميع حسب department كالمعتاد).[m
+[32m+[m[32m                               ("report_group", "TEXT")],[m
+         "reference_ranges": [("age_from_unit", "TEXT DEFAULT 'Years'"), ("age_to_unit", "TEXT DEFAULT 'Years'")],[m
+[31m-        "test_parameters": [("highlight", "INTEGER DEFAULT 0")],[m
+[32m+[m[32m        # unit2 / unit2_factor: وحدة ثانية اختيارية تُعرض تلقائيًا جنب النتيجة[m
+[32m+[m[32m        # الأصلية وقت الطباعة (مثلاً mg/dL بالإضافة لـ mmol/L). القيمة الثانية[m
+[32m+[m[32m        # تُحسب دائمًا = القيمة الأصلية × unit2_factor، ولا تُخزَّن بجدول[m
+[32m+[m[32m        # results أبدًا — تُحسب لحظة الطباعة فقط. فاضي = بدون وحدة ثانية[m
+[32m+[m[32m        # (السلوك القديم كما هو).[m
+[32m+[m[32m        "test_parameters": [("highlight", "INTEGER DEFAULT 0"), ("unit2", "TEXT"), ("unit2_factor", "REAL")],[m
+         # is_trial: يميّز الترخيص التجريبي عن ترخيص العميل العادي (بالأيام)،[m
+         # حتى يظهر شريط "متبقي كم يوم" فقط للتجريبي وليس لكل ترخيص له تاريخ انتهاء.[m
+         # revoked_reason: سبب الإلغاء عن بُعد (يُعبّى تلقائياً لو المصمم ألغى[m
+[36m@@ -455,6 +465,33 @@[m [mdef migrate(conn):[m
+                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")[m
+     conn.commit()[m
+ [m
+[32m+[m[32m    # ترحيل قائمة (دكتور المختبر الفاحص) من التخزين القديم (نص JSON بسيط[m
+[32m+[m[32m    # داخل جدول settings) إلى جدول examining_doctors_list الجديد — مرة وحدة[m
+[32m+[m[32m    # فقط (لو الجدول الجديد فاضي أصلاً)، حتى لا تضيع أسماء محفوظة سابقًا عند[m
+[32m+[m[32m    # الترقية. الشهادات (degree_ar/degree_en) تبقى فاضية بعد الترحيل — يعبّيها[m
+[32m+[m[32m    # المدير يدويًا من الشاشة الجديدة، لأن التخزين القديم أصلاً ما كان فيه[m
+[32m+[m[32m    # هذا الحقل إطلاقًا.[m
+[32m+[m[32m    already_migrated = conn.execute("SELECT COUNT(*) as c FROM examining_doctors_list").fetchone()["c"][m
+[32m+[m[32m    if not already_migrated:[m
+[32m+[m[32m        legacy_names = [][m
+[32m+[m[32m        legacy_row = conn.execute("SELECT value FROM settings WHERE key='examining_doctors'").fetchone()[m
+[32m+[m[32m        if legacy_row and legacy_row["val
