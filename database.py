@@ -403,6 +403,22 @@ CREATE TABLE IF NOT EXISTS whatsapp_sends (
     FOREIGN KEY (order_test_id) REFERENCES order_tests(id),
     FOREIGN KEY (patient_id) REFERENCES patients(id)
 );
+
+-- التقارير المحفوظة (PDF) لكل زيارة، تُستخدم لأرشيف التقارير والبحث عنها لاحقًا.
+CREATE TABLE IF NOT EXISTS saved_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visit_id INTEGER NOT NULL UNIQUE,
+    patient_id INTEGER,
+    full_name TEXT,
+    registration_number TEXT,
+    pdf_path TEXT NOT NULL,
+    referring_doctor_name TEXT,
+    referral_center_name TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    FOREIGN KEY (visit_id) REFERENCES visits(id),
+    FOREIGN KEY (patient_id) REFERENCES patients(id)
+);
 """
 
 
@@ -1159,6 +1175,53 @@ def set_setting(db, key, value):
         db.execute("UPDATE settings SET value=? WHERE key=?", (value, key))
     else:
         db.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, value))
+
+
+def save_saved_report(db, visit_id, patient_id, full_name, registration_number,
+                       pdf_path, referring_doctor_name=None, referral_center_name=None):
+    """يحفظ (أو يحدّث) مسار PDF المحفوظ لزيارة معيّنة في أرشيف التقارير."""
+    now = datetime.now().isoformat(timespec="seconds")
+    existing = get_saved_report(db, visit_id)
+    if existing:
+        db.execute(
+            "UPDATE saved_reports SET patient_id=?, full_name=?, registration_number=?, "
+            "pdf_path=?, referring_doctor_name=?, referral_center_name=?, updated_at=? "
+            "WHERE visit_id=?",
+            (patient_id, full_name, registration_number, pdf_path,
+             referring_doctor_name, referral_center_name, now, visit_id)
+        )
+    else:
+        db.execute(
+            "INSERT INTO saved_reports (visit_id, patient_id, full_name, registration_number, "
+            "pdf_path, referring_doctor_name, referral_center_name, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (visit_id, patient_id, full_name, registration_number, pdf_path,
+             referring_doctor_name, referral_center_name, now, now)
+        )
+    db.commit()
+
+
+def get_saved_report(db, visit_id):
+    """يرجع صف التقرير المحفوظ لزيارة معيّنة، أو None إذا ما كان موجود."""
+    return db.execute(
+        "SELECT * FROM saved_reports WHERE visit_id=?", (visit_id,)
+    ).fetchone()
+
+
+def search_saved_reports(db, q):
+    """يبحث عن التقارير المحفوظة بالاسم أو رقم التسجيل أو رقم المريض.
+    إذا q فاضي، يرجع كل التقارير مرتبة من الأحدث للأقدم."""
+    if not q:
+        return db.execute(
+            "SELECT * FROM saved_reports ORDER BY updated_at DESC"
+        ).fetchall()
+    like = f"%{q}%"
+    return db.execute(
+        "SELECT * FROM saved_reports "
+        "WHERE full_name LIKE ? OR registration_number LIKE ? OR patient_id LIKE ? "
+        "ORDER BY updated_at DESC",
+        (like, like, like)
+    ).fetchall()
 
 
 DEFAULT_EXAMINING_DOCTORS = ["د.خليل حمود", "د.هدى نصيف", "د.اسراء عبد الاقر"]
