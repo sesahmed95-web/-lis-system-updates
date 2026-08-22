@@ -150,8 +150,14 @@
         </div>
         <div class="form-field">
           <label>نموذج وارد من مختبر آخر؟</label>
-          <input type="text" id="referral_lab_name" name="referral_lab_name" list="referralLabsList" autocomplete="off"
-                 placeholder="-- لا شيء، مراجع مباشر --">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <input type="text" id="referral_lab_name" name="referral_lab_name" list="referralLabsList" autocomplete="off"
+                   placeholder="-- لا شيء، مراجع مباشر --" style="flex:1; min-width:160px;">
+            <button type="button" id="referralLabBadge" class="btn small secondary"
+                    title="اضغط للتعديل على اسم المختبر المُرسِل"
+                    onclick="document.getElementById('referral_lab_name').focus()"
+                    style="display:none; white-space:nowrap;">The Sample received from another Lab</button>
+          </div>
           <datalist id="referralLabsList">
             {% for lab in referral_labs %}
             <option value="{{ lab['name'] }}">
@@ -387,6 +393,24 @@
   // ويُضاف كخيار بالقائمة فورًا ويُختار تلقائيًا، دون الحاجة للذهاب إلى
   // Management → Settings أولًا.
   // ------------------------------------------------------------------
+  // "The Sample received from another Lab" badge — يظهر تلقائيًا بمجرد ما
+  // يكتب المستخدم اسم مختبر بحقل "نموذج وارد من مختبر آخر؟"، ويختفي إذا
+  // ترك الحقل فارغًا (يعني مراجع مباشر). الضغط على الزر نفسه يرجّع التركيز
+  // لنفس الحقل حتى يقدر يعدّل اسم المختبر مباشرة بدون ما يدور عليه.
+  function updateReferralLabBadge() {
+    const input = document.getElementById('referral_lab_name');
+    const badge = document.getElementById('referralLabBadge');
+    if (!input || !badge) return;
+    badge.style.display = input.value.trim() ? 'inline-block' : 'none';
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    const input = document.getElementById('referral_lab_name');
+    if (input) {
+      input.addEventListener('input', updateReferralLabBadge);
+      updateReferralLabBadge();
+    }
+  });
+
   function toggleAddDoctorBox(show) {
     const box = document.getElementById('addDoctorBox');
     const willShow = typeof show === 'boolean' ? show : (box.style.display === 'none');
