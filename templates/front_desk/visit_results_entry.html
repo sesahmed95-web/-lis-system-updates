@@ -39,7 +39,7 @@
   // الحقلين يبقيان قابلين للتعديل اليدوي — بمجرد ما يكتب المستخدم بأحدهما
   // مباشرة يتوقف التحديث التلقائي له، مع زر "↻ إعادة الحساب التلقائي".
   // ------------------------------------------------------------------
-  (function () {
+  document.addEventListener('DOMContentLoaded', function () {
     function fieldIn(box, paramName) {
       return box.querySelector('[data-param-name="' + paramName + '"]');
     }
@@ -81,7 +81,7 @@
       });
       recalc();
     });
-  })();
+  });
 </script>
 
 <script>

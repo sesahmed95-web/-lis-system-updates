@@ -941,7 +941,30 @@ def init_db():
     ensure_reactive_lymphocytes_parameter(conn)
     ensure_cbc_comment_parameter(conn)
     ensure_coag_parameters(conn)
+    ensure_vldl_parameter(conn)
     conn.close()
+
+
+def ensure_vldl_parameter(conn):
+    """يضيف معامل VLDL لتحليل Lipid Profile (LIPID) للقواعد الموجودة مسبقًا —
+    هذا المعامل غير موجود أصلاً بقاعدة البيانات القديمة، ويُحسب تلقائيًا من
+    Triglycerides ÷ 5 بواجهة إدخال النتائج. يعمل مرة واحدة فقط؛ لا شيء يحدث
+    إذا كان المعامل مضافًا مسبقًا."""
+    row = conn.execute("SELECT id FROM test_definitions WHERE code='LIPID'").fetchone()
+    if not row:
+        return
+    test_id = row["id"]
+    exists = conn.execute(
+        "SELECT id FROM test_parameters WHERE test_definition_id=? AND name='VLDL'", (test_id,)
+    ).fetchone()
+    if exists:
+        return
+    conn.execute(
+        "INSERT INTO test_parameters (test_definition_id, name, unit, result_type, low, high) "
+        "VALUES (?, 'VLDL', 'mg/dL', 'Numeric', 2, 30)",
+        (test_id,),
+    )
+    conn.commit()
 
 
 def seed(conn):

@@ -257,6 +257,39 @@ function lisRecalcHctInitial(table) {
   if (val !== null) hctInput.value = val;
 }
 
+// ------------------------------------------------------------------
+// حساب VLDL تلقائيًا من Triglycerides (تقرير Lipid Profile):
+//   VLDL (mg/dL) = Triglycerides ÷ 5
+// نفس آلية الحقول الأخرى: يبقى الحقل قابلاً للتعديل اليدوي، ولمسه من
+// المستخدم يوقف الحساب التلقائي عنه.
+// ------------------------------------------------------------------
+window.lisComputeVldl = function (tgValue) {
+  var tg = parseFloat(tgValue);
+  if (isNaN(tg) || tg < 0) return null;
+  return Math.round(tg / 5);
+};
+
+function lisRecalcVldl(table) {
+  var tgInput = table.querySelector('[data-param-name="Triglycerides"]');
+  var vldlInput = table.querySelector('[data-param-name="VLDL"]');
+  if (!tgInput || !vldlInput) return;
+  if (vldlInput.dataset.autoFilled === "0") return; // المستخدم عدّلها يدويًا — ما نكتب فوقها
+  var val = window.lisComputeVldl(tgInput.value);
+  if (val !== null) {
+    vldlInput.value = val;
+    vldlInput.dataset.autoFilled = "1";
+  }
+}
+
+function lisRecalcVldlInitial(table) {
+  var tgInput = table.querySelector('[data-param-name="Triglycerides"]');
+  var vldlInput = table.querySelector('[data-param-name="VLDL"]');
+  if (!tgInput || !vldlInput) return;
+  if (vldlInput.value || !tgInput.value) return;
+  var val = window.lisComputeVldl(tgInput.value);
+  if (val !== null) vldlInput.value = val;
+}
+
 document.addEventListener("input", function (e) {
   var el = e.target;
   if (!el || !el.matches) return;
@@ -295,6 +328,15 @@ document.addEventListener("input", function (e) {
   if (el.matches('[data-param-name="HCT"]')) {
     el.dataset.autoFilled = "0"; // المستخدم لمسها يدويًا
   }
+
+  // VLDL من Triglycerides
+  if (el.matches('[data-param-name="Triglycerides"]')) {
+    var vldlTable = el.closest("table");
+    if (vldlTable) lisRecalcVldl(vldlTable);
+  }
+  if (el.matches('[data-param-name="VLDL"]')) {
+    el.dataset.autoFilled = "0"; // المستخدم لمسها يدويًا
+  }
 });
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -316,6 +358,7 @@ document.addEventListener("DOMContentLoaded", function () {
   document.querySelectorAll(".rb-box table").forEach(function (table) {
     lisRecalcAllDiffAbsolutesInitial(table);
     lisRecalcHctInitial(table);
+    lisRecalcVldlInitial(table);
   });
 });
 
