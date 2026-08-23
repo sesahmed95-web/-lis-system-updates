@@ -11,6 +11,31 @@
     <a class="btn" href="{{ url_for('preview_report_design', test_definition_id=selected_test['id']) }}">👁️ معاينة التصميم الآن</a>
   {% else %}
 
+  <h4>⚙️ إعدادات "اللوحة المجمّعة" لهذا التحليل</h4>
+  <p class="muted">
+    تتحكم فقط بشكل هذا التحليل لما يظهر ضمن "اللوحة المجمّعة" (طباعة أكثر من
+    تحليل سوا بورقة وحدة لنفس المريض) — منفصلة كليًا عن تصميم التقرير
+    المفرد تحت. تنطبق حتى لو هذا التحليل ما إله تصميم مخصص أصلاً.
+  </p>
+  <form method="POST" style="margin-bottom:22px;">
+    <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">
+    <input type="hidden" name="mode" value="panel">
+    <div class="form-field">
+      <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="checkbox" name="enable_panel_color" {{ 'checked' if selected_test['panel_color'] }}>
+        لون مخصص لاسم ونتيجة هذا التحليل باللوحة المجمّعة
+        <input type="color" name="panel_color" value="{{ selected_test['panel_color'] or '#1F3B7A' }}" style="width:36px; height:24px; padding:0; border:1px solid var(--border,#E2E8F0);">
+      </label>
+    </div>
+    <div class="form-field">
+      <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="checkbox" name="panel_page_break" {{ 'checked' if selected_test['panel_page_break'] }}>
+        ابدأ صفحة جديدة قبل هذا التحليل باللوحة المجمّعة
+      </label>
+    </div>
+    <button class="btn" type="submit">حفظ إعدادات اللوحة المجمّعة</button>
+  </form>
+
   <h4>الطريقة الأولى — استيراد من ملف Word</h4>
   <form method="POST" enctype="multipart/form-data" style="margin-bottom:22px;">
     <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">
@@ -47,16 +72,62 @@
       </select>
       <small class="muted">يتحكم بمحاذاة كل أعمدة الجدول بالتقرير المطبوع: اسم الفحص، النتيجة، الوحدة، والمدى الطبيعي.</small>
     </div>
-    <p class="muted">حدد الباراميترات التي تظهر بالتقرير وبأي ترتيب (رتّبها بالسحب إن أمكن، أو فقط أشّر عليها بالترتيب الحالي):</p>
-    <div class="form-field">
+    <p class="muted">
+      حدد الباراميترات التي تظهر بالتقرير، وبأي ترتيب — رتّبها بأزرار
+      ⬆️⬇️ (نفس ترتيب الطباعة، والصفحة تنقسم تلقائيًا حسب المساحة؛ فعّل
+      "ابدأ صفحة جديدة" جنب أي تحليل لإجباره يبدأ بأعلى صفحة جديدة دائمًا).
+      لكل صف تحكم مستقل: جهة اسم الحقل، موضع المدى الطبيعي، ولون مخصص
+      اختياري لاسم التحليل ونتيجته معًا.
+    </p>
+    <div class="form-field" id="paramRowsList">
       {% for p in selected_parameters %}
-      <label style="display:block; padding:4px 0;">
-        <input type="checkbox" name="param_order" value="{{ p['id'] }}"
-          {% if p['name'] in selected_rows_by_param or not selected_template %}checked{% endif %}>
-        {{ p['name'] }} {% if p['unit'] %}({{ p['unit'] }}){% endif %}
-      </label>
+      {% set saved_row = selected_rows_by_param.get(p['name']) %}
+      <div class="param-row" data-pid="{{ p['id'] }}"
+           style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 0; border-bottom:1px dashed var(--border,#E2E8F0);">
+        <div style="display:flex; flex-direction:column; gap:2px;">
+          <button type="button" class="btn small secondary" onclick="moveParamRow(this,-1)" title="نقل لأعلى" style="padding:1px 6px;">⬆️</button>
+          <button type="button" class="btn small secondary" onclick="moveParamRow(this,1)" title="نقل لأسفل" style="padding:1px 6px;">⬇️</button>
+        </div>
+        <label style="display:flex; align-items:center; gap:4px; min-width:220px; font-weight:normal;">
+          <input type="checkbox" name="param_order" value="{{ p['id'] }}"
+            {% if p['name'] in selected_rows_by_param or not selected_template %}checked{% endif %}>
+          {{ p['name'] }} {% if p['unit'] %}({{ p['unit'] }}){% endif %}
+        </label>
+        <label style="font-size:12px; font-weight:normal;">جهة الاسم:
+          <select name="name_side_{{ p['id'] }}" style="font-size:12px;">
+            <option value="left" {{ 'selected' if (saved_row.get('name_side') if saved_row else '') != 'right' }}>يسار (افتراضي)</option>
+            <option value="right" {{ 'selected' if (saved_row.get('name_side') if saved_row else '') == 'right' }}>يمين</option>
+          </select>
+        </label>
+        <label style="font-size:12px; font-weight:normal;">المدى الطبيعي:
+          <select name="range_position_{{ p['id'] }}" style="font-size:12px;">
+            <option value="inline" {{ 'selected' if (saved_row.get('range_position') if saved_row else '') != 'below' }}>بنفس السطر (افتراضي)</option>
+            <option value="below" {{ 'selected' if (saved_row.get('range_position') if saved_row else '') == 'below' }}>سطر مستقل تحت</option>
+          </select>
+        </label>
+        <label style="font-size:12px; font-weight:normal; display:flex; align-items:center; gap:4px;">
+          <input type="checkbox" name="enable_color_{{ p['id'] }}" {{ 'checked' if saved_row and saved_row.get('color') }}>
+          لون مخصص:
+          <input type="color" name="row_color_{{ p['id'] }}" value="{{ saved_row.get('color') if saved_row and saved_row.get('color') else '#1F3B7A' }}" style="width:36px; height:24px; padding:0; border:1px solid var(--border,#E2E8F0);">
+        </label>
+        <label style="font-size:12px; font-weight:normal; display:flex; align-items:center; gap:4px;">
+          <input type="checkbox" name="page_break_{{ p['id'] }}" {{ 'checked' if saved_row and saved_row.get('page_break_before') }}>
+          ابدأ صفحة جديدة قبل هذا التحليل
+        </label>
+      </div>
       {% endfor %}
     </div>
+    <script>
+      function moveParamRow(btn, dir) {
+        var row = btn.closest('.param-row');
+        if (!row) return;
+        if (dir < 0 && row.previousElementSibling) {
+          row.parentNode.insertBefore(row, row.previousElementSibling);
+        } else if (dir > 0 && row.nextElementSibling) {
+          row.parentNode.insertBefore(row.nextElementSibling, row);
+        }
+      }
+    </script>
     <button class="btn" type="submit">حفظ التصميم</button>
   </form>
 

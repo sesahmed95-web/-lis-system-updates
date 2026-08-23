@@ -128,6 +128,32 @@ def format_unit2_value(value, factor):
     return f"{converted:.3f}".rstrip("0").rstrip(".")
 
 
+# يحوّل حقل range_text (نفس الحقل الحر الموجود أصلاً بجدول reference_ranges)
+# إلى قائمة مستويات جاهزة للعرض بشكل "Normal Range" مفصّل بالتقرير، بدل
+# كتابته كسطر نص واحد فقط. الصيغة المتوقعة بخانة range_text: كل مستوى
+# بسطر مستقل "التسمية: القيمة" — مثال (زي Triglycerides بالنموذج المرجعي):
+#   Borderline high: 150 - 199
+#   Normal: Less than 150
+#   High: 200 - 499
+#   Very high: More than 500
+# وسطر بدون ":" (أو حقل range_text بسطر وحيد فقط، مثل "166 - 507") يُعرض
+# كقيمة بسيطة بلا تسمية — بنفس شكل باقي التحاليل العادية (Cortisol, TSH...).
+def parse_range_tiers(text):
+    if not text:
+        return []
+    tiers = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if ":" in line:
+            label, _, value = line.partition(":")
+            tiers.append({"label": label.strip(), "value": value.strip()})
+        else:
+            tiers.append({"label": None, "value": line})
+    return tiers
+
+
 ALLOWED_DOCX_EXT = {"docx"}
 
 # نص الكليشة الجاهز لزر "Normal" بحقول وصف RBC/WBC/Platelets بتقرير الـ Blood
@@ -248,11 +274,15 @@ def render_conclusion_filter(text):
 
 # The department names that get the extra "previous result per parameter"
 # column on the printed report (in addition to the previous-visit date that
-# every report shows). Covers Chemistry, Hormones, Vitamins, Virology and
-# Coagulation — the quantifiable/serology departments the lab wants
-# tracked over time. Hematology/CBC, Blood Film, and the other big
-# dedicated-template reports never go through this at all (they don't call
-# find_previous_reference), so they're unaffected either way. Matches
+# every report shows), AND that get the printed report's repeating letterhead
+# when a result overflows onto a second page (see repeat_header_on_print in
+# print_report). Covers Chemistry, Hormones, Vitamins, Tumor Markers,
+# Virology and Coagulation — the quantifiable/serology departments the lab
+# wants tracked over time / laid out as multi-line result cards. Hematology
+# (CBC, Blood Film, WBC Differential, Fluid examination, and the other big
+# dedicated-template reports) never goes through either feature — they don't
+# call find_previous_reference and print_report never sets
+# repeat_header_on_print for them — so they're unaffected either way. Matches
 # loosely (Arabic or English, any casing) so it keeps working no matter how
 # an admin later spells a new department.
 PREVIOUS_VALUE_DEPARTMENT_KEYWORDS = (
@@ -261,6 +291,7 @@ PREVIOUS_VALUE_DEPARTMENT_KEYWORDS = (
     "hormone", "هرمون",
     "vitamin", "فيتامين",
     "virology", "viral", "فايروس", "فيروس",
+    "tumor", "tumour", "marker", "دلائل", "ورمي",
 )
 
 
@@ -378,6 +409,15 @@ def inject_globals():
     letterhead_doctors = get_letterhead_doctors(db)
     letterhead_font_size = get_setting(db, "letterhead_font_size", "14")
     letterhead_font_family = get_setting(db, "letterhead_font_family", "Segoe UI, Tahoma, Arial, sans-serif")
+    # حجم خط اسم التحليل وحجم خط النتيجة بكل التقارير المطبوعة — نفس أسلوب
+    # letterhead_font_size أعلاه: محقونة هنا مرة وحدة فتنطبق تلقائيًا على كل
+    # قوالب reports/* (وbase_report.html) دون تمريرها يدويًا من كل route.
+    test_name_font_size = get_setting(db, "test_name_font_size", "16")
+    result_value_font_size = get_setting(db, "result_value_font_size", "16")
+    # موضع/حجم الشعار بترويسة كل تقرير مطبوع — إعدادان عامان محقونان هنا
+    # مرة وحدة، بنفس أسلوب باقي إعدادات التقرير.
+    logo_position = get_setting(db, "logo_position", "right")
+    logo_width = get_setting(db, "logo_width", "100")
     # حالة "التحديث التلقائي" الحالية — تُحقن هنا حتى يظهر زر التبديل بشريط
     # الأعلى (base.html، بجانب اسم المستخدم) بأي صفحة بدون تمريرها يدويًا.
     auto_update_enabled = get_setting(db, "auto_update_enabled", "1") == "1"
@@ -397,6 +437,10 @@ def inject_globals():
                 letterhead_doctors=letterhead_doctors,
                 letterhead_font_size=letterhead_font_size,
                 letterhead_font_family=letterhead_font_family,
+                test_name_font_size=test_name_font_size,
+                result_value_font_size=result_value_font_size,
+                logo_position=logo_position,
+                logo_width=logo_width,
                 auto_update_enabled=auto_update_enabled,
                 license_banner=license_banner,
                 # أيقونة المصمم العائمة: تظهر فقط لمن سجّل دخوله فعلاً من
@@ -2888,9 +2932,16 @@ def print_combined_panel(visit_id):
                 "range_text": rng["range_text"] if rng else None,
                 "previous_value": previous_values.get(p["name"]),
                 "previous_date": previous_visit_date,
+                # لون مخصص + فاصل صفحة اختياريان لهذا التحليل تحديداً —
+                # يُضبطان من "مصمم التقارير" (بطاقة "اللوحة المجمّعة")،
+                # ينطبقان على كل باراميتراته هنا؛ فاصل الصفحة يُطبَّق فقط
+                # على أول صف من صفوف هذا التحليل ضمن قسمه (راجع الحلقة تحت).
+                "color": ot["panel_color"] or None,
             })
         if not rows:
             continue
+        if ot["panel_page_break"]:
+            rows[0]["page_break_before"] = True
         # الأولوية دائماً لاسم "الريبورت المجمّع" المخصص (report_group) إذا
         # الأدمن حدده لهذا التحليل من كتالوج التحاليل — وإلا نرجع لاسم
         # القسم (department) القديم كما كان الوضع قبل هذي الميزة.
@@ -2899,6 +2950,16 @@ def print_combined_panel(visit_id):
             groups_by_dept[dept] = []
             dept_order.append(dept)
         groups_by_dept[dept].extend(rows)
+
+    # ترتيب طباعة أقسام اللوحة المجمّعة — افتراضيًا أبجدي (كما هو بالاستعلام
+    # فوق)؛ لو الأدمن حدد ترتيبًا مخصصًا من الإعدادات (combined_panel_group_order)
+    # نقدّم الأقسام المذكورة هناك بنفس ترتيبها، وأي قسم غير مذكور يبقى بعدها
+    # بترتيبه الأبجدي الأصلي دون أي تغيير.
+    group_order_raw = get_setting(db, "combined_panel_group_order", "")
+    preferred_order = [ln.strip() for ln in group_order_raw.splitlines() if ln.strip()]
+    if preferred_order:
+        remaining = [d for d in dept_order if d not in preferred_order]
+        dept_order = [d for d in preferred_order if d in dept_order] + remaining
 
     panel_groups = [{"department": d, "rows": groups_by_dept[d]} for d in dept_order]
 
@@ -3094,18 +3155,64 @@ def print_report(order_test_id):
                 elif rng["high"] is not None:
                     normal_range = f"< {rng['high']}"
             result_val = params.get(pname, "")
+
+            # حقل "This test done by ... (FDA Approved)" (source_note) أُلغي
+            # عرضه نهائيًا بالتقرير المطبوع بناءً على الطلب — يبقى العمود
+            # موجود بجدول reference_ranges (ما يُحذف) لكن لا يُقرأ ولا يُمرَّر
+            # للقالب أبداً بعد الآن، فلا يظهر إطلاقًا مهما كانت قيمته بقاعدة
+            # البيانات.
+
+            # مستويات Normal Range المفصّلة (زي Triglycerides بالنموذج
+            # المرجعي) — من range_text لو موجود، وإلا من normal_range
+            # الجاهزة (سطر واحد بلا تسمية، زي أغلب التحاليل العادية).
+            if rng and rng["range_text"]:
+                range_tiers = parse_range_tiers(rng["range_text"])
+            elif normal_range:
+                range_tiers = [{"label": None, "value": normal_range}]
+            else:
+                range_tiers = []
+
+            # مدى الوحدة الثانية (unit2) — يُحسب تلقائيًا بنفس معامل تحويل
+            # النتيجة (unit2_factor) على low/high، فقط لمدى بسيط (سطر واحد
+            # رقمي بلا مستويات)؛ لا ينطبق على مدى متدرّج (range_tiers متعدد).
+            normal_range2 = None
+            if rng and not (rng["range_text"] and len(range_tiers) > 1) and rng["low"] is not None and rng["high"] is not None:
+                factor = unit2_factor_by_name.get(pname)
+                low2 = format_unit2_value(rng["low"], factor)
+                high2 = format_unit2_value(rng["high"], factor)
+                if low2 is not None and high2 is not None:
+                    normal_range2 = f"{low2} - {high2}"
+
             custom_rows.append({
                 "label": rd.get("label") or pname,
                 "result": result_val,
                 "unit": units_by_name.get(pname, ""),
                 "normal_range": normal_range,
+                "range_tiers": range_tiers,
+                "normal_range2": normal_range2,
                 "previous": previous_values.get(pname, "") if show_prev_values else "",
                 "result2": format_unit2_value(result_val, unit2_factor_by_name.get(pname)),
                 "unit2": unit2_by_name.get(pname) or "",
+                # حرية تحريك موضع الحقول لكل صف على حدة (يُضبط من مصمم
+                # التقرير مستقبلاً، يُقرأ من rows_json): name_side='right'
+                # ينقل اسم التحليل فيزيائيًا لعمود القيمة بدل عمود الاسم،
+                # range_position='below' يرجع المدى الطبيعي لسطر مستقل تحت
+                # اسم التحليل بدل عمود محاذي لعمود النتيجة (الافتراضي).
+                "name_side": rd.get("name_side") or "left",
+                "range_position": rd.get("range_position") or "inline",
+                "name_align": rd.get("name_align"),
             })
 
     age_unit_abbr = {"Hours": "H", "Days": "D", "Weeks": "W", "Months": "M", "Years": "Y"}
     age_display = f"{ot['age']}{age_unit_abbr.get(ot['age_unit'] or 'Years', 'Y')}" if ot["age"] not in (None, "") else ""
+
+    # ترويسة متكرّرة تلقائيًا بأعلى كل صفحة إضافية عند الطباعة (نفس الشعار،
+    # أسماء الأطباء، الدكتور المرسل، اسم المريض، التاريخ...) — فقط لتقارير
+    # الكيمياء/الهرمونات/الفيتامينات/الدلائل الورمية/التخثر/الفايروسات (اللي
+    # تُطبع كبطاقات وقد تطول لأكثر من صفحة)، وليس لتحاليل أمراض الدم إطلاقًا
+    # (CBC وغيره من التقارير الجاهزة أبدًا ما يُمرَّر لها هذا المتغيّر، فتبقى
+    # بسلوكها القديم تمامًا). راجع base_report.html لآلية التكرار الفعلية.
+    repeat_header_on_print = department_shows_previous_values(ot["test_department"])
 
     return render_template(
         template_name,
@@ -3113,7 +3220,7 @@ def print_report(order_test_id):
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         show_prev_values=show_prev_values, previous_visit_date=previous_visit_date,
-        previous_values=previous_values,
+        previous_values=previous_values, repeat_header_on_print=repeat_header_on_print,
         logo_url=logo_url, from_other_lab=from_other_lab, font_size=font_size,
         show_exam_signature=show_exam_signature,
         visit_date=visit_date, sex=ot["gender"] or "", age=age_display,
@@ -3851,10 +3958,11 @@ def reference_ranges():
         low = request.form.get("low") or None
         high = request.form.get("high") or None
         range_text = request.form.get("range_text") or None
+        source_note = request.form.get("source_note") or None
         db.execute(
-            "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (param_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text),
+            "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text, source_note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (param_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text, source_note),
         )
         db.commit()
         flash("Reference range added.")
@@ -3885,9 +3993,10 @@ def update_reference_range(range_id):
     low = request.form.get("low") or None
     high = request.form.get("high") or None
     range_text = request.form.get("range_text") or None
+    source_note = request.form.get("source_note") or None
     db.execute(
-        "UPDATE reference_ranges SET gender=?, age_from=?, age_from_unit=?, age_to=?, age_to_unit=?, low=?, high=?, range_text=? WHERE id=?",
-        (gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text, range_id),
+        "UPDATE reference_ranges SET gender=?, age_from=?, age_from_unit=?, age_to=?, age_to_unit=?, low=?, high=?, range_text=?, source_note=? WHERE id=?",
+        (gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text, source_note, range_id),
     )
     db.commit()
     flash(t(session.get("lang", "en"), "range_updated"))
@@ -4349,6 +4458,45 @@ def app_settings():
         if lh_family_raw:
             set_setting(db, "letterhead_font_family", lh_family_raw)
 
+        # موضع الشعار (يمين الافتراضي/وسط/يسار) وحجمه (عرضه بالبكسل) —
+        # إعدادان عامان جديدان، نفس أسلوب باقي إعدادات التقرير.
+        logo_pos_raw = request.form.get("logo_position", "").strip()
+        if logo_pos_raw in ("right", "center", "left"):
+            set_setting(db, "logo_position", logo_pos_raw)
+        logo_width_raw = request.form.get("logo_width", "").strip()
+        if logo_width_raw:
+            try:
+                logo_width = max(30, min(300, int(logo_width_raw)))
+                set_setting(db, "logo_width", str(logo_width))
+            except ValueError:
+                pass
+
+        # ترتيب أقسام اللوحة المجمّعة — سطر واحد لكل اسم قسم/ريبورت مجمّع
+        # (report_group أو department)، بنفس الترتيب اللي يريده الأدمن
+        # بالطباعة. حقل نصي فاضي بالكامل = رجوع للترتيب الأبجدي الافتراضي.
+        panel_group_order_raw = request.form.get("combined_panel_group_order")
+        if panel_group_order_raw is not None:
+            set_setting(db, "combined_panel_group_order", panel_group_order_raw.strip())
+
+        # حجم خط اسم التحليل وحجم خط النتيجة بجدول/بطاقات النتائج بكل
+        # التقارير المطبوعة — إعدادان عامان منفصلان عن بعض (وعن حجم خط
+        # ترويسة الدكاترة letterhead_font_size أعلاه)، دفعة وحدة لكل
+        # التقارير. أي قيمة غير صالحة تُتجاهل ويبقى المحفوظ سابقًا كما هو.
+        tn_size_raw = request.form.get("test_name_font_size", "").strip()
+        if tn_size_raw:
+            try:
+                tn_size = max(8, min(30, int(tn_size_raw)))
+                set_setting(db, "test_name_font_size", str(tn_size))
+            except ValueError:
+                pass
+        rv_size_raw = request.form.get("result_value_font_size", "").strip()
+        if rv_size_raw:
+            try:
+                rv_size = max(8, min(30, int(rv_size_raw)))
+                set_setting(db, "result_value_font_size", str(rv_size))
+            except ValueError:
+                pass
+
         # مجلد أرشفة الـPDF الدائم (نقطة #8) — يُضبط مرة وحدة هنا وقت
         # التنصيب/الإعداد الأولي، ويُعاد استخدامه تلقائيًا بعدها لكل زيارة
         # تكتمل نتائجها. لا نتحقق من وجوده هنا (os.makedirs لاحقًا وقت
@@ -4392,6 +4540,11 @@ def app_settings():
         "pdf_archive_dir": get_setting(db, "pdf_archive_dir", ""),
         "letterhead_font_size": get_setting(db, "letterhead_font_size", "14"),
         "letterhead_font_family": get_setting(db, "letterhead_font_family", "Segoe UI, Tahoma, Arial, sans-serif"),
+        "test_name_font_size": get_setting(db, "test_name_font_size", "16"),
+        "result_value_font_size": get_setting(db, "result_value_font_size", "16"),
+        "logo_position": get_setting(db, "logo_position", "right"),
+        "logo_width": get_setting(db, "logo_width", "100"),
+        "combined_panel_group_order": get_setting(db, "combined_panel_group_order", ""),
     }
     marker_colors_by_char = get_conclusion_marker_colors(db)
     conclusion_markers = [
@@ -4449,7 +4602,16 @@ def examining_doctor_add():
     degree_ar = request.form.get("degree_ar", "").strip() or None
     degree_en = request.form.get("degree_en", "").strip() or None
     show_on_letterhead = bool(request.form.get("show_on_letterhead"))
-    add_examining_doctor_full(db, name, title, degree_ar, degree_en, show_on_letterhead)
+    # حجم خط مخصص لهذا الدكتور تحديداً بالترويسة (اختياري) — يتجاوز الحجم
+    # العام letterhead_font_size من الإعدادات لو تُرك فاضي يرث العام كالمعتاد.
+    font_size_raw = request.form.get("font_size", "").strip()
+    font_size = None
+    if font_size_raw:
+        try:
+            font_size = max(8, min(30, int(font_size_raw)))
+        except ValueError:
+            font_size = None
+    add_examining_doctor_full(db, name, title, degree_ar, degree_en, show_on_letterhead, font_size)
     log_action("AddExaminingDoctor", "examining_doctor", 0, name)
     flash(f"تمت إضافة \"{name}\".")
     return redirect(url_for("examining_doctors_manage"))
@@ -4467,7 +4629,14 @@ def examining_doctor_update(doctor_id):
     degree_ar = request.form.get("degree_ar", "").strip() or None
     degree_en = request.form.get("degree_en", "").strip() or None
     show_on_letterhead = bool(request.form.get("show_on_letterhead"))
-    update_examining_doctor(db, doctor_id, name, title, degree_ar, degree_en, show_on_letterhead)
+    font_size_raw = request.form.get("font_size", "").strip()
+    font_size = None
+    if font_size_raw:
+        try:
+            font_size = max(8, min(30, int(font_size_raw)))
+        except ValueError:
+            font_size = None
+    update_examining_doctor(db, doctor_id, name, title, degree_ar, degree_en, show_on_letterhead, font_size)
     log_action("UpdateExaminingDoctor", "examining_doctor", doctor_id, name)
     flash(f"تم حفظ تعديلات \"{name}\".")
     return redirect(url_for("examining_doctors_manage"))
@@ -4591,6 +4760,24 @@ def report_designer():
                   f"الشعار وترويسة الأطباء وذيل الصفحة ستُضاف تلقائيًا عند الطباعة — راجع الصفوف غير المرتبطة (إن وجدت) وعدّلها يدويًا أدناه.")
             return redirect(url_for("report_designer", test_definition_id=test_id))
 
+        if mode == "panel":
+            # إعدادات "اللوحة المجمّعة" لهذا التحليل (لون مخصص + فاصل صفحة) —
+            # تنطبق حتى على التحاليل اللي ما إلها تصميم مخصص أصلاً (تُطبع
+            # بالشكل الافتراضي ضمن reports/combined_panel.html)، فمنفصلة
+            # تمامًا عن rows_json/report_templates.
+            panel_color = request.form.get("panel_color", "").strip()
+            enable_panel_color = bool(request.form.get("enable_panel_color"))
+            panel_color_val = panel_color if (enable_panel_color and panel_color and _HEX_COLOR_RE.match(panel_color)) else None
+            panel_page_break = 1 if request.form.get("panel_page_break") else 0
+            db.execute(
+                "UPDATE test_definitions SET panel_color=?, panel_page_break=? WHERE id=?",
+                (panel_color_val, panel_page_break, test_id),
+            )
+            db.commit()
+            log_action("UpdatePanelSettings", "test_definition", int(test_id), "panel")
+            flash("تم حفظ إعدادات اللوحة المجمّعة لهذا التحليل.")
+            return redirect(url_for("report_designer", test_definition_id=test_id))
+
         # mode == manual: rebuild the row order from the submitted list of
         # parameter ids (checked + reordered by the admin in the form).
         heading = request.form.get("heading", "").strip() or test["name"]
@@ -4600,7 +4787,28 @@ def report_designer():
         for pid in ordered_param_ids:
             p = params_by_id.get(pid)
             if p:
-                rows.append({"param_name": p["name"], "label": p["name"]})
+                row = {"param_name": p["name"], "label": p["name"]}
+                # حرية تحريك الحقول لكل صف — تُقرأ فقط لو مصمم التقرير
+                # (report_designer.html) يرسلها فعليًا كحقول name_side_<id>/
+                # range_position_<id> (زر أو قائمة اختيار جنب كل صف)؛ إذا ما
+                # أُرسلت (كل الحالات الحالية) تبقى القيم الافتراضية كما هي
+                # ولا يتغيّر أي تصميم محفوظ سابقًا.
+                name_side = request.form.get(f"name_side_{pid}")
+                if name_side in ("left", "right"):
+                    row["name_side"] = name_side
+                range_position = request.form.get(f"range_position_{pid}")
+                if range_position in ("inline", "below"):
+                    row["range_position"] = range_position
+                # لون مخصص لهذا التحليل (اسمه ونتيجته) — اختياري، فاضي يعني
+                # يبقى باللون الافتراضي بكل التقرير. وفاصل صفحة: لو مفعّل،
+                # هذا التحليل يبدأ دائمًا بأعلى صفحة جديدة عند الطباعة (يُقرأ
+                # بـ custom.html كـ page-break-before قبل بطاقة هذا الصف).
+                row_color = request.form.get(f"row_color_{pid}", "").strip()
+                if request.form.get(f"enable_color_{pid}") and row_color and _HEX_COLOR_RE.match(row_color):
+                    row["color"] = row_color
+                if request.form.get(f"page_break_{pid}"):
+                    row["page_break_before"] = True
+                rows.append(row)
         if not rows:
             flash("اختر باراميتر واحد على الأقل لتصميم التقرير.")
             return redirect(url_for("report_designer", test_definition_id=test_id))
@@ -4638,13 +4846,36 @@ def report_designer():
             ).fetchall()
             selected_template = get_report_template(db, selected_id)
             if selected_template:
-                for i, r in enumerate(json.loads(selected_template["rows_json"] or "[]")):
-                    selected_rows_by_param[r.get("param_name", "")] = i
+                for r in json.loads(selected_template["rows_json"] or "[]"):
+                    selected_rows_by_param[r.get("param_name", "")] = r
+
+    # ترتيب عرض الباراميترات بشاشة التصميم يدويًا: لو فيه تصميم محفوظ سابقًا،
+    # نعرضهم بنفس ترتيب rows_json المحفوظ (نفس ترتيب الطباعة فعليًا) أولاً،
+    # وأي باراميتر جديد أُضيف للتحليل لاحقًا (بعد آخر حفظ) يُلحق بالنهاية غير
+    # مؤشر عليه — هذا يخلي "إضافة تحليل/باراميتر جديد لاحقًا" يظهر تلقائيًا
+    # هنا جاهز للتأشير عليه دون أي خطوة إضافية. بدون تصميم سابق، الترتيب
+    # الافتراضي هو ترتيب الإدخال بقاعدة البيانات كالمعتاد.
+    ordered_selected_params = list(selected_parameters)
+    if selected_template:
+        params_by_name = {p["name"]: p for p in selected_parameters}
+        saved_order = [r.get("param_name", "") for r in json.loads(selected_template["rows_json"] or "[]")]
+        seen = set()
+        ordered = []
+        for name in saved_order:
+            p = params_by_name.get(name)
+            if p and name not in seen:
+                ordered.append(p)
+                seen.add(name)
+        for p in selected_parameters:
+            if p["name"] not in seen:
+                ordered.append(p)
+                seen.add(p["name"])
+        ordered_selected_params = ordered
 
     return render_template(
         "management/report_designer.html",
         tests_status=tests_status, selected_test=selected_test,
-        selected_parameters=selected_parameters, selected_template=selected_template,
+        selected_parameters=ordered_selected_params, selected_template=selected_template,
         selected_rows_by_param=selected_rows_by_param,
     )
 
@@ -4702,7 +4933,12 @@ def preview_report_design(test_definition_id):
         custom_rows = [{
             "label": rd.get("label") or rd.get("param_name", ""),
             "result": "—", "unit": units_by_name.get(rd.get("param_name", ""), ""),
-            "normal_range": "—", "previous": "—" if show_prev_values else "",
+            "normal_range": "—", "range_tiers": [{"label": None, "value": "—"}],
+            "normal_range2": None, "result2": None, "unit2": "",
+            "previous": "—" if show_prev_values else "",
+            "name_side": rd.get("name_side") or "left",
+            "range_position": rd.get("range_position") or "inline",
+            "name_align": rd.get("name_align"),
         } for rd in row_defs]
 
     params = {p["name"]: "—" for p in parameters}
@@ -4713,6 +4949,7 @@ def preview_report_design(test_definition_id):
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         show_prev_values=show_prev_values, previous_visit_date=None, previous_values={},
+        repeat_header_on_print=department_shows_previous_values(test["department"]),
         logo_url=logo_url, from_other_lab=False, font_size=14 if test["code"] == "CBC" else 16,
         show_exam_signature=False,
         visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}", sex="—", age="—",

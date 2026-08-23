@@ -18,7 +18,14 @@
   .sheet { max-width: 760px; margin: 0 auto; padding: 6px 4px 20px 4px; }
 
   .doc-col.logo-col { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
-  .doc-col.logo-col img { width: 100px; height: auto; }
+  .doc-col.logo-col img { width: {{ logo_width|default(100) }}px; height: auto; }
+  /* موضع الشعار: 'right' (الافتراضي) يبقيه آخر عنصر بصف الأطباء direction:ltr
+     فيظهر فيزيائيًا أقصى اليمين كالسابق تمامًا. 'left' يسحبه لأول عنصر بنفس
+     الصف (order:-1) فيظهر أقصى يسار الصف. 'center' يُخرجه كليًا من صف
+     الأطباء ويُعرض كسطر مستقل موسّط فوقه (راجع HTML تحت). */
+  .doc-col.logo-col.logo-pos-left { order: -1; }
+  .logo-center-row { text-align: center; margin-bottom: 8px; }
+  .logo-center-row img { width: {{ logo_width|default(100) }}px; height: auto; }
 
   .lab-title-box {
     text-align: center;
@@ -34,6 +41,9 @@
 
   .doctors-row {
     display: flex;
+    direction: ltr; /* موضع الشعار (يمين الصف دائمًا) ثابت فيزيائيًا بغض
+                       النظر عن اتجاه باقي الصفحة — راجع الشرح بالـ HTML فوق
+                       .doctors-row مباشرة. */
     align-items: flex-start;
     justify-content: space-between;
     border-bottom: 2px solid #333;
@@ -58,7 +68,10 @@
     line-height: 1.4;
   }
   .doc-col .doc-title { color: #7A1F1F; font-weight: bold; }
-  .doc-col .doc-name { color: #1F3B7A; font-weight: bold; font-size: 14px; }
+  /* كانت 14px ثابتة دومًا (متطابقة صدفة مع الحجم الافتراضي)؛ الآن ترث حجم
+     .doc-col نفسه حتى تتحرك مع letterhead_font_size العام أو تجاوز حجم
+     الدكتور المفرد font_size سوا. */
+  .doc-col .doc-name { color: #1F3B7A; font-weight: bold; font-size: 1em; }
   .doc-col .doc-degree { color: #1F3B7A; }
   .doc-col .doc-eng { color: #1F3B7A; font-style: italic; }
 
@@ -91,8 +104,16 @@
   table.data-table td, table.data-table th {
     border: 1px solid #333;
     padding: {{ report_row_pad|default(7) }}px {{ report_col_pad|default(12) }}px;
+    /* حجم خط النتيجة (وأي خلية عادية بالجدول: القيمة، النسبة، الوحدة) —
+       إعداد عام test_name_font_size / result_value_font_size (Management →
+       الإعدادات) ينطبق تلقائيًا على كل التقارير دفعة وحدة. td.field-name
+       تحته يكتب فوقه بحجم اسم التحليل لأنه نفس الـ specificity وجاي بعده. */
+    font-size: {{ result_value_font_size|default(16) }}px;
   }
-  table.data-table td.field-name { font-weight: bold; font-style: italic; color: #1F3B7A; }
+  table.data-table td.field-name {
+    font-weight: bold; font-style: italic; color: #1F3B7A;
+    font-size: {{ test_name_font_size|default(16) }}px;
+  }
   table.data-table td.pct-val { width: 55px; text-align: center; direction: ltr; color: #1F3B7A; font-style: italic; }
   table.data-table td.unit-val { width: 34px; text-align: center; direction: ltr; color: #1F3B7A; font-style: italic; background: #F3F6F8; }
 
@@ -132,6 +153,101 @@
     margin-bottom: 46px; /* فراغ لختم الدكتور الفاحص */
   }
   .exam-signature-line { border-top: 1px solid #333; padding-top: 3px; font-size: 0.72em; color: #555; }
+
+  /* ============== بطاقة نتيجة تحليل مفردة (كيمياء/فيتامينات/فايروسات/تخثر) ==============
+     كل تحليل يُعرض كـ"بطاقة" مستقلة بدل صف جدول عادي — بنفس ترتيب النموذج
+     المرجعي (Triglycerides/Cortisol/Prolactin): اسم التحليل كعنوان بارز،
+     النتيجة+الوحدة بجانبه، Previous Result مباشرة تحته (لو موجود)، وبعدها
+     Normal Range وقد يكون سطر واحد بسيط أو عدّة مستويات (Borderline high/
+     Normal/High/Very high) — كل هذا مبني من نفس حقل range_text الموجود
+     أصلاً بجدول reference_ranges دون أي تعديل بقاعدة البيانات، فقط اكتب
+     بحقل range_text بصفحة "المدايات المرجعية" كل مستوى بسطر مستقل بصيغة
+     "التسمية: القيمة" (مثال: Borderline high: 150 - 199) — سطر بدون ":"
+     يُعرض كقيمة بسيطة بلا تسمية (زي 166 - 507). */
+  .result-card { direction: ltr; margin-bottom: 14px; padding-bottom: 10px;
+                 page-break-inside: avoid; break-inside: avoid; }
+  .result-card + .result-card { border-top: 1px solid #D8DEE6; padding-top: 12px; }
+
+  /* ============== ترويسة متكرّرة بأعلى كل صفحة إضافية عند الطباعة ==============
+     تُفعَّل فقط لو مُرِّر repeat_header_on_print=True من app.py (تحاليل
+     الكيمياء/الهرمونات/الفيتامينات/الدلائل الورمية/التخثر/الفايروسات
+     تحديدًا، أبدًا لتحاليل أمراض الدم) — بطاقات هذي التحاليل قد تطول لأكثر
+     من صفحة A4 وحدة، فبدل ما تُقطع الترويسة (الشعار/أسماء الأطباء/الدكتور
+     المرسل/اسم المريض/التاريخ) وتظهر فقط بالصفحة الأولى، هذا يخليها تتكرر
+     تلقائيًا أعلى كل صفحة تالية. الحيلة: المتصفح يكرر <thead> فقط عند
+     الطباعة عبر أكثر من صفحة (سلوك HTML قياسي)، فنضع الترويسة داخل <thead>
+     حصرًا لو الفلاغ مفعّل، وإلا داخل <tbody> عادي (بدون أي تكرار، بالضبط
+     نفس السلوك القديم) — والجدول نفسه بلا حدود/تباعد مرئي حتى ما يتغيّر
+     شكل التقرير على الشاشة إطلاقًا، فرقه فقط وقت الطباعة لتقرير طويل. */
+  table.page-repeat-table { width: 100%; border-collapse: collapse; }
+  table.page-repeat-table thead { display: table-header-group; }
+  table.page-repeat-table td { padding: 0; border: none; }
+  .result-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+  /* بطاقة نتيجة مفردة (كيمياء/فيتامينات/فايروسات/تخثر): نفس إعدادي حجم
+     الخط العامين اللي يتحكم فيهم Management → الإعدادات — اسم التحليل
+     test_name_font_size، والنتيجة result_value_font_size. val2-line (النتيجة
+     السابقة Previous Result) تبقى أصغر نسبيًا (0.82em) من نفس حجم النتيجة. */
+  .result-name { font-weight: bold; font-size: {{ test_name_font_size|default(16) }}px; color: #14213D; }
+  .result-values { text-align: right; white-space: nowrap; flex: 0 0 auto; font-size: {{ result_value_font_size|default(16) }}px; }
+  .result-values .val-line { font-weight: bold; }
+  .result-values .val { color: #1F3B7A; }
+  .result-values .unit { color: #14213D; font-weight: normal; margin-left: 4px; }
+  .result-values .val2-line { font-size: 0.82em; color: #1F3B7A; margin-top: 2px; }
+  .prev-line { margin: 4px 0 2px 0; font-size: 0.88em; }
+  .prev-line .prev-label { font-weight: bold; color: #14213D; }
+  .prev-line .prev-date { color: #555; margin: 0 8px; }
+  .prev-line .prev-val { color: #7A1F1F; font-weight: bold; }
+  .range-block { margin-top: 6px; display: flex; align-items: flex-start; gap: 8px; }
+  .range-title { font-weight: bold; color: #14213D; flex: 0 0 auto; white-space: nowrap; }
+  .range-tiers { flex: 1; }
+  .range-tier-row { display: flex; gap: 24px; }
+  .range-tier-row .tier-label { min-width: 130px; color: #14213D; }
+  .range-tier-row .tier-value { color: #1F3B7A; }
+  .result-source-note { font-size: 0.72em; color: #26529C; margin-top: 3px; }
+
+  /* ============== جدول التحاليل بأعمدة ثابتة (custom.html) ==============
+     يطابق النموذج المرجعي: "Laboratory Test Results | Conventional Units |
+     SI Units" — كل الصفوف (اسم التحليل، النتيجة السابقة، المدى الطبيعي)
+     تستخدم نفس أعمدة الـ CSS Grid فتصطف القيم تحت بعضها بدقة عبر كل
+     التحليل، بدل ما تتكدّس النتيجة الثانية (SI) تحت الأولى بدل عمود
+     مستقل جنبها. عمود SI يظهر فقط لو فيه تحليل واحد على الأقل بهذا
+     التقرير له وحدة ثانية (unit2) — غير هذا يختفي تلقائيًا (.no-si).
+     حرية التحريك: كل صف يقدر يمرر name_side='right' (ينقل اسم التحليل
+     فيزيائيًا لعمود القيمة، مو مجرد محاذاة نص) أو range_position='below'
+     (يرجع المدى الطبيعي لسطر مستقل تحت اسم التحليل بالتصميم القديم) —
+     تُقرأ من rows_json لكل صف عبر مصمم التقرير. */
+  .lt-table { direction: ltr; --lt-cols: 1fr 130px 130px; }
+  .lt-table.no-si { --lt-cols: 1fr 150px; }
+  .lt-head {
+    display: grid; grid-template-columns: var(--lt-cols); gap: 10px;
+    border-bottom: 2px solid #26529C; padding-bottom: 6px; margin-bottom: 6px;
+    font-weight: bold; color: #26529C; font-size: 0.92em;
+  }
+  .lt-group { page-break-inside: avoid; break-inside: avoid; }
+  .lt-group + .lt-group { border-top: 1px solid #D8DEE6; margin-top: 10px; padding-top: 10px; }
+  /* فاصل صفحة يدوي لتحليل معيّن (page_break_before من مصمم التقرير) —
+     يجبره يبدأ دائمًا بأعلى صفحة جديدة عند الطباعة، بدل ما يترك التقسيم
+     بين الصفحات لتدفق المحتوى الطبيعي فقط. */
+  .lt-group.lt-page-break { page-break-before: always; break-before: page; }
+  .lt-row {
+    display: grid; grid-template-columns: var(--lt-cols); gap: 10px;
+    align-items: baseline;
+  }
+  .lt-row.lt-flip > .lt-name { order: 3; text-align: right; }
+  .lt-row.lt-flip > .lt-val { order: 1; }
+  .lt-row.lt-flip > .lt-val2 { order: 2; }
+  .lt-name-row .lt-name { font-weight: bold; font-size: {{ test_name_font_size|default(16) }}px; color: #14213D; }
+  .lt-val, .lt-val2 { color: #1F3B7A; font-weight: bold; white-space: nowrap; font-size: {{ result_value_font_size|default(16) }}px; }
+  .lt-val .unit, .lt-val2 .unit { color: #14213D; font-weight: normal; margin-left: 4px; }
+  .lt-prev-row .lt-name { font-size: 0.88em; }
+  .lt-prev-row .prev-label { font-weight: bold; color: #14213D; }
+  .lt-prev-row .prev-date { color: #555; margin: 0 8px; font-weight: normal; }
+  .lt-prev-row .lt-val { color: #7A1F1F; }
+  .lt-range-row .lt-name { font-weight: normal; }
+  .lt-range-row .lt-val, .lt-range-row .lt-val2 { color: #14213D; font-weight: normal; }
+  .lt-range-title { font-weight: bold; color: #14213D; margin-right: 10px; }
+  .lt-tier-label { color: #14213D; display: inline-block; min-width: 120px; }
+  .lt-range-below { display: block; }
 
   .footer-block { margin-top: 14px; page-break-inside: avoid; break-inside: avoid; }
   .other-lab-note { font-style: italic; font-weight: bold; margin: 6px 0; text-align: left; direction: ltr; }
@@ -209,62 +325,85 @@
 
 <div class="report-scope">
   <div class="sheet">
-    <div class="lab-title-box">مختبر امراض الدم التخصصي للتحليلات المرضية</div>
+    <table class="page-repeat-table">
+      {% if repeat_header_on_print %}<thead>{% else %}<tbody>{% endif %}
+        <tr><td>
+          <div class="lab-title-box">مختبر امراض الدم التخصصي للتحليلات المرضية</div>
 
-    <!-- ترويسة الدكاترة: تُبنى تلقائيًا من قائمة (دكتور المختبر الفاحص)
-         المُفعَّل لهم "إظهار بترويسة التقرير" (Management → الإعدادات →
-         إدارة قائمة الدكاترة)، بنفس الترتيب اليدوي المحفوظ هناك. الشعار
-         (إن وجد) يُدرج كعمود إضافي بنفس الصف. -->
-    <div class="doctors-row">
-      {% if logo_url %}
-      <div class="doc-col logo-col"><img src="{{ logo_url }}" alt="logo"></div>
-      {% endif %}
-      <div class="doctors-group">
-        {% for doc in letterhead_doctors %}
-        <div class="doc-col">
-          <div class="doc-title">{{ doc['title'] or 'الدكتور' }}</div>
-          <div class="doc-name">{{ doc['name'] }}</div>
-          {% if doc['degree_ar'] %}<div class="doc-degree">{{ doc['degree_ar']|replace('\n', '<br>')|safe }}</div>{% endif %}
-          {% if doc['degree_en'] %}<div class="doc-eng">{{ doc['degree_en']|replace('\n', '<br>')|safe }}</div>{% endif %}
-        </div>
-        {% endfor %}
-      </div>
-    </div>
+          {% if logo_url and logo_position == 'center' %}
+          <div class="logo-center-row"><img src="{{ logo_url }}" alt="logo"></div>
+          {% endif %}
 
-    <table class="meta-table">
-      <tr>
-        <td class="meta-label">الدكتور المرسل: {{ referring_doctor_name }}</td>
-        <td class="meta-side"><b>Date:</b> {{ visit_date }}</td>
-      </tr>
-      <tr>
-        <td class="meta-label">اسم المريض: <span class="patient-name-hl">{{ patient_name }}</span></td>
-        <td class="meta-side"><b>Age:</b> {{ age }} &nbsp;&nbsp; <b>Sex:</b> {{ sex }}</td>
-      </tr>
+          <!-- ترويسة الدكاترة: تُبنى تلقائيًا من قائمة (دكتور المختبر الفاحص)
+               المُفعَّل لهم "إظهار بترويسة التقرير" (Management → الإعدادات →
+               إدارة قائمة الدكاترة)، بنفس الترتيب اليدوي المحفوظ هناك. هذا
+               الصف مشترك بـ base_report.html فيظهر بنفس الشكل بكل أنواع
+               التقارير تلقائيًا (CBC، Blood film، تخثر، كيمياء...الخ) دون أي
+               فرق بينها — أي تعديل هنا (إضافة/حذف دكتور، أو موضع الشعار)
+               ينعكس على كل التقارير دفعة وحدة، ما يحتاج تكرار التعديل بكل
+               قالب. الشعار (إن وجد) يُدرج بعمود إضافي بنهاية نفس الصف على
+               الجهة اليمنى افتراضيًا (logo_position='right'، القيمة
+               المحفوظة بالإعدادات) أو أول الصف (فيزيائيًا يسار) لو
+               logo_position='left' — أما 'center' فلا يُعرض هنا إطلاقًا
+               لأنه صار سطرًا مستقلاً موسّطًا فوق (راجع الشرط فوق مباشرة).
+               direction:ltr ثابتة على الصف نفسه (راجع CSS .doctors-row)
+               تحدد فيزيائيًا يمين/يسار بغض النظر عن اتجاه باقي الصفحة. -->
+          <div class="doctors-row">
+            <div class="doctors-group">
+              {% for doc in letterhead_doctors %}
+              <div class="doc-col"{% if doc['font_size'] %} style="font-size:{{ doc['font_size'] }}px;"{% endif %}>
+                <div class="doc-title">{{ doc['title'] or 'الدكتور' }}</div>
+                <div class="doc-name">{{ doc['name'] }}</div>
+                {% if doc['degree_ar'] %}<div class="doc-degree">{{ doc['degree_ar']|replace('\n', '<br>')|safe }}</div>{% endif %}
+                {% if doc['degree_en'] %}<div class="doc-eng">{{ doc['degree_en']|replace('\n', '<br>')|safe }}</div>{% endif %}
+              </div>
+              {% endfor %}
+            </div>
+            {% if logo_url and logo_position != 'center' %}
+            <div class="doc-col logo-col{% if logo_position == 'left' %} logo-pos-left{% endif %}"><img src="{{ logo_url }}" alt="logo"></div>
+            {% endif %}
+          </div>
+
+          <table class="meta-table">
+            <tr>
+              <td class="meta-label">الدكتور المرسل: {{ referring_doctor_name }}</td>
+              <td class="meta-side"><b>Date:</b> {{ visit_date }}</td>
+            </tr>
+            <tr>
+              <td class="meta-label">اسم المريض: <span class="patient-name-hl">{{ patient_name }}</span></td>
+              <td class="meta-side"><b>Age:</b> {{ age }} &nbsp;&nbsp; <b>Sex:</b> {{ sex }}</td>
+            </tr>
+          </table>
+        </td></tr>
+      {% if repeat_header_on_print %}</thead>{% else %}</tbody>{% endif %}
+      <tbody>
+        <tr><td>
+          {% block report_body %}{% endblock %}
+
+          {% if show_exam_signature %}
+          <div class="exam-signature-row">
+            <div class="exam-signature-box">
+              <div class="exam-signature-label">توقيع وختم الدكتور الفاحص<br><span style="font-weight:normal; font-style:italic; color:#555;">Examining Doctor Signature &amp; Stamp</span></div>
+              <div class="exam-signature-line">التوقيع / Signature</div>
+            </div>
+          </div>
+          {% endif %}
+
+          <div class="footer-block">
+            {% block extra_note %}{% endblock %}
+            {% if previous_visit_date %}
+            <div class="prev-visit-note">زيارة سابقة بتاريخ: {{ previous_visit_date }}</div>
+            {% endif %}
+            {% if from_other_lab %}
+            <div class="other-lab-note">The sample received from another Lab.</div>
+            {% endif %}
+            <div class="footer-address">
+              <span class="addr-line"><span class="addr-label">العنوان</span> : كوت – شارع الأطباء/ شارع دائرة الكهرباء القديمة / خلف مصرف الرافدين // للاستفسار: <span class="phone">07827434531</span> &nbsp;|&nbsp; <span class="email-line">hematologist_lab@yahoo.com</span></span>
+            </div>
+          </div>
+        </td></tr>
+      </tbody>
     </table>
-
-    {% block report_body %}{% endblock %}
-
-    {% if show_exam_signature %}
-    <div class="exam-signature-row">
-      <div class="exam-signature-box">
-        <div class="exam-signature-label">توقيع وختم الدكتور الفاحص<br><span style="font-weight:normal; font-style:italic; color:#555;">Examining Doctor Signature &amp; Stamp</span></div>
-        <div class="exam-signature-line">التوقيع / Signature</div>
-      </div>
-    </div>
-    {% endif %}
-
-    <div class="footer-block">
-      {% block extra_note %}{% endblock %}
-      {% if previous_visit_date %}
-      <div class="prev-visit-note">زيارة سابقة بتاريخ: {{ previous_visit_date }}</div>
-      {% endif %}
-      {% if from_other_lab %}
-      <div class="other-lab-note">The sample received from another Lab.</div>
-      {% endif %}
-      <div class="footer-address">
-        <span class="addr-line"><span class="addr-label">العنوان</span> : كوت – شارع الأطباء/ شارع دائرة الكهرباء القديمة / خلف مصرف الرافدين // للاستفسار: <span class="phone">07827434531</span> &nbsp;|&nbsp; <span class="email-line">hematologist_lab@yahoo.com</span></span>
-      </div>
-    </div>
 
     <div class="no-print">
       <button onclick="window.print()">Print</button>

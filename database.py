@@ -449,7 +449,15 @@ def migrate(conn):
                                # المجمّعة (print_combined_panel) لتجميع التحاليل تحت عنوان
                                # فرعي محدد بدل الاعتماد على القسم العام. فاضي = يرجع
                                # للسلوك القديم (تجميع حسب department كالمعتاد).
-                               ("report_group", "TEXT")],
+                               ("report_group", "TEXT"),
+                               # panel_color / panel_page_break: تخصيص اختياري
+                               # لهذا التحليل بـ"اللوحة المجمّعة" (combined_panel
+                               # — لما تُطبع أكثر من تحليل سوا بنفس الورقة).
+                               # panel_color يلوّن اسم ونتيجة كل باراميتر تابع
+                               # لهذا التحليل بالجدول المجمّع؛ panel_page_break
+                               # يجبر أول صف تابع له يبدأ بأعلى صفحة جديدة.
+                               # فاضي/0 = السلوك الافتراضي بدون أي تغيير.
+                               ("panel_color", "TEXT"), ("panel_page_break", "INTEGER DEFAULT 0")],
         "reference_ranges": [("age_from_unit", "TEXT DEFAULT 'Years'"), ("age_to_unit", "TEXT DEFAULT 'Years'")],
         # unit2 / unit2_factor: وحدة ثانية اختيارية تُعرض تلقائيًا جنب النتيجة
         # الأصلية وقت الطباعة (مثلاً mg/dL بالإضافة لـ mmol/L). القيمة الثانية
@@ -473,6 +481,12 @@ def migrate(conn):
         # الفحص وقيمة النتيجة بجدول الفحوصات (custom.html فقط، التقارير
         # الجاهزة CBC/التخثر... إلخ لها تصميم ثابت منفصل).
         "report_templates": [("heading_align", "TEXT DEFAULT 'center'"), ("rows_align", "TEXT DEFAULT 'right'")],
+        # font_size: تجاوز اختياري لحجم خط اسم/شهادة هذا الدكتور تحديداً
+        # بترويسة التقرير (بالبكسل). فاضي (NULL) = يرث الحجم العام
+        # letterhead_font_size من الإعدادات كالسابق تماماً — هذا العمود لا
+        # يغيّر أي تصميم محفوظ إلا إذا عبّاه المدير صراحةً من شاشة إدارة
+        # الدكاترة لدكتور معيّن.
+        "examining_doctors_list": [("font_size", "INTEGER")],
     }
     for table, columns in needed.items():
         existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -1322,8 +1336,10 @@ def add_examining_doctor(db, name):
     return get_examining_doctors(db)
 
 
-def add_examining_doctor_full(db, name, title, degree_ar, degree_en, show_on_letterhead):
-    """يضيف دكتور فحص جديد بكامل تفاصيله من شاشة إدارة الدكاترة."""
+def add_examining_doctor_full(db, name, title, degree_ar, degree_en, show_on_letterhead, font_size=None):
+    """يضيف دكتور فحص جديد بكامل تفاصيله من شاشة إدارة الدكاترة.
+    font_size: تجاوز اختياري لحجم خط اسمه/شهادته بالترويسة (بكسل)؛ فاضي
+    (None) يعني يرث الحجم العام letterhead_font_size من الإعدادات كالمعتاد."""
     name = (name or "").strip()
     if not name:
         return
@@ -1331,20 +1347,20 @@ def add_examining_doctor_full(db, name, title, degree_ar, degree_en, show_on_let
         "SELECT COALESCE(MAX(sort_order), -1) as m FROM examining_doctors_list"
     ).fetchone()["m"]
     db.execute(
-        "INSERT INTO examining_doctors_list (name, title, degree_ar, degree_en, sort_order, show_on_letterhead) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO examining_doctors_list (name, title, degree_ar, degree_en, sort_order, show_on_letterhead, font_size) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (name, (title or "").strip() or "الدكتور", degree_ar, degree_en,
-         max_order + 1, 1 if show_on_letterhead else 0),
+         max_order + 1, 1 if show_on_letterhead else 0, font_size),
     )
     db.commit()
 
 
-def update_examining_doctor(db, doctor_id, name, title, degree_ar, degree_en, show_on_letterhead):
+def update_examining_doctor(db, doctor_id, name, title, degree_ar, degree_en, show_on_letterhead, font_size=None):
     db.execute(
-        "UPDATE examining_doctors_list SET name=?, title=?, degree_ar=?, degree_en=?, show_on_letterhead=? "
+        "UPDATE examining_doctors_list SET name=?, title=?, degree_ar=?, degree_en=?, show_on_letterhead=?, font_size=? "
         "WHERE id=?",
         ((name or "").strip(), (title or "").strip() or "الدكتور", degree_ar, degree_en,
-         1 if show_on_letterhead else 0, doctor_id),
+         1 if show_on_letterhead else 0, font_size, doctor_id),
     )
     db.commit()
 

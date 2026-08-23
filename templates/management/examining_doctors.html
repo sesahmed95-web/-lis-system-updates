@@ -32,6 +32,11 @@
           إظهار بترويسة التقرير المطبوع
         </label>
       </div>
+      <div class="form-field">
+        <label>حجم خط مخصص لهذا الدكتور بالترويسة (بكسل)</label>
+        <input type="number" name="font_size" min="8" max="30" placeholder="اتركه فاضي ليستخدم الحجم العام">
+        <small class="muted">اختياري — إذا تركته فاضي يُستخدم الحجم العام من الإعدادات.</small>
+      </div>
     </div>
     <button class="btn" type="submit">إضافة</button>
   </form>
@@ -67,6 +72,11 @@
             <input type="checkbox" name="show_on_letterhead" {{ 'checked' if d['show_on_letterhead'] }}>
             إظهار بترويسة التقرير المطبوع
           </label>
+        </div>
+        <div class="form-field">
+          <label>حجم خط مخصص لهذا الدكتور بالترويسة (بكسل)</label>
+          <input type="number" name="font_size" min="8" max="30" value="{{ d['font_size'] or '' }}" placeholder="اتركه فاضي ليستخدم الحجم العام">
+          <small class="muted">اختياري — إذا تركته فاضي يُستخدم الحجم العام من الإعدادات.</small>
         </div>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">

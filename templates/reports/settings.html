@@ -37,6 +37,19 @@
       <span class="muted">PNG / JPG / GIF / SVG / WEBP</span>
     </div>
 
+    <div class="form-field">
+      <label>موضع الشعار بترويسة التقرير المطبوع</label>
+      <select name="logo_position">
+        <option value="right" {{ 'selected' if current.logo_position == 'right' }}>يمين (الافتراضي)</option>
+        <option value="center" {{ 'selected' if current.logo_position == 'center' }}>وسط</option>
+        <option value="left" {{ 'selected' if current.logo_position == 'left' }}>يسار</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>حجم الشعار (عرضه بالبكسل) — القيمة الافتراضية 100</label>
+      <input type="number" name="logo_width" min="30" max="300" value="{{ current.logo_width }}" style="width:120px;">
+    </div>
+
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
 </div>
@@ -50,6 +63,58 @@
   </p>
   <a class="btn" style="display:inline-block;" href="{{ url_for('examining_doctors_manage') }}">✏️ إدارة قائمة الدكاترة وشهاداتهم</a>
   <a class="btn small secondary" style="margin-top:10px; display:inline-block;" href="{{ url_for('examining_doctor_rates_list') }}">💰 تحديد أجور دكتور المختبر الفاحص</a>
+  <p class="muted" style="margin-top:10px;">
+    ملاحظة: نفس هذي الشاشة تقدر تضيف فيها أي شخص إله ظهور بترويسة التقرير —
+    مو بالضرورة دكتور — مثلاً كيميائي اختصاصي أو بايولوجي ممارس. اكتب اسمه
+    باللقب المناسب (بدل "الدكتور") بحقل "اللقب"، وشهادته بحقلي الشهادة، وفعّل
+    "إظهار بترويسة التقرير المطبوع" — يظهر تلقائيًا بجانب باقي الأسماء بكل
+    التقارير، بغض النظر هل هو دكتور فاحص فعليًا أو لا.
+  </p>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🔤 تنسيق أسماء وشهادات الدكاترة بالترويسة</h3>
+  <p class="muted">
+    يتحكم هذا بحجم ونوع الخط لكل أسماء وألقاب وشهادات الدكاترة (والأشخاص
+    الآخرين المضافين لنفس الترويسة) بكل التقارير المطبوعة دفعة وحدة — إعداد
+    عام واحد ينطبق على الجميع.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>حجم الخط (بكسل) — القيمة الافتراضية 14</label>
+      <input type="number" name="letterhead_font_size" min="8" max="30" value="{{ current.letterhead_font_size }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>نوع الخط</label>
+      <select name="letterhead_font_family">
+        <option value="Segoe UI, Tahoma, Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Segoe UI, Tahoma, Arial, sans-serif' }}>Segoe UI (افتراضي)</option>
+        <option value="Tahoma, Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Tahoma, Arial, sans-serif' }}>Tahoma</option>
+        <option value="Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Arial, sans-serif' }}>Arial</option>
+        <option value="'Times New Roman', serif" {{ 'selected' if current.letterhead_font_family == "'Times New Roman', serif" }}>Times New Roman</option>
+        <option value="'Traditional Arabic', Tahoma, serif" {{ 'selected' if current.letterhead_font_family == "'Traditional Arabic', Tahoma, serif" }}>Traditional Arabic</option>
+      </select>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🔠 حجم خط أسماء التحاليل والنتائج</h3>
+  <p class="muted">
+    يتحكم هذا بحجم خط اسم كل تحليل (Test) وحجم خط النتيجة نفسها بكل التقارير
+    المطبوعة دفعة وحدة — منفصل تمامًا عن حجم خط ترويسة الدكاترة أعلاه.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>حجم خط اسم التحليل (بكسل) — القيمة الافتراضية 16</label>
+      <input type="number" name="test_name_font_size" min="8" max="30" value="{{ current.test_name_font_size }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>حجم خط النتيجة (بكسل) — القيمة الافتراضية 16</label>
+      <input type="number" name="result_value_font_size" min="8" max="30" value="{{ current.result_value_font_size }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
 </div>
 
 <div class="card" style="max-width:640px;">
@@ -67,6 +132,24 @@
     <div class="form-field">
       <label>عرض العمود (بكسل) — القيمة الافتراضية 12</label>
       <input type="number" name="report_col_pad" min="2" max="40" value="{{ current.report_col_pad }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🗂️ ترتيب أقسام اللوحة المجمّعة</h3>
+  <p class="muted">
+    لما تُطبع أكثر من تحليل سوا بورقة وحدة لنفس المريض، الأقسام (زي
+    Biochemical Test, Hormones, Vitamins...) تترتب أبجديًا افتراضيًا. اكتب
+    أسماء الأقسام هنا كل اسم بسطر مستقل بالترتيب اللي تريده — أي قسم غير
+    مذكور هنا يظهر بعدها بترتيبه الأبجدي الاعتيادي. اترك الحقل فاضي للرجوع
+    للترتيب الأبجدي بالكامل.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ترتيب الأقسام (سطر لكل قسم)</label>
+      <textarea name="combined_panel_group_order" rows="5" style="width:100%; direction:ltr;" placeholder="Hormones&#10;Vitamins&#10;Biochemical Test">{{ current.combined_panel_group_order }}</textarea>
     </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
