@@ -949,20 +949,28 @@ def ensure_vldl_parameter(conn):
     """يضيف معامل VLDL لتحليل Lipid Profile (LIPID) للقواعد الموجودة مسبقًا —
     هذا المعامل غير موجود أصلاً بقاعدة البيانات القديمة، ويُحسب تلقائيًا من
     Triglycerides ÷ 5 بواجهة إدخال النتائج. يعمل مرة واحدة فقط؛ لا شيء يحدث
-    إذا كان المعامل مضافًا مسبقًا."""
+    إذا كان المعامل مضافًا مسبقًا. المدى الطبيعي (low/high) يُضاف بجدول
+    reference_ranges المنفصل (نفس أسلوب باقي معاملات الاختبارات)، وليس بجدول
+    test_parameters نفسه."""
     row = conn.execute("SELECT id FROM test_definitions WHERE code='LIPID'").fetchone()
     if not row:
         return
     test_id = row["id"]
-    exists = conn.execute(
+    param_row = conn.execute(
         "SELECT id FROM test_parameters WHERE test_definition_id=? AND name='VLDL'", (test_id,)
     ).fetchone()
-    if exists:
+    if param_row:
         return
-    conn.execute(
-        "INSERT INTO test_parameters (test_definition_id, name, unit, result_type, low, high) "
-        "VALUES (?, 'VLDL', 'mg/dL', 'Numeric', 2, 30)",
+    cur = conn.execute(
+        "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) "
+        "VALUES (?, 'VLDL', 'mg/dL', 'Numeric')",
         (test_id,),
+    )
+    param_id = cur.lastrowid
+    conn.execute(
+        "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, "
+        "age_to, age_to_unit, low, high) VALUES (?, 'Both', 0, 'Years', 120, 'Years', 2, 30)",
+        (param_id,),
     )
     conn.commit()
 
