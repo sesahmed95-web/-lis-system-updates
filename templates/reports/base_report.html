@@ -39,9 +39,19 @@
     border-bottom: 2px solid #333;
     padding-bottom: 8px;
     margin-bottom: 10px;
-    gap: 4px;
+    gap: 8px;
   }
-  .doc-col { flex: 1; text-align: center; font-size: 14px; line-height: 1.4; }
+  /* شبكة الدكاترة: عمود ثابت بـ 3 خانات دائمًا — إذا زاد عددهم عن 3
+     (كيميائي، بايولوجي، إلخ)، ينتقل الرابع تلقائيًا لصف جديد تحت (3
+     فوق و3 تحت وهكذا) بدل ما يضيق كل عمود عشان يتسع الكل بصف وحدة. */
+  .doctors-group {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px 6px;
+    align-items: start;
+  }
+  .doc-col { text-align: center; font-size: 14px; line-height: 1.4; }
   .doc-col .doc-title { color: #7A1F1F; font-weight: bold; }
   .doc-col .doc-name { color: #1F3B7A; font-weight: bold; font-size: 14px; }
   .doc-col .doc-degree { color: #1F3B7A; }
@@ -204,14 +214,16 @@
       {% if logo_url %}
       <div class="doc-col logo-col"><img src="{{ logo_url }}" alt="logo"></div>
       {% endif %}
-      {% for doc in letterhead_doctors %}
-      <div class="doc-col">
-        <div class="doc-title">{{ doc['title'] or 'الدكتور' }}</div>
-        <div class="doc-name">{{ doc['name'] }}</div>
-        {% if doc['degree_ar'] %}<div class="doc-degree">{{ doc['degree_ar']|replace('\n', '<br>')|safe }}</div>{% endif %}
-        {% if doc['degree_en'] %}<div class="doc-eng">{{ doc['degree_en']|replace('\n', '<br>')|safe }}</div>{% endif %}
+      <div class="doctors-group">
+        {% for doc in letterhead_doctors %}
+        <div class="doc-col">
+          <div class="doc-title">{{ doc['title'] or 'الدكتور' }}</div>
+          <div class="doc-name">{{ doc['name'] }}</div>
+          {% if doc['degree_ar'] %}<div class="doc-degree">{{ doc['degree_ar']|replace('\n', '<br>')|safe }}</div>{% endif %}
+          {% if doc['degree_en'] %}<div class="doc-eng">{{ doc['degree_en']|replace('\n', '<br>')|safe }}</div>{% endif %}
+        </div>
+        {% endfor %}
       </div>
-      {% endfor %}
     </div>
 
     <table class="meta-table">
