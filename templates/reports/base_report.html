@@ -51,7 +51,12 @@
     gap: 8px 6px;
     align-items: start;
   }
-  .doc-col { text-align: center; font-size: 14px; line-height: 1.4; }
+  .doc-col {
+    text-align: center;
+    font-size: {{ letterhead_font_size|default(14) }}px;
+    font-family: {{ letterhead_font_family|default("'Segoe UI', Tahoma, Arial, sans-serif")|safe }};
+    line-height: 1.4;
+  }
   .doc-col .doc-title { color: #7A1F1F; font-weight: bold; }
   .doc-col .doc-name { color: #1F3B7A; font-weight: bold; font-size: 14px; }
   .doc-col .doc-degree { color: #1F3B7A; }

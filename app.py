@@ -376,6 +376,11 @@ def inject_globals():
     # حتى تنعرض بترويسة أي تقرير مطبوع (reports/*.html) بدون تمريرها يدويًا
     # من كل route. راجع Management → الإعدادات → إدارة قائمة الدكاترة.
     letterhead_doctors = get_letterhead_doctors(db)
+    letterhead_font_size = get_setting(db, "letterhead_font_size", "14")
+    letterhead_font_family = get_setting(db, "letterhead_font_family", "Segoe UI, Tahoma, Arial, sans-serif")
+    # حالة "التحديث التلقائي" الحالية — تُحقن هنا حتى يظهر زر التبديل بشريط
+    # الأعلى (base.html، بجانب اسم المستخدم) بأي صفحة بدون تمريرها يدويًا.
+    auto_update_enabled = get_setting(db, "auto_update_enabled", "1") == "1"
     license_banner = None
     if "user_id" in session:
         lic = license_manager.check_license(db)
@@ -390,6 +395,9 @@ def inject_globals():
                 lab_address=lab_address, lab_phone=lab_phone,
                 report_row_pad=report_row_pad, report_col_pad=report_col_pad,
                 letterhead_doctors=letterhead_doctors,
+                letterhead_font_size=letterhead_font_size,
+                letterhead_font_family=letterhead_font_family,
+                auto_update_enabled=auto_update_enabled,
                 license_banner=license_banner,
                 # أيقونة المصمم العائمة: تظهر فقط لمن سجّل دخوله فعلاً من
                 # /designer/login بنفس المتصفح (session['designer_id']).
@@ -4328,6 +4336,19 @@ def app_settings():
         if wa_code:
             set_setting(db, "whatsapp_country_code", "".join(ch for ch in wa_code if ch.isdigit()))
 
+        # حجم ونوع خط أسماء/شهادات الدكاترة بترويسة كل تقرير مطبوع (base_report.html)
+        # — إعداد عام واحد ينطبق على الجميع دفعة وحدة، مو لكل شخص لحاله.
+        lh_size_raw = request.form.get("letterhead_font_size", "").strip()
+        if lh_size_raw:
+            try:
+                lh_size = max(8, min(30, int(lh_size_raw)))
+                set_setting(db, "letterhead_font_size", str(lh_size))
+            except ValueError:
+                pass
+        lh_family_raw = request.form.get("letterhead_font_family", "").strip()
+        if lh_family_raw:
+            set_setting(db, "letterhead_font_family", lh_family_raw)
+
         # مجلد أرشفة الـPDF الدائم (نقطة #8) — يُضبط مرة وحدة هنا وقت
         # التنصيب/الإعداد الأولي، ويُعاد استخدامه تلقائيًا بعدها لكل زيارة
         # تكتمل نتائجها. لا نتحقق من وجوده هنا (os.makedirs لاحقًا وقت
@@ -4369,6 +4390,8 @@ def app_settings():
         "report_col_pad": get_setting(db, "report_col_pad", "12"),
         "whatsapp_country_code": get_setting(db, "whatsapp_country_code", "964"),
         "pdf_archive_dir": get_setting(db, "pdf_archive_dir", ""),
+        "letterhead_font_size": get_setting(db, "letterhead_font_size", "14"),
+        "letterhead_font_family": get_setting(db, "letterhead_font_family", "Segoe UI, Tahoma, Arial, sans-serif"),
     }
     marker_colors_by_char = get_conclusion_marker_colors(db)
     conclusion_markers = [
@@ -4377,6 +4400,26 @@ def app_settings():
     return render_template(
         "management/settings.html", current=current, conclusion_markers=conclusion_markers
     )
+
+
+# ------------------------------------------------------------------------
+# تبديل "التحديث التلقائي" بضغطة وحدة من شريط الأعلى (بجانب اسم المستخدم) —
+# متاح لدخول الأدمن العادي، بعكس /designer/update/toggle اللي يحتاج جلسة
+# "مصمم" منفصلة. الاثنين يكتبان لنفس المفتاح (auto_update_enabled) بجدول
+# الإعدادات، فتفعيل/تعطيل أي وحدة منهم ينعكس على الثاني وعلى auto_updater
+# نفسه فورًا. يرجّع المستخدم لنفس الصفحة اللي كان فيها (request.referrer).
+# ------------------------------------------------------------------------
+@app.route("/settings/auto-update/toggle", methods=["POST"])
+@roles_required("admin")
+def toggle_auto_update():
+    db = get_db()
+    currently_on = get_setting(db, "auto_update_enabled", "1") == "1"
+    set_setting(db, "auto_update_enabled", "0" if currently_on else "1")
+    db.commit()
+    log_action("ToggleAutoUpdate", "settings", 0, "off" if currently_on else "on")
+    db.close()
+    flash("تم إيقاف التحديث التلقائي." if currently_on else "تم تفعيل التحديث التلقائي.")
+    return redirect(request.referrer or url_for("dashboard"))
 
 
 # ------------------------------------------------------------------------

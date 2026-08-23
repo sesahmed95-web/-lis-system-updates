@@ -43,14 +43,46 @@
 
 <div class="card" style="max-width:640px;">
   <h3>دكتور المختبر الفاحص</h3>
-  <p class="muted">قائمة الأسماء التي تظهر بالاختيار عند فتح زيارة جديدة أو تعديلها. اكتب اسمًا واحدًا في كل سطر — أضف اسمًا جديدًا بإضافة سطر جديد، أو احذف اسمًا بحذف سطره.</p>
+  <p class="muted">
+    إدارة أسماء دكاترة المختبر الفاحص، ألقابهم، شهاداتهم (عربي/انكليزي)، ترتيب ظهورهم
+    بترويسة كل تقرير مطبوع، وهل يظهر كل واحد منهم بالترويسة أصلاً أو فقط بقائمة اختيار
+    الفاحص عند تسجيل الزيارات.
+  </p>
+  <a class="btn" style="display:inline-block;" href="{{ url_for('examining_doctors_manage') }}">✏️ إدارة قائمة الدكاترة وشهاداتهم</a>
+  <a class="btn small secondary" style="margin-top:10px; display:inline-block;" href="{{ url_for('examining_doctor_rates_list') }}">💰 تحديد أجور دكتور المختبر الفاحص</a>
+  <p class="muted" style="margin-top:10px;">
+    ملاحظة: نفس هذي الشاشة تقدر تضيف فيها أي شخص إله ظهور بترويسة التقرير —
+    مو بالضرورة دكتور — مثلاً كيميائي اختصاصي أو بايولوجي ممارس. اكتب اسمه
+    باللقب المناسب (بدل "الدكتور") بحقل "اللقب"، وشهادته بحقلي الشهادة، وفعّل
+    "إظهار بترويسة التقرير المطبوع" — يظهر تلقائيًا بجانب باقي الأسماء بكل
+    التقارير، بغض النظر هل هو دكتور فاحص فعليًا أو لا.
+  </p>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🔤 تنسيق أسماء وشهادات الدكاترة بالترويسة</h3>
+  <p class="muted">
+    يتحكم هذا بحجم ونوع الخط لكل أسماء وألقاب وشهادات الدكاترة (والأشخاص
+    الآخرين المضافين لنفس الترويسة) بكل التقارير المطبوعة دفعة وحدة — إعداد
+    عام واحد ينطبق على الجميع.
+  </p>
   <form method="POST">
     <div class="form-field">
-      <textarea name="examining_doctors" rows="6" style="width:100%; font-family:inherit;">{{ current.examining_doctors }}</textarea>
+      <label>حجم الخط (بكسل) — القيمة الافتراضية 14</label>
+      <input type="number" name="letterhead_font_size" min="8" max="30" value="{{ current.letterhead_font_size }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>نوع الخط</label>
+      <select name="letterhead_font_family">
+        <option value="Segoe UI, Tahoma, Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Segoe UI, Tahoma, Arial, sans-serif' }}>Segoe UI (افتراضي)</option>
+        <option value="Tahoma, Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Tahoma, Arial, sans-serif' }}>Tahoma</option>
+        <option value="Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Arial, sans-serif' }}>Arial</option>
+        <option value="'Times New Roman', serif" {{ 'selected' if current.letterhead_font_family == "'Times New Roman', serif" }}>Times New Roman</option>
+        <option value="'Traditional Arabic', Tahoma, serif" {{ 'selected' if current.letterhead_font_family == "'Traditional Arabic', Tahoma, serif" }}>Traditional Arabic</option>
+      </select>
     </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
-  <a class="btn small secondary" style="margin-top:10px; display:inline-block;" href="{{ url_for('examining_doctor_rates_list') }}">💰 تحديد أجور دكتور المختبر الفاحص</a>
 </div>
 
 <div class="card" style="max-width:640px;">
