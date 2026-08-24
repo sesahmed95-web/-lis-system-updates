@@ -36,6 +36,37 @@
     <button class="btn" type="submit">حفظ إعدادات اللوحة المجمّعة</button>
   </form>
 
+  <p class="muted" style="margin-top:-8px; margin-bottom:14px;">
+    تحكم أدق: لون/فاصل صفحة لباراميتر وحدة بس (مو التحليل كامل) — مفيد
+    لتحليل فيه أكثر من باراميتر (زي Blood film) وتريد تلوّن باراميتر وحدة
+    منه (زي NRBC) بس داخل اللوحة المجمّعة. لو ضبطت باراميتر معيّن هنا،
+    إعداده يتغلّب على إعداد التحليل كامل فوق بس لهذا الباراميتر تحديداً.
+  </p>
+  {% if selected_parameters|length > 1 %}
+  <form method="POST" style="margin-bottom:22px;">
+    <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">
+    <input type="hidden" name="mode" value="panel">
+    <input type="hidden" name="panel_color" value="{{ selected_test['panel_color'] or '#1F3B7A' }}">
+    <input type="hidden" name="enable_panel_color" value="{{ '1' if selected_test['panel_color'] else '' }}">
+    <input type="hidden" name="panel_page_break" value="{{ '1' if selected_test['panel_page_break'] else '' }}">
+    {% for p in selected_parameters %}
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:4px 0; border-bottom:1px dashed var(--border,#E2E8F0);">
+      <span style="min-width:160px;">{{ p['name'] }}</span>
+      <label style="font-size:12px; font-weight:normal; display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" name="enable_param_panel_color_{{ p['id'] }}" {{ 'checked' if p['panel_color'] }}>
+        لون:
+        <input type="color" name="param_panel_color_{{ p['id'] }}" value="{{ p['panel_color'] or '#1F3B7A' }}" style="width:32px; height:22px; padding:0; border:1px solid var(--border,#E2E8F0);">
+      </label>
+      <label style="font-size:12px; font-weight:normal; display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" name="param_panel_page_break_{{ p['id'] }}" {{ 'checked' if p['panel_page_break'] }}>
+        ابدأ صفحة جديدة قبله
+      </label>
+    </div>
+    {% endfor %}
+    <button class="btn small" type="submit" style="margin-top:10px;">حفظ تخصيص الباراميترات</button>
+  </form>
+  {% endif %}
+
   <h4>الطريقة الأولى — استيراد من ملف Word</h4>
   <form method="POST" enctype="multipart/form-data" style="margin-bottom:22px;">
     <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">
@@ -72,8 +103,13 @@
       </select>
       <small class="muted">يتحكم بمحاذاة كل أعمدة الجدول بالتقرير المطبوع: اسم الفحص، النتيجة، الوحدة، والمدى الطبيعي.</small>
     </div>
-    <p class="muted">
-      حدد الباراميترات التي تظهر بالتقرير، وبأي ترتيب — رتّبها بأزرار
+    <div class="form-field">
+      <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="checkbox" name="unit_column" {{ 'checked' if selected_template and selected_template['unit_column'] }}>
+        تخطيط أعمدة بديل: عمود وحدة مستقل بأقصى اليمين + النتيجة توسّط بعمودها (بدل الوضع الافتراضي: الوحدة ملتصقة بنهاية النتيجة بنفس العمود)
+      </label>
+    </div>
+    <p class="muted">حدد الباراميترات التي تظهر بالتقرير، وبأي ترتيب — رتّبها بأزرار
       ⬆️⬇️ (نفس ترتيب الطباعة، والصفحة تنقسم تلقائيًا حسب المساحة؛ فعّل
       "ابدأ صفحة جديدة" جنب أي تحليل لإجباره يبدأ بأعلى صفحة جديدة دائمًا).
       لكل صف تحكم مستقل: جهة اسم الحقل، موضع المدى الطبيعي، ولون مخصص

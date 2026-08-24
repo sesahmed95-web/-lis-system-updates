@@ -16,6 +16,13 @@
   {% set name_flip = row.name_side == 'right' %}
   <div class="lt-group{% if row.page_break_before %} lt-page-break{% endif %}">
 
+    {% if custom_unit_column %}
+    <div class="lt-row lt-name-row lt-row-3col{% if name_flip %} lt-flip{% endif %}">
+      <div class="lt-name" style="text-align: {{ name_align }};{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.label }}</div>
+      <div class="lt-val lt-val-center"{% if row.color %} style="color: {{ row.color }};"{% endif %}>{% if row.result not in (None, '') %}<span class="val">{{ row.result }}</span>{% endif %}</div>
+      <div class="lt-unit"{% if row.color %} style="color: {{ row.color }};"{% endif %}>{{ row.unit or '' }}</div>
+    </div>
+    {% else %}
     <div class="lt-row lt-name-row{% if name_flip %} lt-flip{% endif %}">
       <div class="lt-name" style="text-align: {{ name_align }};{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.label }}</div>
       <div class="lt-val"{% if row.color %} style="color: {{ row.color }};"{% endif %}>{% if row.result not in (None, '') %}<span class="val">{{ row.result }}</span>{% if row.unit %} <span class="unit">{{ row.unit }}</span>{% endif %}{% endif %}</div>
@@ -23,6 +30,7 @@
       <div class="lt-val2"{% if row.color %} style="color: {{ row.color }};"{% endif %}>{% if row.result2 %}<span class="val">{{ row.result2 }}</span>{% if row.unit2 %} <span class="unit">{{ row.unit2 }}</span>{% endif %}{% endif %}</div>
       {% endif %}
     </div>
+    {% endif %}
 
     {% if show_prev_values and row.previous %}
     <div class="lt-row lt-prev-row">

@@ -464,7 +464,14 @@ def migrate(conn):
         # تُحسب دائمًا = القيمة الأصلية × unit2_factor، ولا تُخزَّن بجدول
         # results أبدًا — تُحسب لحظة الطباعة فقط. فاضي = بدون وحدة ثانية
         # (السلوك القديم كما هو).
-        "test_parameters": [("highlight", "INTEGER DEFAULT 0"), ("unit2", "TEXT"), ("unit2_factor", "REAL")],
+        "test_parameters": [("highlight", "INTEGER DEFAULT 0"), ("unit2", "TEXT"), ("unit2_factor", "REAL"),
+                             # panel_color / panel_page_break: نفس فكرة أعمدة
+                             # test_definitions بنفس الاسم، بس هنا على مستوى
+                             # الباراميتر المفرد — يسمح بتلوين/فصل صفحة
+                             # لباراميتر وحدة بس داخل تحليل متعدد الباراميترات
+                             # (مثل NRBC بس داخل Blood film) عند ظهوره باللوحة
+                             # المجمّعة، بدل تلوين كل التحليل سوا.
+                             ("panel_color", "TEXT"), ("panel_page_break", "INTEGER DEFAULT 0")],
         # is_trial: يميّز الترخيص التجريبي عن ترخيص العميل العادي (بالأيام)،
         # حتى يظهر شريط "متبقي كم يوم" فقط للتجريبي وليس لكل ترخيص له تاريخ انتهاء.
         # revoked_reason: سبب الإلغاء عن بُعد (يُعبّى تلقائياً لو المصمم ألغى
@@ -480,7 +487,13 @@ def migrate(conn):
         # التقارير" — توسيط/يمين/يسار لعنوان التقرير المخصَّص ولعمود اسم
         # الفحص وقيمة النتيجة بجدول الفحوصات (custom.html فقط، التقارير
         # الجاهزة CBC/التخثر... إلخ لها تصميم ثابت منفصل).
-        "report_templates": [("heading_align", "TEXT DEFAULT 'center'"), ("rows_align", "TEXT DEFAULT 'right'")],
+        "report_templates": [("heading_align", "TEXT DEFAULT 'center'"), ("rows_align", "TEXT DEFAULT 'right'"),
+                              # unit_column: تخطيط أعمدة بديل لهذا التقرير تحديداً —
+                              # لو مفعّل (1)، عمود الوحدة ينفصل عن عمود النتيجة
+                              # ويصير بأقصى اليمين لحاله، والنتيجة توسّط بعمودها،
+                              # بدل الوضع الافتراضي (0) اللي تكون فيه الوحدة
+                              # ملتصقة بنهاية النتيجة بنفس العمود.
+                              ("unit_column", "INTEGER DEFAULT 0")],
         # font_size: تجاوز اختياري لحجم خط اسم/شهادة هذا الدكتور تحديداً
         # بترويسة التقرير (بالبكسل). فاضي (NULL) = يرث الحجم العام
         # letterhead_font_size من الإعدادات كالسابق تماماً — هذا العمود لا
@@ -1189,22 +1202,23 @@ def get_report_template(db, test_definition_id):
 
 
 def save_report_template(db, test_definition_id, heading, rows_json, source_docx_name, user_id,
-                          heading_align=None, rows_align=None):
+                          heading_align=None, rows_align=None, unit_column=0):
     now = datetime.now().isoformat(timespec="seconds")
     existing = get_report_template(db, test_definition_id)
     heading_align = heading_align or "center"
     rows_align = rows_align or "right"
+    unit_column = 1 if unit_column else 0
     if existing:
         db.execute(
             "UPDATE report_templates SET heading=?, rows_json=?, source_docx_name=COALESCE(?, source_docx_name), "
-            "heading_align=?, rows_align=?, updated_at=? WHERE test_definition_id=?",
-            (heading, rows_json, source_docx_name, heading_align, rows_align, now, test_definition_id),
+            "heading_align=?, rows_align=?, unit_column=?, updated_at=? WHERE test_definition_id=?",
+            (heading, rows_json, source_docx_name, heading_align, rows_align, unit_column, now, test_definition_id),
         )
     else:
         db.execute(
             "INSERT INTO report_templates (test_definition_id, heading, rows_json, source_docx_name, "
-            "heading_align, rows_align, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (test_definition_id, heading, rows_json, source_docx_name, heading_align, rows_align, user_id, now, now),
+            "heading_align, rows_align, unit_column, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (test_definition_id, heading, rows_json, source_docx_name, heading_align, rows_align, unit_column, user_id, now, now),
         )
     db.commit()
 

@@ -249,6 +249,15 @@
   .lt-tier-label { color: #14213D; display: inline-block; min-width: 120px; }
   .lt-range-below { display: block; }
 
+  /* تخطيط أعمدة بديل (unit_column مفعّل من مصمم التقرير لهذا التقرير كامل):
+     اسم التحليل يسار | النتيجة بالوسط | الوحدة يمين — بعمود مستقل بدل
+     التصاقها بنهاية النتيجة. يُفضَّل ضبط "المدى الطبيعي: سطر مستقل تحت"
+     لكل صف عند استخدام هذا التخطيط، حتى يبقى المدى مصطف بوضوح تحت التحليل
+     بدل عمود جانبي ضيّق. */
+  .lt-row-3col { grid-template-columns: 1fr 110px 90px; }
+  .lt-val-center { text-align: center; }
+  .lt-unit { color: #14213D; font-weight: normal; white-space: nowrap; text-align: right; font-size: {{ result_value_font_size|default(16) }}px; }
+
   .footer-block { margin-top: 14px; page-break-inside: avoid; break-inside: avoid; }
   .other-lab-note { font-style: italic; font-weight: bold; margin: 6px 0; text-align: left; direction: ltr; }
   .prev-visit-note { font-style: italic; margin: 6px 0; color: #14213D; }

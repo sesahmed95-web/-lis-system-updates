@@ -2932,14 +2932,23 @@ def print_combined_panel(visit_id):
                 "range_text": rng["range_text"] if rng else None,
                 "previous_value": previous_values.get(p["name"]),
                 "previous_date": previous_visit_date,
-                # لون مخصص + فاصل صفحة اختياريان لهذا التحليل تحديداً —
-                # يُضبطان من "مصمم التقارير" (بطاقة "اللوحة المجمّعة")،
-                # ينطبقان على كل باراميتراته هنا؛ فاصل الصفحة يُطبَّق فقط
-                # على أول صف من صفوف هذا التحليل ضمن قسمه (راجع الحلقة تحت).
-                "color": ot["panel_color"] or None,
+                # لون مخصص + فاصل صفحة اختياريان — الأولوية دائماً للباراميتر
+                # المفرد (test_parameters.panel_color/panel_page_break، يُضبط
+                # من "مصمم التقارير" لكل باراميتر لحاله)؛ لو غير مضبوط له
+                # تحديداً، يرجع لإعداد التحليل كامل (test_definitions) كسلوك
+                # احتياطي قديم — هذا يسمح بتلوين باراميتر وحدة بس (زي NRBC)
+                # داخل تحليل متعدد الباراميترات (زي Blood film) بدون ما
+                # يلوّن باقي باراميتراته.
+                "color": p["panel_color"] or ot["panel_color"] or None,
+                "_own_page_break": bool(p["panel_page_break"]),
             })
         if not rows:
             continue
+        # فاصل الصفحة: كل صف يحمل فاصله المفرد (لو مضبوط لباراميتره تحديداً)،
+        # وفاصل التحليل كامل (لو مفعّل) يُطبَّق فقط على أول صف من صفوفه.
+        for row in rows:
+            if row.pop("_own_page_break", False):
+                row["page_break_before"] = True
         if ot["panel_page_break"]:
             rows[0]["page_break_before"] = True
         # الأولوية دائماً لاسم "الريبورت المجمّع" المخصص (report_group) إذا
@@ -3132,6 +3141,7 @@ def print_report(order_test_id):
     custom_heading = None
     custom_heading_align = "center"
     custom_rows_align = "right"
+    custom_unit_column = False
     if custom_template:
         units_by_name = {p["name"]: p["unit"] for p in parameters}
         unit2_by_name = {p["name"]: p["unit2"] for p in parameters}
@@ -3139,6 +3149,7 @@ def print_report(order_test_id):
         custom_heading = custom_template["heading"] or ot["test_name"]
         custom_heading_align = custom_template["heading_align"] or "center"
         custom_rows_align = custom_template["rows_align"] or "right"
+        custom_unit_column = bool(custom_template["unit_column"])
         row_defs = json.loads(custom_template["rows_json"] or "[]")
         custom_rows = []
         for rd in row_defs:
@@ -3201,6 +3212,8 @@ def print_report(order_test_id):
                 "name_side": rd.get("name_side") or "left",
                 "range_position": rd.get("range_position") or "inline",
                 "name_align": rd.get("name_align"),
+                "color": rd.get("color"),
+                "page_break_before": rd.get("page_break_before", False),
             })
 
     age_unit_abbr = {"Hours": "H", "Days": "D", "Weeks": "W", "Months": "M", "Years": "Y"}
@@ -3219,6 +3232,7 @@ def print_report(order_test_id):
         ot=ot, params=params, ranges=ranges, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
+        custom_unit_column=custom_unit_column,
         show_prev_values=show_prev_values, previous_visit_date=previous_visit_date,
         previous_values=previous_values, repeat_header_on_print=repeat_header_on_print,
         logo_url=logo_url, from_other_lab=from_other_lab, font_size=font_size,
@@ -4761,10 +4775,11 @@ def report_designer():
             return redirect(url_for("report_designer", test_definition_id=test_id))
 
         if mode == "panel":
-            # إعدادات "اللوحة المجمّعة" لهذا التحليل (لون مخصص + فاصل صفحة) —
-            # تنطبق حتى على التحاليل اللي ما إلها تصميم مخصص أصلاً (تُطبع
-            # بالشكل الافتراضي ضمن reports/combined_panel.html)، فمنفصلة
-            # تمامًا عن rows_json/report_templates.
+            # إعدادات "اللوحة المجمّعة" — مستويان: (أ) التحليل كامل، تنطبق
+            # على كل باراميتراته كسلوك احتياطي؛ (ب) كل باراميتر لحاله
+            # (panel_color_<pid>/panel_page_break_<pid>) تكتسح مستوى التحليل
+            # لنفس الباراميتر لو ضُبطت — تسمح بتلوين/فصل باراميتر وحدة بس
+            # (زي NRBC) داخل تحليل متعدد الباراميترات دون التأثير على الباقي.
             panel_color = request.form.get("panel_color", "").strip()
             enable_panel_color = bool(request.form.get("enable_panel_color"))
             panel_color_val = panel_color if (enable_panel_color and panel_color and _HEX_COLOR_RE.match(panel_color)) else None
@@ -4773,9 +4788,19 @@ def report_designer():
                 "UPDATE test_definitions SET panel_color=?, panel_page_break=? WHERE id=?",
                 (panel_color_val, panel_page_break, test_id),
             )
+            for p in parameters:
+                pid = p["id"]
+                p_color = request.form.get(f"param_panel_color_{pid}", "").strip()
+                p_enable = bool(request.form.get(f"enable_param_panel_color_{pid}"))
+                p_color_val = p_color if (p_enable and p_color and _HEX_COLOR_RE.match(p_color)) else None
+                p_page_break = 1 if request.form.get(f"param_panel_page_break_{pid}") else 0
+                db.execute(
+                    "UPDATE test_parameters SET panel_color=?, panel_page_break=? WHERE id=?",
+                    (p_color_val, p_page_break, pid),
+                )
             db.commit()
             log_action("UpdatePanelSettings", "test_definition", int(test_id), "panel")
-            flash("تم حفظ إعدادات اللوحة المجمّعة لهذا التحليل.")
+            flash("تم حفظ إعدادات اللوحة المجمّعة.")
             return redirect(url_for("report_designer", test_definition_id=test_id))
 
         # mode == manual: rebuild the row order from the submitted list of
@@ -4812,9 +4837,13 @@ def report_designer():
         if not rows:
             flash("اختر باراميتر واحد على الأقل لتصميم التقرير.")
             return redirect(url_for("report_designer", test_definition_id=test_id))
+        # تخطيط أعمدة بديل لهذا التقرير كامل (وحدة بعمود مستقل بأقصى اليمين
+        # + نتيجة موسّطة بعمودها) بدل الوضع الافتراضي (الوحدة ملتصقة بنهاية
+        # النتيجة بنفس العمود) — يُضبط مرة وحدة لكل التقرير من نفس الفورم.
+        unit_column = 1 if request.form.get("unit_column") else 0
         rows_json = json.dumps(rows, ensure_ascii=False)
         save_report_template(db, test_id, heading, rows_json, None, session["user_id"],
-                              heading_align=heading_align, rows_align=rows_align)
+                              heading_align=heading_align, rows_align=rows_align, unit_column=unit_column)
         log_action("SaveReportTemplate", "test_definition", int(test_id), "manual")
         flash("تم حفظ تصميم التقرير. الشعار سيُضاف تلقائيًا عند الطباعة.")
         return redirect(url_for("report_designer", test_definition_id=test_id))
@@ -4925,10 +4954,12 @@ def preview_report_design(test_definition_id):
     custom_heading = None
     custom_heading_align = "center"
     custom_rows_align = "right"
+    custom_unit_column = False
     if custom_template:
         custom_heading = custom_template["heading"] or test["name"]
         custom_heading_align = custom_template["heading_align"] or "center"
         custom_rows_align = custom_template["rows_align"] or "right"
+        custom_unit_column = bool(custom_template["unit_column"])
         row_defs = json.loads(custom_template["rows_json"] or "[]")
         custom_rows = [{
             "label": rd.get("label") or rd.get("param_name", ""),
@@ -4939,6 +4970,8 @@ def preview_report_design(test_definition_id):
             "name_side": rd.get("name_side") or "left",
             "range_position": rd.get("range_position") or "inline",
             "name_align": rd.get("name_align"),
+            "color": rd.get("color"),
+            "page_break_before": rd.get("page_break_before", False),
         } for rd in row_defs]
 
     params = {p["name"]: "—" for p in parameters}
@@ -4948,6 +4981,7 @@ def preview_report_design(test_definition_id):
         ot={"test_name": test["name"]}, params=params, ranges={}, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
+        custom_unit_column=custom_unit_column,
         show_prev_values=show_prev_values, previous_visit_date=None, previous_values={},
         repeat_header_on_print=department_shows_previous_values(test["department"]),
         logo_url=logo_url, from_other_lab=False, font_size=14 if test["code"] == "CBC" else 16,
