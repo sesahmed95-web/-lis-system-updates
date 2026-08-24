@@ -38,6 +38,9 @@ app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days when "re
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_LOGO_EXT = {"png", "jpg", "jpeg", "gif", "svg", "webp"}
+# صور خلفية شاشة الترحيب (dashboard) — صور فوتوغرافية بس، بدون svg/gif
+# (svg ما إله فايدة كخلفية ممتدة، وgif المتحرك يشتت الانتباه بشاشة ترحيب).
+ALLOWED_DASHBOARD_BG_EXT = {"png", "jpg", "jpeg", "webp"}
 
 ROLE_LABELS = {
     "admin": "Administrator",
@@ -393,6 +396,11 @@ def inject_globals():
     brand_name = get_setting(db, "app_name_ar" if lang == "ar" else "app_name", t(lang, "app_name"))
     logo_path = get_setting(db, "logo_path", "")
     logo_url = url_for("static", filename=logo_path) if logo_path else None
+    # خلفية شاشة الترحيب (dashboard) — اختيارية، تُرفع من Management → الإعدادات
+    # (بطاقة "خلفية شاشة الترحيب")، نفس أسلوب الشعار logo_path أعلاه بالضبط.
+    # محقونة هنا عالمياً حتى تتوفر بـ dashboard.html دون تمريرها يدويًا من route.
+    dashboard_bg_path = get_setting(db, "dashboard_bg_path", "")
+    dashboard_bg_url = url_for("static", filename=dashboard_bg_path) if dashboard_bg_path else None
     # عنوان وهاتف المختبر — اختياريان، يُضبطان مرة وحدة من الإعدادات (بطاقة
     # العلامة التجارية) ويظهران تلقائيًا بأي قالب يحتاجهم (خصوصًا فاتورة
     # A5 — نقطة #10) بدون تمريرهما يدويًا من كل route.
@@ -432,6 +440,7 @@ def inject_globals():
     return dict(t=lambda key: t(lang, key), lang=lang,
                 current_user=session.get("full_name"), current_role=session.get("role"),
                 brand_name=brand_name, logo_url=logo_url,
+                dashboard_bg_url=dashboard_bg_url,
                 lab_address=lab_address, lab_phone=lab_phone,
                 report_row_pad=report_row_pad, report_col_pad=report_col_pad,
                 letterhead_doctors=letterhead_doctors,
@@ -2792,6 +2801,18 @@ def visit_results_entry(visit_id):
         flash("لا توجد تحاليل مطلوبة بهذي الزيارة.")
         return redirect(url_for("results_list"))
 
+    # ترتيب ثابت لعرض/طباعة/إدخال التحاليل — بغض النظر عن ترتيب طلبها الفعلي
+    # بهذي الزيارة (ot.id الافتراضي). الأدمن يحدد الترتيب المطلوب من
+    # Management → الإعدادات → "ترتيب التحاليل بشاشة إدخال النتائج" (اسم
+    # التحليل بالضبط كما يظهر بالشاشة، مثلاً "HbA1c (BioChemstry)"، سطر لكل
+    # تحليل). أي تحليل غير مذكور هناك يظهر بعد كل المذكورين، بنفس ترتيبه
+    # الأصلي (ot.id) فيما بينهم.
+    order_pref_raw = get_setting(db, "results_entry_test_order", "")
+    order_pref = [ln.strip() for ln in order_pref_raw.splitlines() if ln.strip()]
+    if order_pref:
+        rank = {name: i for i, name in enumerate(order_pref)}
+        order_tests = sorted(order_tests, key=lambda row: (rank.get(row["test_name"], len(order_pref)), row["id"]))
+
     if request.method == "POST":
         any_saved = False
         for ot in order_tests:
@@ -4434,6 +4455,32 @@ def app_settings():
             else:
                 flash("Unsupported logo file type. Use PNG, JPG, GIF, SVG or WEBP.")
 
+        # خلفية شاشة الترحيب (dashboard) — نفس منطق رفع الشعار أعلاه بالضبط:
+        # نحذف أي نسخة قديمة (بأي امتداد) ثم نحفظ الجديدة باسم ثابت
+        # dashboard-bg.<ext> حتى يبقى مسار واحد معروف. زر "إزالة الصورة"
+        # منفصل (checkbox/hidden باسم remove_dashboard_bg) يمسحها بدون رفع بديل.
+        if request.form.get("remove_dashboard_bg") == "1":
+            old_bg_path = get_setting(db, "dashboard_bg_path", "")
+            if old_bg_path:
+                old_bg_full = os.path.join(UPLOAD_DIR, os.path.basename(old_bg_path))
+                if os.path.exists(old_bg_full):
+                    os.remove(old_bg_full)
+            set_setting(db, "dashboard_bg_path", "")
+        else:
+            bg_file = request.files.get("dashboard_bg")
+            if bg_file and bg_file.filename:
+                bg_ext = bg_file.filename.rsplit(".", 1)[-1].lower() if "." in bg_file.filename else ""
+                if bg_ext in ALLOWED_DASHBOARD_BG_EXT:
+                    bg_filename = secure_filename(f"dashboard-bg.{bg_ext}")
+                    for old_ext in ALLOWED_DASHBOARD_BG_EXT:
+                        old_bg = os.path.join(UPLOAD_DIR, f"dashboard-bg.{old_ext}")
+                        if os.path.exists(old_bg):
+                            os.remove(old_bg)
+                    bg_file.save(os.path.join(UPLOAD_DIR, bg_filename))
+                    set_setting(db, "dashboard_bg_path", f"uploads/{bg_filename}")
+                else:
+                    flash("صيغة صورة غير مدعومة لخلفية شاشة الترحيب. استخدم PNG أو JPG أو WEBP.")
+
         # ملاحظة: إدارة أسماء وشهادات دكاترة الفحص انتقلت لشاشة مستقلة
         # (management/examining_doctors.html عبر الرابط بهذي الصفحة) — ما عاد
         # فيها فورم هنا.
@@ -4492,6 +4539,15 @@ def app_settings():
         if panel_group_order_raw is not None:
             set_setting(db, "combined_panel_group_order", panel_group_order_raw.strip())
 
+        # ترتيب ثابت للتحاليل بشاشة "إدخال النتائج" (Results Entry) — سطر
+        # لكل اسم تحليل بالضبط كما يظهر بالشاشة (مثلاً "HbA1c (BioChemstry)")،
+        # بنفس الترتيب اللي يريده الأدمن، ثابت دائماً بغض النظر عن ترتيب
+        # طلب التحاليل الفعلي بكل زيارة. فاضي بالكامل = رجوع لترتيب الطلب
+        # الأصلي (ot.id) كالسابق.
+        results_order_raw = request.form.get("results_entry_test_order")
+        if results_order_raw is not None:
+            set_setting(db, "results_entry_test_order", results_order_raw.strip())
+
         # حجم خط اسم التحليل وحجم خط النتيجة بجدول/بطاقات النتائج بكل
         # التقارير المطبوعة — إعدادان عامان منفصلان عن بعض (وعن حجم خط
         # ترويسة الدكاترة letterhead_font_size أعلاه)، دفعة وحدة لكل
@@ -4548,6 +4604,7 @@ def app_settings():
         "lab_address": get_setting(db, "lab_address", ""),
         "lab_phone": get_setting(db, "lab_phone", ""),
         "logo_path": get_setting(db, "logo_path", ""),
+        "dashboard_bg_path": get_setting(db, "dashboard_bg_path", ""),
         "report_row_pad": get_setting(db, "report_row_pad", "5"),
         "report_col_pad": get_setting(db, "report_col_pad", "12"),
         "whatsapp_country_code": get_setting(db, "whatsapp_country_code", "964"),
@@ -4559,6 +4616,7 @@ def app_settings():
         "logo_position": get_setting(db, "logo_position", "right"),
         "logo_width": get_setting(db, "logo_width", "100"),
         "combined_panel_group_order": get_setting(db, "combined_panel_group_order", ""),
+        "results_entry_test_order": get_setting(db, "results_entry_test_order", ""),
     }
     marker_colors_by_char = get_conclusion_marker_colors(db)
     conclusion_markers = [

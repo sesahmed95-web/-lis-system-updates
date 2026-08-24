@@ -37,6 +37,40 @@
       <span class="muted">PNG / JPG / GIF / SVG / WEBP</span>
     </div>
 
+    <div class="form-field">
+      <label>موضع الشعار بترويسة التقرير المطبوع</label>
+      <select name="logo_position">
+        <option value="right" {{ 'selected' if current.logo_position == 'right' }}>يمين (الافتراضي)</option>
+        <option value="center" {{ 'selected' if current.logo_position == 'center' }}>وسط</option>
+        <option value="left" {{ 'selected' if current.logo_position == 'left' }}>يسار</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>حجم الشعار (عرضه بالبكسل) — القيمة الافتراضية 100</label>
+      <input type="number" name="logo_width" min="30" max="300" value="{{ current.logo_width }}" style="width:120px;">
+    </div>
+
+    <div class="form-field">
+      <label>🖼️ خلفية شاشة الترحيب (Dashboard)</label>
+      <span class="muted" style="display:block; margin-bottom:8px;">
+        اختر أي صورة (مختبر، مبنى...) — البرنامج يظبطها تلقائياً (يقصّها لتملأ
+        الشاشة، يعتّمها، يموّهها بنفس الدرجة دائماً) حتى تنسجم مع تصميم
+        البرنامج بغض النظر عن حجمها أو ألوانها الأصلية. تظهر فقط بشاشة
+        الترحيب بعد تسجيل الدخول، مو خلف باقي الصفحات. اتركها فاضية للرجوع
+        للخلفية المتدرّجة الافتراضية.
+      </span>
+      {% if dashboard_bg_url %}
+        <img src="{{ dashboard_bg_url }}" alt="dashboard background preview"
+             style="max-height:90px; max-width:220px; object-fit:cover; border:1px solid var(--border); border-radius:8px; padding:4px; display:block; margin-bottom:8px;">
+        <label class="checkbox-item">
+          <input type="checkbox" name="remove_dashboard_bg" value="1">
+          إزالة الصورة الحالية والرجوع للخلفية الافتراضية
+        </label>
+      {% endif %}
+      <input type="file" name="dashboard_bg" accept=".png,.jpg,.jpeg,.webp" style="margin-top:8px;">
+      <span class="muted">PNG / JPG / WEBP</span>
+    </div>
+
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
 </div>
@@ -86,6 +120,25 @@
 </div>
 
 <div class="card" style="max-width:640px;">
+  <h3>🔠 حجم خط أسماء التحاليل والنتائج</h3>
+  <p class="muted">
+    يتحكم هذا بحجم خط اسم كل تحليل (Test) وحجم خط النتيجة نفسها بكل التقارير
+    المطبوعة دفعة وحدة — منفصل تمامًا عن حجم خط ترويسة الدكاترة أعلاه.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>حجم خط اسم التحليل (بكسل) — القيمة الافتراضية 16</label>
+      <input type="number" name="test_name_font_size" min="8" max="30" value="{{ current.test_name_font_size }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>حجم خط النتيجة (بكسل) — القيمة الافتراضية 16</label>
+      <input type="number" name="result_value_font_size" min="8" max="30" value="{{ current.result_value_font_size }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
   <h3>حجم جدول النتائج بالتقارير المطبوعة</h3>
   <p class="muted">
     يتحكم هذا بارتفاع صفوف جدول النتائج (Test / Result / Control / Unit...) وعرض أعمدته
@@ -100,6 +153,44 @@
     <div class="form-field">
       <label>عرض العمود (بكسل) — القيمة الافتراضية 12</label>
       <input type="number" name="report_col_pad" min="2" max="40" value="{{ current.report_col_pad }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🗂️ ترتيب أقسام اللوحة المجمّعة</h3>
+  <p class="muted">
+    لما تُطبع أكثر من تحليل سوا بورقة وحدة لنفس المريض، الأقسام (زي
+    Biochemical Test, Hormones, Vitamins...) تترتب أبجديًا افتراضيًا. اكتب
+    أسماء الأقسام هنا كل اسم بسطر مستقل بالترتيب اللي تريده — أي قسم غير
+    مذكور هنا يظهر بعدها بترتيبه الأبجدي الاعتيادي. اترك الحقل فاضي للرجوع
+    للترتيب الأبجدي بالكامل.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ترتيب الأقسام (سطر لكل قسم)</label>
+      <textarea name="combined_panel_group_order" rows="5" style="width:100%; direction:ltr;" placeholder="Hormones&#10;Vitamins&#10;Biochemical Test">{{ current.combined_panel_group_order }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🧪 ترتيب التحاليل بشاشة إدخال النتائج</h3>
+  <p class="muted">
+    شاشة "Results Entry" تعرض التحاليل حسب ترتيب طلبها بالزيارة افتراضيًا،
+    وهذا يختلف من زيارة لزيارة. اكتب هنا اسم كل تحليل بالضبط كما يظهر
+    بالشاشة (نفس النص اللي فوق كل بطاقة تحليل، مثلاً "HbA1c (BioChemstry)")،
+    كل اسم بسطر مستقل، بالترتيب الثابت اللي تريده — ينطبق على كل الزيارات
+    دايماً بغض النظر عن التحاليل المطلوبة أو ترتيب طلبها الفعلي. أي تحليل
+    بالزيارة غير مذكور بالقائمة هنا يظهر بعد كل المذكورين. اترك الحقل فاضي
+    للرجوع لترتيب الطلب الأصلي.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ترتيب التحاليل (سطر لكل تحليل، بنفس الاسم بالضبط)</label>
+      <textarea name="results_entry_test_order" rows="8" style="width:100%; direction:ltr;" placeholder="HbA1c (BioChemstry)&#10;Triglycerides (BioChemstry)&#10;Total PSA (Hormones)&#10;Vitamin D3 Total (Hormones)&#10;Erythrocyte Sedimentation Rate (ESR) (Hematology)">{{ current.results_entry_test_order }}</textarea>
     </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>

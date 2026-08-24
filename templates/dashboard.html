@@ -2,156 +2,193 @@
 {% block page_title %}{{ t('dashboard') }}{% endblock %}
 {% block content %}
 <style>
-  #dashSearchWrap { position: relative; margin-bottom: 14px; }
-  #dashSearchInput { width: 100%; max-width: 420px; padding: 9px 12px; font-size: 14px;
-    border: 1px solid #E2E8F0; border-radius: 8px; }
-  #dashSearchResults { position: absolute; z-index: 20; top: 100%; margin-top: 4px;
-    width: 100%; max-width: 420px; background: var(--card-bg, #fff); border: 1px solid #E2E8F0;
-    border-radius: 8px; max-height: 360px; overflow-y: auto; box-shadow: 0 6px 16px rgba(0,0,0,.12); display: none; }
-  #dashSearchResults .ds-group-title { padding: 6px 10px; font-size: 11.5px; font-weight: 700;
-    color: #64748B; background: #F8FAFC; }
-  #dashSearchResults .ds-item { padding: 8px 10px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #EEF2F6; }
-  #dashSearchResults .ds-item:hover { background: #F1F5F9; }
-  #dashSearchResults .ds-item small { display: block; color: #64748B; }
-  #dashSearchResults .ds-empty { padding: 10px; font-size: 12.5px; color: #64748B; }
-  /* بطاقات الرئيسية أصبحت روابط فعلية — نفس شكل stat-card تماماً بس
-     بدون خط تحت وبلون نص موروث، وتأثير بسيط عند المرور يوضّح أنها قابلة
-     للنقر بدون ما نغيّر التصميم العام. */
-  a.stat-card-link { text-decoration: none; color: inherit; display: block; cursor: pointer;
-    transition: transform .12s ease, box-shadow .12s ease; }
-  a.stat-card-link:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,.08); }
+  .dash-hero {
+    position: relative;
+    min-height: calc(100vh - 220px);
+    border-radius: 18px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 24px;
+    isolation: isolate;
+  }
+  .dash-hero::before {
+    /*
+      خلفية شاشة الترحيب: تدرّج ألوان ثابت دائماً كطبقة تعتيم فوق أي صورة
+      يرفعها الأدمن من الإعدادات (dashboard_bg_url) — بهذا الشكل أي صورة
+      (أي حجم/دقة/ألوان) تنعرض دائماً بنفس "المزاج" اللي ينسجم مع تصميم
+      البرنامج: نفس التعتيم، نفس التمويه، نفس القص (cover) — بدون ما نحتاج
+      نعالج كل صورة يدويًا. إذا ما فيه صورة مرفوعة (dashboard_bg_url فاضي)
+      يبقى التدرّج اللوني وحده وتشتغل الشاشة زينة برضو.
+    */
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(rgba(10, 16, 28, .62), rgba(10, 16, 28, .62))
+      {%- if dashboard_bg_url %}, url("{{ dashboard_bg_url }}") center / cover no-repeat{% endif %},
+      linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #0f172a 100%);
+    filter: blur(2px);
+    transform: scale(1.03); /* يمنع ظهور حواف الـ blur */
+    z-index: 0;
+  }
+  html.dark .dash-hero::before {
+    background:
+      linear-gradient(rgba(2, 6, 14, .72), rgba(2, 6, 14, .72))
+      {%- if dashboard_bg_url %}, url("{{ dashboard_bg_url }}") center / cover no-repeat{% endif %},
+      linear-gradient(135deg, #0b1220 0%, #131c2e 55%, #0b1220 100%);
+  }
+  .dash-hero-content {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    color: #f8fafc;
+    padding: 40px 20px;
+  }
+  .dash-welcome {
+    font-size: clamp(24px, 4vw, 34px);
+    font-weight: 300;
+    letter-spacing: .5px;
+    opacity: .92;
+    margin-bottom: 6px;
+  }
+  .dash-welcome b { font-weight: 700; }
+  .dash-clock {
+    font-size: clamp(48px, 9vw, 92px);
+    font-weight: 700;
+    line-height: 1.05;
+    margin: 6px 0;
+    font-variant-numeric: tabular-nums;
+    direction: ltr;
+  }
+  .dash-date {
+    font-size: clamp(15px, 2vw, 19px);
+    opacity: .85;
+    margin-top: 4px;
+  }
+  .dash-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .dash-stat-card {
+    background: var(--card-bg, #fff);
+    border-radius: 14px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  html.dark .dash-stat-card { background: #1e293b; color: #f1f5f9; }
+  .dash-stat-icon { font-size: 26px; }
+  .dash-stat-value { font-size: 22px; font-weight: 700; line-height: 1.1; }
+  .dash-stat-label { font-size: 12.5px; opacity: .7; }
+  .dash-stat-card.critical .dash-stat-value { color: #dc2626; }
+
+  .dash-recent {
+    background: var(--card-bg, #fff);
+    border-radius: 14px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  }
+  html.dark .dash-recent { background: #1e293b; color: #f1f5f9; }
+  .dash-recent h3 { margin: 0 0 12px; font-size: 15px; }
+  .dash-recent table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .dash-recent th { text-align: {{ 'right' if lang == 'ar' else 'left' }}; opacity: .6; font-weight: 600; padding: 6px 8px; }
+  .dash-recent td { padding: 8px; border-top: 1px solid rgba(127,127,127,.15); }
 </style>
-<div id="dashSearchWrap">
-  <input type="text" id="dashSearchInput" autocomplete="off"
-         placeholder="🔎 بحث باسم المريض، أو الطبيب المُحيل، أو المختبر المُرسِل...">
-  <div id="dashSearchResults"></div>
-</div>
-<div class="stat-grid">
-  <a class="stat-card-link" href="{{ url_for('visits_list') }}">
-    <div class="stat-card">
-      <div class="label">{{ t('today_visits') }}</div>
-      <div class="value">{{ visits_today }}</div>
-    </div>
-  </a>
-  <a class="stat-card-link" href="{{ url_for('daily_report') }}">
-    <div class="stat-card">
-      <div class="label">{{ t('today_revenue') }}</div>
-      <div class="value">{{ "%.0f"|format(revenue_today) }}</div>
-    </div>
-  </a>
-  <a class="stat-card-link" href="{{ url_for('results_list', filter='pending') }}">
-    <div class="stat-card">
-      <div class="label">{{ t('pending_results') }}</div>
-      <div class="value">{{ pending_results }}</div>
-    </div>
-  </a>
-  <a class="stat-card-link" href="{{ url_for('results_list', filter='critical') }}">
-    <div class="stat-card {{ 'warn' if critical_count > 0 else '' }}">
-      <div class="label">{{ t('critical_alerts') }}</div>
-      <div class="value">{{ critical_count }}</div>
-    </div>
-  </a>
+
+<!-- شاشة الترحيب: تعبي منتصف صفحة المحتوى بالساعة والتاريخ -->
+<div class="dash-hero">
+  <div class="dash-hero-content">
+    <div class="dash-welcome">{{ t('welcome') if t('welcome') else ('مرحباً' if lang=='ar' else 'Welcome') }}, <b>{{ current_user }}</b></div>
+    <div class="dash-clock" id="dashClock">--:--</div>
+    <div class="dash-date" id="dashDate">&nbsp;</div>
+  </div>
 </div>
 
-<div class="card">
-  <h3>{{ t('visits') }}</h3>
+<!-- إحصائيات سريعة -->
+<div class="dash-stats">
+  <div class="dash-stat-card">
+    <div class="dash-stat-icon">📋</div>
+    <div>
+      <div class="dash-stat-value">{{ visits_today }}</div>
+      <div class="dash-stat-label">{{ 'زيارات اليوم' if lang=='ar' else "Today's Visits" }}</div>
+    </div>
+  </div>
+  <div class="dash-stat-card">
+    <div class="dash-stat-icon">💳</div>
+    <div>
+      <div class="dash-stat-value">{{ revenue_today }}</div>
+      <div class="dash-stat-label">{{ 'إيرادات اليوم' if lang=='ar' else "Today's Revenue" }}</div>
+    </div>
+  </div>
+  <div class="dash-stat-card">
+    <div class="dash-stat-icon">⏳</div>
+    <div>
+      <div class="dash-stat-value">{{ pending_results }}</div>
+      <div class="dash-stat-label">{{ 'نتائج قيد الانتظار' if lang=='ar' else 'Pending Results' }}</div>
+    </div>
+  </div>
+  <div class="dash-stat-card critical">
+    <div class="dash-stat-icon">🚨</div>
+    <div>
+      <div class="dash-stat-value">{{ critical_count }}</div>
+      <div class="dash-stat-label">{{ 'حرجة غير موثّقة' if lang=='ar' else 'Unverified Critical' }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- آخر الزيارات -->
+<div class="dash-recent">
+  <h3>{{ 'آخر الزيارات' if lang=='ar' else 'Recent Visits' }}</h3>
   <table>
-    <thead><tr>
-      <th>{{ t('no_col') }}</th><th>{{ t('name') }}</th><th>{{ t('status') }}</th><th>{{ t('date') }}</th>
-    </tr></thead>
+    <thead>
+      <tr>
+        <th>{{ 'رقم التسجيل' if lang=='ar' else 'Reg. No' }}</th>
+        <th>{{ 'المريض' if lang=='ar' else 'Patient' }}</th>
+        <th>{{ 'الحالة' if lang=='ar' else 'Status' }}</th>
+        <th>{{ 'التاريخ' if lang=='ar' else 'Date' }}</th>
+      </tr>
+    </thead>
     <tbody>
       {% for v in recent_visits %}
       <tr>
-        <td class="mono">{{ v['registration_number'] }}</td>
-        <td>{{ v['full_name'] }}</td>
-        <td><span class="badge badge-{{ v['status'] }}">{{ v['status'] }}</span></td>
-        <td>{{ v['created_at'] }}</td>
+        <td>{{ v.registration_number }}</td>
+        <td>{{ v.full_name }}</td>
+        <td>{{ v.status }}</td>
+        <td>{{ v.created_at }}</td>
       </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center; opacity:.6;">{{ 'لا توجد زيارات' if lang=='ar' else 'No visits yet' }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 
 <script>
-  // بحث موحّد بالرئيسية: اسم مريض (يودّي لسجله الكامل)، أو اسم طبيب
-  // مُحيل / مختبر مُرسِل (يودّي لقائمة زياراته مرتبة بالأحدث تاريخًا
-  // ووقتًا عبر /front-desk/visits؟doctor_id= أو ؟referral_center_id=).
   (function () {
-    const input = document.getElementById('dashSearchInput');
-    const resultsEl = document.getElementById('dashSearchResults');
-    const VISITS_URL = "{{ url_for('visits_list') }}";
-    const PATIENT_HISTORY_TEMPLATE = "{{ url_for('patient_history', patient_id=999999) }}";
-    let debounceTimer = null;
+    var locale = "{{ 'ar-IQ' if lang == 'ar' else 'en-US' }}";
+    var clockEl = document.getElementById('dashClock');
+    var dateEl = document.getElementById('dashDate');
 
-    function hideResults() {
-      resultsEl.style.display = 'none';
-      resultsEl.innerHTML = '';
-    }
-
-    function escapeHtml(s) {
-      return (s || '').replace(/[&<>"']/g, function (c) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    function tick() {
+      var now = new Date();
+      clockEl.textContent = now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+      dateEl.textContent = now.toLocaleDateString(locale, {
+        weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
       });
     }
-
-    function renderGroup(title, items, buildLine) {
-      if (!items.length) return '';
-      let html = '<div class="ds-group-title">' + title + '</div>';
-      items.forEach(function (it) {
-        html += buildLine(it);
-      });
-      return html;
-    }
-
-    input.addEventListener('input', function () {
-      const q = this.value.trim();
-      clearTimeout(debounceTimer);
-      if (q.length < 2) { hideResults(); return; }
-      debounceTimer = setTimeout(function () {
-        fetch('/api/dashboard/search?q=' + encodeURIComponent(q))
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            const totalCount = (data.patients || []).length + (data.doctors || []).length + (data.referral_labs || []).length;
-            if (!totalCount) {
-              resultsEl.innerHTML = '<div class="ds-empty">لا توجد نتائج مطابقة.</div>';
-              resultsEl.style.display = 'block';
-              return;
-            }
-            let html = '';
-            html += renderGroup('🧑‍🤝‍🧑 مرضى', data.patients, function (p) {
-              const last = p.last_visit_at ? p.last_visit_at.slice(0, 16).replace('T', ' ') : 'بدون زيارات سابقة';
-              return '<div class="ds-item" data-href="' + PATIENT_HISTORY_TEMPLATE.replace('999999', p.id) + '">' +
-                escapeHtml(p.full_name) +
-                '<small>' + (p.gender || '') + ' · ' + (p.age || '-') + ' ' + (p.age_unit || '') +
-                ' · ' + (p.phone || '') + ' · آخر زيارة: ' + last + '</small></div>';
-            });
-            html += renderGroup('🩺 أطباء مُحيلون', data.doctors, function (d) {
-              const last = d.last_visit_at ? d.last_visit_at.slice(0, 16).replace('T', ' ') : 'بدون زيارات';
-              return '<div class="ds-item" data-href="' + VISITS_URL + '?doctor_id=' + d.id + '">' +
-                escapeHtml(d.full_name) +
-                '<small>' + (d.phone || '') + ' · آخر زيارة: ' + last + '</small></div>';
-            });
-            html += renderGroup('🧪 مختبرات مُرسِلة', data.referral_labs, function (l) {
-              const last = l.last_visit_at ? l.last_visit_at.slice(0, 16).replace('T', ' ') : 'بدون زيارات';
-              return '<div class="ds-item" data-href="' + VISITS_URL + '?referral_center_id=' + l.id + '">' +
-                escapeHtml(l.name) +
-                '<small>' + (l.phone || '') + ' · آخر زيارة: ' + last + '</small></div>';
-            });
-            resultsEl.innerHTML = html;
-            resultsEl.style.display = 'block';
-            resultsEl.querySelectorAll('.ds-item').forEach(function (el) {
-              el.addEventListener('click', function () {
-                window.location.href = this.getAttribute('data-href');
-              });
-            });
-          })
-          .catch(hideResults);
-      }, 300);
-    });
-
-    document.addEventListener('click', function (e) {
-      if (!document.getElementById('dashSearchWrap').contains(e.target)) hideResults();
-    });
+    tick();
+    setInterval(tick, 1000 * 30); // تحديث كل 30 ثانية يكفي للساعة بصيغة hh:mm
+    setInterval(function () {
+      // تحديث الثواني الفعلي كل ثانية لعرض دقيق للوقت
+      var now = new Date();
+      clockEl.textContent = now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+    }, 1000);
   })();
 </script>
 {% endblock %}

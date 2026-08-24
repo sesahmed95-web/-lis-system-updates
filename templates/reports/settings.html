@@ -156,6 +156,26 @@
 </div>
 
 <div class="card" style="max-width:640px;">
+  <h3>🧪 ترتيب التحاليل بشاشة إدخال النتائج</h3>
+  <p class="muted">
+    شاشة "Results Entry" تعرض التحاليل حسب ترتيب طلبها بالزيارة افتراضيًا،
+    وهذا يختلف من زيارة لزيارة. اكتب هنا اسم كل تحليل بالضبط كما يظهر
+    بالشاشة (نفس النص اللي فوق كل بطاقة تحليل، مثلاً "HbA1c (BioChemstry)")،
+    كل اسم بسطر مستقل، بالترتيب الثابت اللي تريده — ينطبق على كل الزيارات
+    دايماً بغض النظر عن التحاليل المطلوبة أو ترتيب طلبها الفعلي. أي تحليل
+    بالزيارة غير مذكور بالقائمة هنا يظهر بعد كل المذكورين. اترك الحقل فاضي
+    للرجوع لترتيب الطلب الأصلي.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ترتيب التحاليل (سطر لكل تحليل، بنفس الاسم بالضبط)</label>
+      <textarea name="results_entry_test_order" rows="8" style="width:100%; direction:ltr;" placeholder="HbA1c (BioChemstry)&#10;Triglycerides (BioChemstry)&#10;Total PSA (Hormones)&#10;Vitamin D3 Total (Hormones)&#10;Erythrocyte Sedimentation Rate (ESR) (Hematology)">{{ current.results_entry_test_order }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
   <h3>📱 إرسال النتائج عبر واتساب</h3>
   <p class="muted">
     كود الدولة يُستخدم لتحويل أرقام الهواتف المحلية (اللي تبدأ بصفر) لصيغة
