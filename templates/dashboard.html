@@ -104,7 +104,7 @@
 <!-- شاشة الترحيب: تعبي منتصف صفحة المحتوى بالساعة والتاريخ -->
 <div class="dash-hero">
   <div class="dash-hero-content">
-    <div class="dash-welcome">{{ t('welcome') if t('welcome') else ('مرحباً' if lang=='ar' else 'Welcome') }}, <b>{{ current_user }}</b></div>
+    <div class="dash-welcome">{{ 'مرحباً' if lang=='ar' else 'Welcome' }}, <b>{{ current_user }}</b></div>
     <div class="dash-clock" id="dashClock">--:--</div>
     <div class="dash-date" id="dashDate">&nbsp;</div>
   </div>

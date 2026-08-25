@@ -1011,13 +1011,32 @@ def new_visit():
             return redirect(url_for("new_visit"))
 
         name = request.form.get("patient_name", "").strip()
+        title = request.form.get("title", "Mr.")
         gender = request.form.get("gender", "")
         age = request.form.get("age") or None
         age_unit = request.form.get("age_unit") or "Years"
         phone = request.form.get("phone", "")
+        email = request.form.get("email", "").strip()
         address = request.form.get("address", "")
+        national_id = request.form.get("national_id", "").strip()
+        passport_number = request.form.get("passport_number", "").strip()
+        travel_certificate_number = request.form.get("travel_certificate_number", "").strip()
+        lab_card_number = request.form.get("lab_card_number", "").strip()
         fasting = request.form.get("fasting", "Undefined")
         notes = request.form.get("notes", "")
+        # المعلومات الصحية (Health Information) — خاصة بهذي الزيارة تحديداً.
+        weight = request.form.get("weight") or None
+        height = request.form.get("height") or None
+        symptoms = request.form.get("symptoms", "")
+        disease = request.form.get("disease", "")
+        therapy = request.form.get("therapy", "")
+        # الزيارة المنزلية (Home Visit)
+        is_home_visit = 1 if request.form.get("is_home_visit") == "1" else 0
+        home_visit_address = request.form.get("home_visit_address", "") if is_home_visit else ""
+        try:
+            home_visit_fee = float(request.form.get("home_visit_fee") or 0) if is_home_visit else 0.0
+        except ValueError:
+            home_visit_fee = 0.0
         examining_doctor = request.form.get("examining_doctor", "")
         expenses = request.form.get("expenses") or 0
         # حقل "الدكتور الفاحص" (attending_doctor) صار نفس "دكتور المختبر
@@ -1054,21 +1073,28 @@ def new_visit():
 
         if patient_id is None:
             cur = db.execute(
-                "INSERT INTO patients (full_name, gender, age, age_unit, phone, address, contact_method, branch_id, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (name, gender, age, age_unit, phone, address, contact_method, session.get("branch_id"), now),
+                "INSERT INTO patients (full_name, gender, age, age_unit, phone, address, contact_method, "
+                "title, email, national_id, passport_number, travel_certificate_number, lab_card_number, "
+                "branch_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (name, gender, age, age_unit, phone, address, contact_method,
+                 title, email, national_id, passport_number, travel_certificate_number, lab_card_number,
+                 session.get("branch_id"), now),
             )
             patient_id = cur.lastrowid
 
         examining_doctor_fee = compute_examining_doctor_fee(db, examining_doctor, test_ids)
 
         reg_number = next_registration_number(db)
+        visit_type = "home-visit" if is_home_visit else "walk-in"
         cur = db.execute(
             "INSERT INTO visits (registration_number, patient_id, doctor_id, referral_center_id, visit_type, fasting, notes, "
-            "examining_doctor, expenses, examining_doctor_fee, attending_doctor, status, branch_id, created_by, created_at) "
-            "VALUES (?, ?, ?, ?, 'walk-in', ?, ?, ?, ?, ?, ?, 'Open', ?, ?, ?)",
-            (reg_number, patient_id, referring_doctor_id, referral_center_id, fasting, notes, examining_doctor, expenses,
-             examining_doctor_fee, attending_doctor, session.get("branch_id"), session["user_id"], now),
+            "examining_doctor, expenses, examining_doctor_fee, attending_doctor, weight, height, symptoms, disease, therapy, "
+            "is_home_visit, home_visit_address, home_visit_fee, status, branch_id, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', ?, ?, ?)",
+            (reg_number, patient_id, referring_doctor_id, referral_center_id, visit_type, fasting, notes, examining_doctor, expenses,
+             examining_doctor_fee, attending_doctor, weight, height, symptoms, disease, therapy,
+             is_home_visit, home_visit_address, home_visit_fee, session.get("branch_id"), session["user_id"], now),
         )
         visit_id = cur.lastrowid
 
@@ -1092,6 +1118,10 @@ def new_visit():
                 (order_id, tid, barcode, price, referring_doctor_id, now, now),
             )
             total += price or 0
+
+        # أجرة الزيارة المنزلية الإضافية (إن فُعِّلت) تُضاف لمجموع الفحوصات
+        # قبل حساب الفاتورة، بنفس أسلوب أي بند إضافي بالمجموع.
+        total += home_visit_fee
 
         # "المبلغ الكلي" بصفحة الزيارة الجديدة يبدأ محسوبًا تلقائيًا من
         # مجموع أسعار التحاليل المختارة، بس موظف الاستقبال يقدر يعدّله يدويًا

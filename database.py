@@ -441,7 +441,16 @@ def migrate(conn):
         ],
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
         "visits": [("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
-                    ("examining_doctor_fee", "REAL DEFAULT 0"), ("attending_doctor", "TEXT")],
+                    ("examining_doctor_fee", "REAL DEFAULT 0"), ("attending_doctor", "TEXT"),
+                    # حقول "المعلومات الصحية" الجديدة بشاشة "زيارة جديدة" — خاصة
+                    # بكل زيارة تحديداً (تختلف من زيارة لأخرى لنفس المريض)، لذلك
+                    # على جدول visits وليس patients.
+                    ("weight", "REAL"), ("height", "REAL"), ("symptoms", "TEXT"),
+                    ("disease", "TEXT"), ("therapy", "TEXT"),
+                    # الزيارة المنزلية (Home Visit): علامة + عنوان + أجرة إضافية
+                    # خاصة بهذي الزيارة فقط.
+                    ("is_home_visit", "INTEGER DEFAULT 0"), ("home_visit_address", "TEXT"),
+                    ("home_visit_fee", "REAL DEFAULT 0")],
         "test_definitions": [("is_examining_test", "INTEGER DEFAULT 0"),
                                # report_group: اسم "الريبورت المجمّع" اللي ينتمي له هذا
                                # التحليل (مثلاً "Thyroid function test" أو "Viral study")،

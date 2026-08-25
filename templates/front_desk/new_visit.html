@@ -3,18 +3,18 @@
 {% block content %}
 <style>
   /* تصغير المسافات بهذي الصفحة فقط حتى يصير كل شي ظاهر بدون نزول للأسفل */
-  .nv-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
-  .nv-row .card { margin-bottom: 0; }
-  .nv-row .card { padding: 12px 14px; }
-  .nv-row h3 { font-size: 14.5px; margin-bottom: 8px; }
-  .nv-row .form-field { margin-bottom: 6px; }
-  .nv-row textarea { min-height: 40px; }
-  .nv-orders-card { padding: 12px 14px; margin-top: 12px; }
+  .nv-layout { display: grid; grid-template-columns: 1.35fr 1fr; gap: 12px; align-items: start; }
+  .nv-left { display: flex; flex-direction: column; gap: 12px; }
+  .nv-layout .card { margin-bottom: 0; padding: 12px 14px; }
+  .nv-layout h3 { font-size: 14.5px; margin-bottom: 8px; }
+  .nv-layout .form-field { margin-bottom: 6px; }
+  .nv-layout textarea { min-height: 40px; }
+  .nv-orders-card { padding: 12px 14px; }
   .nv-orders-card h3 { font-size: 14.5px; margin-bottom: 8px; }
-  .nv-checkbox-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 10px; }
+  .nv-checkbox-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 10px; }
   .nv-checkbox-grid .checkbox-item { font-size: 12.5px; }
   @media (max-width: 1100px) {
-    .nv-row { grid-template-columns: 1fr; }
+    .nv-layout { grid-template-columns: 1fr; }
     .nv-checkbox-grid { grid-template-columns: repeat(2, 1fr); }
   }
   #patientMatches { position: relative; }
@@ -36,29 +36,49 @@
   #visitCreatedPanel .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
   #customTestRow { display:flex; gap:6px; align-items:flex-end; margin-bottom:10px; flex-wrap:wrap; }
   #customTestRow .form-field { margin-bottom:0; }
+
+  /* الشريط السفلي: زر الحفظ + تأكيد سحب العينة + طباعة الباركود على اليسار،
+     ومفاتيح Visit Barcode / Sample-wise / Invoice على اليمين — نفس ترتيب
+     الصورة المطلوبة. */
+  .nv-bottombar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;
+    gap:12px; margin-top:12px; padding:12px 14px; background: var(--card-bg, #fff); border-radius:10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .nv-bottombar-left { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .nv-bottombar-right { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .nv-toggle-wrap { display:flex; align-items:center; gap:8px; font-size:12.5px; }
+  .nv-switch { position:relative; display:inline-block; width:38px; height:20px; flex-shrink:0; }
+  .nv-switch input { opacity:0; width:0; height:0; }
+  .nv-switch-slider { position:absolute; cursor:pointer; inset:0; background:#CBD5E1; border-radius:20px; transition:.15s; }
+  .nv-switch-slider::before { content:""; position:absolute; height:14px; width:14px; left:3px; top:3px;
+    background:#fff; border-radius:50%; transition:.15s; }
+  .nv-switch input:checked + .nv-switch-slider { background:#0D9488; }
+  html[dir="rtl"] .nv-switch input:checked + .nv-switch-slider::before { transform: translateX(-18px); }
+  html[dir="ltr"] .nv-switch input:checked + .nv-switch-slider::before { transform: translateX(18px); }
+
+  #homeVisitFields { display:none; grid-column: span 2; }
 </style>
 <form method="POST" id="newVisitForm">
   <input type="hidden" name="existing_patient_id" id="existing_patient_id" value="">
   <input type="hidden" name="include_visit_ids" id="include_visit_ids" value="">
-  <div class="nv-row">
+  <div class="nv-layout">
+    <div class="nv-left">
     <div class="card">
       <h3>{{ t('patient_information') }}</h3>
+
       <div class="form-grid">
-        <div class="form-field" id="patientMatches">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
-            <label>{{ t('patient_name') }} *</label>
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; background:#FEF9C3; border:1px solid #FDE047; border-radius:6px; padding:4px 8px; white-space:nowrap;">
-                <input type="checkbox" name="sample_collected" id="sample_collected" value="1">
-                ✅ تم سحب العينة
-              </label>
-              <a class="btn small secondary" id="printBarcodeBtn" href="#" target="_blank"
-                 style="padding:4px 10px; font-size:12.5px; white-space:nowrap; pointer-events:none; opacity:.5;"
-                 title="يفعّل بعد حفظ الزيارة">🖨️ طباعة الباركود</a>
-              <button class="btn" type="submit" id="createVisitBtn" style="padding:4px 14px; font-size:12.5px; white-space:nowrap;">💾 {{ t('create_visit') }}</button>
-            </div>
+        <div class="form-field" id="patientMatches" style="grid-column: span 2;">
+          <label>{{ t('patient_name') }} *</label>
+          <div style="display:flex; gap:6px;">
+            <select name="title" id="patient_title" style="width:92px; flex-shrink:0;">
+              <option value="Mr." selected>Mr.</option>
+              <option value="Mrs.">Mrs.</option>
+              <option value="Ms.">Ms.</option>
+              <option value="Miss">Miss</option>
+              <option value="Master">Master</option>
+              <option value="Dr.">Dr.</option>
+            </select>
+            <input type="text" name="patient_name" id="patient_name" required autocomplete="off" style="flex:1;">
           </div>
-          <input type="text" name="patient_name" id="patient_name" required autocomplete="off">
           <div id="patientMatchesList"></div>
         </div>
         <div id="existingPatientBanner" style="grid-column: span 2;">
@@ -94,6 +114,10 @@
           <label>{{ t('phone') }}</label>
           <input type="text" name="phone" id="phone_input">
         </div>
+        <div class="form-field">
+          <label>Email</label>
+          <input type="email" name="email" id="email_input" dir="ltr">
+        </div>
         <div class="form-field" style="grid-column: span 2;">
           <label>{{ t('address') }}</label>
           <input type="text" name="address" id="address_input">
@@ -114,8 +138,28 @@
     </div>
 
     <div class="card">
-      <h3>{{ t('reference_information') }}</h3>
+      <h3>{{ 'المعلومات الصحية' if lang=='ar' else 'Health Information' }}</h3>
       <div class="form-grid">
+        <div class="form-field">
+          <label>الوزن (Weight)</label>
+          <input type="number" step="any" min="0" name="weight" id="weight_input">
+        </div>
+        <div class="form-field">
+          <label>الطول (Height)</label>
+          <input type="number" step="any" min="0" name="height" id="height_input">
+        </div>
+        <div class="form-field" style="grid-column: span 2;">
+          <label>الأعراض (Symptoms)</label>
+          <input type="text" name="symptoms" id="symptoms_input">
+        </div>
+        <div class="form-field">
+          <label>المرض (Disease)</label>
+          <input type="text" name="disease" id="disease_input">
+        </div>
+        <div class="form-field">
+          <label>العلاج (Therapy)</label>
+          <input type="text" name="therapy" id="therapy_input">
+        </div>
         <div class="form-field">
           <label>{{ t('fasting') }}</label>
           <select name="fasting">
@@ -124,32 +168,18 @@
             <option value="No">{{ t('no') }}</option>
           </select>
         </div>
-        <div class="form-field" id="examiningDoctorField" style="display:none;">
-          <label>دكتور المختبر الفاحص</label>
-          <div style="display:flex; gap:6px;">
-            <select name="examining_doctor" id="examining_doctor" style="flex:1;">
-              <option value="">-</option>
-              {% for d in examining_doctors %}
-              <option value="{{ d }}">{{ d }}</option>
-              {% endfor %}
-            </select>
-            <button type="button" class="btn small secondary" onclick="toggleAddDoctorBox()" title="إضافة طبيب فاحص جديد">+ طبيب</button>
-          </div>
-          <small class="muted">أجره عن الفحوصات المختارة: <span id="examFeePreview">0</span></small>
+        <div class="form-field" style="grid-column: span 2;">
+          <label>{{ t('notes') }}</label>
+          <textarea name="notes"></textarea>
         </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>{{ t('reference_information') }}</h3>
+      <div class="form-grid">
         <div class="form-field">
-          <label>{{ t('referring_doctor') }}</label>
-          <input type="text" id="doctor_name" name="doctor_name" list="doctorsList" autocomplete="off"
-                 placeholder="{{ t('referring_doctor') }}">
-          <datalist id="doctorsList">
-            {% for d in doctors %}
-            <option value="{{ d['full_name'] }}">
-            {% endfor %}
-          </datalist>
-          <small class="muted">{{ t('referring_doctor_hint') }}</small>
-        </div>
-        <div class="form-field">
-          <label>نموذج وارد من مختبر آخر؟</label>
+          <label>Center / Lab</label>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <input type="text" id="referral_lab_name" name="referral_lab_name" list="referralLabsList" autocomplete="off"
                    placeholder="-- لا شيء، مراجع مباشر --" style="flex:1; min-width:160px;">
@@ -163,7 +193,31 @@
             <option value="{{ lab['name'] }}">
             {% endfor %}
           </datalist>
-          <small class="muted">اكتب اسم المختبر فقط إذا هذا النموذج مبعوث من مختبر آخر (بدل مراجع مباشر) — اختر من الاقتراحات أو اكتب اسم مختبر جديد وينحفظ تلقائيًا. اسم المختبر ما ينطبع بأي تقرير، ويُستخدم فقط لحساب المختبر يوميًا وشهريًا. اتركه فارغًا للمراجع المباشر.</small>
+          <small class="muted">اكتب اسم المركز أو المختبر فقط إذا هذا النموذج مبعوث من جهة أخرى (بدل مراجع مباشر) — اختر من الاقتراحات أو اكتب اسم جديد وينحفظ تلقائيًا. الاسم ما ينطبع بأي تقرير، ويُستخدم فقط لحساب المختبر يوميًا وشهريًا. اتركه فارغًا للمراجع المباشر.</small>
+        </div>
+        <div class="form-field">
+          <label>{{ t('referring_doctor') }} (Doctor)</label>
+          <input type="text" id="doctor_name" name="doctor_name" list="doctorsList" autocomplete="off"
+                 placeholder="{{ t('referring_doctor') }}">
+          <datalist id="doctorsList">
+            {% for d in doctors %}
+            <option value="{{ d['full_name'] }}">
+            {% endfor %}
+          </datalist>
+          <small class="muted">{{ t('referring_doctor_hint') }}</small>
+        </div>
+        <div class="form-field" id="examiningDoctorField" style="display:none; grid-column: span 2;">
+          <label>دكتور المختبر الفاحص</label>
+          <div style="display:flex; gap:6px;">
+            <select name="examining_doctor" id="examining_doctor" style="flex:1;">
+              <option value="">-</option>
+              {% for d in examining_doctors %}
+              <option value="{{ d }}">{{ d }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="btn small secondary" onclick="toggleAddDoctorBox()" title="إضافة طبيب فاحص جديد">+ طبيب</button>
+          </div>
+          <small class="muted">أجره عن الفحوصات المختارة: <span id="examFeePreview">0</span></small>
         </div>
         <div class="form-field" id="addDoctorBox" style="display:none; grid-column: span 2;">
           <label>اسم الطبيب الفاحص الجديد</label>
@@ -174,9 +228,24 @@
           </div>
           <small class="muted" id="addDoctorError" style="display:none; color:#DC2626;"></small>
         </div>
-        <div class="form-field" style="grid-column: span 2;">
-          <label>{{ t('notes') }}</label>
-          <textarea name="notes"></textarea>
+        <div class="form-field">
+          <label>Home Visit</label>
+          <select name="is_home_visit" id="home_visit_select">
+            <option value="0" selected>{{ t('no') }}</option>
+            <option value="1">{{ t('yes') }}</option>
+          </select>
+        </div>
+        <div class="form-field" id="homeVisitFields" style="display:none; grid-column: span 2;">
+          <div class="form-grid">
+            <div class="form-field">
+              <label>عنوان الزيارة المنزلية</label>
+              <input type="text" name="home_visit_address" id="home_visit_address_input">
+            </div>
+            <div class="form-field">
+              <label>أجرة الزيارة المنزلية</label>
+              <input type="number" step="any" min="0" name="home_visit_fee" id="home_visit_fee_input" value="0">
+            </div>
+          </div>
         </div>
         <div class="form-field" style="grid-column: span 2;">
           <label>{{ t('contact_method') }}</label>
@@ -188,7 +257,32 @@
         </div>
       </div>
     </div>
-  </div>
+
+    <div class="card">
+      <h3>{{ 'معلومات أخرى' if lang=='ar' else 'Other Information' }}</h3>
+      <div class="form-grid">
+        <div class="form-field">
+          <label>National ID Number</label>
+          <input type="text" name="national_id" id="national_id_input" dir="ltr">
+        </div>
+        <div class="form-field">
+          <label>Passport Number</label>
+          <input type="text" name="passport_number" id="passport_number_input" dir="ltr">
+        </div>
+        <div class="form-field">
+          <label>Travel Certificate Number</label>
+          <input type="text" name="travel_certificate_number" id="travel_certificate_input" dir="ltr">
+        </div>
+        <div class="form-field">
+          <label>Lab Card Number</label>
+          <input type="text" name="lab_card_number" id="lab_card_number_input" dir="ltr">
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div class="nv-right">
+
 
   <div class="card nv-orders-card">
     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -233,17 +327,58 @@
     </div>
     <p style="margin-top:10px; font-weight:600;">{{ t('grand_total') }}: <span id="grandTotal">0</span></p>
   </div>
+    </div>
+  </div>
+
+  <div class="nv-bottombar">
+    <div class="nv-bottombar-left">
+      <button class="btn" type="submit" id="createVisitBtn">💾 {{ t('create_visit') }}</button>
+      <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; background:#FEF9C3; border:1px solid #FDE047; border-radius:6px; padding:4px 8px; white-space:nowrap;">
+        <input type="checkbox" name="sample_collected" id="sample_collected" value="1">
+        ✅ تم سحب العينة
+      </label>
+      <a class="btn small secondary" id="printBarcodeBtn" href="#" target="_blank"
+         style="padding:4px 10px; font-size:12.5px; white-space:nowrap; pointer-events:none; opacity:.5;"
+         title="يفعّل بعد حفظ الزيارة">🖨️ طباعة الباركود</a>
+    </div>
+    <div class="nv-bottombar-right">
+      <div class="nv-toggle-wrap">
+        <span>Visit Barcode</span>
+        <label class="nv-switch">
+          <input type="checkbox" id="toggleVisitBarcode">
+          <span class="nv-switch-slider"></span>
+        </label>
+      </div>
+      <div class="nv-toggle-wrap">
+        <span>Sample-wise</span>
+        <label class="nv-switch">
+          <input type="checkbox" id="toggleSampleWise" checked>
+          <span class="nv-switch-slider"></span>
+        </label>
+      </div>
+      <div class="nv-toggle-wrap">
+        <span>Invoice</span>
+        <label class="nv-switch">
+          <input type="checkbox" id="toggleInvoice">
+          <span class="nv-switch-slider"></span>
+        </label>
+      </div>
+    </div>
+  </div>
 </form>
 
 <div id="visitCreatedPanel" class="card">
   <h3>✅ تم إنشاء الزيارة رقم <span id="createdRegNumber"></span> بنجاح</h3>
   <div class="actions">
-    <button type="button" class="btn" onclick="printCreatedVisitBarcode()">🏷️ طباعة الباركود</button>
+    <button type="button" class="btn" id="createdPrintBarcodeBtn" onclick="printCreatedVisitBarcode()">🏷️ طباعة الباركود</button>
+    <button type="button" class="btn" id="createdPrintSampleWiseBtn" onclick="printCreatedSampleBarcodes()">🧪🏷️ طباعة ملصقات العينات</button>
+    <button type="button" class="btn" id="createdPrintInvoiceBtn" onclick="printCreatedInvoice()">🧾 طباعة الفاتورة</button>
     <a class="btn secondary" id="goToVisitsBtn" href="#">📋 قائمة الزيارات</a>
     <button type="button" class="btn secondary" onclick="startAnotherVisit()">➕ زيارة جديدة أخرى</button>
   </div>
 </div>
 <iframe id="barcodePrintFrame" style="display:none;" title="barcode-print"></iframe>
+
 
 {% if current_role in ('admin', 'supervisor') %}
 <div id="testManageBackdrop" class="tm-backdrop" onclick="if(event.target===this) closeTestManageModal()">
@@ -550,6 +685,17 @@
         printBarcodeBtn.style.pointerEvents = 'auto';
         printBarcodeBtn.style.opacity = '1';
         printBarcodeBtn.title = '';
+
+        // إظهار/إخفاء أزرار الطباعة بلوحة "تم إنشاء الزيارة" حسب حالة
+        // مفاتيح Visit Barcode / Sample-wise / Invoice أسفل الفورم — نفس
+        // فلسفة المفاتيح: تفعيل/إظهار القسم المرتبط فقط، بدون طباعة تلقائية.
+        document.getElementById('createdPrintBarcodeBtn').style.display =
+          document.getElementById('toggleVisitBarcode').checked ? '' : 'none';
+        document.getElementById('createdPrintSampleWiseBtn').style.display =
+          document.getElementById('toggleSampleWise').checked ? '' : 'none';
+        document.getElementById('createdPrintInvoiceBtn').style.display =
+          document.getElementById('toggleInvoice').checked ? '' : 'none';
+
         visitCreatedPanel.style.display = 'block';
         visitCreatedPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
       })
@@ -567,9 +713,31 @@
     barcodePrintFrame.src = '/front-desk/visits/' + lastCreatedVisitId + '/print/barcode';
   };
 
+  window.printCreatedSampleBarcodes = function () {
+    if (!lastCreatedVisitId) return;
+    window.open('/front-desk/visits/' + lastCreatedVisitId + '/print/samples', '_blank');
+  };
+
+  window.printCreatedInvoice = function () {
+    if (!lastCreatedVisitId) return;
+    window.open('/front-desk/visits/' + lastCreatedVisitId + '/print/invoice', '_blank');
+  };
+
   window.startAnotherVisit = function () {
     window.location.reload();
   };
+
+  // ------------------------------------------------------------------
+  // "Home Visit" — إظهار حقلي العنوان والأجرة الإضافية فقط عند اختيار
+  // "نعم"، دون أي منطق آخر.
+  // ------------------------------------------------------------------
+  const homeVisitSelect = document.getElementById('home_visit_select');
+  const homeVisitFields = document.getElementById('homeVisitFields');
+  if (homeVisitSelect && homeVisitFields) {
+    homeVisitSelect.addEventListener('change', function () {
+      homeVisitFields.style.display = this.value === '1' ? '' : 'none';
+    });
+  }
 
   document.getElementById('doctor_name').addEventListener('input', refreshPrices);
   document.getElementById('examining_doctor').addEventListener('change', refreshExamFeePreview);
