@@ -54,18 +54,23 @@
     margin-bottom: 6px;
   }
   .dash-welcome b { font-weight: 700; }
+  /* الترتيب الجديد: الترحيب فوق، بعده التاريخ، وبالأخير الساعة تحت —
+     التاريخ صار بحجم أوضح شوي من السابق بما إنه صار العنصر الثاني
+     بالتسلسل البصري (بدل الساعة)، والساعة صغّرناها وخليناها آخر عنصر. */
+  .dash-date {
+    font-size: clamp(19px, 2.6vw, 26px);
+    font-weight: 500;
+    opacity: .9;
+    margin: 4px 0;
+  }
   .dash-clock {
-    font-size: clamp(48px, 9vw, 92px);
+    font-size: clamp(30px, 5vw, 48px);
     font-weight: 700;
     line-height: 1.05;
-    margin: 6px 0;
+    margin-top: 10px;
     font-variant-numeric: tabular-nums;
     direction: ltr;
-  }
-  .dash-date {
-    font-size: clamp(15px, 2vw, 19px);
-    opacity: .85;
-    margin-top: 4px;
+    opacity: .95;
   }
   .dash-stats {
     display: grid;
@@ -73,6 +78,9 @@
     gap: 14px;
     margin-bottom: 24px;
   }
+  a.dash-stat-card-link { text-decoration: none; color: inherit; display: block;
+    transition: transform .12s ease, box-shadow .12s ease; border-radius: 14px; cursor: pointer; }
+  a.dash-stat-card-link:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,.12); }
   .dash-stat-card {
     background: var(--card-bg, #fff);
     border-radius: 14px;
@@ -101,45 +109,56 @@
   .dash-recent td { padding: 8px; border-top: 1px solid rgba(127,127,127,.15); }
 </style>
 
-<!-- شاشة الترحيب: تعبي منتصف صفحة المحتوى بالساعة والتاريخ -->
+<!-- شاشة الترحيب: الترحيب، بعده التاريخ، وبالأخير الساعة -->
 <div class="dash-hero">
   <div class="dash-hero-content">
     <div class="dash-welcome">{{ 'مرحباً' if lang=='ar' else 'Welcome' }}, <b>{{ current_user }}</b></div>
-    <div class="dash-clock" id="dashClock">--:--</div>
     <div class="dash-date" id="dashDate">&nbsp;</div>
+    <div class="dash-clock" id="dashClock">--:--</div>
   </div>
 </div>
 
-<!-- إحصائيات سريعة -->
+<!-- إحصائيات سريعة — كل بطاقة صارت رابط فعلي يودّي لنفس الصفحة اللي
+     تعرض تفاصيلها (نفس الروابط والفلاتر الموجودة أصلاً بالبرنامج:
+     results_list بفلتر pending/critical، وصفحتي الزيارات والإيرادات
+     اليومية) — بدون ما تغيّر شكل البطاقات نفسها. -->
 <div class="dash-stats">
-  <div class="dash-stat-card">
-    <div class="dash-stat-icon">📋</div>
-    <div>
-      <div class="dash-stat-value">{{ visits_today }}</div>
-      <div class="dash-stat-label">{{ 'زيارات اليوم' if lang=='ar' else "Today's Visits" }}</div>
+  <a class="dash-stat-card-link" href="{{ url_for('visits_list') }}">
+    <div class="dash-stat-card">
+      <div class="dash-stat-icon">📋</div>
+      <div>
+        <div class="dash-stat-value">{{ visits_today }}</div>
+        <div class="dash-stat-label">{{ 'زيارات اليوم' if lang=='ar' else "Today's Visits" }}</div>
+      </div>
     </div>
-  </div>
-  <div class="dash-stat-card">
-    <div class="dash-stat-icon">💳</div>
-    <div>
-      <div class="dash-stat-value">{{ revenue_today }}</div>
-      <div class="dash-stat-label">{{ 'إيرادات اليوم' if lang=='ar' else "Today's Revenue" }}</div>
+  </a>
+  <a class="dash-stat-card-link" href="{{ url_for('daily_report') }}">
+    <div class="dash-stat-card">
+      <div class="dash-stat-icon">💳</div>
+      <div>
+        <div class="dash-stat-value">{{ revenue_today }}</div>
+        <div class="dash-stat-label">{{ 'إيرادات اليوم' if lang=='ar' else "Today's Revenue" }}</div>
+      </div>
     </div>
-  </div>
-  <div class="dash-stat-card">
-    <div class="dash-stat-icon">⏳</div>
-    <div>
-      <div class="dash-stat-value">{{ pending_results }}</div>
-      <div class="dash-stat-label">{{ 'نتائج قيد الانتظار' if lang=='ar' else 'Pending Results' }}</div>
+  </a>
+  <a class="dash-stat-card-link" href="{{ url_for('results_list', filter='pending') }}">
+    <div class="dash-stat-card">
+      <div class="dash-stat-icon">⏳</div>
+      <div>
+        <div class="dash-stat-value">{{ pending_results }}</div>
+        <div class="dash-stat-label">{{ 'نتائج قيد الانتظار' if lang=='ar' else 'Pending Results' }}</div>
+      </div>
     </div>
-  </div>
-  <div class="dash-stat-card critical">
-    <div class="dash-stat-icon">🚨</div>
-    <div>
-      <div class="dash-stat-value">{{ critical_count }}</div>
-      <div class="dash-stat-label">{{ 'حرجة غير موثّقة' if lang=='ar' else 'Unverified Critical' }}</div>
+  </a>
+  <a class="dash-stat-card-link" href="{{ url_for('results_list', filter='critical') }}">
+    <div class="dash-stat-card critical">
+      <div class="dash-stat-icon">🚨</div>
+      <div>
+        <div class="dash-stat-value">{{ critical_count }}</div>
+        <div class="dash-stat-label">{{ 'حرجة غير موثّقة' if lang=='ar' else 'Unverified Critical' }}</div>
+      </div>
     </div>
-  </div>
+  </a>
 </div>
 
 <!-- آخر الزيارات -->
