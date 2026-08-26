@@ -10,6 +10,18 @@
     <h3>{{ t('patient_information') }}</h3>
     <div class="form-grid">
       <div class="form-field">
+        <label>Title</label>
+        <select name="title" {{ 'disabled' if locked }}>
+          {% set cur_title = visit['title'] or 'Mr.' %}
+          <option value="Mr." {{ 'selected' if cur_title=='Mr.' }}>Mr.</option>
+          <option value="Mrs." {{ 'selected' if cur_title=='Mrs.' }}>Mrs.</option>
+          <option value="Ms." {{ 'selected' if cur_title=='Ms.' }}>Ms.</option>
+          <option value="Miss" {{ 'selected' if cur_title=='Miss' }}>Miss</option>
+          <option value="Master" {{ 'selected' if cur_title=='Master' }}>Master</option>
+          <option value="Dr." {{ 'selected' if cur_title=='Dr.' }}>Dr.</option>
+        </select>
+      </div>
+      <div class="form-field">
         <label>{{ t('patient_name') }}</label>
         <input type="text" name="patient_name" value="{{ visit['full_name'] }}" {{ 'disabled' if locked }}>
       </div>
@@ -38,6 +50,10 @@
       <div class="form-field">
         <label>{{ t('phone') }}</label>
         <input type="text" name="phone" value="{{ visit['phone'] }}" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>Email</label>
+        <input type="email" name="email" value="{{ visit['email'] or '' }}" dir="ltr" {{ 'disabled' if locked }}>
       </div>
       <div class="form-field">
         <label>{{ t('fasting') }}</label>
@@ -95,9 +111,77 @@
         <small class="muted" id="addDoctorError" style="display:none; color:#DC2626;"></small>
       </div>
       {% endif %}
+      <div class="form-field">
+        <label>Home Visit</label>
+        {% set cur_home_visit = '1' if visit['is_home_visit'] else '0' %}
+        <select name="is_home_visit" id="home_visit_select" {{ 'disabled' if locked }}>
+          <option value="0" {{ 'selected' if cur_home_visit=='0' }}>{{ t('no') }}</option>
+          <option value="1" {{ 'selected' if cur_home_visit=='1' }}>{{ t('yes') }}</option>
+        </select>
+      </div>
+      <div class="form-field" id="homeVisitFields" style="{{ '' if visit['is_home_visit'] else 'display:none;' }} grid-column: span 2;">
+        <div class="form-grid">
+          <div class="form-field">
+            <label>عنوان الزيارة المنزلية</label>
+            <input type="text" name="home_visit_address" value="{{ visit['home_visit_address'] or '' }}" {{ 'disabled' if locked }}>
+          </div>
+          <div class="form-field">
+            <label>أجرة الزيارة المنزلية</label>
+            <input type="number" step="any" min="0" name="home_visit_fee" value="{{ visit['home_visit_fee'] or 0 }}" {{ 'disabled' if locked }}>
+          </div>
+        </div>
+      </div>
       <div class="form-field" style="grid-column: span 2;">
         <label>{{ t('notes') }}</label>
         <textarea name="notes" {{ 'disabled' if locked }}>{{ visit['notes'] or '' }}</textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>{{ 'المعلومات الصحية' if lang=='ar' else 'Health Information' }}</h3>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>الوزن (Weight)</label>
+        <input type="number" step="any" min="0" name="weight" value="{{ visit['weight'] or '' }}" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>الطول (Height)</label>
+        <input type="number" step="any" min="0" name="height" value="{{ visit['height'] or '' }}" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field" style="grid-column: span 2;">
+        <label>الأعراض (Symptoms)</label>
+        <input type="text" name="symptoms" value="{{ visit['symptoms'] or '' }}" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>المرض (Disease)</label>
+        <input type="text" name="disease" value="{{ visit['disease'] or '' }}" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>العلاج (Therapy)</label>
+        <input type="text" name="therapy" value="{{ visit['therapy'] or '' }}" {{ 'disabled' if locked }}>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>{{ 'معلومات أخرى' if lang=='ar' else 'Other Information' }}</h3>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>National ID Number</label>
+        <input type="text" name="national_id" value="{{ visit['national_id'] or '' }}" dir="ltr" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>Passport Number</label>
+        <input type="text" name="passport_number" value="{{ visit['passport_number'] or '' }}" dir="ltr" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>Travel Certificate Number</label>
+        <input type="text" name="travel_certificate_number" value="{{ visit['travel_certificate_number'] or '' }}" dir="ltr" {{ 'disabled' if locked }}>
+      </div>
+      <div class="form-field">
+        <label>Lab Card Number</label>
+        <input type="text" name="lab_card_number" value="{{ visit['lab_card_number'] or '' }}" dir="ltr" {{ 'disabled' if locked }}>
       </div>
     </div>
   </div>
@@ -270,6 +354,18 @@
   });
   refreshAddTestPrice();
   refreshExaminingDoctorVisibility();
+
+  // ------------------------------------------------------------------
+  // "Home Visit" — إظهار حقلي العنوان والأجرة الإضافية فقط عند اختيار "نعم"
+  // (نفس منطق شاشة "زيارة جديدة").
+  // ------------------------------------------------------------------
+  const homeVisitSelect = document.getElementById('home_visit_select');
+  const homeVisitFields = document.getElementById('homeVisitFields');
+  if (homeVisitSelect && homeVisitFields) {
+    homeVisitSelect.addEventListener('change', function () {
+      homeVisitFields.style.display = this.value === '1' ? '' : 'none';
+    });
+  }
 </script>
 {% endif %}
 {% endblock %}

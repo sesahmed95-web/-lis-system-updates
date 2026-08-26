@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block page_title %}ترتيب الباراميترات{% endblock %}
+{% block content %}
+<style>
+  .po-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid #E2E8F0;
+    border-radius:8px; margin-bottom:6px; background: var(--card-bg, #fff); cursor: grab; }
+  .po-row.dragging { opacity:.4; }
+  .po-row .po-handle { cursor: grab; color:#94A3B8; font-size:16px; user-select:none; }
+  .po-row .po-name { flex:1; font-size:13.5px; }
+  .po-row .po-unit { color:#64748B; font-size:12px; }
+  .po-row input[type="number"] { width:64px; }
+  #poHint { display:none; margin-top:8px; padding:8px 10px; background:#ECFDF5; border:1px solid #A7F3D0;
+    border-radius:8px; font-size:12.5px; }
+</style>
+
+<div class="card" style="max-width:700px;">
+  <h3>ترتيب باراميترات التحليل</h3>
+  <p class="muted">
+    اختر التحليل، وبعدين رتّب باراميتراته بالسحب (🟰) أو بتغيير رقم "الترتيب" يدويًا
+    (رقم أصغر = يظهر أولاً بشاشة إدخال النتائج وبالتقرير المطبوع). زر "ترتيب تلقائي"
+    يحاول يرتب باراميترات الـ Differential المعروفة (Neutrophil, Lymphocyte, Monocyte,
+    Basophil, Eosinophil، وبعدها Metamyelocyte, Myelocyte, Promyelocyte, Blast) تلقائيًا
+    حسب أسمائها — راجعها قبل الحفظ للتأكد إنها طابقت الأسماء الصح عندك، وبعدين اضغط
+    "حفظ الترتيب".
+  </p>
+
+  <form method="GET" style="margin-bottom:16px;">
+    <div class="form-field" style="max-width:360px;">
+      <label>التحليل</label>
+      <select name="test_id" onchange="this.form.submit()">
+        {% for t in tests %}
+        <option value="{{ t['id'] }}" {{ 'selected' if t['id'] == selected_id }}>{{ t['name'] }} ({{ t['code'] }})</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
+  {% if not parameters %}
+  <p class="muted">هذا التحليل ما إله باراميترات بعد.</p>
+  {% else %}
+  <form method="POST" id="poForm">
+    <input type="hidden" name="test_id" value="{{ selected_id }}">
+    <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <button type="button" class="btn small secondary" onclick="autoOrderDifferential()">⚡ ترتيب تلقائي (Differential)</button>
+    </div>
+    <div id="poHint">تم اقتراح ترتيب تلقائي حسب أسماء الباراميترات — راجعه ثم اضغط "حفظ الترتيب" بالأسفل لتثبيته.</div>
+    <div id="poList">
+      {% for p in parameters %}
+      <div class="po-row" draggable="true" data-id="{{ p['id'] }}">
+        <span class="po-handle">🟰</span>
+        <span class="po-name">{{ p['name'] }}</span>
+        <span class="po-unit">{{ p['unit'] or '' }}</span>
+        <input type="hidden" name="param_id" value="{{ p['id'] }}">
+        <label style="display:flex; align-items:center; gap:4px; font-size:12px;">
+          الترتيب:
+          <input type="number" name="order" class="po-order-input" value="{{ p['sort_order'] or 0 }}">
+        </label>
+      </div>
+      {% endfor %}
+    </div>
+    <button class="btn" type="submit" style="margin-top:10px;">💾 حفظ الترتيب</button>
+  </form>
+  {% endif %}
+</div>
+
+<script>
+  // ------------------------------------------------------------------
+  // سحب وإفلات لإعادة ترتيب الصفوف بصريًا — عند إفلات صف، تُعاد ترقيم كل
+  // حقول "الترتيب" تلقائيًا حسب الموضع الجديد بالقائمة (1, 2, 3, ...).
+  // ------------------------------------------------------------------
+  (function () {
+    const list = document.getElementById('poList');
+    if (!list) return;
+    let dragged = null;
+
+    list.querySelectorAll('.po-row').forEach(function (row) {
+      row.addEventListener('dragstart', function () {
+        dragged = row;
+        row.classList.add('dragging');
+      });
+      row.addEventListener('dragend', function () {
+        row.classList.remove('dragging');
+        renumber();
+      });
+    });
+
+    list.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      const afterEl = getRowAfter(list, e.clientY);
+      if (!dragged) return;
+      if (afterEl == null) {
+        list.appendChild(dragged);
+      } else {
+        list.insertBefore(dragged, afterEl);
+      }
+    });
+
+    function getRowAfter(container, y) {
+      const rows = Array.from(container.querySelectorAll('.po-row:not(.dragging)'));
+      return rows.reduce(function (closest, row) {
+        const box = row.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+          return { offset: offset, element: row };
+        }
+        return closest;
+      }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
+    }
+
+    function renumber() {
+      list.querySelectorAll('.po-row').forEach(function (row, idx) {
+        const input = row.querySelector('.po-order-input');
+        if (input) input.value = idx + 1;
+      });
+    }
+    window.poRenumber = renumber;
+  })();
+
+  // ------------------------------------------------------------------
+  // "ترتيب تلقائي (Differential)" — يحاول يتعرّف على أسماء باراميترات
+  // الـDifferential الشائعة (بأي صيغة تقريبية: مفرد/جمع/اختصار/نسبة مئوية)
+  // ويرتبها: Neutrophil, Lymphocyte, Monocyte, Basophil, Eosinophil، وبعدها
+  // Metamyelocyte, Myelocyte, Promyelocyte, Blast — وأي باراميتر ثاني يبقى
+  // بترتيبه الحالي (بعد هذوله). هذا اقتراح بس على الشاشة — ما يُحفظ إلا لو
+  // ضغطت "حفظ الترتيب" بعدها.
+  // ------------------------------------------------------------------
+  function autoOrderDifferential() {
+    const rules = [
+      { re: /metamyelo/i, rank: 6 },
+      { re: /promyelo/i, rank: 8 },
+      { re: /myelo/i, rank: 7 },
+      { re: /neutro|^ne\b|^ne%|^ne#|^neut/i, rank: 1 },
+      { re: /lympho|^ly\b|^ly%|^ly#|^lymp/i, rank: 2 },
+      { re: /mono|^mo\b|^mo%|^mo#/i, rank: 3 },
+      { re: /baso|^ba\b|^ba%|^ba#/i, rank: 4 },
+      { re: /eosino|^eo\b|^eo%|^eo#/i, rank: 5 },
+      { re: /blast/i, rank: 9 },
+    ];
+    const rows = Array.from(document.querySelectorAll('#poList .po-row'));
+    const withRank = rows.map(function (row, idx) {
+      const name = row.querySelector('.po-name').textContent.trim();
+      let rank = 1000 + idx; // غير المعروف يبقى بترتيبه الحالي بعد كل المعروفين
+      for (const rule of rules) {
+        if (rule.re.test(name)) { rank = rule.rank; break; }
+      }
+      return { row: row, rank: rank };
+    });
+    withRank.sort(function (a, b) { return a.rank - b.rank; });
+    const list = document.getElementById('poList');
+    withRank.forEach(function (item) { list.appendChild(item.row); });
+    window.poRenumber();
+    document.getElementById('poHint').style.display = 'block';
+  }
+</script>
+{% endblock %}

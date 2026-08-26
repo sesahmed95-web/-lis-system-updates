@@ -109,6 +109,7 @@
         <a class="nav-link {{ 'active' if request.path == url_for('quick_add_items') else '' }}" href="{{ url_for('quick_add_items') }}">⚡ {{ t('quick_add_items') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('suggestions_list') else '' }}" href="{{ url_for('suggestions_list') }}">💬 {{ t('suggestions') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('test_catalog') else '' }}" href="{{ url_for('test_catalog') }}">🧾 {{ t('test_catalog') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('parameter_order') else '' }}" href="{{ url_for('parameter_order') }}">🔢 ترتيب الباراميترات</a>
         <a class="nav-link {{ 'active' if request.path == url_for('unit_converter') else '' }}" href="{{ url_for('unit_converter') }}">📏 تعديل الوحدات</a>
       </div>
       {% endif %}

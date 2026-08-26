@@ -106,7 +106,7 @@ EXAM_SIGNATURE_TEST_CODES = {"BF", "BFRETIC", "RETIC", "FLUIDEXAM", "HBPREP", "S
 # CBC results are grouped on the printed report with a blank spacer row
 # between each group, matching the reference report layout.
 CBC_ROW_GROUPS = [
-    ["WBCs", "Ly", "MO", "NE", "EO", "BA", "LY#", "MO#", "NE#", "EO#", "BA#"],
+    ["WBCs", "NE", "Ly", "MO", "BA", "EO", "NE#", "LY#", "MO#", "BA#", "EO#"],
     ["RBC", "HGB", "HCT", "MCV", "MCH", "MCHC", "RDW", "RDW-SD"],
     ["PLT", "MPV"],
 ]
@@ -301,6 +301,32 @@ PREVIOUS_VALUE_DEPARTMENT_KEYWORDS = (
 def department_shows_previous_values(department):
     d = (department or "").lower()
     return any(k in d for k in PREVIOUS_VALUE_DEPARTMENT_KEYWORDS)
+
+
+# الترتيب الافتراضي لتحاليل شاشة "إدخال النتائج" حسب القسم — يُستخدم فقط
+# لأي تحليل غير مذكور صراحةً بإعداد "ترتيب التحاليل بشاشة إدخال النتائج"
+# اليدوي (results_entry_test_order)؛ لو ذاك الإعداد فاضي بالكامل، يصير هذا
+# الترتيب هو الافتراضي الوحيد. مطابقة كلمات مفتاحية (عربي/انكليزي، أي حالة
+# أحرف) نفس أسلوب PREVIOUS_VALUE_DEPARTMENT_KEYWORDS فوق — تشتغل بغض النظر
+# شلون كتب الأدمن اسم القسم بالضبط بكتالوج التحاليل. أي قسم ما يطابق ولا
+# مجموعة (مثلاً قسم نادر أو Other) يظهر بالأخير.
+# الترتيب المطلوب: كيمياء ← فايروسات ← هرمونات ← فيتامينات ← تخثر ← أمراض الدم.
+DEPARTMENT_PRIORITY_KEYWORDS = [
+    ("chem", "كيمياء"),                              # 1) Chemistry
+    ("virology", "viral", "فايروس", "فيروس"),        # 2) Virology
+    ("hormone", "هرمون"),                             # 3) Hormones
+    ("vitamin", "فيتامين"),                           # 4) Vitamins
+    ("coagul", "تخثر"),                               # 5) Coagulation
+    ("hemat", "دم"),                                  # 6) Hematology / blood diseases
+]
+
+
+def department_priority_rank(department):
+    d = (department or "").lower()
+    for i, keywords in enumerate(DEPARTMENT_PRIORITY_KEYWORDS):
+        if any(k in d for k in keywords):
+            return i
+    return len(DEPARTMENT_PRIORITY_KEYWORDS)  # قسم غير معروف/غير مذكور أعلاه — يظهر بالأخير
 
 
 def get_visit_hct(db, visit_id):
@@ -2013,8 +2039,9 @@ def delete_visit(visit_id):
 def visit_edit(visit_id):
     db = get_db()
     visit = db.execute(
-        "SELECT v.*, p.full_name, p.gender, p.age, p.age_unit, p.phone FROM visits v "
-        "JOIN patients p ON p.id = v.patient_id WHERE v.id=?", (visit_id,),
+        "SELECT v.*, p.full_name, p.gender, p.age, p.age_unit, p.phone, p.title, p.email, "
+        "p.national_id, p.passport_number, p.travel_certificate_number, p.lab_card_number "
+        "FROM visits v JOIN patients p ON p.id = v.patient_id WHERE v.id=?", (visit_id,),
     ).fetchone()
     if not visit:
         return "Not found", 404
@@ -2027,10 +2054,14 @@ def visit_edit(visit_id):
             return redirect(url_for("visits_list"))
 
         db.execute(
-            "UPDATE patients SET full_name=?, gender=?, age=?, age_unit=?, phone=? WHERE id=?",
+            "UPDATE patients SET full_name=?, gender=?, age=?, age_unit=?, phone=?, title=?, email=?, "
+            "national_id=?, passport_number=?, travel_certificate_number=?, lab_card_number=? WHERE id=?",
             (request.form.get("patient_name", "").strip(), request.form.get("gender"),
              request.form.get("age") or None, request.form.get("age_unit") or "Years",
-             request.form.get("phone"), visit["patient_id"]),
+             request.form.get("phone"), request.form.get("title", "Mr."), request.form.get("email", "").strip(),
+             request.form.get("national_id", "").strip(), request.form.get("passport_number", "").strip(),
+             request.form.get("travel_certificate_number", "").strip(), request.form.get("lab_card_number", "").strip(),
+             visit["patient_id"]),
         )
         referring_doctor_id = find_or_create_doctor(db, request.form.get("doctor_name", ""))
         doctor_changed = referring_doctor_id != visit["doctor_id"]
@@ -2040,9 +2071,26 @@ def visit_edit(visit_id):
         # تلقائيًا الآن بعد ما صار حقلاً واحدًا بالشاشة.
         attending_doctor = examining_doctor
         referral_center_id = find_or_create_referral_center(db, request.form.get("referral_lab_name", ""))
-        db.execute("UPDATE visits SET doctor_id=?, referral_center_id=?, fasting=?, notes=?, examining_doctor=?, expenses=?, attending_doctor=? WHERE id=?",
-                   (referring_doctor_id, referral_center_id, request.form.get("fasting", "Undefined"), request.form.get("notes", ""),
-                    examining_doctor, request.form.get("expenses") or 0, attending_doctor, visit_id))
+        # المعلومات الصحية + الزيارة المنزلية — نفس حقول شاشة "زيارة جديدة".
+        weight = request.form.get("weight") or None
+        height = request.form.get("height") or None
+        symptoms = request.form.get("symptoms", "")
+        disease = request.form.get("disease", "")
+        therapy = request.form.get("therapy", "")
+        is_home_visit = 1 if request.form.get("is_home_visit") == "1" else 0
+        home_visit_address = request.form.get("home_visit_address", "") if is_home_visit else ""
+        try:
+            home_visit_fee = float(request.form.get("home_visit_fee") or 0) if is_home_visit else 0.0
+        except ValueError:
+            home_visit_fee = 0.0
+        db.execute(
+            "UPDATE visits SET doctor_id=?, referral_center_id=?, fasting=?, notes=?, examining_doctor=?, "
+            "expenses=?, attending_doctor=?, weight=?, height=?, symptoms=?, disease=?, therapy=?, "
+            "is_home_visit=?, home_visit_address=?, home_visit_fee=? WHERE id=?",
+            (referring_doctor_id, referral_center_id, request.form.get("fasting", "Undefined"), request.form.get("notes", ""),
+             examining_doctor, request.form.get("expenses") or 0, attending_doctor,
+             weight, height, symptoms, disease, therapy,
+             is_home_visit, home_visit_address, home_visit_fee, visit_id))
 
         new_test_id = request.form.get("add_test")
         if new_test_id:
@@ -2085,6 +2133,9 @@ def visit_edit(visit_id):
             "SELECT COALESCE(SUM(ot.price),0) as total FROM order_tests ot WHERE ot.order_id=?",
             (order["id"],),
         ).fetchone()["total"]
+        # أجرة الزيارة المنزلية (إن فُعِّلت) تُضاف لمجموع الفحوصات، نفس أسلوب
+        # شاشة "زيارة جديدة" — منفصلة عن حقل "Extra Charges" اليدوي.
+        new_total += home_visit_fee
         if invoice:
             db.execute(
                 "UPDATE invoices SET total_amount=?, extra_charges=?, discount_amount=? WHERE id=?",
@@ -2756,7 +2807,7 @@ def result_entry(order_test_id):
         return "Not found", 404
 
     parameters = db.execute(
-        "SELECT * FROM test_parameters WHERE test_definition_id=?", (ot["test_definition_id"],)
+        "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (ot["test_definition_id"],)
     ).fetchall()
 
     if request.method == "POST":
@@ -2819,7 +2870,7 @@ def visit_results_entry(visit_id):
         return "Not found", 404
 
     order_tests = db.execute(
-        "SELECT ot.*, td.name as test_name, td.code as test_code, "
+        "SELECT ot.*, td.name as test_name, td.code as test_code, td.department as test_department, "
         "p.gender as gender, p.age as age, p.age_unit as age_unit "
         "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id "
         "JOIN orders o ON o.id = ot.order_id JOIN visits v2 ON v2.id = o.visit_id "
@@ -2835,13 +2886,28 @@ def visit_results_entry(visit_id):
     # بهذي الزيارة (ot.id الافتراضي). الأدمن يحدد الترتيب المطلوب من
     # Management → الإعدادات → "ترتيب التحاليل بشاشة إدخال النتائج" (اسم
     # التحليل بالضبط كما يظهر بالشاشة، مثلاً "HbA1c (BioChemstry)"، سطر لكل
-    # تحليل). أي تحليل غير مذكور هناك يظهر بعد كل المذكورين، بنفس ترتيبه
-    # الأصلي (ot.id) فيما بينهم.
+    # تحليل). أي تحليل غير مذكور هناك يُرتَّب افتراضيًا حسب أولوية القسم
+    # (DEPARTMENT_PRIORITY_KEYWORDS: كيمياء ← فايروسات ← هرمونات ← فيتامينات
+    # ← تخثر ← أمراض الدم)، وبينهم حسب ترتيبهم الأصلي (ot.id) — فلو المريض
+    # ماله بعض الأقسام تلقائيًا تنتخطى وتنطبع/تنعرض بس الأقسام الموجودة فعلاً
+    # بنفس التسلسل المطلوب.
     order_pref_raw = get_setting(db, "results_entry_test_order", "")
     order_pref = [ln.strip() for ln in order_pref_raw.splitlines() if ln.strip()]
     if order_pref:
         rank = {name: i for i, name in enumerate(order_pref)}
-        order_tests = sorted(order_tests, key=lambda row: (rank.get(row["test_name"], len(order_pref)), row["id"]))
+        order_tests = sorted(
+            order_tests,
+            key=lambda row: (
+                rank.get(row["test_name"], len(order_pref)),
+                department_priority_rank(row["test_department"]),
+                row["id"],
+            ),
+        )
+    else:
+        order_tests = sorted(
+            order_tests,
+            key=lambda row: (department_priority_rank(row["test_department"]), row["id"]),
+        )
 
     if request.method == "POST":
         any_saved = False
@@ -2851,7 +2917,7 @@ def visit_results_entry(visit_id):
             # — كل تعديل يبقى مسجّل بجدول result_history (القيمة القديمة +
             # مين عدّلها ووقتها) بغض النظر عن حالة الاعتماد.
             parameters = db.execute(
-                "SELECT * FROM test_parameters WHERE test_definition_id=?", (ot["test_definition_id"],)
+                "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (ot["test_definition_id"],)
             ).fetchall()
             touched = save_order_test_results(
                 db, ot, parameters, request.form, session["user_id"], field_prefix=f"ot{ot['id']}_"
@@ -2873,7 +2939,7 @@ def visit_results_entry(visit_id):
     boxes = []
     for ot in order_tests:
         parameters = db.execute(
-            "SELECT * FROM test_parameters WHERE test_definition_id=?", (ot["test_definition_id"],)
+            "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (ot["test_definition_id"],)
         ).fetchall()
         results = db.execute(
             "SELECT r.*, tp.name as param_name FROM results r "
@@ -2945,7 +3011,7 @@ def print_combined_panel(visit_id):
         if ot["test_code"] in REPORT_TEMPLATE_MAP:
             continue  # لهذا التحليل تقريره الكبير الخاص، ما يدخل باللوحة المجمّعة
         params = db.execute(
-            "SELECT * FROM test_parameters WHERE test_definition_id=?", (ot["test_definition_id"],)
+            "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (ot["test_definition_id"],)
         ).fetchall()
         if not params:
             continue
@@ -3108,7 +3174,7 @@ def print_report(order_test_id):
     parameters = []
     seen_param_names = set()
     for tdid in test_def_ids:
-        for p in db.execute("SELECT * FROM test_parameters WHERE test_definition_id=?", (tdid,)).fetchall():
+        for p in db.execute("SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (tdid,)).fetchall():
             if p["name"] not in seen_param_names:
                 parameters.append(p)
                 seen_param_names.add(p["name"])
@@ -4296,6 +4362,49 @@ def test_catalog():
     return render_template("master/test_catalog.html", tests=tests, report_groups=report_groups)
 
 
+# ------------------------------------------------------------ parameter order
+# ترتيب باراميترات أي تحليل (بشاشة إدخال النتائج وبالتقرير المطبوع) —
+# صفحة مستقلة عامة لأي تحليل (مو خاصة بس بتحاليل الـdifferential)، لأن
+# ترتيب الباراميترات بقاعدة البيانات بيّن (test_parameters.sort_order)
+# وما كان فيه شاشة تتحكم فيه سابقًا — كانت تعتمد على ترتيب id (الإدخال).
+@app.route("/master/parameter-order", methods=["GET", "POST"])
+@roles_required("supervisor")
+def parameter_order():
+    db = get_db()
+    if request.method == "POST":
+        test_id = request.form.get("test_id")
+        param_ids = request.form.getlist("param_id")
+        orders = request.form.getlist("order")
+        for pid, order in zip(param_ids, orders):
+            try:
+                order_val = int(order)
+            except (TypeError, ValueError):
+                order_val = 0
+            db.execute("UPDATE test_parameters SET sort_order=? WHERE id=?", (order_val, pid))
+        db.commit()
+        flash("تم حفظ ترتيب الباراميترات.")
+        return redirect(url_for("parameter_order", test_id=test_id))
+
+    tests = db.execute(
+        "SELECT DISTINCT td.id, td.name, td.code FROM test_definitions td "
+        "JOIN test_parameters tp ON tp.test_definition_id = td.id "
+        "ORDER BY td.name"
+    ).fetchall()
+
+    selected_id = request.args.get("test_id", type=int)
+    if not selected_id and tests:
+        selected_id = tests[0]["id"]
+
+    parameters = []
+    if selected_id:
+        parameters = db.execute(
+            "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
+            (selected_id,),
+        ).fetchall()
+
+    return render_template("master/parameter_order.html", tests=tests, parameters=parameters, selected_id=selected_id)
+
+
 def unique_test_code(db, name):
     """يولّد رمزًا فريدًا للتحليل من اسمه الإنكليزي عند الإضافة السريعة من
     قسم الطلبات (بدون الحاجة لإدخال رمز يدويًا)."""
@@ -4829,7 +4938,7 @@ def report_designer():
             return redirect(url_for("report_designer"))
 
         parameters = db.execute(
-            "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY id", (test_id,)
+            "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (test_id,)
         ).fetchall()
         mode = request.form.get("mode", "manual")
         source_docx_name = None
@@ -4959,7 +5068,7 @@ def report_designer():
         selected_test = db.execute("SELECT * FROM test_definitions WHERE id=?", (selected_id,)).fetchone()
         if selected_test:
             selected_parameters = db.execute(
-                "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY id", (selected_id,)
+                "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (selected_id,)
             ).fetchall()
             selected_template = get_report_template(db, selected_id)
             if selected_template:
@@ -5021,7 +5130,7 @@ def preview_report_design(test_definition_id):
         template_name = "reports/custom.html"
 
     parameters = db.execute(
-        "SELECT * FROM test_parameters WHERE test_definition_id=?", (test_definition_id,)
+        "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (test_definition_id,)
     ).fetchall()
     units_by_name = {p["name"]: p["unit"] for p in parameters}
     highlight_by_name = {p["name"]: bool(p["highlight"]) for p in parameters}
