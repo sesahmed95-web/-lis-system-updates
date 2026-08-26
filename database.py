@@ -770,6 +770,49 @@ def ensure_reactive_lymphocytes_parameter(conn):
     conn.commit()
 
 
+def ensure_basophils_after_eosinophils_order(conn):
+    """طلب المستخدم: بكل تحاليل الـDifferential (Blood Film / Blood Film and
+    Retic Count / WBC Differential / Fluid Examination) لازم يظهر Basophils
+    مباشرة بعد Eosinophils بترتيب العرض والطباعة وإدخال النتائج. يعتمد على
+    عمود test_parameters.sort_order (يُقرأ بكل الأماكن اللي تجيب باراميترات
+    تحليل معيّن — انظر ORDER BY sort_order, id بـ app.py). يشتغل بمطابقة اسم
+    تام (بأي حالة أحرف، بدون حساسية للجمع/المفرد: Basophil/Basophils) حتى ما
+    يتأثر بأي تحليل الاسمين فيه غير موجودين (متل بعض حالات Fluid Examination
+    اللي ما تحتوي Differential أصلاً — يتم تجاوزه بصمت). يعيد ترقيم كل
+    باراميترات التحليل بالكامل حسب ترتيبها الحالي (sort_order ثم id) مع
+    إزاحة Basophils بس لموقعه الجديد — يبقى ثابت (idempotent) لو انشغل أكثر
+    من مرة، وما يغيّر ترتيب أي باراميتر ثاني فيما بينهم."""
+    def norm(name):
+        return (name or "").strip().lower().rstrip("s")
+
+    for code in ("BF", "BFRETIC", "WBCDIFF", "FLUIDEXAM"):
+        row = conn.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
+        if not row:
+            continue
+        test_id = row["id"]
+        params = conn.execute(
+            "SELECT id, name FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
+            (test_id,),
+        ).fetchall()
+        names = [norm(p["name"]) for p in params]
+        if "eosinophil" not in names or "basophil" not in names:
+            continue  # هذا التحليل ما فيه الاثنين (مثلاً بعض إعدادات Fluid Examination) — تجاوزه
+
+        eo_idx = names.index("eosinophil")
+        ba_idx = names.index("basophil")
+        if ba_idx == eo_idx + 1:
+            continue  # مرتب صح أصلاً — لا شي يسوى (يخلي التشغيل مكرر بأمان)
+
+        ordered = list(params)
+        basophil_row = ordered.pop(ba_idx)
+        new_eo_idx = ordered.index(next(p for p in ordered if norm(p["name"]) == "eosinophil"))
+        ordered.insert(new_eo_idx + 1, basophil_row)
+
+        for i, p in enumerate(ordered):
+            conn.execute("UPDATE test_parameters SET sort_order=? WHERE id=?", (i + 1, p["id"]))
+    conn.commit()
+
+
 def ensure_cbc_comment_parameter(conn):
     """Optional free-text 'Comment' field for the CBC report — lets the
     examining doctor add a short note about the CBC on the printed report
@@ -981,6 +1024,7 @@ def init_db():
     ensure_nrbc_parameter(conn)
     ensure_atypical_lymphocytes_parameter(conn)
     ensure_reactive_lymphocytes_parameter(conn)
+    ensure_basophils_after_eosinophils_order(conn)
     ensure_cbc_comment_parameter(conn)
     ensure_coag_parameters(conn)
     ensure_vldl_parameter(conn)

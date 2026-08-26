@@ -275,12 +275,19 @@
     "metamyelocyte", "promyelocyte", "myelocyte", "neutrophil",
     "lymphocyte", "monocyte", "eosinophil", "basophil", "band", "blast",
   ];
+  // أسماء CBC المختصرة لنسب التفريق الخمسة (NE/Ly/MO/EO/BA) — تحليل CBC
+  // يخزّنها بهذا الشكل المختصر بالضبط (مو "Neutrophils" الكاملة زي فحوصات
+  // الـDifferential الثانية)، فهذا التطابق منفصل وبمطابقة تامة (exact) وليس
+  // "يحتوي على" — حتى ما يطابق غلط أعمدة الأعداد المطلقة NE#/LY#/MO#/EO#/BA#
+  // الموجودة بنفس الجدول (تلك ما تدخل بمجموع الـ100).
+  var CBC_ABBR_CORE = ["ne", "ly", "mo", "eo", "ba"];
 
   function classifyName(rawName) {
     var name = rawName.trim().toLowerCase();
     if (name.indexOf("nrbc") !== -1 || name.indexOf("n.r.b.c") !== -1) return "nrbc";
     if (name.indexOf("atypical") !== -1) return "atypical";
     if (name.indexOf("reactive") !== -1) return "reactive";
+    if (CBC_ABBR_CORE.indexOf(name) !== -1) return "core";
     for (var i = 0; i < CORE_PATTERNS.length; i++) {
       if (name.indexOf(CORE_PATTERNS[i]) !== -1) return "core";
     }
