@@ -6,11 +6,11 @@
   <p class="muted">{{ visit['gender'] }} · {{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['created_at'] }}</p>
   <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
   <a class="btn small secondary print-link" id="printAllLink"
-     href="{{ url_for('print_visit_results', visit_id=visit['id'], completed_only=1) }}">🖨 طباعة كل النتائج المكتملة</a>
+     href="{{ url_for('print_all_separate_reports', visit_id=visit['id']) }}">🖨 طباعة كل النتائج المكتملة (منفصلة)</a>
   <a class="btn small secondary" href="{{ url_for('print_combined_panel', visit_id=visit['id']) }}" target="_blank"
      title="يجمع تحاليل الكيمياء/الفايروسات/الهرمونات/الفيتامينات وأي قسم آخر بورقة A4 وحدة، مرتّبة حسب القسم">🧾 طباعة اللوحة المجمّعة</a>
   {% if visit['phone'] %}
-  <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id'], completed_only=1) }}"
+  <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id']) }}"
         style="display:inline;" onsubmit="return confirm('إرسال كل النتائج المكتملة لهذه الزيارة بملف PDF واحد عبر واتساب لرقم المريض؟');">
     <button class="btn small" type="submit">📱 إرسال كل النتائج المكتملة واتساب</button>
   </form>
@@ -30,64 +30,7 @@
 </script>
 
 <script>
-  // ------------------------------------------------------------------
-  // حساب MCH وMCHC تلقائيًا من HGB وRBC وHCT — بنفس منطق شاشة الإدخال
-  // المفردة، بس هنا كل صندوق تحليل (rb-box) يُفحص لحاله (لأن هذي الصفحة
-  // تعرض كل تحاليل الزيارة معًا، وقد يتكرر اسم معيار بأكثر من صندوق):
-  //   MCH  = HGB ÷ RBC × 10     (pg)
-  //   MCHC = HGB ÷ HCT × 100    (g/dL)
-  // الحقلين يبقيان قابلين للتعديل اليدوي — بمجرد ما يكتب المستخدم بأحدهما
-  // مباشرة يتوقف التحديث التلقائي له، مع زر "↻ إعادة الحساب التلقائي".
-  // ------------------------------------------------------------------
-  document.addEventListener('DOMContentLoaded', function () {
-    function fieldIn(box, paramName) {
-      return box.querySelector('[data-param-name="' + paramName + '"]');
-    }
-    function numIn(box, paramName) {
-      var el = fieldIn(box, paramName);
-      if (!el) return null;
-      var v = parseFloat(el.value);
-      return isNaN(v) ? null : v;
-    }
-    document.querySelectorAll('.rb-box').forEach(function (box) {
-      var hasCbcFields = fieldIn(box, 'HGB') && (fieldIn(box, 'MCH') || fieldIn(box, 'MCHC'));
-      if (!hasCbcFields) return;
-      function recalc() {
-        var hgb = numIn(box, 'HGB');
-        var rbc = numIn(box, 'RBC');
-        var hct = numIn(box, 'HCT');
-        var mchEl = fieldIn(box, 'MCH');
-        var mchcEl = fieldIn(box, 'MCHC');
-        if (mchEl && mchEl.dataset.userEdited !== '1' && hgb !== null && rbc) {
-          mchEl.value = ((hgb / rbc) * 10).toFixed(1);
-        }
-        if (mchcEl && mchcEl.dataset.userEdited !== '1' && hgb !== null && hct) {
-          mchcEl.value = ((hgb / hct) * 100).toFixed(1);
-        }
-      }
-      window.lisForceRecalcMchMchc = function (btn) {
-        var wrap = btn.closest('td');
-        var input = wrap ? wrap.querySelector('input[data-param-name]') : null;
-        if (input) delete input.dataset.userEdited;
-        recalc();
-      };
-      ['HGB', 'RBC', 'HCT'].forEach(function (name) {
-        var el = fieldIn(box, name);
-        if (el) el.addEventListener('input', recalc);
-      });
-      ['MCH', 'MCHC'].forEach(function (name) {
-        var el = fieldIn(box, name);
-        if (el) el.addEventListener('input', function () { el.dataset.userEdited = '1'; });
-      });
-      recalc();
-    });
-  });
-</script>
-
-<script>
-  // يطبّق اختيار "إظهار النتيجة السابقة" على كل روابط الطباعة بالصفحة عبر
-  // إضافة show_prev=1/0 بالرابط قبل ما المستخدم يضغط عليه — القسم الطبي
-  // (كيمياء/تخثر) هو الوحيد المتأثر أصلاً بهذا الخيار بالتقرير نفسه.
+  // يطبّق اختيار "إظهار النتيجة السابقة" على كل روابط الطباعة بالصفحة
   function lisApplyShowPrev() {
     var checked = document.getElementById('showPrevToggle').checked ? '1' : '0';
     document.querySelectorAll('a.print-link').forEach(function (a) {
@@ -106,7 +49,11 @@
     <div class="card rb-box" id="rbox_{{ ot['id'] }}">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
         <h4 style="margin:0;">{{ ot['test_name'] }}</h4>
-        <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span>
+          <button type="button" class="btn small success" onclick="saveSingleTest({{ ot['id'] }})" title="حفظ نتائج هذا التحليل فقط">💾 حفظ</button>
+          <a class="btn small secondary print-link" href="{{ url_for('print_report', order_test_id=ot['id']) }}">🖨 طباعة</a>
+        </div>
       </div>
       <p class="muted" style="margin:4px 0 10px;">{{ t('barcode') }}: <span class="mono">{{ ot['barcode'] }}</span></p>
 
@@ -222,7 +169,6 @@
       </table>
 
       <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-        <a class="btn small secondary print-link" href="{{ url_for('print_report', order_test_id=ot['id']) }}">🖨 طباعة التقرير</a>
         {% if visit['phone'] and ot['status'] in ['Completed', 'Verified'] %}
         <form method="POST" action="{{ url_for('whatsapp_send_result', order_test_id=ot['id']) }}" style="display:inline;"
               onsubmit="return confirm('إرسال نتيجة {{ ot['test_name'] }} فقط عبر واتساب لرقم المريض؟');">
@@ -238,10 +184,6 @@
       </div>
     </div>
     {% endfor %}
-  </div>
-
-  <div style="position:sticky; bottom:0; background:var(--card-bg,#fff); padding:12px 0; margin-top:16px; border-top:1px solid #E2E8F0;">
-    <button class="btn" type="submit">{{ t('save') }}</button>
   </div>
 </form>
 
@@ -261,25 +203,98 @@
 
 <script>
 // ------------------------------------------------------------------
-// التحقق من فحوصات التفريق (WBC Differential / فلم الدم):
-// مجموع خلايا الفحص (Neutrophils, Lymphocytes, Monocytes, Eosinophils,
-// Basophils, Band, Promyelocytes, Myelocytes, Metamyelocytes, Blast)
-// لازم يكون بالضبط 100 خلية قبل الحفظ.
-// - NRBC ما تدخل بمجموع الـ100 أبداً؛ فقط سؤال اختياري "عدّها؟" يتحكم
-//   بتفعيل/تعطيل حقلها.
-// - Atypical Lymphocyte و Reactive lymphocytes أحياناً تدخل ضمن الـ100
-//   وأحياناً لا، فكل وحدة منهم بشرط (checkbox) يتحكم بيه المستخدم لكل فحص.
+// حفظ تحليل واحد فقط عبر AJAX (زر "حفظ" بجانب اسم التحليل)
+// ------------------------------------------------------------------
+function saveSingleTest(orderTestId) {
+    var form = document.getElementById('visitResultsForm');
+    var data = new FormData();
+    var prefix = 'ot' + orderTestId + '_';
+    var inputs = form.querySelectorAll('input, textarea, select');
+    for (var i = 0; i < inputs.length; i++) {
+        var el = inputs[i];
+        if (el.name && el.name.startsWith(prefix)) {
+            data.append(el.name, el.value);
+        }
+    }
+    fetch('/api/order-tests/' + orderTestId + '/save-results', {
+        method: 'POST',
+        body: data,
+        credentials: 'same-origin'
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+        if (j.ok) {
+            alert('✅ ' + j.message);
+            // نحدّث شارة الحالة بدون إعادة تحميل
+            var box = document.getElementById('rbox_' + orderTestId);
+            var badge = box ? box.querySelector('.badge') : null;
+            if (badge && badge.textContent === 'Accepted') {
+                badge.textContent = 'Completed';
+                badge.className = badge.className.replace('badge-Accepted', 'badge-Completed');
+            }
+        } else {
+            alert('⚠️ ' + j.message);
+        }
+    })
+    .catch(function(err){ alert('❌ خطأ: ' + err); });
+}
+
+// ------------------------------------------------------------------
+// حساب MCH وMCHC تلقائيًا من HGB وRBC وHCT
+// ------------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', function () {
+    function fieldIn(box, paramName) {
+      return box.querySelector('[data-param-name="' + paramName + '"]');
+    }
+    function numIn(box, paramName) {
+      var el = fieldIn(box, paramName);
+      if (!el) return null;
+      var v = parseFloat(el.value);
+      return isNaN(v) ? null : v;
+    }
+    document.querySelectorAll('.rb-box').forEach(function (box) {
+      var hasCbcFields = fieldIn(box, 'HGB') && (fieldIn(box, 'MCH') || fieldIn(box, 'MCHC'));
+      if (!hasCbcFields) return;
+      function recalc() {
+        var hgb = numIn(box, 'HGB');
+        var rbc = numIn(box, 'RBC');
+        var hct = numIn(box, 'HCT');
+        var mchEl = fieldIn(box, 'MCH');
+        var mchcEl = fieldIn(box, 'MCHC');
+        if (mchEl && mchEl.dataset.userEdited !== '1' && hgb !== null && rbc) {
+          mchEl.value = ((hgb / rbc) * 10).toFixed(1);
+        }
+        if (mchcEl && mchcEl.dataset.userEdited !== '1' && hgb !== null && hct) {
+          mchcEl.value = ((hgb / hct) * 100).toFixed(1);
+        }
+      }
+      window.lisForceRecalcMchMchc = function (btn) {
+        var wrap = btn.closest('td');
+        var input = wrap ? wrap.querySelector('input[data-param-name]') : null;
+        if (input) delete input.dataset.userEdited;
+        recalc();
+      };
+      ['HGB', 'RBC', 'HCT'].forEach(function (name) {
+        var el = fieldIn(box, name);
+        if (el) el.addEventListener('input', recalc);
+      });
+      ['MCH', 'MCHC'].forEach(function (name) {
+        var el = fieldIn(box, name);
+        if (el) el.addEventListener('input', function () { el.dataset.userEdited = '1'; });
+      });
+      recalc();
+    });
+});
+
+// ------------------------------------------------------------------
+// التحقق من فحوصات التفريق (WBC Differential):
+// مجموع خلايا الفحص لازم يكون بالضبط 100 خلية قبل الحفظ.
 // ------------------------------------------------------------------
 (function () {
   var CORE_PATTERNS = [
     "metamyelocyte", "promyelocyte", "myelocyte", "neutrophil",
     "lymphocyte", "monocyte", "eosinophil", "basophil", "band", "blast",
   ];
-  // أسماء CBC المختصرة لنسب التفريق الخمسة (NE/Ly/MO/EO/BA) — تحليل CBC
-  // يخزّنها بهذا الشكل المختصر بالضبط (مو "Neutrophils" الكاملة زي فحوصات
-  // الـDifferential الثانية)، فهذا التطابق منفصل وبمطابقة تامة (exact) وليس
-  // "يحتوي على" — حتى ما يطابق غلط أعمدة الأعداد المطلقة NE#/LY#/MO#/EO#/BA#
-  // الموجودة بنفس الجدول (تلك ما تدخل بمجموع الـ100).
   var CBC_ABBR_CORE = ["ne", "ly", "mo", "eo", "ba"];
 
   function classifyName(rawName) {
@@ -294,7 +309,7 @@
     return null;
   }
 
-  var diffBoxes = []; // { box, coreInputs:[], nrbcInput, atypicalInput, atypicalCheck, reactiveInput, reactiveCheck, sumEl }
+  var diffBoxes = [];
 
   document.querySelectorAll(".rb-box").forEach(function (box) {
     var coreInputs = [], nrbcInput = null, atypicalInput = null, reactiveInput = null;
@@ -309,7 +324,6 @@
       else if (kind === "reactive") reactiveInput = input;
     });
 
-    // ما نعتبره فحص تفريق إلا إذا لكيت 3 خلايا أساسية وأكثر
     if (coreInputs.length < 3) return;
 
     var readOnly = coreInputs[0].hasAttribute("readonly");
@@ -394,6 +408,10 @@
     });
   });
 
+  // نربط التحقق على زر "حفظ" لكل صندوق (onclick) بدل submit النموذج الكبير
+  // لكن لأن الحفظ الآن AJAX لكل صندوق، ما نحتاج منع submit النموذج الكبير
+  // إلا إذا استُخدم زر الحفظ الكبير (اللي حذفناه). فنترك هذا كـ safety net
+  // لو حد ضغط Enter داخل حقل أو شي.
   var form = document.getElementById("visitResultsForm");
   if (form) {
     form.addEventListener("submit", function (e) {
@@ -401,12 +419,12 @@
         var d = diffBoxes[i];
         if (d.readOnly) continue;
         var anyFilled = d.coreInputs.some(function (inp) { return inp.value.trim() !== ""; });
-        if (!anyFilled) continue; // الفحص ما زال فاضي، تجاوزه
+        if (!anyFilled) continue;
         var sum = d.recompute();
         if (sum !== 100) {
           e.preventDefault();
-          alert("⚠️ فحص \"" + d.testName + "\": مجموع خلايا التفريق حالياً " + sum +
-                " وليس 100. أكمل/صحّح النسب قبل الحفظ.\n(NRBC لا تحسب ضمن الـ100، وAtypical Lymphocyte وReactive lymphocytes حسب الخيار المحدد أعلى الجدول.)");
+          alert("⚠️ فحص "" + d.testName + "": مجموع خلايا التفريق حالياً " + sum +
+                " وليس 100. أكمل/صحّح النسب قبل الحفظ.");
           d.box.scrollIntoView({ behavior: "smooth", block: "center" });
           return false;
         }

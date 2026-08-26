@@ -2980,6 +2980,75 @@ def visit_results_entry(visit_id):
 # أي تكرار لها. تحليل بدون أي نتيجة مُدخلة بعد يُستبعد من اللوحة تلقائيًا
 # حتى ما تطلع أسطر فاضية.
 # ------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------------
+# حفظ نتائج تحليل واحد فقط (AJAX) — زر "حفظ" بجانب اسم كل تحليل
+# ------------------------------------------------------------------
+@app.route("/api/order-tests/<int:order_test_id>/save-results", methods=["POST"])
+@login_required
+def api_save_single_test_results(order_test_id):
+    db = get_db()
+    ot = db.execute(
+        "SELECT ot.*, td.name as test_name, p.gender, p.age, p.age_unit, v.id as visit_id "
+        "FROM order_tests ot "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "JOIN orders o ON o.id = ot.order_id "
+        "JOIN visits v ON v.id = o.visit_id "
+        "JOIN patients p ON p.id = v.patient_id "
+        "WHERE ot.id = ?",
+        (order_test_id,),
+    ).fetchone()
+    if not ot:
+        return jsonify({"ok": False, "error": "Not found"}), 404
+
+    parameters = db.execute(
+        "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
+        (ot["test_definition_id"],),
+    ).fetchall()
+
+    prefix = f"ot{order_test_id}_"
+    touched = save_order_test_results(db, ot, parameters, request.form, session["user_id"], field_prefix=prefix)
+    if touched:
+        if ot["status"] != "Verified":
+            db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (order_test_id,))
+        db.commit()
+        _maybe_auto_whatsapp_send(db, ot["visit_id"])
+        _maybe_archive_visit_pdf(db, ot["visit_id"])
+        log_action("EnterResult", "order_test", order_test_id)
+        return jsonify({"ok": True, "message": "تم حفظ نتائج هذا التحليل."})
+    return jsonify({"ok": False, "message": "لم تُدخل أي قيمة جديدة."})
+
+
+# ------------------------------------------------------------------
+# طباعة كل نتائج الزيارة — كل تحليل بتقريره الخاص المنفصل
+# ------------------------------------------------------------------
+@app.route("/front-desk/visits/<int:visit_id>/print/all-separate")
+@login_required
+def print_all_separate_reports(visit_id):
+    db = get_db()
+    order_tests = db.execute(
+        "SELECT ot.id, td.name as test_name, td.code as test_code "
+        "FROM order_tests ot "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "JOIN orders o ON o.id = ot.order_id "
+        "WHERE o.visit_id = ? AND ot.status IN ('Completed', 'Verified') "
+        "ORDER BY ot.id",
+        (visit_id,),
+    ).fetchall()
+    urls = [url_for("print_report", order_test_id=ot["id"], _external=True) for ot in order_tests]
+    html = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>طباعة التقارير</title></head>
+    <body style="font-family:sans-serif; padding:20px; direction:rtl;">
+    <p>جاري فتح {{ count }} تقرير في نوافذ جديدة...</p>
+    <ul>{% for u in urls %}<li><a href="{{ u }}" target="_blank">تقرير {{ loop.index }}</a></li>{% endfor %}</ul>
+    <script>
+    {% for u in urls %}
+      window.open('{{ u }}', '_blank');
+    {% endfor %}
+    setTimeout(function(){ window.close(); }, 3000);
+    </script></body></html>"""
+    return render_template_string(html, urls=urls, count=len(urls))
+
 @app.route("/front-desk/visits/<int:visit_id>/print/combined-panel")
 @login_required
 def print_combined_panel(visit_id):

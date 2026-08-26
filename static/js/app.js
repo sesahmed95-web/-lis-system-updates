@@ -14,6 +14,45 @@
 })();
 
 // ------------------------------------------------------------------
+// حفظ نتائج تحليل واحد فقط عبر AJAX (زر "💾 حفظ" بجانب اسم التحليل)
+// ------------------------------------------------------------------
+window.saveSingleTest = function (orderTestId) {
+  var form = document.getElementById("visitResultsForm");
+  var data = new FormData();
+  var prefix = "ot" + orderTestId + "_";
+  var inputs = form.querySelectorAll("input, textarea, select");
+  for (var i = 0; i < inputs.length; i++) {
+    var el = inputs[i];
+    if (el.name && el.name.indexOf(prefix) === 0) {
+      data.append(el.name, el.value);
+    }
+  }
+  fetch("/api/order-tests/" + orderTestId + "/save-results", {
+    method: "POST",
+    body: data,
+    credentials: "same-origin",
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j.ok) {
+        alert("✅ " + j.message);
+        var box = document.getElementById("rbox_" + orderTestId);
+        var badge = box ? box.querySelector(".badge") : null;
+        if (badge && badge.textContent.trim() === "Accepted") {
+          badge.textContent = "Completed";
+          badge.className = badge.className.replace("badge-Accepted", "badge-Completed");
+        }
+      } else {
+        alert("⚠️ " + j.message);
+      }
+    })
+    .catch(function (err) {
+      alert("❌ خطأ: " + err);
+    });
+};
+
+
+// ------------------------------------------------------------------
 // حقول النتائج النصية (RBC/WBC/Platelets/Conclusion...): تكبير تلقائي
 // لصندوق الكتابة حتى يظهر كل النص المكتوب دائمًا، بلا قص أو تمرير مخفي.
 // ------------------------------------------------------------------
