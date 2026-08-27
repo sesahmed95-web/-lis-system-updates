@@ -137,6 +137,47 @@
       </div>
     </div>
 
+    <!-- شريط الحفظ نُقل هنا (جنب معلومات المريض مباشرة، فوق) بدل آخر
+         الفورم — بما إن التخطيط عمودين يخلي "اسم المريض" و"قائمة
+         التحاليل" ظاهرين مع بعض بدون نزول، صار المستخدم يقدر يحفظ
+         الزيارة مباشرة من هنا بدون ما يمرّر عبر بطاقات المعلومات
+         الإضافية (الصحية/المرجعية/الأخرى) الاختيارية تحت. -->
+    <div class="nv-bottombar">
+      <div class="nv-bottombar-left">
+        <button class="btn" type="submit" id="createVisitBtn">💾 {{ t('create_visit') }}</button>
+        <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; background:#FEF9C3; border:1px solid #FDE047; border-radius:6px; padding:4px 8px; white-space:nowrap;">
+          <input type="checkbox" name="sample_collected" id="sample_collected" value="1">
+          ✅ تم سحب العينة
+        </label>
+        <a class="btn small secondary" id="printBarcodeBtn" href="#" target="_blank"
+           style="padding:4px 10px; font-size:12.5px; white-space:nowrap; pointer-events:none; opacity:.5;"
+           title="يفعّل بعد حفظ الزيارة">🖨️ طباعة الباركود</a>
+      </div>
+      <div class="nv-bottombar-right">
+        <div class="nv-toggle-wrap">
+          <span>Visit Barcode</span>
+          <label class="nv-switch">
+            <input type="checkbox" id="toggleVisitBarcode">
+            <span class="nv-switch-slider"></span>
+          </label>
+        </div>
+        <div class="nv-toggle-wrap">
+          <span>Sample-wise</span>
+          <label class="nv-switch">
+            <input type="checkbox" id="toggleSampleWise" checked>
+            <span class="nv-switch-slider"></span>
+          </label>
+        </div>
+        <div class="nv-toggle-wrap">
+          <span>Invoice</span>
+          <label class="nv-switch">
+            <input type="checkbox" id="toggleInvoice">
+            <span class="nv-switch-slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h3>{{ 'المعلومات الصحية' if lang=='ar' else 'Health Information' }}</h3>
       <div class="form-grid">
@@ -196,56 +237,8 @@
         </div>
       </div>
     </div>
-    </div>
 
-    <div class="nv-right">
-
-
-  <div class="card nv-orders-card">
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-      <h3>{{ t('orders_section') }}</h3>
-      {% if current_role in ('admin', 'supervisor') %}
-      <button type="button" class="btn small secondary" onclick="openTestManageModal()">+ Add Test</button>
-      {% endif %}
-    </div>
-    {% if quick_items %}
-    <div style="margin-bottom:10px;">
-      <span class="muted">⚡ {{ t('quick_add_items') }}:</span>
-      {% for qi in quick_items %}
-      <button type="button" class="btn small secondary" style="margin:4px;"
-        onclick="document.getElementById('test_{{ qi['id'] }}').checked = true; refreshPrices();">{{ qi['name'] }}</button>
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    <div id="customTestRow">
-      <div class="form-field" style="flex:2; min-width:180px;">
-        <label style="font-size:12px;">تحليل غير موجود بالقائمة؟ اكتب اسمه هنا</label>
-        <input type="text" id="customTestName" placeholder="اسم التحليل" autocomplete="off">
-      </div>
-      <div class="form-field" style="width:110px;">
-        <label style="font-size:12px;">السعر</label>
-        <input type="number" id="customTestPrice" step="any" min="0" placeholder="0">
-      </div>
-      <button type="button" class="btn small" onclick="addCustomTest()">+ إضافة وتحديد</button>
-    </div>
-    <small class="muted" id="customTestError" style="display:none; color:#DC2626; display:none;"></small>
-
-    <div class="checkbox-grid nv-checkbox-grid">
-      {% for test in tests %}
-      <span class="checkbox-item-wrap" id="test_item_{{ test['id'] }}">
-      <label class="checkbox-item">
-        <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}"
-               data-exam="{{ '1' if test['id'] in examining_test_ids else '0' }}">
-        <span id="test_label_{{ test['id'] }}">{{ test['name'] }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
-      </label>
-      </span>
-      {% endfor %}
-    </div>
-    <p style="margin-top:10px; font-weight:600;">{{ t('grand_total') }}: <span id="grandTotal">0</span></p>
-  </div>
-
-  <div class="card">
+    <div class="card">
       <h3>{{ t('reference_information') }}</h3>
       <div class="form-grid">
         <div class="form-field">
@@ -328,43 +321,56 @@
       </div>
     </div>
     </div>
+
+    <div class="nv-right">
+
+
+  <div class="card nv-orders-card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3>{{ t('orders_section') }}</h3>
+      {% if current_role in ('admin', 'supervisor') %}
+      <button type="button" class="btn small secondary" onclick="openTestManageModal()">+ Add Test</button>
+      {% endif %}
+    </div>
+    {% if quick_items %}
+    <div style="margin-bottom:10px;">
+      <span class="muted">⚡ {{ t('quick_add_items') }}:</span>
+      {% for qi in quick_items %}
+      <button type="button" class="btn small secondary" style="margin:4px;"
+        onclick="document.getElementById('test_{{ qi['id'] }}').checked = true; refreshPrices();">{{ qi['name'] }}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div id="customTestRow">
+      <div class="form-field" style="flex:2; min-width:180px;">
+        <label style="font-size:12px;">تحليل غير موجود بالقائمة؟ اكتب اسمه هنا</label>
+        <input type="text" id="customTestName" placeholder="اسم التحليل" autocomplete="off">
+      </div>
+      <div class="form-field" style="width:110px;">
+        <label style="font-size:12px;">السعر</label>
+        <input type="number" id="customTestPrice" step="any" min="0" placeholder="0">
+      </div>
+      <button type="button" class="btn small" onclick="addCustomTest()">+ إضافة وتحديد</button>
+    </div>
+    <small class="muted" id="customTestError" style="display:none; color:#DC2626; display:none;"></small>
+
+    <div class="checkbox-grid nv-checkbox-grid">
+      {% for test in tests %}
+      <span class="checkbox-item-wrap" id="test_item_{{ test['id'] }}">
+      <label class="checkbox-item">
+        <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}"
+               data-exam="{{ '1' if test['id'] in examining_test_ids else '0' }}">
+        <span id="test_label_{{ test['id'] }}">{{ test['name'] }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
+      </label>
+      </span>
+      {% endfor %}
+    </div>
+    <p style="margin-top:10px; font-weight:600;">{{ t('grand_total') }}: <span id="grandTotal">0</span></p>
+  </div>
+    </div>
   </div>
 
-  <div class="nv-bottombar">
-    <div class="nv-bottombar-left">
-      <button class="btn" type="submit" id="createVisitBtn">💾 {{ t('create_visit') }}</button>
-      <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; background:#FEF9C3; border:1px solid #FDE047; border-radius:6px; padding:4px 8px; white-space:nowrap;">
-        <input type="checkbox" name="sample_collected" id="sample_collected" value="1">
-        ✅ تم سحب العينة
-      </label>
-      <a class="btn small secondary" id="printBarcodeBtn" href="#" target="_blank"
-         style="padding:4px 10px; font-size:12.5px; white-space:nowrap; pointer-events:none; opacity:.5;"
-         title="يفعّل بعد حفظ الزيارة">🖨️ طباعة الباركود</a>
-    </div>
-    <div class="nv-bottombar-right">
-      <div class="nv-toggle-wrap">
-        <span>Visit Barcode</span>
-        <label class="nv-switch">
-          <input type="checkbox" id="toggleVisitBarcode">
-          <span class="nv-switch-slider"></span>
-        </label>
-      </div>
-      <div class="nv-toggle-wrap">
-        <span>Sample-wise</span>
-        <label class="nv-switch">
-          <input type="checkbox" id="toggleSampleWise" checked>
-          <span class="nv-switch-slider"></span>
-        </label>
-      </div>
-      <div class="nv-toggle-wrap">
-        <span>Invoice</span>
-        <label class="nv-switch">
-          <input type="checkbox" id="toggleInvoice">
-          <span class="nv-switch-slider"></span>
-        </label>
-      </div>
-    </div>
-  </div>
 </form>
 
 <div id="visitCreatedPanel" class="card">
