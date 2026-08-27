@@ -313,8 +313,19 @@
 </form>
 
 <style>
-  .rb-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:14px; }
-  .rb-box { margin-bottom:0; }
+  /* كانت .rb-grid تستخدم CSS Grid (grid-template-columns) — وهذا يخلي كل
+     صناديق نفس الصف بنفس الارتفاع إجباريًا (يتحدد بأطول صندوق بالصف)، فلو
+     تحليل قصير (متل FBS بسطر وحدة) جنب تحليل طويل (متل Blood Film)، يضل
+     فراغ فاضي كبير تحت القصير، والتحليل اللي بعده (متل CBC) ينزل تحت هذا
+     الفراغ بدل ما يعبيه. أعمدة CSS (columns) تحل هذا: كل صندوق يتدفق
+     لأقصر عمود فعليًا (توزيع متوازن بالارتفاع الحقيقي)، بدون فراغات.
+     break-inside: avoid يمنع تقطيع أي صندوق نصين بين عمودين. */
+  .rb-grid { columns: 2 380px; column-gap: 14px; }
+  .rb-box { break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid;
+            display: inline-block; width: 100%; margin-bottom: 14px; }
+  @media (max-width: 900px) {
+    .rb-grid { columns: 1; }
+  }
   .diff-panel {
     display:flex; gap:14px; flex-wrap:wrap; align-items:center;
     background:#F3F6F8; border:1px solid #E2E8F0; border-radius:6px;
