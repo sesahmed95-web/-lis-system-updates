@@ -1862,7 +1862,11 @@ def referral_lab_statement_pdf(center_id):
     html_content = render_template("management/print_referral_lab_statement.html", lab=lab,
                                     by_day=by_day, by_test=by_test, total=total, month=month)
     pdf_path = pdf_export.make_temp_pdf_path(f"reflab{center_id}_{month}")
-    pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+    try:
+        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+    except Exception as exc:
+        flash(f"❌ تعذّر توليد ملف PDF لكشف الحساب: {exc}")
+        return redirect(url_for("referral_lab_statement", center_id=center_id, month=month))
     log_action("PDF", "referral_center", center_id, f"statement {month}")
     safe_name = re.sub(r"[^\w\-]+", "_", lab["name"])
     return send_file(pdf_path, as_attachment=True, download_name=f"{safe_name}_{month}.pdf")
@@ -1886,7 +1890,11 @@ def referral_lab_statement_whatsapp(center_id):
     html_content = render_template("management/print_referral_lab_statement.html", lab=lab,
                                     by_day=by_day, by_test=by_test, total=total, month=month)
     pdf_path = pdf_export.make_temp_pdf_path(f"reflab{center_id}_{month}")
-    pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+    try:
+        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+    except Exception as exc:
+        flash(f"❌ تعذّر توليد ملف PDF لإرساله: {exc}")
+        return redirect(url_for("referral_lab_statement", center_id=center_id, month=month))
 
     try:
         whatsapp_bridge.send_pdf(
@@ -3448,7 +3456,26 @@ def _whatsapp_generate_and_queue(db, visit_row, patient_id, patient_name, phone,
 
     now = datetime.now().isoformat(timespec="seconds")
     pdf_path = pdf_export.make_temp_pdf_path(f"visit{visit_row['id']}")
-    pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+
+    # توليد PDF نفسه كان بدون أي حماية — أي خطأ يصير أثناء التحويل (خط
+    # ناقص، مسار شعار كسران، أي عطل بمكتبة التحويل) كان يطيح الطلب كامل
+    # بصفحة 500 بيضاء بدون أي رسالة توضح شنو صار، ويقفل الصفحة على
+    # المستخدم بدل ما يعطيه رسالة مفهومة أو يحفظ المحاولة بالطابور. الآن
+    # أي فشل هنا يُسجَّل كصف "failed" بنفس الطابور (تكدر تعيد المحاولة من
+    # "طابور واتساب" لاحقاً) بدل ما يكسر الصفحة بالكامل.
+    try:
+        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+    except Exception as exc:
+        cur = db.execute(
+            "INSERT INTO whatsapp_sends (visit_id, order_test_id, patient_id, patient_name, "
+            "phone, label, pdf_path, status, attempts, error, requested_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', 1, ?, ?, ?)",
+            (visit_row["id"], order_test_id, patient_id, patient_name, phone, label,
+             pdf_path, f"فشل توليد PDF: {exc}", session.get("user_id"), now),
+        )
+        db.commit()
+        log_action("WhatsAppSend", "order_test", order_test_id or visit_row["id"], f"PDF generation failed: {exc}")
+        return False, f"فشل توليد ملف PDF: {exc}"
 
     cur = db.execute(
         "INSERT INTO whatsapp_sends (visit_id, order_test_id, patient_id, patient_name, "
