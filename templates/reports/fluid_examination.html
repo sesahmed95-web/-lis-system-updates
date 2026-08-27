@@ -7,11 +7,11 @@
   <tr><td class="field-name">RBCs</td><td colspan="2">{{ params.get('RBCs', '') }}</td></tr>
   <tr><td class="field-name">W.B.C count:</td><td colspan="2">{{ params.get('WBC count', '') }}</td></tr>
   <tr><td colspan="3" style="text-align:center; font-weight:bold; color:#C0392B;">Differential W.B.C</td></tr>
-  <tr><td class="field-name">Neutrophils</td><td class="pct-val">{{ params.get('Neutrophils', '') }}</td><td class="unit-val">{% if params.get('Neutrophils') %}%{% endif %}</td></tr>
-  <tr><td class="field-name">Lymphocytes</td><td class="pct-val">{{ params.get('Lymphocytes', '') }}</td><td class="unit-val">{% if params.get('Lymphocytes') %}%{% endif %}</td></tr>
-  <tr><td class="field-name">Monocytes</td><td class="pct-val">{{ params.get('Monocytes', '') }}</td><td class="unit-val">{% if params.get('Monocytes') %}%{% endif %}</td></tr>
-  <tr><td class="field-name">Eosinophils</td><td class="pct-val">{{ params.get('Eosinophils', '') }}</td><td class="unit-val">{% if params.get('Eosinophils') %}%{% endif %}</td></tr>
-  <tr><td class="field-name">Basophils</td><td class="pct-val">{{ params.get('Basophils', '') }}</td><td class="unit-val">{% if params.get('Basophils') %}%{% endif %}</td></tr>
+  <tr><td class="field-name">Neutrophils</td><td class="pct-val">{{ params.get('Neutrophils', '') }}</td><td class="unit-val">{% if params.get('Neutrophils') %}{{ units.get('Neutrophils') or '%' }}{% endif %}</td></tr>
+  <tr><td class="field-name">Lymphocytes</td><td class="pct-val">{{ params.get('Lymphocytes', '') }}</td><td class="unit-val">{% if params.get('Lymphocytes') %}{{ units.get('Lymphocytes') or '%' }}{% endif %}</td></tr>
+  <tr><td class="field-name">Monocytes</td><td class="pct-val">{{ params.get('Monocytes', '') }}</td><td class="unit-val">{% if params.get('Monocytes') %}{{ units.get('Monocytes') or '%' }}{% endif %}</td></tr>
+  <tr><td class="field-name">Eosinophils</td><td class="pct-val">{{ params.get('Eosinophils', '') }}</td><td class="unit-val">{% if params.get('Eosinophils') %}{{ units.get('Eosinophils') or '%' }}{% endif %}</td></tr>
+  <tr><td class="field-name">Basophils</td><td class="pct-val">{{ params.get('Basophils', '') }}</td><td class="unit-val">{% if params.get('Basophils') %}{{ units.get('Basophils') or '%' }}{% endif %}</td></tr>
   <tr><td class="field-name">Others</td><td colspan="2">{{ params.get('Others', '') }}</td></tr>
 </table>
 

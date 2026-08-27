@@ -5,9 +5,9 @@
 {% set corrected_retic = params.get('Corrected Retic count', '') %}
 <table style="width:100%; margin-top:10px; direction:ltr; text-align:left;">
   <tr>
-    <td style="width:{{ '50%' if corrected_retic else '100%' }};"><b>Reticulocyte count:</b> {{ params.get('Reticulocyte count', '') }} %</td>
+    <td style="width:{{ '50%' if corrected_retic else '100%' }};"><b>Reticulocyte count:</b> {{ params.get('Reticulocyte count', '') }} {{ units.get('Reticulocyte count') or '%' }}</td>
     {% if corrected_retic %}
-    <td><b>Corrected Retic count:</b> {{ corrected_retic }} %</td>
+    <td><b>Corrected Retic count:</b> {{ corrected_retic }} {{ units.get('Corrected Retic count') or '%' }}</td>
     {% endif %}
   </tr>
 </table>

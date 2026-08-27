@@ -2482,6 +2482,70 @@ def print_visit_results(visit_id):
                             completed_only=completed_only)
 
 
+# "طباعة كل النتائج المكتملة" بشاشة إدخال النتائج — بدل الجدول الموحّد
+# العام (print_visit_results فوق، الذي لا يستخدم تصميم التقرير الخاص بكل
+# تحليل)، هذا الزر يفتح لكل تحليل مكتمل تقريره المخصّص الحقيقي (نفس
+# print_report المستخدم من زر "🖨 طباعة التقرير" أسفل كل تحليل مباشرة) —
+# كل واحد بنافذة/تبويب منفصلة، حتى يطابق شكل التقرير المطبوع تماماً شكل
+# تقرير نفس التحليل لو طبعته لحاله. صفحة "مُشغّل" خفيفة فقط تفتح الروابط
+# تلقائياً + تعرضها كروابط احتياطية لو المتصفح منع النوافذ المنبثقة.
+@app.route("/front-desk/visits/<int:visit_id>/print/results-bundle")
+@login_required
+def print_visit_results_bundle(visit_id):
+    db = get_db()
+    visit = db.execute(
+        "SELECT v.*, p.full_name FROM visits v JOIN patients p ON p.id = v.patient_id WHERE v.id=?",
+        (visit_id,),
+    ).fetchone()
+    if not visit:
+        return "Not found", 404
+
+    order_tests = db.execute(
+        "SELECT ot.id, ot.status, td.code as test_code, td.name as test_name, td.department as test_department "
+        "FROM order_tests ot JOIN orders o ON o.id = ot.order_id "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "WHERE o.visit_id=? AND ot.status IN ('Completed', 'Verified') ORDER BY ot.id",
+        (visit_id,),
+    ).fetchall()
+
+    # نفس منطق الترتيب المستخدم بشاشة "إدخال النتائج" بالضبط (ترتيب يدوي من
+    # الإعدادات إن وُجد، وإلا حسب أولوية القسم: كيمياء ← فايروسات ← هرمونات ←
+    # فيتامينات ← تخثر ← أمراض الدم) — كانت هذي الصفحة تستخدم ترتيب الإضافة
+    # الخام (ot.id) فقط بدون أي فرز، فتفتح التقارير بترتيب عشوائي لا علاقة له
+    # بترتيب شاشة الإدخال.
+    order_pref_raw = get_setting(db, "results_entry_test_order", "")
+    order_pref = [ln.strip() for ln in order_pref_raw.splitlines() if ln.strip()]
+    if order_pref:
+        rank = {name: i for i, name in enumerate(order_pref)}
+        order_tests = sorted(
+            order_tests,
+            key=lambda row: (
+                rank.get(row["test_name"], len(order_pref)),
+                department_priority_rank(row["test_department"]),
+                row["id"],
+            ),
+        )
+    else:
+        order_tests = sorted(
+            order_tests,
+            key=lambda row: (department_priority_rank(row["test_department"]), row["id"]),
+        )
+
+    # تجنّب فتح تقرير "لطاخة الدم" مرتين لو الزيارة فيها BF وRETIC كتحليلين
+    # منفصلين (بدل BFRETIC الموحّد) — print_report أصلاً يدمجهم بتقرير واحد
+    # لو فتحت أي وحدة منهم (انظر BF_RETIC_LINK)، فنكتفي هنا برابط واحد بس.
+    seen_codes = set()
+    reports = []
+    for ot in order_tests:
+        code = ot["test_code"]
+        if code in BF_RETIC_LINK and BF_RETIC_LINK[code] in seen_codes:
+            continue
+        seen_codes.add(code)
+        reports.append({"order_test_id": ot["id"], "test_name": ot["test_name"]})
+
+    return render_template("front_desk/print_results_bundle.html", visit=visit, reports=reports)
+
+
 # الجدول الموحّد: يدمج نتائج زيارة أو أكثر (عادة زيارة قديمة + الزيارة الجديدة)
 # بصفحة واحدة، صف لكل باراميتر وعمود لكل زيارة، حتى تتضح مقارنة النتائج عبر
 # الزمن دون الحاجة لنسخ أي بيانات فعليًا داخل قاعدة البيانات.
@@ -2980,75 +3044,6 @@ def visit_results_entry(visit_id):
 # أي تكرار لها. تحليل بدون أي نتيجة مُدخلة بعد يُستبعد من اللوحة تلقائيًا
 # حتى ما تطلع أسطر فاضية.
 # ------------------------------------------------------------------------
-
-
-# ------------------------------------------------------------------
-# حفظ نتائج تحليل واحد فقط (AJAX) — زر "حفظ" بجانب اسم كل تحليل
-# ------------------------------------------------------------------
-@app.route("/api/order-tests/<int:order_test_id>/save-results", methods=["POST"])
-@login_required
-def api_save_single_test_results(order_test_id):
-    db = get_db()
-    ot = db.execute(
-        "SELECT ot.*, td.name as test_name, p.gender, p.age, p.age_unit, v.id as visit_id "
-        "FROM order_tests ot "
-        "JOIN test_definitions td ON td.id = ot.test_definition_id "
-        "JOIN orders o ON o.id = ot.order_id "
-        "JOIN visits v ON v.id = o.visit_id "
-        "JOIN patients p ON p.id = v.patient_id "
-        "WHERE ot.id = ?",
-        (order_test_id,),
-    ).fetchone()
-    if not ot:
-        return jsonify({"ok": False, "error": "Not found"}), 404
-
-    parameters = db.execute(
-        "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
-        (ot["test_definition_id"],),
-    ).fetchall()
-
-    prefix = f"ot{order_test_id}_"
-    touched = save_order_test_results(db, ot, parameters, request.form, session["user_id"], field_prefix=prefix)
-    if touched:
-        if ot["status"] != "Verified":
-            db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (order_test_id,))
-        db.commit()
-        _maybe_auto_whatsapp_send(db, ot["visit_id"])
-        _maybe_archive_visit_pdf(db, ot["visit_id"])
-        log_action("EnterResult", "order_test", order_test_id)
-        return jsonify({"ok": True, "message": "تم حفظ نتائج هذا التحليل."})
-    return jsonify({"ok": False, "message": "لم تُدخل أي قيمة جديدة."})
-
-
-# ------------------------------------------------------------------
-# طباعة كل نتائج الزيارة — كل تحليل بتقريره الخاص المنفصل
-# ------------------------------------------------------------------
-@app.route("/front-desk/visits/<int:visit_id>/print/all-separate")
-@login_required
-def print_all_separate_reports(visit_id):
-    db = get_db()
-    order_tests = db.execute(
-        "SELECT ot.id, td.name as test_name, td.code as test_code "
-        "FROM order_tests ot "
-        "JOIN test_definitions td ON td.id = ot.test_definition_id "
-        "JOIN orders o ON o.id = ot.order_id "
-        "WHERE o.visit_id = ? AND ot.status IN ('Completed', 'Verified') "
-        "ORDER BY ot.id",
-        (visit_id,),
-    ).fetchall()
-    urls = [url_for("print_report", order_test_id=ot["id"], _external=True) for ot in order_tests]
-    html = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>طباعة التقارير</title></head>
-    <body style="font-family:sans-serif; padding:20px; direction:rtl;">
-    <p>جاري فتح {{ count }} تقرير في نوافذ جديدة...</p>
-    <ul>{% for u in urls %}<li><a href="{{ u }}" target="_blank">تقرير {{ loop.index }}</a></li>{% endfor %}</ul>
-    <script>
-    {% for u in urls %}
-      window.open('{{ u }}', '_blank');
-    {% endfor %}
-    setTimeout(function(){ window.close(); }, 3000);
-    </script></body></html>"""
-    return render_template_string(html, urls=urls, count=len(urls))
-
 @app.route("/front-desk/visits/<int:visit_id>/print/combined-panel")
 @login_required
 def print_combined_panel(visit_id):
@@ -3259,6 +3254,13 @@ def print_report(order_test_id):
 
     params = {}
     ranges = {}
+    # units: يُبنى بنفس حلقة params/ranges — يغذّي القوالب الستة الكبيرة
+    # (Blood Film, WBC Diff, Coagulation, Fluid exam, Retic) بوحدة كل
+    # باراميتر من قاعدة البيانات (test_parameters.unit) بدل ما تكون نصاً
+    # ثابتاً مكتوباً داخل القالب نفسه — فتعديلها من صفحة "📏 تعديل
+    # الوحدات" ينعكس فعلياً على الورقة المطبوعة لهذي التقارير أيضاً، تماماً
+    # متل ما يصير أصلاً مع custom.html وcbc.html.
+    units = {}
     for p in parameters:
         r = results_by_name.get(p["name"])
         if r is not None:
@@ -3267,6 +3269,7 @@ def print_report(order_test_id):
             value = None
         params[p["name"]] = "" if value is None else value
         ranges[p["name"]] = find_reference_range(db, p["id"], ot["gender"], ot["age"], ot["age_unit"])
+        units[p["name"]] = p["unit"] or ""
 
     logo_path = get_setting(db, "logo_path", "")
     logo_url = url_for("static", filename=logo_path) if logo_path else None
@@ -3415,7 +3418,7 @@ def print_report(order_test_id):
 
     return render_template(
         template_name,
-        ot=ot, params=params, ranges=ranges, cbc_groups=cbc_groups,
+        ot=ot, params=params, ranges=ranges, units=units, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         custom_unit_column=custom_unit_column,
@@ -5241,10 +5244,11 @@ def preview_report_design(test_definition_id):
         } for rd in row_defs]
 
     params = {p["name"]: "—" for p in parameters}
+    units = units_by_name
 
     return render_template(
         template_name,
-        ot={"test_name": test["name"]}, params=params, ranges={}, cbc_groups=cbc_groups,
+        ot={"test_name": test["name"]}, params=params, ranges={}, units=units, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         custom_unit_column=custom_unit_column,

@@ -3,30 +3,30 @@
 <div class="report-heading">WBCs differential</div>
 <table class="data-table" style="direction:ltr;">
   <tr>
-    <td class="field-name">Neutrophils :</td><td class="pct-val">{{ params.get('Neutrophils', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name">Band :</td><td class="pct-val">{{ params.get('Band', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Neutrophils :</td><td class="pct-val">{{ params.get('Neutrophils', '') }}</td><td class="unit-val">{{ units.get('Neutrophils') or '%' }}</td>
+    <td class="field-name">Band :</td><td class="pct-val">{{ params.get('Band', '') }}</td><td class="unit-val">{{ units.get('Band') or '%' }}</td>
   </tr>
   <tr>
-    <td class="field-name">Lymphocytes:</td><td class="pct-val">{{ params.get('Lymphocytes', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name">Metamyelocytes:</td><td class="pct-val">{{ params.get('Metamyelocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Lymphocytes:</td><td class="pct-val">{{ params.get('Lymphocytes', '') }}</td><td class="unit-val">{{ units.get('Lymphocytes') or '%' }}</td>
+    <td class="field-name">Metamyelocytes:</td><td class="pct-val">{{ params.get('Metamyelocytes', '') }}</td><td class="unit-val">{{ units.get('Metamyelocytes') or '%' }}</td>
   </tr>
   <tr>
-    <td class="field-name">Monocytes :</td><td class="pct-val">{{ params.get('Monocytes', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name">Myelocytes:</td><td class="pct-val">{{ params.get('Myelocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Monocytes :</td><td class="pct-val">{{ params.get('Monocytes', '') }}</td><td class="unit-val">{{ units.get('Monocytes') or '%' }}</td>
+    <td class="field-name">Myelocytes:</td><td class="pct-val">{{ params.get('Myelocytes', '') }}</td><td class="unit-val">{{ units.get('Myelocytes') or '%' }}</td>
   </tr>
   <tr>
-    <td class="field-name">Eosinophils :</td><td class="pct-val">{{ params.get('Eosinophils', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name">Promyelocytes :</td><td class="pct-val">{{ params.get('Promyelocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Eosinophils :</td><td class="pct-val">{{ params.get('Eosinophils', '') }}</td><td class="unit-val">{{ units.get('Eosinophils') or '%' }}</td>
+    <td class="field-name">Promyelocytes :</td><td class="pct-val">{{ params.get('Promyelocytes', '') }}</td><td class="unit-val">{{ units.get('Promyelocytes') or '%' }}</td>
   </tr>
   <tr>
-    <td class="field-name">Basophils :</td><td class="pct-val">{{ params.get('Basophils', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name">Blast :</td><td class="pct-val">{{ params.get('Blast', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Basophils :</td><td class="pct-val">{{ params.get('Basophils', '') }}</td><td class="unit-val">{{ units.get('Basophils') or '%' }}</td>
+    <td class="field-name">Blast :</td><td class="pct-val">{{ params.get('Blast', '') }}</td><td class="unit-val">{{ units.get('Blast') or '%' }}</td>
   </tr>
   <tr>
     <td class="field-name">{% if params.get('Reactive lymphocytes') %}Reactive lymphocytes{% else %}Atypical Lymphocyte{% endif %} :</td>
     <td class="pct-val">{{ params.get('Reactive lymphocytes') or params.get('Atypical lymphocytes', '') }}</td>
-    <td class="unit-val">%</td>
-    <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">/100</td>
+    <td class="unit-val">{{ units.get('Reactive lymphocytes') or units.get('Atypical lymphocytes') or '%' }}</td>
+    <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">{{ units.get('NRBC') or '/100' }}</td>
   </tr>
 </table>
 {% endblock %}

@@ -3,35 +3,35 @@
 <div class="report-heading">Blood film and Morphology</div>
 <table class="data-table" style="direction:ltr;">
   <tr>
-    <td class="field-name">Neutrophils :</td><td class="pct-val">{{ params.get('Neutrophils', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name">Band :</td><td class="pct-val">{{ params.get('Band', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Neutrophils :</td><td class="pct-val">{{ params.get('Neutrophils', '') }}</td><td class="unit-val">{{ units.get('Neutrophils') or '%' }}</td>
+    <td class="field-name">Band :</td><td class="pct-val">{{ params.get('Band', '') }}</td><td class="unit-val">{{ units.get('Band') or '%' }}</td>
   </tr>
   <tr>
-    <td class="field-name">Lymphocytes:</td><td class="pct-val">{{ params.get('Lymphocytes', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name">Metamyelocytes:</td><td class="pct-val">{{ params.get('Metamyelocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Lymphocytes:</td><td class="pct-val">{{ params.get('Lymphocytes', '') }}</td><td class="unit-val">{{ units.get('Lymphocytes') or '%' }}</td>
+    <td class="field-name">Metamyelocytes:</td><td class="pct-val">{{ params.get('Metamyelocytes', '') }}</td><td class="unit-val">{{ units.get('Metamyelocytes') or '%' }}</td>
   </tr>
   <tr>
-    <td class="field-name">Monocytes :</td><td class="pct-val">{{ params.get('Monocytes', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name">Myelocytes:</td><td class="pct-val">{{ params.get('Myelocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Monocytes :</td><td class="pct-val">{{ params.get('Monocytes', '') }}</td><td class="unit-val">{{ units.get('Monocytes') or '%' }}</td>
+    <td class="field-name">Myelocytes:</td><td class="pct-val">{{ params.get('Myelocytes', '') }}</td><td class="unit-val">{{ units.get('Myelocytes') or '%' }}</td>
   </tr>
   <tr>
-    <td class="field-name">Eosinophils :</td><td class="pct-val">{{ params.get('Eosinophils', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name">Promyelocytes :</td><td class="pct-val">{{ params.get('Promyelocytes', '') }}</td><td class="unit-val">%</td>
+    <td class="field-name">Eosinophils :</td><td class="pct-val">{{ params.get('Eosinophils', '') }}</td><td class="unit-val">{{ units.get('Eosinophils') or '%' }}</td>
+    <td class="field-name">Promyelocytes :</td><td class="pct-val">{{ params.get('Promyelocytes', '') }}</td><td class="unit-val">{{ units.get('Promyelocytes') or '%' }}</td>
   </tr>
   <tr>
-    <td class="field-name">Basophils :</td><td class="pct-val">{{ params.get('Basophils', '') }}</td><td class="unit-val">%</td>
-    <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">/100wbc</td>
+    <td class="field-name">Basophils :</td><td class="pct-val">{{ params.get('Basophils', '') }}</td><td class="unit-val">{{ units.get('Basophils') or '%' }}</td>
+    <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">{{ units.get('NRBC') or '100/wbc' }}</td>
   </tr>
   <tr>
     <td class="field-name">{% if params.get('Reactive lymphocytes') %}Reactive lymphocytes{% else %}Atypical lymphocytes{% endif %} :</td>
     <td class="pct-val">{{ params.get('Reactive lymphocytes') or params.get('Atypical lymphocytes', '') }}</td>
-    <td class="unit-val">%</td>
+    <td class="unit-val">{{ units.get('Reactive lymphocytes') or units.get('Atypical lymphocytes') or '%' }}</td>
     <td class="field-name">Blast :</td>
     <td class="pct-val">
       {% set blast_val = params.get('Blast', '') %}
       {% if blast_val %}<span style="color:#D40000; font-weight:bold;">{{ blast_val }}</span>{% else %}{{ blast_val }}{% endif %}
     </td>
-    <td class="unit-val">%</td>
+    <td class="unit-val">{{ units.get('Blast') or '%' }}</td>
   </tr>
 </table>
 
@@ -43,9 +43,9 @@
 {% set corrected_retic = params.get('Corrected Retic count', '') %}
 <table style="width:100%; margin-top:10px; direction:ltr; text-align:left;">
   <tr>
-    <td style="width:{{ '50%' if corrected_retic else '100%' }};"><b>Reticulocyte count:</b> {{ params.get('Reticulocyte count', '') }} %</td>
+    <td style="width:{{ '50%' if corrected_retic else '100%' }};"><b>Reticulocyte count:</b> {{ params.get('Reticulocyte count', '') }} {{ units.get('Reticulocyte count') or '%' }}</td>
     {% if corrected_retic %}
-    <td><b>Corrected Retic count:</b> {{ corrected_retic }} %</td>
+    <td><b>Corrected Retic count:</b> {{ corrected_retic }} {{ units.get('Corrected Retic count') or '%' }}</td>
     {% endif %}
   </tr>
 </table>
