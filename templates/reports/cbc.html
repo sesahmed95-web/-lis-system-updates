@@ -2,13 +2,24 @@
 {% block report_body %}
 <div class="report-heading">Complete Blood Count (CBC)</div>
 
+<style>
+  /* فاصل بصري بين مجاميع الـCBC الثلاث (كريات الدم البيضاء بكل أنواعها /
+     كريات الدم الحمراء وكافة متعلقاتها / الأقراص وكافة متعلقاتها) —
+     مسافة واضحة ومتناسقة بين مجموعة وأخرى (12px) بدون ما تكون فراغ عشوائي،
+     مع إبقاء المسافة الطبيعية بين كل نتيجة وأخرى داخل نفس المجموعة كما هي
+     (يحددها padding الخلية العادي بـ reports/base_report.html). الفراغ
+     المتبقي أسفل الورقة (لو التحاليل قليلة) متروك عمدًا كما هو ولا علاقة
+     له بهذا الفاصل.  */
+  .cbc-group-gap td { border: none !important; padding: 0 !important; height: 12px; line-height: 0; }
+</style>
+
 <table class="data-table" style="text-align:center; direction:ltr;">
   <tr>
     <th>Test</th><th>result</th><th>units</th><th>low</th><th>high</th>
   </tr>
   {% for group in cbc_groups %}
     {% if not loop.first %}
-    <tr><td colspan="5" style="border:none; padding:4px;"></td></tr>
+    <tr class="cbc-group-gap"><td colspan="5"></td></tr>
     {% endif %}
     {% for row in group %}
     <tr{% if row.highlight %} style="background:#FFF59D;"{% endif %}>

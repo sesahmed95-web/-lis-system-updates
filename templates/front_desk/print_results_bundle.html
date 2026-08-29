@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block page_title %}طباعة كل النتائج المكتملة — {{ visit['full_name'] }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3 style="margin-top:0;">{{ visit['full_name'] }} <span class="muted mono">#{{ visit['registration_number'] }}</span></h3>
+  <p class="muted">
+    كل تحليل مكتمل بهذي الزيارة له تقريره المخصّص الحقيقي (نفس شكل الورقة تمامًا لو طبعته لحاله).
+    اضغط "🖨 طباعة" أمام أي تحليل لمعاينته وطباعته، أو استخدم "🖨 طباعة الكل تباعًا" لفتحها
+    واحد بعد الآخر داخل نفس النافذة.
+  </p>
+  <a class="btn small secondary" href="{{ url_for('visit_results_entry', visit_id=visit['id']) }}">🔙 الرجوع لإدخال النتائج</a>
+
+  {% if reports %}
+  <button type="button" class="btn small" style="margin-inline-start:8px;" onclick="printAllSequential()">🖨 طباعة الكل تباعًا</button>
+  {% endif %}
+
+  {% if not reports %}
+  <p class="muted" style="margin-top:14px;">لا توجد تحاليل مكتملة بعد بهذي الزيارة.</p>
+  {% else %}
+  <table style="margin-top:14px;">
+    <thead><tr><th>التحليل</th><th></th></tr></thead>
+    <tbody>
+      {% for rep in reports %}
+      <tr>
+        <td>{{ rep.test_name }}</td>
+        <td><button type="button" class="btn small secondary" onclick="openReportModal('{{ url_for('print_report', order_test_id=rep.order_test_id) }}')">🖨 طباعة</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<!-- نافذة الطباعة المنبثقة (modal) — نفس النمط المستخدم بباقي صفحات
+     البرنامج (visit_results_entry.html / results.html): تعرض التقرير
+     بداخل iframe فوق نفس صفحة البرنامج بدل نافذة/تبويب متصفح منفصل. -->
+<div id="reportModalOverlay" class="report-modal-overlay" style="display:none;">
+  <div class="report-modal-box">
+    <div class="report-modal-bar">
+      <span class="report-modal-title" id="reportModalTitle">🖨 معاينة الطباعة</span>
+      <div class="report-modal-actions">
+        <button type="button" class="btn small" onclick="printReportModalFrame()">🖨 طباعة</button>
+        {% if reports and reports|length > 1 %}
+        <button type="button" class="btn small secondary" id="reportModalNextBtn" style="display:none;" onclick="printAllAdvance()">التالي ▶</button>
+        {% endif %}
+        <button type="button" class="btn small secondary" onclick="closeReportModal()">✖ إغلاق</button>
+      </div>
+    </div>
+    <iframe id="reportModalFrame" class="report-modal-frame" src="about:blank"></iframe>
+  </div>
+</div>
+
+<style>
+  .report-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
+    z-index: 9999; display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .report-modal-box {
+    background: #fff; width: min(900px, 96vw); height: min(92vh, 1100px);
+    border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  }
+  .report-modal-bar {
+    background: #205072; color: #fff; padding: 10px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .report-modal-title { font-weight: 700; font-size: 14px; }
+  .report-modal-actions { display: flex; gap: 8px; }
+  .report-modal-actions .btn.secondary { background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.3); }
+  .report-modal-frame { flex: 1; border: 0; width: 100%; background: #fff; }
+</style>
+
+<script>
+  var reportUrls = [
+    {% for rep in reports %}"{{ url_for('print_report', order_test_id=rep.order_test_id) }}"{% if not loop.last %},{% endif %}{% endfor %}
+  ];
+  var reportNames = [
+    {% for rep in reports %}{{ rep.test_name|tojson }}{% if not loop.last %},{% endif %}{% endfor %}
+  ];
+  var sequentialIndex = -1;
+
+  function openReportModal(url, title) {
+    document.getElementById('reportModalFrame').src = url;
+    document.getElementById('reportModalTitle').textContent = title ? ('🖨 ' + title) : '🖨 معاينة الطباعة';
+    document.getElementById('reportModalOverlay').style.display = 'flex';
+  }
+  function closeReportModal() {
+    document.getElementById('reportModalOverlay').style.display = 'none';
+    document.getElementById('reportModalFrame').src = 'about:blank';
+    sequentialIndex = -1;
+    var nextBtn = document.getElementById('reportModalNextBtn');
+    if (nextBtn) nextBtn.style.display = 'none';
+  }
+  function printReportModalFrame() {
+    var frame = document.getElementById('reportModalFrame');
+    if (frame && frame.contentWindow) frame.contentWindow.print();
+  }
+  document.getElementById('reportModalOverlay').addEventListener('click', function (e) {
+    if (e.target === this) closeReportModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeReportModal();
+  });
+
+  // طباعة كل التحاليل المكتملة تباعًا — تفتح أول تقرير بنفس النافذة
+  // المنبثقة، وزر "التالي" ينقل للتقرير اللي بعده (كل تقرير بصفحته
+  // الأصلية الحقيقية، بدون محاولة دمجها كلها بصفحة وحدة قد تكسر تنسيق
+  // أي تقرير منها).
+  function printAllSequential() {
+    sequentialIndex = 0;
+    var nextBtn = document.getElementById('reportModalNextBtn');
+    if (nextBtn) nextBtn.style.display = reportUrls.length > 1 ? 'inline-flex' : 'none';
+    openReportModal(reportUrls[0], reportNames[0]);
+  }
+  function printAllAdvance() {
+    sequentialIndex++;
+    if (sequentialIndex >= reportUrls.length) { closeReportModal(); return; }
+    var nextBtn = document.getElementById('reportModalNextBtn');
+    if (nextBtn) nextBtn.style.display = (sequentialIndex < reportUrls.length - 1) ? 'inline-flex' : 'none';
+    openReportModal(reportUrls[sequentialIndex], reportNames[sequentialIndex]);
+  }
+</script>
+{% endblock %}

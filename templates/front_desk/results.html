@@ -26,8 +26,8 @@
         <td class="muted">{{ r['created_at'] }}</td>
         <td>
           <div style="display:flex; flex-direction:column; gap:4px; min-width:190px;">
-            <a class="btn small secondary print-link"
-               href="{{ url_for('print_visit_results', visit_id=r['visit_id'], completed_only=1) }}">🖨 طباعة كل النتائج</a>
+            <button type="button" class="btn small secondary print-link"
+               onclick="openReportModal('{{ url_for('print_visit_results', visit_id=r['visit_id'], completed_only=1) }}')">🖨 طباعة كل النتائج</button>
             {% if r['tests_list'] %}
             <div style="display:flex; gap:4px;">
               <select id="testSel_{{ r['visit_id'] }}" style="flex:1; font-size:12px;">
@@ -47,20 +47,75 @@
     </tbody>
   </table>
 </div>
+<!-- نافذة الطباعة المنبثقة (modal) — تعرض صفحة التقرير المصمّم بداخل iframe
+     فوق نفس صفحة البرنامج (نفس الألوان والهوية)، بدل فتح نافذة متصفح
+     منفصلة بشريط عنوان نظام التشغيل. تُستخدم من printSpecific() هنا،
+     وممكن تُستدعى من أي مكان ثاني بالبرنامج عبر openReportModal(url). -->
+<div id="reportModalOverlay" class="report-modal-overlay" style="display:none;">
+  <div class="report-modal-box">
+    <div class="report-modal-bar">
+      <span class="report-modal-title">🖨 معاينة الطباعة</span>
+      <div class="report-modal-actions">
+        <button type="button" class="btn small" onclick="printReportModalFrame()">🖨 طباعة</button>
+        <button type="button" class="btn small secondary" onclick="closeReportModal()">✖ إغلاق</button>
+      </div>
+    </div>
+    <iframe id="reportModalFrame" class="report-modal-frame" src="about:blank"></iframe>
+  </div>
+</div>
+
+<style>
+  .report-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
+    z-index: 9999; display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .report-modal-box {
+    background: #fff; width: min(900px, 96vw); height: min(92vh, 1100px);
+    border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  }
+  .report-modal-bar {
+    background: #205072; color: #fff; padding: 10px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .report-modal-title { font-weight: 700; font-size: 14px; }
+  .report-modal-actions { display: flex; gap: 8px; }
+  .report-modal-actions .btn.secondary { background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.3); }
+  .report-modal-frame { flex: 1; border: 0; width: 100%; background: #fff; }
+</style>
+
 <script>
+  // فتح أي رابط تقرير طباعة داخل نفس الصفحة (modal + iframe) بدل نافذة
+  // منفصلة — يحافظ على هوية وتصميم البرنامج بدل شكل نافذة المتصفح الخام.
+  function openReportModal(url) {
+    document.getElementById('reportModalFrame').src = url;
+    document.getElementById('reportModalOverlay').style.display = 'flex';
+  }
+  function closeReportModal() {
+    document.getElementById('reportModalOverlay').style.display = 'none';
+    document.getElementById('reportModalFrame').src = 'about:blank';
+  }
+  function printReportModalFrame() {
+    var frame = document.getElementById('reportModalFrame');
+    if (frame && frame.contentWindow) frame.contentWindow.print();
+  }
+  // إغلاق النافذة بالضغط على المساحة الخارجية أو زر Escape
+  document.getElementById('reportModalOverlay').addEventListener('click', function (e) {
+    if (e.target === this) closeReportModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeReportModal();
+  });
+
   // طباعة نتيجة تحليل واحد معيّن (مو كل نتائج الزيارة) مباشرة من صفحة
-  // القائمة، بنفس أسلوب النافذة المنبثقة الصغيرة المستخدم بباقي روابط
-  // الطباعة (بدل فتح تبويب متصفح كامل).
+  // القائمة — الآن تفتح بنفس صفحة البرنامج (modal) بدل تبويب/نافذة متصفح
+  // منفصلة.
   function printSpecific(visitId) {
     var sel = document.getElementById('testSel_' + visitId);
     var otId = sel.value;
-    var w = Math.min(1000, Math.round(screen.availWidth * 0.9));
-    var h = Math.min(1200, Math.round(screen.availHeight * 0.92));
-    var left = Math.round((screen.availWidth - w) / 2);
-    var top = Math.round((screen.availHeight - h) / 2);
-    window.open('/reports/print/' + otId, '_blank',
-      'popup=yes,width=' + w + ',height=' + h + ',left=' + left + ',top=' + top +
-      ',toolbar=no,location=no,menubar=no,status=no,scrollbars=yes,resizable=yes');
+    openReportModal('/reports/print/' + otId);
   }
 </script>
 {% endblock %}

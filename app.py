@@ -3174,6 +3174,13 @@ def print_combined_panel(visit_id):
     age_unit_abbr = {"Hours": "H", "Days": "D", "Weeks": "W", "Months": "M", "Years": "Y"}
     age_display = f"{visit['age']}{age_unit_abbr.get(visit['age_unit'] or 'Years', 'Y')}" if visit["age"] not in (None, "") else ""
 
+    # ملاحظة إصلاح: كانت هذي الشاشة تُطبّع 500 Internal Server Error دائمًا —
+    # السبب إن render_template هنا ما كان يمرّر كل المتغيّرات اللي يعتمد
+    # عليها القالب المشترك reports/base_report.html (نفس الترويسة، اسم
+    # التحليل بالعنوان، حجم الخط...)، وهذي المتغيّرات ممرَّرة دائمًا من
+    # print_report() (شوف الدالة فوق) لأي تقرير غيرها. أضفناها هنا بقيم
+    # مناسبة للوحة المجمّعة تحديدًا (بلا تحليل واحد محدد، فـ"ot" هنا مجرد
+    # عنوان عام للتقرير) حتى تتوقف الصفحة عن الانهيار.
     return render_template(
         "reports/combined_panel.html",
         panel_groups=panel_groups, logo_url=logo_url, from_other_lab=from_other_lab,
@@ -3181,6 +3188,12 @@ def print_combined_panel(visit_id):
         patient_name=visit["patient_name"], patient_id=visit["registration_number"],
         referring_doctor_name=visit["referring_doctor_name"] or "",
         show_exam_signature=False,
+        ot={"test_name": "اللوحة المجمّعة / Combined Panel"},
+        font_size=16, show_prev_values=True, repeat_header_on_print=True,
+        previous_visit_date=None, previous_values={},
+        params={}, ranges={}, units={}, cbc_groups=None,
+        custom_rows=None, custom_heading=None, custom_heading_align="center",
+        custom_rows_align="right", custom_unit_column=False,
     )
 
 
