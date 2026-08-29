@@ -1,2 +1,3 @@
-2026/08/27-19:45:50.563 90dc Creating DB C:\Users\Mas\Documents\GitHub\-lis-system-updates\whatsapp_profile\Default\Local Storage\leveldb since it was missing.
-2026/08/27-19:45:50.585 90dc Reusing MANIFEST C:\Users\Mas\Documents\GitHub\-lis-system-updates\whatsapp_profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/08/29-11:01:59.803 964c Reusing MANIFEST C:\Users\Mas\Documents\GitHub\-lis-system-updates\whatsapp_profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/08/29-11:01:59.813 964c Recovering log #3
+2026/08/29-11:01:59.819 964c Reusing old log C:\Users\Mas\Documents\GitHub\-lis-system-updates\whatsapp_profile\Default\Local Storage\leveldb/000003.log 

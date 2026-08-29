@@ -1,6 +1,14 @@
-2026/08/27-19:45:52.611 3cc8 Creating DB C:\Users\Mas\Documents\GitHub\-lis-system-updates\whatsapp_profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb since it was missing.
-2026/08/27-19:45:52.618 3cc8 Reusing MANIFEST C:\Users\Mas\Documents\GitHub\-lis-system-updates\whatsapp_profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
-2026/08/27-19:45:52.731 6b3c Level-0 table #5: started
-2026/08/27-19:45:52.734 6b3c Level-0 table #5: 6841 bytes OK
-2026/08/27-19:45:52.736 6b3c Delete type=0 #3
-2026/08/27-19:45:52.737 3cc8 Manual compaction at level-0 from '\x00\x01\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x02\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/08/29-11:02:02.773 95bc Reusing MANIFEST C:\Users\Mas\Documents\GitHub\-lis-system-updates\whatsapp_profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/08/29-11:02:02.774 95bc Recovering log #4
+2026/08/29-11:02:02.775 95bc Reusing old log C:\Users\Mas\Documents\GitHub\-lis-system-updates\whatsapp_profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000004.log 
+2026/08/29-11:02:02.787 95bc Level-0 table #8: started
+2026/08/29-11:02:02.790 95bc Level-0 table #8: 1847 bytes OK
+2026/08/29-11:02:02.793 95bc Delete type=0 #4
+2026/08/29-11:02:02.794 95bc Manual compaction at level-0 from '\x00\x02\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x03\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/08/29-11:02:02.795 95bc Manual compaction at level-1 from '\x00\x02\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x03\x00\x00\x00' @ 0 : 0; will stop at '\x00\x03\x00\x00\x05' @ 571 : 1
+2026/08/29-11:02:02.795 95bc Compacting 1@1 + 1@2 files
+2026/08/29-11:02:02.799 95bc Generated table #9@1: 9 keys, 416 bytes
+2026/08/29-11:02:02.799 95bc Compacted 1@1 + 1@2 files => 416 bytes
+2026/08/29-11:02:02.802 95bc compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/08/29-11:02:02.803 95bc Delete type=2 #8
+2026/08/29-11:02:02.803 95bc Manual compaction at level-1 from '\x00\x03\x00\x00\x05' @ 571 : 1 .. '\x00\x03\x00\x00\x00' @ 0 : 0; will stop at (end)
