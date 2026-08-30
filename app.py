@@ -1005,7 +1005,7 @@ def dashboard():
         "SELECT COUNT(*) c FROM results WHERE flag='Critical' AND verified_at IS NULL"
     ).fetchone()["c"]
     recent_visits = db.execute(
-        "SELECT v.registration_number, p.full_name, v.status, v.created_at "
+        "SELECT v.registration_number, p.id as patient_id, p.full_name, v.status, v.created_at "
         "FROM visits v JOIN patients p ON p.id=v.patient_id "
         "ORDER BY v.id DESC LIMIT 8"
     ).fetchall()
@@ -1862,11 +1862,7 @@ def referral_lab_statement_pdf(center_id):
     html_content = render_template("management/print_referral_lab_statement.html", lab=lab,
                                     by_day=by_day, by_test=by_test, total=total, month=month)
     pdf_path = pdf_export.make_temp_pdf_path(f"reflab{center_id}_{month}")
-    try:
-        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
-    except Exception as exc:
-        flash(f"❌ تعذّر توليد ملف PDF لكشف الحساب: {exc}")
-        return redirect(url_for("referral_lab_statement", center_id=center_id, month=month))
+    pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
     log_action("PDF", "referral_center", center_id, f"statement {month}")
     safe_name = re.sub(r"[^\w\-]+", "_", lab["name"])
     return send_file(pdf_path, as_attachment=True, download_name=f"{safe_name}_{month}.pdf")
@@ -1890,11 +1886,7 @@ def referral_lab_statement_whatsapp(center_id):
     html_content = render_template("management/print_referral_lab_statement.html", lab=lab,
                                     by_day=by_day, by_test=by_test, total=total, month=month)
     pdf_path = pdf_export.make_temp_pdf_path(f"reflab{center_id}_{month}")
-    try:
-        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
-    except Exception as exc:
-        flash(f"❌ تعذّر توليد ملف PDF لإرساله: {exc}")
-        return redirect(url_for("referral_lab_statement", center_id=center_id, month=month))
+    pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
 
     try:
         whatsapp_bridge.send_pdf(
@@ -3174,13 +3166,6 @@ def print_combined_panel(visit_id):
     age_unit_abbr = {"Hours": "H", "Days": "D", "Weeks": "W", "Months": "M", "Years": "Y"}
     age_display = f"{visit['age']}{age_unit_abbr.get(visit['age_unit'] or 'Years', 'Y')}" if visit["age"] not in (None, "") else ""
 
-    # ملاحظة إصلاح: كانت هذي الشاشة تُطبّع 500 Internal Server Error دائمًا —
-    # السبب إن render_template هنا ما كان يمرّر كل المتغيّرات اللي يعتمد
-    # عليها القالب المشترك reports/base_report.html (نفس الترويسة، اسم
-    # التحليل بالعنوان، حجم الخط...)، وهذي المتغيّرات ممرَّرة دائمًا من
-    # print_report() (شوف الدالة فوق) لأي تقرير غيرها. أضفناها هنا بقيم
-    # مناسبة للوحة المجمّعة تحديدًا (بلا تحليل واحد محدد، فـ"ot" هنا مجرد
-    # عنوان عام للتقرير) حتى تتوقف الصفحة عن الانهيار.
     return render_template(
         "reports/combined_panel.html",
         panel_groups=panel_groups, logo_url=logo_url, from_other_lab=from_other_lab,
@@ -3188,12 +3173,6 @@ def print_combined_panel(visit_id):
         patient_name=visit["patient_name"], patient_id=visit["registration_number"],
         referring_doctor_name=visit["referring_doctor_name"] or "",
         show_exam_signature=False,
-        ot={"test_name": "اللوحة المجمّعة / Combined Panel"},
-        font_size=16, show_prev_values=True, repeat_header_on_print=True,
-        previous_visit_date=None, previous_values={},
-        params={}, ranges={}, units={}, cbc_groups=None,
-        custom_rows=None, custom_heading=None, custom_heading_align="center",
-        custom_rows_align="right", custom_unit_column=False,
     )
 
 
@@ -3275,13 +3254,6 @@ def print_report(order_test_id):
 
     params = {}
     ranges = {}
-    # units: يُبنى بنفس حلقة params/ranges — يغذّي القوالب الستة الكبيرة
-    # (Blood Film, WBC Diff, Coagulation, Fluid exam, Retic) بوحدة كل
-    # باراميتر من قاعدة البيانات (test_parameters.unit) بدل ما تكون نصاً
-    # ثابتاً مكتوباً داخل القالب نفسه — فتعديلها من صفحة "📏 تعديل
-    # الوحدات" ينعكس فعلياً على الورقة المطبوعة لهذي التقارير أيضاً، تماماً
-    # متل ما يصير أصلاً مع custom.html وcbc.html.
-    units = {}
     for p in parameters:
         r = results_by_name.get(p["name"])
         if r is not None:
@@ -3290,7 +3262,6 @@ def print_report(order_test_id):
             value = None
         params[p["name"]] = "" if value is None else value
         ranges[p["name"]] = find_reference_range(db, p["id"], ot["gender"], ot["age"], ot["age_unit"])
-        units[p["name"]] = p["unit"] or ""
 
     logo_path = get_setting(db, "logo_path", "")
     logo_url = url_for("static", filename=logo_path) if logo_path else None
@@ -3439,7 +3410,7 @@ def print_report(order_test_id):
 
     return render_template(
         template_name,
-        ot=ot, params=params, ranges=ranges, units=units, cbc_groups=cbc_groups,
+        ot=ot, params=params, ranges=ranges, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         custom_unit_column=custom_unit_column,
@@ -3469,26 +3440,7 @@ def _whatsapp_generate_and_queue(db, visit_row, patient_id, patient_name, phone,
 
     now = datetime.now().isoformat(timespec="seconds")
     pdf_path = pdf_export.make_temp_pdf_path(f"visit{visit_row['id']}")
-
-    # توليد PDF نفسه كان بدون أي حماية — أي خطأ يصير أثناء التحويل (خط
-    # ناقص، مسار شعار كسران، أي عطل بمكتبة التحويل) كان يطيح الطلب كامل
-    # بصفحة 500 بيضاء بدون أي رسالة توضح شنو صار، ويقفل الصفحة على
-    # المستخدم بدل ما يعطيه رسالة مفهومة أو يحفظ المحاولة بالطابور. الآن
-    # أي فشل هنا يُسجَّل كصف "failed" بنفس الطابور (تكدر تعيد المحاولة من
-    # "طابور واتساب" لاحقاً) بدل ما يكسر الصفحة بالكامل.
-    try:
-        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
-    except Exception as exc:
-        cur = db.execute(
-            "INSERT INTO whatsapp_sends (visit_id, order_test_id, patient_id, patient_name, "
-            "phone, label, pdf_path, status, attempts, error, requested_by, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', 1, ?, ?, ?)",
-            (visit_row["id"], order_test_id, patient_id, patient_name, phone, label,
-             pdf_path, f"فشل توليد PDF: {exc}", session.get("user_id"), now),
-        )
-        db.commit()
-        log_action("WhatsAppSend", "order_test", order_test_id or visit_row["id"], f"PDF generation failed: {exc}")
-        return False, f"فشل توليد ملف PDF: {exc}"
+    pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
 
     cur = db.execute(
         "INSERT INTO whatsapp_sends (visit_id, order_test_id, patient_id, patient_name, "
@@ -5284,11 +5236,10 @@ def preview_report_design(test_definition_id):
         } for rd in row_defs]
 
     params = {p["name"]: "—" for p in parameters}
-    units = units_by_name
 
     return render_template(
         template_name,
-        ot={"test_name": test["name"]}, params=params, ranges={}, units=units, cbc_groups=cbc_groups,
+        ot={"test_name": test["name"]}, params=params, ranges={}, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         custom_unit_column=custom_unit_column,

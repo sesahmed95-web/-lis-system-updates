@@ -159,6 +159,20 @@
       </div>
     </div>
   </a>
+  <div class="dash-stat-card" id="dashPatientSearchCard" style="position:relative; cursor:text;">
+    <div class="dash-stat-icon">🔍</div>
+    <div style="flex:1; min-width:0;">
+      <input type="text" id="dashPatientSearchInput" autocomplete="off"
+             placeholder="{{ 'بحث عن مريض بالاسم...' if lang=='ar' else 'Search a patient by name...' }}"
+             style="border:none; outline:none; background:transparent; font-size:15px; font-weight:700;
+                    width:100%; color:inherit; font-family:inherit;">
+      <div class="dash-stat-label">{{ 'لعرض تفاصيله ونتائجه السابقة' if lang=='ar' else 'View details & past results' }}</div>
+      <div id="dashPatientSearchResults" style="display:none; position:absolute; top:100%; inset-inline-start:0;
+           inset-inline-end:0; z-index:30; background:var(--card-bg,#fff); border:1px solid #E2E8F0;
+           border-radius:10px; margin-top:8px; max-height:280px; overflow-y:auto;
+           box-shadow:0 8px 22px rgba(0,0,0,.15);"></div>
+    </div>
+  </div>
 </div>
 
 <!-- آخر الزيارات -->
@@ -177,7 +191,7 @@
       {% for v in recent_visits %}
       <tr>
         <td>{{ v.registration_number }}</td>
-        <td>{{ v.full_name }}</td>
+        <td><a href="{{ url_for('patient_history', patient_id=v.patient_id) }}" style="color:inherit; text-decoration:underline; text-decoration-style:dotted;">{{ v.full_name }}</a></td>
         <td>{{ v.status }}</td>
         <td>{{ v.created_at }}</td>
       </tr>
@@ -208,6 +222,67 @@
       var now = new Date();
       clockEl.textContent = now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
     }, 1000);
+  })();
+
+  // ------------------------------------------------------------------
+  // بطاقة "بحث عن مريض" بالداشبورد — تستخدم نفس API البحث الموحّد
+  // الموجود أصلاً (/api/dashboard/search)، وتعرض النتائج بقائمة منسدلة
+  // تحت البطاقة نفسها؛ الضغط على أي مريض يوديك مباشرة لصفحة سجله الكامل
+  // (front_desk/patient_history.html) بكل زياراته ونتائجه السابقة.
+  // ------------------------------------------------------------------
+  (function () {
+    var input = document.getElementById('dashPatientSearchInput');
+    var resultsBox = document.getElementById('dashPatientSearchResults');
+    if (!input || !resultsBox) return;
+    var lang = "{{ lang }}";
+    var debounceTimer = null;
+
+    function renderResults(patients) {
+      if (!patients || !patients.length) {
+        resultsBox.innerHTML = '<div style="padding:12px; font-size:13px; color:#64748B;">' +
+          (lang === 'ar' ? 'ما فيه نتائج' : 'No results') + '</div>';
+        resultsBox.style.display = 'block';
+        return;
+      }
+      resultsBox.innerHTML = patients.map(function (p) {
+        var sub = [p.gender, (p.age !== null && p.age !== undefined ? (p.age + ' ' + (p.age_unit || '')) : '')]
+          .filter(Boolean).join(' · ');
+        return '<div class="dash-patient-result" data-id="' + p.id + '" ' +
+          'style="padding:10px 12px; cursor:pointer; border-bottom:1px solid #EEF2F6; font-size:13.5px;">' +
+          '<div style="font-weight:600;">' + p.full_name + '</div>' +
+          '<div style="color:#64748B; font-size:12px;">' + sub + '</div>' +
+          '</div>';
+      }).join('');
+      resultsBox.style.display = 'block';
+      resultsBox.querySelectorAll('.dash-patient-result').forEach(function (row) {
+        row.addEventListener('mouseenter', function () { row.style.background = '#F1F5F9'; });
+        row.addEventListener('mouseleave', function () { row.style.background = ''; });
+        row.addEventListener('click', function () {
+          window.location.href = '/front-desk/patients/' + row.dataset.id + '/history';
+        });
+      });
+    }
+
+    input.addEventListener('input', function () {
+      var q = input.value.trim();
+      clearTimeout(debounceTimer);
+      if (q.length < 2) {
+        resultsBox.style.display = 'none';
+        return;
+      }
+      debounceTimer = setTimeout(function () {
+        fetch('/api/dashboard/search?q=' + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (data) { renderResults(data.patients); })
+          .catch(function () { resultsBox.style.display = 'none'; });
+      }, 250);
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!document.getElementById('dashPatientSearchCard').contains(e.target)) {
+        resultsBox.style.display = 'none';
+      }
+    });
   })();
 </script>
 {% endblock %}

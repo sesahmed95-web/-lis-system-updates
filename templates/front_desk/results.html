@@ -41,7 +41,11 @@
             {% endif %}
           </div>
         </td>
-        <td><a class="btn small" href="{{ url_for('visit_results_entry', visit_id=r['visit_id']) }}">{{ t('enter_results') }}</a></td>
+        <td><a class="btn small" href="{{ url_for('visit_results_entry', visit_id=r['visit_id']) }}">{{ t('enter_results') }}</a>
+          <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=r['visit_id']) }}"
+             title="تعديل كل معلومات المريض والزيارة (الاسم، الهاتف، العمر، التحاليل المطلوبة...)"
+             style="display:inline-block; margin-top:4px;">✏️ تعديل معلومات المريض</a>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
