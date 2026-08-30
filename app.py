@@ -3292,6 +3292,14 @@ def _print_report_impl(order_test_id):
         ).fetchall())
     results_by_name = {r["param_name"]: r for r in results}
 
+    # وحدة كل باراميتر (اسم → وحدة) — يحتاجه بعض القوالب المخصّصة الجاهزة
+    # (مثل blood_film.html) مباشرة كمتغيّر Jinja اسمه units.get('...')،
+    # عكس params/ranges اللي تُبنى وتُستخدم فقط داخل مسارات CBC/custom
+    # أدناه. يُبنى هنا مرة وحدة ويُمرَّر دائمًا لكل template_name بلا استثناء،
+    # حتى لا يتكرر نفس الخطأ (UndefinedError: 'units' is undefined) لأي
+    # قالب جاهز آخر يتوقع نفس المتغيّر مستقبلاً.
+    units = {p["name"]: (p["unit"] or "") for p in parameters}
+
     params = {}
     ranges = {}
     for p in parameters:
@@ -3450,7 +3458,7 @@ def _print_report_impl(order_test_id):
 
     return render_template(
         template_name,
-        ot=ot, params=params, ranges=ranges, cbc_groups=cbc_groups,
+        ot=ot, params=params, ranges=ranges, units=units, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         custom_unit_column=custom_unit_column,
