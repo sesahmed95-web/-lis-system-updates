@@ -329,7 +329,14 @@
   <span style="margin-left:auto; color:#64748B; font-size:12px;">هذي معاينة للتقرير قبل الطباعة</span>
   {% endif %}
   <button class="btn-print" onclick="window.print()">🖨 طباعة الآن</button>
-  <a href="{{ url_for('dashboard') }}" style="text-decoration:none; background:#F3F6F8; color:#26529C; padding:8px 16px; border-radius:6px; font-size:13px; font-weight:bold; border:1px solid #E2E8F0;">🔙 الرجوع للرئيسية</a>
+  <!-- "الرجوع للرئيسية": لو هذي النافذة فُتحت كنافذة منبثقة (popup) من نافذة
+       ثانية — وهو حال هذي الصفحة دائماً عمليًا، راجع تعليق window.opener
+       بالسكربت بالأسفل — يكفي نسكّرها بس (window.close())، فيرجع المستخدم
+       تلقائيًا لنفس النافذة/الصفحة الأصلية اللي فتح منها التقرير بدل ما
+       تتراكم نوافذ فوق بعض. وبس لو فُتحت هذي الصفحة مباشرة بتبويب عادي (لا
+       يوجد window.opener، مثلاً رابط مباشر باللصق بالمتصفح) نرجعها لسلوكها
+       القديم: تنتقل فعليًا لصفحة Dashboard. -->
+  <a href="{{ url_for('dashboard') }}" onclick="return handleBackToHome(event)" style="text-decoration:none; background:#F3F6F8; color:#26529C; padding:8px 16px; border-radius:6px; font-size:13px; font-weight:bold; border:1px solid #E2E8F0;">🔙 الرجوع للرئيسية</a>
 </div>
 
 <div class="report-scope">
@@ -431,6 +438,21 @@
     window.addEventListener('beforeprint', function () { document.title = ''; });
     window.addEventListener('afterprint', function () { document.title = savedTitle; });
   })();
+
+  // زر "🔙 الرجوع للرئيسية" فوق: لو هذي النافذة منبثقة (window.opener
+  // موجود) نسكّرها بس بدل ما ننتقل داخلها لصفحة Dashboard — هذا يرجّع
+  // المستخدم فعليًا لنفس النافذة الأصلية بدل ما يفتح طبقة جديدة عالقة
+  // فوق النوافذ السابقة. لو ما فيه window.opener (نادراً، مثلاً فتح
+  // مباشر بتبويب عادي) نسمح للرابط يشتغل بشكله العادي (الانتقال لـ
+  // Dashboard).
+  function handleBackToHome(e) {
+    if (window.opener) {
+      e.preventDefault();
+      window.close();
+      return false;
+    }
+    return true;
+  }
 
   {% if not is_design_preview %}
   // هذي الصفحة تُفتح دائماً كنافذة منبثقة مستقلة عبر lisSaveThenPrint()
