@@ -439,13 +439,26 @@
     window.addEventListener('afterprint', function () { document.title = savedTitle; });
   })();
 
-  // زر "🔙 الرجوع للرئيسية" فوق: لو هذي النافذة منبثقة (window.opener
-  // موجود) نسكّرها بس بدل ما ننتقل داخلها لصفحة Dashboard — هذا يرجّع
-  // المستخدم فعليًا لنفس النافذة الأصلية بدل ما يفتح طبقة جديدة عالقة
-  // فوق النوافذ السابقة. لو ما فيه window.opener (نادراً، مثلاً فتح
-  // مباشر بتبويب عادي) نسمح للرابط يشتغل بشكله العادي (الانتقال لـ
-  // Dashboard).
+  // زر "🔙 الرجوع للرئيسية" فوق: 3 حالات حسب طريقة فتح هذي الصفحة —
+  // 1) محمّلة جوه iframe مودال "معاينة الطباعة" (نافذة نتائج الزيارة
+  //    المجمّعة، print_results_bundle.html): نستدعي closeReportModal()
+  //    مباشرة من نافذة الأب (window.parent) — هذا يسكّر المودال كامل
+  //    ويرجّع المستخدم لنفس صفحة نتائج الزيارة اللي كانت خلفه، بدل ما
+  //    نغيّر محتوى الـ iframe نفسه لصفحة Dashboard وتضل نافذة المودال
+  //    فاتحة فوقها (هذا بالضبط كان سبب المشكلة).
+  // 2) نافذة منبثقة حقيقية (window.opener موجود، تُفتح مثلاً من زر طباعة
+  //    مفرد عبر lisSaveThenPrint/print-link بـ app.js): نسكّرها بس.
+  // 3) غير هذا (فتح مباشر بتبويب عادي، أو معاينة تصميم): نسمح للرابط
+  //    يشتغل بشكله العادي وينتقل فعليًا لصفحة Dashboard.
   function handleBackToHome(e) {
+    try {
+      if (window.parent && window.parent !== window &&
+          typeof window.parent.closeReportModal === "function") {
+        e.preventDefault();
+        window.parent.closeReportModal();
+        return false;
+      }
+    } catch (err) { /* لو منع المتصفح الوصول لـ window.parent لأي سبب، نكمل بالحالات التالية */ }
     if (window.opener) {
       e.preventDefault();
       window.close();
