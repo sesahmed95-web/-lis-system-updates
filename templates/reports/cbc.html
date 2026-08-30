@@ -1,16 +1,16 @@
 {% extends "reports/base_report.html" %}
 {% block report_body %}
-<div class="report-heading">Complete Blood Count (CBC)</div>
+<div class="report-heading" style="margin-bottom:16px;">Complete Blood Count (CBC)</div>
 
 <style>
   /* فاصل بصري بين مجاميع الـCBC الثلاث (كريات الدم البيضاء بكل أنواعها /
      كريات الدم الحمراء وكافة متعلقاتها / الأقراص وكافة متعلقاتها) —
-     مسافة واضحة ومتناسقة بين مجموعة وأخرى (12px) بدون ما تكون فراغ عشوائي،
-     مع إبقاء المسافة الطبيعية بين كل نتيجة وأخرى داخل نفس المجموعة كما هي
-     (يحددها padding الخلية العادي بـ reports/base_report.html). الفراغ
-     المتبقي أسفل الورقة (لو التحاليل قليلة) متروك عمدًا كما هو ولا علاقة
-     له بهذا الفاصل.  */
-  .cbc-group-gap td { border: none !important; padding: 0 !important; height: 12px; line-height: 0; }
+     مسافة واضحة ومتناسقة بين مجموعة وأخرى (22px، كبّرناها من 12px بناءً
+     على طلب المستخدم) بدون ما تكون فراغ عشوائي، مع إبقاء المسافة الطبيعية
+     بين كل نتيجة وأخرى داخل نفس المجموعة كما هي (يحددها padding الخلية
+     العادي بـ reports/base_report.html). الفراغ المتبقي أسفل الورقة (لو
+     التحاليل قليلة) متروك عمدًا كما هو ولا علاقة له بهذا الفاصل.  */
+  .cbc-group-gap td { border: none !important; padding: 0 !important; height: 22px; line-height: 0; }
 </style>
 
 <table class="data-table" style="text-align:center; direction:ltr;">

@@ -5,11 +5,11 @@
   <h3>{{ visit['patient_name'] }} <span class="muted mono">#{{ visit['registration_number'] }}</span></h3>
   <p class="muted">{{ visit['gender'] }} · {{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['created_at'] }}</p>
   <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
-  <a class="btn small secondary print-link" id="printAllLink"
-     href="{{ url_for('print_visit_results_bundle', visit_id=visit['id']) }}">🖨 طباعة كل النتائج المكتملة</a>
-  <a class="btn small secondary" href="{{ url_for('print_combined_panel', visit_id=visit['id']) }}"
-     onclick="openReportModal(this.href); return false;"
-     title="يجمع تحاليل الكيمياء/الفايروسات/الهرمونات/الفيتامينات وأي قسم آخر بورقة A4 وحدة، مرتّبة حسب القسم">🧾 طباعة اللوحة المجمّعة</a>
+  <button type="button" class="btn small secondary print-link" id="printAllLink"
+     onclick="openReportModal('{{ url_for('print_visit_results_bundle', visit_id=visit['id']) }}', 'طباعة كل النتائج المكتملة')">🖨 طباعة كل النتائج المكتملة</button>
+  <button type="button" class="btn small secondary"
+     onclick="openReportModal('{{ url_for('print_combined_panel', visit_id=visit['id']) }}', 'اللوحة المجمّعة')"
+     title="يجمع تحاليل الكيمياء/الفايروسات/الهرمونات/الفيتامينات وأي قسم آخر بورقة A4 وحدة، مرتّبة حسب القسم">🧾 طباعة اللوحة المجمّعة</button>
   {% if visit['phone'] %}
   <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id'], completed_only=1) }}"
         style="display:inline;" onsubmit="return confirm('إرسال كل النتائج المكتملة لهذه الزيارة بملف PDF واحد عبر واتساب لرقم المريض؟');">
@@ -18,19 +18,21 @@
   {% else %}
   <span class="muted" style="margin-inline-start:8px;">لا يوجد رقم واتساب مسجّل لهذا المريض</span>
   {% endif %}
+  <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=visit['id']) }}" title="تعديل كل معلومات المريض والزيارة (الاسم، الهاتف، العمر، التحاليل المطلوبة...)">✏️ تعديل معلومات المريض</a>
   <label class="checkbox-item" style="margin-inline-start:10px; display:inline-flex; align-items:center; gap:4px;">
     <input type="checkbox" id="showPrevToggle" checked onchange="lisApplyShowPrev()">
     إظهار النتيجة السابقة بالتقارير المطبوعة (لتحاليل الكيمياء/التخثر)
   </label>
 </div>
 
-<!-- نافذة الطباعة المنبثقة (modal) — تعرض أي تقرير طباعة بداخل iframe فوق
-     نفس صفحة البرنامج (نفس الألوان والهوية)، بدل فتح تبويب/نافذة متصفح
-     منفصلة. تُستخدم من كل روابط الطباعة بهذي الصفحة عبر openReportModal(url). -->
+<!-- نافذة الطباعة المنبثقة (modal) — نفس النمط المستخدم بصفحتي
+     results.html وprint_results_bundle.html بالضبط: تعرض أي تقرير
+     بداخل iframe فوق نفس صفحة البرنامج، بدل ما تفتح نافذة تطبيق منفصلة
+     كاملة (بقائمتها الجانبية) فوق النافذة الأصلية. -->
 <div id="reportModalOverlay" class="report-modal-overlay" style="display:none;">
   <div class="report-modal-box">
     <div class="report-modal-bar">
-      <span class="report-modal-title">🖨 معاينة الطباعة</span>
+      <span class="report-modal-title" id="reportModalTitle">🖨 معاينة الطباعة</span>
       <div class="report-modal-actions">
         <button type="button" class="btn small" onclick="printReportModalFrame()">🖨 طباعة</button>
         <button type="button" class="btn small secondary" onclick="closeReportModal()">✖ إغلاق</button>
@@ -63,8 +65,9 @@
 </style>
 
 <script>
-  function openReportModal(url) {
+  function openReportModal(url, title) {
     document.getElementById('reportModalFrame').src = url;
+    document.getElementById('reportModalTitle').textContent = title ? ('🖨 ' + title) : '🖨 معاينة الطباعة';
     document.getElementById('reportModalOverlay').style.display = 'flex';
   }
   function closeReportModal() {
@@ -232,8 +235,7 @@
         <h4 style="margin:0;">{{ ot['test_name'] }}</h4>
         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
           <button type="submit" class="btn small" title="حفظ كل نتائج هذه الصفحة (كل التحاليل الظاهرة، مو هذا التحليل بس)">💾 {{ t('save') }}</button>
-          <a class="btn small secondary" href="{{ url_for('print_report', order_test_id=ot['id']) }}"
-             onclick="openReportModal(this.href); return false;" title="طباعة تقرير هذا التحليل فقط">🖨️</a>
+          <button type="button" class="btn small secondary" onclick="openReportModal('{{ url_for('print_report', order_test_id=ot['id']) }}')" title="طباعة تقرير هذا التحليل فقط">🖨️</button>
           <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span>
         </div>
       </div>
@@ -354,8 +356,7 @@
       </table>
 
       <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-        <a class="btn small secondary print-link" href="{{ url_for('print_report', order_test_id=ot['id']) }}"
-           onclick="openReportModal(this.href); return false;">🖨 طباعة التقرير</a>
+        <a class="btn small secondary print-link" href="{{ url_for('print_report', order_test_id=ot['id']) }}">🖨 طباعة التقرير</a>
         {% if visit['phone'] and ot['status'] in ['Completed', 'Verified'] %}
         <form method="POST" action="{{ url_for('whatsapp_send_result', order_test_id=ot['id']) }}" style="display:inline;"
               onsubmit="return confirm('إرسال نتيجة {{ ot['test_name'] }} فقط عبر واتساب لرقم المريض؟');">
