@@ -3186,6 +3186,39 @@ def print_combined_panel(visit_id):
 @app.route("/reports/print/<int:order_test_id>")
 @login_required
 def print_report(order_test_id):
+    try:
+        return _print_report_impl(order_test_id)
+    except Exception:
+        # تشخيص مؤقت: بدل صفحة "Internal Server Error" الفاضية اللي يعرضها
+        # فلاسك بوضع الإنتاج (production)، نعرض هنا نص الخطأ الكامل
+        # (Traceback) بالضبط مثل وضع debug، ونسجله كمان بملف نصي بجذر
+        # البرنامج (error_log.txt) — حتى لو ما انتبه المستخدم يصوّر الشاشة
+        # بنفس اللحظة، يكدر يفتح الملف بعدين ويرسله. احذف هذا الـ try/except
+        # (رجّع فقط الجسم الأصلي لـ print_report) بعد ما تنحل المشكلة نهائيًا،
+        # لأنه مو مناسب يبقى دائمًا مفعّل بنسخة تشتغل عند الزبون (يفضح تفاصيل
+        # داخلية تقنية للمستخدم لو صار خطأ مستقبلي غير متوقع).
+        import traceback
+        tb_text = traceback.format_exc()
+        try:
+            log_path = os.path.join(os.path.dirname(__file__), "error_log.txt")
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write("\n" + "=" * 80 + "\n")
+                f.write(datetime.now().isoformat(timespec="seconds") + f"  order_test_id={order_test_id}\n")
+                f.write(tb_text)
+        except Exception:
+            pass
+        return (
+            "<h1>خطأ أثناء طباعة التقرير — order_test_id="
+            + str(order_test_id)
+            + "</h1><p>صوّر هذا النص كامل وأرسله:</p>"
+            + "<pre style='direction:ltr; text-align:left; white-space:pre-wrap; "
+            + "background:#f5f5f5; border:1px solid #ccc; padding:12px;'>"
+            + escape(tb_text)
+            + "</pre>"
+        ), 500
+
+
+def _print_report_impl(order_test_id):
     db = get_db()
     ot = db.execute(
         "SELECT ot.*, td.code as test_code, td.name as test_name, td.department as test_department, "
