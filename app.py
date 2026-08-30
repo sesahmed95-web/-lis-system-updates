@@ -7,6 +7,8 @@ from io import BytesIO
 import os
 import json
 import re
+import subprocess
+import webbrowser
 
 from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_test_price, find_or_create_doctor, find_or_create_referral_center,
@@ -1862,7 +1864,11 @@ def referral_lab_statement_pdf(center_id):
     html_content = render_template("management/print_referral_lab_statement.html", lab=lab,
                                     by_day=by_day, by_test=by_test, total=total, month=month)
     pdf_path = pdf_export.make_temp_pdf_path(f"reflab{center_id}_{month}")
-    pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+    try:
+        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+    except Exception as exc:
+        flash(f"❌ تعذّر توليد ملف PDF لكشف الحساب: {exc}")
+        return redirect(url_for("referral_lab_statement", center_id=center_id, month=month))
     log_action("PDF", "referral_center", center_id, f"statement {month}")
     safe_name = re.sub(r"[^\w\-]+", "_", lab["name"])
     return send_file(pdf_path, as_attachment=True, download_name=f"{safe_name}_{month}.pdf")
@@ -1872,7 +1878,6 @@ def referral_lab_statement_pdf(center_id):
 @roles_required("admin", "accountant")
 def referral_lab_statement_whatsapp(center_id):
     import pdf_export
-    import whatsapp_bridge
 
     db = get_db()
     month = request.args.get("month", datetime.now().strftime("%Y-%m"))
@@ -1886,19 +1891,21 @@ def referral_lab_statement_whatsapp(center_id):
     html_content = render_template("management/print_referral_lab_statement.html", lab=lab,
                                     by_day=by_day, by_test=by_test, total=total, month=month)
     pdf_path = pdf_export.make_temp_pdf_path(f"reflab{center_id}_{month}")
-    pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
-
     try:
-        whatsapp_bridge.send_pdf(
-            lab["phone"], pdf_path,
-            caption=f"كشف حساب {lab['name']} — {month}",
-            country_code=get_setting(db, "whatsapp_country_code", "964"),
-        )
-        flash(f"✅ تم إرسال كشف حساب {month} عبر واتساب لمدير {lab['name']}.")
-        log_action("WhatsAppSend", "referral_center", center_id, f"statement {month} OK")
-    except whatsapp_bridge.WhatsAppSendError as exc:
-        flash(f"❌ تعذّر الإرسال: {exc}")
-        log_action("WhatsAppSend", "referral_center", center_id, f"statement {month} failed: {exc}")
+        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+    except Exception as exc:
+        flash(f"❌ تعذّر توليد ملف PDF لإرساله: {exc}")
+        return redirect(url_for("referral_lab_statement", center_id=center_id, month=month))
+
+    opened_wa, _ = _open_whatsapp_with_pdf(
+        lab["phone"], pdf_path, get_setting(db, "whatsapp_country_code", "964")
+    )
+    if opened_wa:
+        flash(f"📎 جهّزنا كشف حساب {month} وفتحنا واتساب على رقم {lab['name']} — اسحب الملف من نافذة المجلد وأرسله يدويًا.")
+        log_action("WhatsAppSend", "referral_center", center_id, f"statement {month} opened")
+    else:
+        flash("❌ تعذّر فتح تطبيق واتساب — تأكد إنه مثبّت على هذا الجهاز.")
+        log_action("WhatsAppSend", "referral_center", center_id, f"statement {month} failed")
     return redirect(url_for("referral_lab_statement", center_id=center_id, month=month))
 
 
@@ -3430,47 +3437,95 @@ def _whatsapp_flush_pdf_dir():
     return d
 
 
+def _open_whatsapp_with_pdf(phone, pdf_path, country_code):
+    """يفتح محادثة واتساب مع رقم المريض مباشرة (تطبيق سطح المكتب المثبّت
+    أصلاً على هذا الجهاز، عبر رابط whatsapp://)، ويفتح مجلد الملف ومحدِّد
+    عليه بمستكشف الملفات — حتى يقدر المستخدم يسحب ملف الـPDF ويرفقه
+    بنفسه بضغطة وحدة، بدل الاعتماد على أتمتة Selenium الهشة (اللي كانت
+    تحتاج Chrome منفصل، وتسبب أقفال ملفات، وتوقف البرنامج بالكامل).
+    يرجّع (opened_whatsapp: bool, opened_folder: bool)."""
+    import re as _re
+    digits = _re.sub(r"\D", "", phone or "")
+    if not digits:
+        return False, False
+    if digits.startswith("00"):
+        digits = digits[2:]
+    elif digits.startswith("0"):
+        digits = country_code + digits[1:]
+    elif not digits.startswith(country_code):
+        digits = country_code + digits
+
+    opened_wa = False
+    try:
+        os.startfile(f"whatsapp://send?phone={digits}")
+        opened_wa = True
+    except OSError:
+        try:
+            webbrowser.open(f"https://wa.me/{digits}")
+            opened_wa = True
+        except Exception:
+            opened_wa = False
+
+    opened_folder = False
+    try:
+        subprocess.run(["explorer", "/select,", os.path.normpath(pdf_path)])
+        opened_folder = True
+    except Exception:
+        opened_folder = False
+
+    return opened_wa, opened_folder
+
+
 def _whatsapp_generate_and_queue(db, visit_row, patient_id, patient_name, phone,
                                   label, html_content, order_test_id=None):
     """يولّد PDF من الـHTML الجاهز (نفس صفحة الطباعة)، يسجّل صف بطابور
-    whatsapp_sends، ويحاول الإرسال فورًا إذا الإنترنت متوفر؛ وإلا يبقى الصف
-    pending وتاخذه المهمة الخلفية لاحقًا أو زر "إعادة المحاولة" اليدوي."""
+    whatsapp_sends، ثم يفتح واتساب على رقم المريض ومجلد الملف جنب بعض —
+    الإرسال الفعلي خطوة يدوية بسيطة (سحب وإفلات) بدل إرسال آلي عبر متصفح
+    منفصل يتحكم فيه Selenium، تفاديًا لكل مشاكل القفل والكراش السابقة."""
     import pdf_export
-    import whatsapp_bridge
 
     now = datetime.now().isoformat(timespec="seconds")
     pdf_path = pdf_export.make_temp_pdf_path(f"visit{visit_row['id']}")
-    pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
 
-    cur = db.execute(
+    # توليد PDF نفسه كان بدون أي حماية — أي خطأ يصير أثناء التحويل (خط
+    # ناقص، مسار شعار كسران، أي عطل بمكتبة التحويل) كان يطيح الطلب كامل
+    # بصفحة 500 بيضاء بدون أي رسالة توضح شنو صار. الآن أي فشل هنا يُسجَّل
+    # كصف "failed" بنفس الطابور بدل ما يكسر الصفحة بالكامل.
+    try:
+        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+    except Exception as exc:
+        db.execute(
+            "INSERT INTO whatsapp_sends (visit_id, order_test_id, patient_id, patient_name, "
+            "phone, label, pdf_path, status, attempts, error, requested_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', 1, ?, ?, ?)",
+            (visit_row["id"], order_test_id, patient_id, patient_name, phone, label,
+             pdf_path, f"فشل توليد PDF: {exc}", session.get("user_id"), now),
+        )
+        db.commit()
+        log_action("WhatsAppSend", "order_test", order_test_id or visit_row["id"], f"PDF generation failed: {exc}")
+        return False, f"فشل توليد ملف PDF: {exc}"
+
+    opened_wa, opened_folder = _open_whatsapp_with_pdf(
+        phone, pdf_path, get_setting(db, "whatsapp_country_code", "964")
+    )
+
+    # status='opened' (مو 'sent') لأننا فعلياً ما نتحقق برمجيًا إن الملف
+    # انرسل فعلاً — هذا فتح واتساب + المجلد بس، الضغطة الأخيرة (سحب
+    # الملف وإرسال) يسويها المستخدم بنفسه.
+    status = "opened" if opened_wa else "failed"
+    error = None if opened_wa else "تعذّر فتح تطبيق واتساب — تأكد إنه مثبّت على هذا الجهاز."
+    db.execute(
         "INSERT INTO whatsapp_sends (visit_id, order_test_id, patient_id, patient_name, "
-        "phone, label, pdf_path, status, attempts, requested_by, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)",
+        "phone, label, pdf_path, status, attempts, error, requested_by, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
         (visit_row["id"], order_test_id, patient_id, patient_name, phone, label,
-         pdf_path, session.get("user_id"), now),
+         pdf_path, status, error, session.get("user_id"), now),
     )
     db.commit()
-    send_id = cur.lastrowid
 
-    try:
-        whatsapp_bridge.send_pdf(
-            phone, pdf_path,
-            caption=f"نتيجة {label} — {patient_name}",
-            country_code=get_setting(db, "whatsapp_country_code", "964"),
-        )
-        db.execute(
-            "UPDATE whatsapp_sends SET status='sent', sent_at=?, attempts=attempts+1 WHERE id=?",
-            (datetime.now().isoformat(timespec="seconds"), send_id),
-        )
-        db.commit()
+    if opened_wa:
         return True, None
-    except whatsapp_bridge.WhatsAppSendError as exc:
-        db.execute(
-            "UPDATE whatsapp_sends SET status='failed', error=?, attempts=attempts+1 WHERE id=?",
-            (str(exc), send_id),
-        )
-        db.commit()
-        return False, str(exc)
+    return False, error
 
 
 def _maybe_auto_whatsapp_send(db, visit_id):
@@ -3501,7 +3556,7 @@ def _maybe_auto_whatsapp_send(db, visit_id):
 
     already = db.execute(
         "SELECT id FROM whatsapp_sends WHERE visit_id=? AND order_test_id IS NULL "
-        "AND status IN ('pending', 'sent')",
+        "AND status IN ('pending', 'sent', 'opened')",
         (visit_id,),
     ).fetchone()
     if already:
@@ -3637,10 +3692,10 @@ def whatsapp_send_result(order_test_id):
         ot["test_name"], html_content, order_test_id=order_test_id,
     )
     if ok:
-        flash(f"✅ تم إرسال نتيجة {ot['test_name']} عبر واتساب للمريض.")
+        flash(f"📎 جهّزنا ملف PDF لنتيجة {ot['test_name']} وفتحنا واتساب على رقم المريض — اسحب الملف من نافذة المجلد وأرفقه بالمحادثة واضغط إرسال.")
     else:
-        flash(f"⏳ تعذّر الإرسال الآن، تمت إضافتها للطابور وستُرسل تلقائيًا عند توفر الإنترنت. ({error})")
-    log_action("WhatsAppSend", "order_test", order_test_id, "OK" if ok else f"queued: {error}")
+        flash(f"❌ {error}")
+    log_action("WhatsAppSend", "order_test", order_test_id, "opened" if ok else f"failed: {error}")
     return redirect(url_for("visit_results_entry", visit_id=ot["visit_id"]))
 
 
@@ -3671,10 +3726,10 @@ def whatsapp_send_visit(visit_id):
         "كل نتائج الزيارة", html_content, order_test_id=None,
     )
     if ok:
-        flash("✅ تم إرسال كل نتائج الزيارة عبر واتساب للمريض بملف واحد.")
+        flash("📎 جهّزنا ملف PDF بكل نتائج الزيارة وفتحنا واتساب على رقم المريض — اسحب الملف من نافذة المجلد وأرفقه بالمحادثة واضغط إرسال.")
     else:
-        flash(f"⏳ تعذّر الإرسال الآن، تمت إضافتها للطابور وستُرسل تلقائيًا عند توفر الإنترنت. ({error})")
-    log_action("WhatsAppSend", "visit", visit_id, "OK" if ok else f"queued: {error}")
+        flash(f"❌ {error}")
+    log_action("WhatsAppSend", "visit", visit_id, "opened" if ok else f"failed: {error}")
     return redirect(url_for("visit_results_entry", visit_id=visit_id))
 
 
@@ -3718,73 +3773,41 @@ def whatsapp_queue():
 @app.route("/whatsapp/queue/<int:send_id>/retry", methods=["POST"])
 @roles_required("supervisor")
 def whatsapp_retry(send_id):
-    import whatsapp_bridge
-
     db = get_db()
     row = db.execute("SELECT * FROM whatsapp_sends WHERE id=?", (send_id,)).fetchone()
     if not row:
         flash("العنصر غير موجود.")
         return redirect(url_for("whatsapp_queue"))
-    try:
-        whatsapp_bridge.send_pdf(
-            row["phone"], row["pdf_path"],
-            caption=f"نتيجة {row['label']} — {row['patient_name']}",
-            country_code=get_setting(db, "whatsapp_country_code", "964"),
-        )
+    opened_wa, _ = _open_whatsapp_with_pdf(
+        row["phone"], row["pdf_path"], get_setting(db, "whatsapp_country_code", "964")
+    )
+    if opened_wa:
         db.execute(
-            "UPDATE whatsapp_sends SET status='sent', sent_at=?, attempts=attempts+1, error=NULL WHERE id=?",
+            "UPDATE whatsapp_sends SET status='opened', sent_at=?, attempts=attempts+1, error=NULL WHERE id=?",
             (datetime.now().isoformat(timespec="seconds"), send_id),
         )
         db.commit()
-        flash("✅ تم الإرسال بنجاح.")
-    except whatsapp_bridge.WhatsAppSendError as exc:
+        flash("📎 فتحنا واتساب ومجلد الملف من جديد — أرفقه وأرسله يدويًا.")
+    else:
         db.execute(
             "UPDATE whatsapp_sends SET status='failed', error=?, attempts=attempts+1 WHERE id=?",
-            (str(exc), send_id),
+            ("تعذّر فتح تطبيق واتساب — تأكد إنه مثبّت على هذا الجهاز.", send_id),
         )
         db.commit()
-        flash(f"❌ فشلت المحاولة: {exc}")
+        flash("❌ تعذّر فتح تطبيق واتساب.")
     return redirect(url_for("whatsapp_queue"))
 
 
 def whatsapp_background_worker():
-    """تعمل بخيط منفصل طول ما البرنامج شغال: كل 3 دقائق تفحص إذا فيه اتصال
-    إنترنت، وإذا موجود تحاول ترسل أي عناصر pending أو failed بالطابور —
-    هذا اللي يخلّي 'البرنامج محلي بس يرسل تلقائيًا لما يوصله نت' ممكن."""
-    import time as _time
-    import whatsapp_bridge
-
-    while True:
-        _time.sleep(180)
-        try:
-            if not whatsapp_bridge.has_internet():
-                continue
-            with app.app_context():
-                db = get_db()
-                pending = db.execute(
-                    "SELECT * FROM whatsapp_sends WHERE status IN ('pending','failed') "
-                    "AND attempts < 5 ORDER BY id ASC LIMIT 10"
-                ).fetchall()
-                for row in pending:
-                    try:
-                        whatsapp_bridge.send_pdf(
-                            row["phone"], row["pdf_path"],
-                            caption=f"نتيجة {row['label']} — {row['patient_name']}",
-                            country_code=get_setting(db, "whatsapp_country_code", "964"),
-                        )
-                        db.execute(
-                            "UPDATE whatsapp_sends SET status='sent', sent_at=?, attempts=attempts+1 WHERE id=?",
-                            (datetime.now().isoformat(timespec="seconds"), row["id"]),
-                        )
-                    except whatsapp_bridge.WhatsAppSendError as exc:
-                        db.execute(
-                            "UPDATE whatsapp_sends SET status='failed', error=?, attempts=attempts+1 WHERE id=?",
-                            (str(exc), row["id"]),
-                        )
-                    db.commit()
-        except Exception:
-            # أي خطأ غير متوقع بالمهمة الخلفية ما يوقف السيرفر أبدًا
-            continue
+    """كانت هذي المهمة تحاول تفتح Chrome بالخلفية كل 3 دقائق لإعادة إرسال
+    أي عنصر فاشل عبر Selenium — بدون علم المستخدم، وهذا سبب رئيسي محتمل
+    لتراكم نوافذ Chrome عالقة وأقفال ملفات (بما فيها مشاكل التثبيت اللي
+    واجهناها). بما إن الإرسال صار خطوة يدوية بالكامل (فتح واتساب + سحب
+    الملف من المستخدم نفسه)، ما فيه داعي لإعادة محاولة تلقائية بالخلفية
+    إطلاقاً — المستخدم يعيد المحاولة بنفسه من "طابور واتساب" وقت ما يريد.
+    خليت الدالة موجودة بس بدون أي فعل، تفاديًا لأي خطأ لو استدعاها كود
+    ثاني بالمشروع."""
+    return
 
 
 @app.route("/workbench/verify/<int:order_test_id>", methods=["POST"])
@@ -4279,13 +4302,37 @@ def toggle_parameter_highlight(param_id):
 @roles_required("supervisor")
 def unit_converter():
     db = get_db()
+    # شيلنا فلتر "result_type = 'Numeric'" — أي باراميتر بأي تحليل يظهر
+    # هنا الحين، مو بس الرقمية، حتى تقدر تعدّل وحدة أي شي بالبرنامج من
+    # نفس هذي الصفحة.
     parameters = db.execute(
         "SELECT tp.id, tp.name, tp.unit, tp.unit2, tp.unit2_factor, td.name as test_name, td.department "
         "FROM test_parameters tp JOIN test_definitions td ON td.id = tp.test_definition_id "
-        "WHERE tp.result_type = 'Numeric' "
         "ORDER BY td.department, td.name, tp.name"
     ).fetchall()
     return render_template("master/unit_converter.html", parameters=parameters)
+
+
+# ------------------------------------------------------------------------
+# تعديل مباشر وبسيط للوحدة — تكتب النص وتضغط حفظ وخلاص، بدون أي معامل
+# تحويل أو اتجاه (بعكس "تغيير/تحويل الوحدة الأساسية" تحت، اللي مصمم
+# لعملية تحويل رقمية فعلية تلمس المديات المرجعية معها). هذا الخيار
+# للحالة الشائعة: بس تبي تغيّر/تصلّح نص الوحدة نفسه (مثال: NRBC من
+# "100/wbc" إلى "/100wbc") بدون لمس أي رقم ثاني إطلاقاً.
+# ------------------------------------------------------------------------
+@app.route("/master/unit-converter/<int:param_id>/set-unit", methods=["POST"])
+@roles_required("supervisor")
+def unit_converter_set_unit(param_id):
+    db = get_db()
+    param = db.execute("SELECT * FROM test_parameters WHERE id=?", (param_id,)).fetchone()
+    if not param:
+        flash("المعيار غير موجود.")
+        return redirect(url_for("unit_converter"))
+    new_unit = request.form.get("unit", "").strip()
+    db.execute("UPDATE test_parameters SET unit=? WHERE id=?", (new_unit, param_id))
+    db.commit()
+    flash(f"تم تحديث وحدة {param['name']} إلى \"{new_unit}\"." if new_unit else f"تم إفراغ وحدة {param['name']}.")
+    return redirect(url_for("unit_converter"))
 
 
 # ------------------------------------------------------------------------
