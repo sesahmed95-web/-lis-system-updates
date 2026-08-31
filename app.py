@@ -5719,6 +5719,32 @@ def report_designer():
 @app.route("/management/report-designer/preview/<int:test_definition_id>")
 @roles_required("admin")
 def preview_report_design(test_definition_id):
+    try:
+        return _preview_report_design_impl(test_definition_id)
+    except Exception:
+        import traceback
+        tb_text = traceback.format_exc()
+        try:
+            log_path = os.path.join(os.path.dirname(__file__), "error_log.txt")
+            with open(log_path, "a", encoding="utf-8") as f        show_exam_signature=False,
+        visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}", sex="—", age="—",:
+                f.write("\n" + "=" * 80 + "\n")
+                f.write(datetime.now().isoformat(timespec="seconds") + f"  preview test_definition_id={test_definition_id}\n")
+                f.write(tb_text)
+        except Exception:
+            pass
+        return (
+            "<h1>خطأ أثناء معاينة التصميم — test_definition_id="
+            + str(test_definition_id)
+            + "</h1><p>صوّر هذا النص كامل وأرسله:</p>"
+            + "<pre style='direction:ltr; text-align:left; white-space:pre-wrap; "
+            + "background:#f5f5f5; border:1px solid #ccc; padding:12px;'>"
+            + escape(tb_text)
+            + "</pre>"
+        ), 500
+
+
+def _preview_report_design_impl(test_definition_id):
     # Renders the exact same report template print_report() uses, but with
     # clearly-labeled sample data instead of a real order/patient — so the
     # admin can actually SEE a built-in or custom design (logo, headings,
@@ -5792,7 +5818,9 @@ def preview_report_design(test_definition_id):
         show_prev_values=show_prev_values, previous_visit_date=None, previous_values={},
         repeat_header_on_print=department_shows_previous_values(test["department"]),
         logo_url=logo_url, from_other_lab=False, font_size=14 if test["code"] == "CBC" else 16,
-        show_exam_signature=False,
+              show_exam_signature=False,
+        stamp_target_type="test_definition", stamp_target_id=test_definition_id,
+        digital_stamps=[], stamp_placements=[],
         visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}", sex="—", age="—",
         patient_name="اسم المريض — معاينة تصميم فقط", patient_id="0000",
         referring_doctor_name="—", is_design_preview=True, preview_test_id=test_definition_id,
