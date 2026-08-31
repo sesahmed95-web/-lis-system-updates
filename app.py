@@ -3179,6 +3179,20 @@ def visit_results_entry(visit_id):
 # أي تكرار لها. تحليل بدون أي نتيجة مُدخلة بعد يُستبعد من اللوحة تلقائيًا
 # حتى ما تطلع أسطر فاضية.
 # ------------------------------------------------------------------------
+
+# عناوين أعمدة اللوحة المجمّعة تختلف حسب اسم القسم — قسم Biochemistry تحديداً
+# يستخدم تسميات مختلفة ("Laboratory Test Results" / "Conventional Units")
+# عن بقية الأقسام ("Test Name" / "Normal Range") بنفس التقرير، مطابقةً
+# لتصميم الورقة الأصلية. المطابقة بالاحتواء (case-insensitive) حتى تشتغل
+# حتى لو الأدمن كتب اسم القسم بصيغة مختلفة شوي بكتالوج التحاليل (مثلاً
+# "Biochemistry" أو "Biochemistry Tests" أو "biochemistry panel").
+def _panel_column_labels(department_name):
+    d = (department_name or "").strip().lower()
+    if "biochem" in d:
+        return {"name_header": "Laboratory Test Results", "range_header": "Conventional Units"}
+    return {"name_header": "Test Name", "range_header": "Normal Range"}
+
+
 @app.route("/front-desk/visits/<int:visit_id>/print/combined-panel")
 @login_required
 def print_combined_panel(visit_id):
@@ -3222,15 +3236,6 @@ def print_combined_panel(visit_id):
         results_by_name = {r["pname"]: r for r in results}
         multi_param = len(params) > 1
         rows = []
-        # نفس منطق التقرير الفردي (print_report/find_previous_reference):
-        # يجيب آخر زيارة سابقة لنفس هذا التحليل مطابقة بالاسم الثلاثي +
-        # العمر + الجنس، وتُضاف قيمها لكل صف فقط إذا كان قسم التحليل من
-        # الأقسام المفعّلة بـ PREVIOUS_VALUE_DEPARTMENT_KEYWORDS. تُستدعى
-        # مرة وحدة لكل تحليل (مو لكل باراميتر) لتفادي تكرار الاستعلام.
-        previous_visit_date, previous_values = find_previous_reference(
-            db, visit["patient_name"], visit["age"], visit["gender"],
-            ot["test_definition_id"], ot["department"], visit_id, visit["created_at"],
-        )
         for p in params:
             r = results_by_name.get(p["name"])
             if r is None:
@@ -3239,15 +3244,41 @@ def print_combined_panel(visit_id):
             if value in (None, ""):
                 continue
             rng = find_reference_range(db, p["id"], visit["gender"], visit["age"], visit["age_unit"])
+            # المدى الطبيعي بعمود واحد مدمج (بدون Low/High منفصلة) — نفضّل
+            # range_text الجاهز لو موجود (يغطي حالات نصية زي "Non-Reactive
+            # (< 1.0)")، وإلا نبنيه يدويًا من low/high الرقميين لو موجودين.
+            if rng and rng["range_text"]:
+                range_display = rng["range_text"]
+            elif rng and rng["low"] is not None and rng["high"] is not None:
+                range_display = f"{rng['low']} - {rng['high']}"
+            elif rng and rng["low"] is not None:
+                range_display = f"≥ {rng['low']}"
+            elif rng and rng["high"] is not None:
+                range_display = f"≤ {rng['high']}"
+            else:
+                range_display = ""
+            # الوحدة الثانية (unit2/unit2_factor) — سطر ثاني أصغر تحت
+            # النتيجة والوحدة والمدى الطبيعي (زي S. Creatinine بالصورة:
+            # mg/dL فوق وµmol/L تحت) — تُحسب فقط للنتائج الرقمية.
+            value2 = unit2 = range2_display = None
+            if p["unit2"] and p["unit2_factor"] not in (None, "", 0):
+                try:
+                    factor = float(p["unit2_factor"])
+                    if r["value_numeric"] is not None:
+                        value2 = round(float(r["value_numeric"]) * factor, 2)
+                    unit2 = p["unit2"]
+                    if rng and rng["low"] is not None and rng["high"] is not None:
+                        range2_display = f"{round(rng['low'] * factor, 2)} - {round(rng['high'] * factor, 2)}"
+                except (TypeError, ValueError):
+                    value2 = unit2 = range2_display = None
             rows.append({
                 "name": p["name"] if multi_param else ot["test_name"],
                 "result": value,
                 "unit": p["unit"] or "",
-                "low": rng["low"] if rng else None,
-                "high": rng["high"] if rng else None,
-                "range_text": rng["range_text"] if rng else None,
-                "previous_value": previous_values.get(p["name"]),
-                "previous_date": previous_visit_date,
+                "range_display": range_display,
+                "value2": value2,
+                "unit2": unit2,
+                "range2_display": range2_display,
                 # لون مخصص + فاصل صفحة اختياريان — الأولوية دائماً للباراميتر
                 # المفرد (test_parameters.panel_color/panel_page_break، يُضبط
                 # من "مصمم التقارير" لكل باراميتر لحاله)؛ لو غير مضبوط له
@@ -3286,7 +3317,10 @@ def print_combined_panel(visit_id):
         remaining = [d for d in dept_order if d not in preferred_order]
         dept_order = [d for d in preferred_order if d in dept_order] + remaining
 
-    panel_groups = [{"department": d, "rows": groups_by_dept[d]} for d in dept_order]
+    panel_groups = [
+        {"department": d, "rows": groups_by_dept[d], **_panel_column_labels(d)}
+        for d in dept_order
+    ]
 
     logo_path = get_setting(db, "logo_path", "")
     logo_url = url_for("static", filename=logo_path) if logo_path else None
