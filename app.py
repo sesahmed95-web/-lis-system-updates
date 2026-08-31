@@ -3673,7 +3673,7 @@ def _whatsapp_generate_and_queue(db, visit_row, patient_id, patient_name, phone,
     # اسم الملف يبدأ باسم المريض (مثل ما يظهر بالتقرير بالضبط) بدل رقم
     # الزيارة، حتى يقدر المستخدم يميّز فوراً بأي ملف بمجلد واتساب وهو
     # يدور عن نتيجة مريض معيّن، بدل أرقام زيارات ما تعني له شي بالنظرة.
-    pdf_path = pdf_export.named_pdf_path(_safe_pdf_name_part(patient_name))
+    pdf_path = pdf_export.make_temp_pdf_path(_safe_pdf_name_part(patient_name))
 
     # توليد PDF نفسه كان بدون أي حماية — أي خطأ يصير أثناء التحويل (خط
     # ناقص، مسار شعار كسران، أي عطل بمكتبة التحويل) كان يطيح الطلب كامل
@@ -3863,7 +3863,7 @@ def _whatsapp_generate_and_queue_multi(db, visit_row, patient_id, patient_name, 
         # فتحت المجلد ولقيت عدة ملفات لنفس الزيارة تعرف فوراً أي ملف
         # لأي تحليل بدون ما تفتحه.
         prefix = f"{_safe_pdf_name_part(patient_name)} - {_safe_pdf_name_part(label)}"
-        pdf_path = pdf_export.named_pdf_path(prefix)
+        pdf_path = pdf_export.make_temp_pdf_path(prefix)
         try:
             pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
         except Exception as exc:
@@ -3928,42 +3928,6 @@ def _whatsapp_generate_and_queue_multi(db, visit_row, patient_id, patient_name, 
     if opened_wa:
         return True, f"جهّزنا {len(generated_paths)} ملف PDF منفصل وفتحنا واتساب + مجلد الملفات — حدد كل الملفات (Ctrl+A) واسحبها سوا للمحادثة."
     return False, error
-
-
-def _do_whatsapp_send_result(order_test_id):
-    """المنطق الفعلي لإرسال نتيجة تحليل واحد عبر واتساب — يرجّع (ok, message,
-    visit_id أو None). تُستخدم من مسارين: الرابط الكلاسيكي (فورم + flash +
-    redirect) للاستخدام خارج أي iframe، والـAPI JSON (fetch من جوّه مودال
-    'طباعة كل النتائج المكتملة') بدون أي تنقّل/إعادة تحميل."""
-    db = get_db()
-    ot = db.execute(
-        "SELECT ot.*, td.name as test_name, v.id as visit_id, "
-        "p.id as patient_id, p.full_name as patient_name, p.phone "
-        "FROM order_tests ot "
-        "JOIN test_definitions td ON td.id = ot.test_definition_id "
-        "JOIN orders o ON o.id = ot.order_id "
-        "JOIN visits v ON v.id = o.visit_id "
-        "JOIN patients p ON p.id = v.patient_id WHERE ot.id=?",
-        (order_test_id,),
-    ).fetchone()
-    if not ot:
-        return False, "النتيجة غير موجودة.", None
-    if not ot["phone"]:
-        return False, "لا يوجد رقم هاتف مسجّل لهذا المريض — أضِفه من ملف المريض أولًا.", ot["visit_id"]
-
-    html_content = print_report(order_test_id)
-    if not isinstance(html_content, str):
-        return False, "لا يوجد تصميم طباعة لهذا التحليل بعد.", ot["visit_id"]
-
-    ok, error = _whatsapp_generate_and_queue(
-        db, ot, ot["patient_id"], ot["patient_name"], ot["phone"],
-        ot["test_name"], html_content, order_test_id=order_test_id,
-    )
-    log_action("WhatsAppSend", "order_test", order_test_id, "opened" if ok else f"failed: {error}")
-    if ok:
-        return True, f"📎 جهّزنا ملف PDF لنتيجة {ot['test_name']} وفتحنا واتساب — اسحب الملف من نافذة المجلد وأرفقه بالمحادثة.", ot["visit_id"]
-    return False, error, ot["visit_id"]
-
 
 def _do_whatsapp_send_visit(visit_id, mode):
     """المنطق الفعلي لإرسال كل نتائج الزيارة عبر واتساب — mode='combined'
