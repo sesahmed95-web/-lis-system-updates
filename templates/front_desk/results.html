@@ -41,7 +41,12 @@
             {% endif %}
           </div>
         </td>
-        <td><a class="btn small" href="{{ url_for('visit_results_entry', visit_id=r['visit_id']) }}">{{ t('enter_results') }}</a>
+                <td><a class="btn small" href="{{ url_for('visit_results_entry', visit_id=r['visit_id']) }}">{{ t('enter_results') }}</a>
+          {% if r['done_count'] > 0 %}
+          <form method="post" action="{{ url_for('whatsapp_send_visit', visit_id=r['visit_id']) }}" style="display:inline-block; margin-top:4px;">
+            <button type="submit" class="btn small secondary" title="إرسال كل النتائج المكتملة (المدخلة حتى الآن) عبر واتساب">📱 إرسال واتساب</button>
+          </form>
+          {% endif %}
           <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=r['visit_id']) }}"
              title="تعديل كل معلومات المريض والزيارة (الاسم، الهاتف، العمر، التحاليل المطلوبة...)"
              style="display:inline-block; margin-top:4px;">✏️ تعديل معلومات المريض</a>
