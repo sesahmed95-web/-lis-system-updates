@@ -3590,6 +3590,14 @@ def _open_whatsapp_with_pdf(phone, pdf_path, country_code):
     return opened_wa, opened_folder
 
 
+def _safe_pdf_name_part(text):
+    """ينظّف نص (اسم مريض/تحليل) حتى يصلح كجزء من اسم ملف PDF بويندوز —
+    يشيل الأحرف الممنوعة (\\ / : * ? " < > |) بس، ويحافظ على باقي النص
+    (بما فيه المسافات والعربي) زي ما هو، حتى يبقى اسم المريض مقروء
+    بالظبط متل ما يظهر بالتقرير المطبوع، لتسهيل البحث بين ملفات الـPDF."""
+    return re.sub(r'[\\/:*?"<>|]+', " ", (text or "").strip()).strip() or "ملف"
+
+
 def _whatsapp_generate_and_queue(db, visit_row, patient_id, patient_name, phone,
                                   label, html_content, order_test_id=None):
     """يولّد PDF من الـHTML الجاهز (نفس صفحة الطباعة)، يسجّل صف بطابور
@@ -3599,7 +3607,10 @@ def _whatsapp_generate_and_queue(db, visit_row, patient_id, patient_name, phone,
     import pdf_export
 
     now = datetime.now().isoformat(timespec="seconds")
-    pdf_path = pdf_export.make_temp_pdf_path(f"visit{visit_row['id']}")
+    # اسم الملف يبدأ باسم المريض (مثل ما يظهر بالتقرير بالضبط) بدل رقم
+    # الزيارة، حتى يقدر المستخدم يميّز فوراً بأي ملف بمجلد واتساب وهو
+    # يدور عن نتيجة مريض معيّن، بدل أرقام زيارات ما تعني له شي بالنظرة.
+    pdf_path = pdf_export.make_temp_pdf_path(_safe_pdf_name_part(patient_name))
 
     # توليد PDF نفسه كان بدون أي حماية — أي خطأ يصير أثناء التحويل (خط
     # ناقص، مسار شعار كسران، أي عطل بمكتبة التحويل) كان يطيح الطلب كامل
@@ -3785,7 +3796,11 @@ def _whatsapp_generate_and_queue_multi(db, visit_row, patient_id, patient_name, 
     now = datetime.now().isoformat(timespec="seconds")
     generated_paths = []
     for label, html_content, order_test_id in items:
-        pdf_path = pdf_export.make_temp_pdf_path(f"visit{visit_row['id']}_{order_test_id or 'x'}")
+        # كل ملف بالوضع "منفصل" اسمه "اسم المريض - اسم التحليل"، حتى لو
+        # فتحت المجلد ولقيت عدة ملفات لنفس الزيارة تعرف فوراً أي ملف
+        # لأي تحليل بدون ما تفتحه.
+        prefix = f"{_safe_pdf_name_part(patient_name)} - {_safe_pdf_name_part(label)}"
+        pdf_path = pdf_export.make_temp_pdf_path(prefix)
         try:
             pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
         except Exception as exc:
