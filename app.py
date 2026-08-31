@@ -5726,8 +5726,7 @@ def preview_report_design(test_definition_id):
         tb_text = traceback.format_exc()
         try:
             log_path = os.path.join(os.path.dirname(__file__), "error_log.txt")
-            with open(log_path, "a", encoding="utf-8") as f        show_exam_signature=False,
-        visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}", sex="—", age="—",:
+            with open(log_path, "a", encoding="utf-8") as f:
                 f.write("\n" + "=" * 80 + "\n")
                 f.write(datetime.now().isoformat(timespec="seconds") + f"  preview test_definition_id={test_definition_id}\n")
                 f.write(tb_text)
@@ -5811,14 +5810,14 @@ def _preview_report_design_impl(test_definition_id):
 
     return render_template(
         template_name,
-       ot={"test_name": test["name"]}, params=params, ranges={}, units=units_by_name, cbc_groups=cbc_groups,
+        ot={"test_name": test["name"]}, params=params, ranges={}, units=units_by_name, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         custom_unit_column=custom_unit_column,
         show_prev_values=show_prev_values, previous_visit_date=None, previous_values={},
         repeat_header_on_print=department_shows_previous_values(test["department"]),
         logo_url=logo_url, from_other_lab=False, font_size=14 if test["code"] == "CBC" else 16,
-              show_exam_signature=False,
+        show_exam_signature=False,
         stamp_target_type="test_definition", stamp_target_id=test_definition_id,
         digital_stamps=[], stamp_placements=[],
         visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}", sex="—", age="—",
