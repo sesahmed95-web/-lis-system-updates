@@ -20,7 +20,10 @@ from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_examining_tests, get_examining_rates_map,
                        set_examining_doctor_rate, compute_examining_doctor_fee,
                        find_reference_range,
-                       save_saved_report, get_saved_report, search_saved_reports)
+                       save_saved_report, get_saved_report, search_saved_reports,
+                       get_digital_stamps, get_digital_stamp, add_digital_stamp,
+                       update_digital_stamp, delete_digital_stamp,
+                       get_stamp_placements, upsert_stamp_placement, remove_stamp_placement)
 from translations import t
 from barcode_gen import generate_code39, generate_code128, generate_qr
 import astm_host
@@ -40,9 +43,37 @@ app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days when "re
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_LOGO_EXT = {"png", "jpg", "jpeg", "gif", "svg", "webp"}
+# صور الأختام/التواقيع — بدون svg (نحتاج نفتحها بمكتبة الصور Pillow لتحويل
+# أي خلفية شفافة/ملوّنة إلى خلفية بيضاء صلبة، وsvg متجه وليس بكسلي فلا يدعمه
+# نفس المسار).
+ALLOWED_STAMP_EXT = {"png", "jpg", "jpeg", "webp"}
+STAMPS_UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "static", "uploads", "stamps")
+os.makedirs(STAMPS_UPLOAD_DIR, exist_ok=True)
 # صور خلفية شاشة الترحيب (dashboard) — صور فوتوغرافية بس، بدون svg/gif
 # (svg ما إله فايدة كخلفية ممتدة، وgif المتحرك يشتت الانتباه بشاشة ترحيب).
 ALLOWED_DASHBOARD_BG_EXT = {"png", "jpg", "jpeg", "webp"}
+
+
+def _save_stamp_image_on_white_bg(file_storage, stamp_id):
+    """يحفظ صورة الختم/التوقيع المرفوعة كملف PNG بخلفية بيضاء صلبة دائمًا —
+    حتى لو الصورة الأصلية عندها خلفية شفافة (PNG) أو ملوّنة (خلفية زرقاء/
+    رمادية من سكنر)، لأن ختم/توقيع بخلفية غير بيضاء يظهر "نشازًا" واضحًا
+    فوق التقرير الأبيض. يفتح الصورة بمكتبة Pillow، يدمجها فوق طبقة بيضاء
+    (فتُصبح أي شفافية بيضاء تلقائيًا)، ثم يحفظها باسم ثابت stamp_<id>.png
+    داخل static/uploads/stamps. يرجّع اسم الملف النهائي فقط (بدون المسار
+    الكامل) ليُخزَّن بعمود digital_stamps.image_filename.
+
+    يتطلب: pip install Pillow (لو غير مثبّت أصلاً على جهاز السيرفر)."""
+    from PIL import Image
+
+    img = Image.open(file_storage.stream).convert("RGBA")
+    white_bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+    white_bg.alpha_composite(img)
+    flattened = white_bg.convert("RGB")
+
+    filename = f"stamp_{stamp_id}.png"
+    flattened.save(os.path.join(STAMPS_UPLOAD_DIR, filename), format="PNG")
+    return filename
 
 ROLE_LABELS = {
     "admin": "Administrator",
@@ -1475,11 +1506,31 @@ def api_patients_search():
     db = get_db()
     rows = db.execute(
         "SELECT p.id, p.full_name, p.gender, p.age, p.age_unit, p.phone, p.address, "
-        "(SELECT MAX(v.created_at) FROM visits v WHERE v.patient_id = p.id) as last_visit_at "
+        "(SELECT MAX(v.created_at) FROM visits v WHERE v.patient_id = p.id) as last_visit_at, "
+        "(SELECT v2.id FROM visits v2 WHERE v2.patient_id = p.id ORDER BY v2.created_at DESC LIMIT 1) as last_visit_id "
         "FROM patients p WHERE p.full_name LIKE ? ORDER BY p.full_name LIMIT 8",
         (f"%{q}%",),
     ).fetchall()
-    return jsonify([dict(r) for r in rows])
+    # لكل مريض مطابق بالاسم، نجيب أسماء تحاليل آخر زيارة له (مو كل الزيارات
+    # — بس آخر وحدة، تكفي كتمييز سريع) حتى يقدر موظف الاستقبال يفرّق فورًا
+    # بين شخصين بنفس الاسم بالضبط عن طريق نوع التحليل أو تاريخ آخر زيارة،
+    # دون فتح كل سجل على حدة. هذا لا يغيّر أو يحذف أي بيانات — قراءة فقط.
+    out = []
+    for r in rows:
+        d = dict(r)
+        last_tests = []
+        if d.get("last_visit_id"):
+            last_tests = [t["name"] for t in db.execute(
+                "SELECT DISTINCT td.name FROM order_tests ot "
+                "JOIN orders o ON o.id = ot.order_id "
+                "JOIN test_definitions td ON td.id = ot.test_definition_id "
+                "WHERE o.visit_id=? LIMIT 6",
+                (d["last_visit_id"],),
+            ).fetchall()]
+        d["last_visit_tests"] = last_tests
+        d.pop("last_visit_id", None)
+        out.append(d)
+    return jsonify(out)
 
 
 # ملخص زيارات مريض سبق أن راجع (تُستدعى من شاشة "زيارة جديدة" بعد اختيار
@@ -3110,7 +3161,11 @@ def visit_results_entry(visit_id):
 
     return render_template("front_desk/visit_results_entry.html", visit=visit, boxes=boxes,
                             patient_hct=get_visit_hct(db, visit_id),
-                            patient_hct_normal=get_normal_hct(db, visit["gender"], visit["age"], visit["age_unit"]))
+                            patient_hct_normal=get_normal_hct(db, visit["gender"], visit["age"], visit["age_unit"]),
+                            # هل كل تحاليل هذي الزيارة مكتملة/معتمدة؟ — يُستخدم لإظهار
+                            # زر "إرسال عبر واتساب" لكل نتائج الزيارة دفعة وحدة بجانب
+                            # زر إدخال النتائج (راجع partials/whatsapp_send_button.html).
+                            all_completed=all(ot["status"] in ("Completed", "Verified") for ot in order_tests))
 
 
 # ------------------------------------------------------------------------
@@ -3253,6 +3308,11 @@ def print_combined_panel(visit_id):
         patient_name=visit["patient_name"], patient_id=visit["registration_number"],
         referring_doctor_name=visit["referring_doctor_name"] or "",
         show_exam_signature=False,
+        # مكتبة الأختام/التواقيع + أي ختم مُلصق فعلاً فوق هذا التقرير الموحّد
+        # حاليًا (راجع partials/stamp_picker.html لطريقة استخدامها بالقالب).
+        stamp_target_type="visit", stamp_target_id=visit_id,
+        digital_stamps=get_digital_stamps(db),
+        stamp_placements=get_stamp_placements(db, "visit", visit_id),
     )
 
 
@@ -3392,11 +3452,11 @@ def _print_report_impl(order_test_id):
     from_other_lab = bool(ot["referral_center_id"]) and ot["referral_center_name"] not in (None, "", "Walk-in")
 
     font_size = 14 if ot["test_code"] == "CBC" else 16
-    # مربع "توقيع وختم الدكتور الفاحص" مُلغى بكل التقارير حسب الطلب — الشرط
-    # تعطّل عمدًا بدل حذف EXAM_SIGNATURE_TEST_CODES نفسها، فلو احتجتوها
-    # ترجع بالمستقبل تكفي إعادة هذا السطر لحالته: ot["test_code"] in
-    # EXAM_SIGNATURE_TEST_CODES or bool(ot["is_examining_test"])
-    show_exam_signature = False
+    # مربع "توقيع وختم الدكتور الفاحص" كان مُلغى بكل التقارير (فراغ فاضي
+    # بانتظار ختم/توقيع حقيقي يُلصق يدويًا على الورقة المطبوعة). الآن رجع
+    # كصورة ختم/توقيع رقمية فعلية تُختار من مكتبة الأختام وتُسحب لموضعها —
+    # راجع digital_stamps/stamp_placements أدناه وpartials/stamp_picker.html.
+    show_exam_signature = ot["test_code"] in EXAM_SIGNATURE_TEST_CODES or bool(ot["is_examining_test"])
 
     try:
         dt = datetime.fromisoformat(ot["visit_created_at"])
@@ -3539,6 +3599,9 @@ def _print_report_impl(order_test_id):
         previous_values=previous_values, repeat_header_on_print=repeat_header_on_print,
         logo_url=logo_url, from_other_lab=from_other_lab, font_size=font_size,
         show_exam_signature=show_exam_signature,
+        stamp_target_type="order_test", stamp_target_id=order_test_id,
+        digital_stamps=get_digital_stamps(db),
+        stamp_placements=get_stamp_placements(db, "order_test", order_test_id),
         visit_date=visit_date, sex=ot["gender"] or "", age=age_display,
         patient_name=ot["patient_name"], patient_id=ot["registration_number"],
         referring_doctor_name=ot["referring_doctor_name"] or "",
@@ -3610,7 +3673,7 @@ def _whatsapp_generate_and_queue(db, visit_row, patient_id, patient_name, phone,
     # اسم الملف يبدأ باسم المريض (مثل ما يظهر بالتقرير بالضبط) بدل رقم
     # الزيارة، حتى يقدر المستخدم يميّز فوراً بأي ملف بمجلد واتساب وهو
     # يدور عن نتيجة مريض معيّن، بدل أرقام زيارات ما تعني له شي بالنظرة.
-    pdf_path = pdf_export.make_temp_pdf_path(_safe_pdf_name_part(patient_name))
+    pdf_path = pdf_export.named_pdf_path(_safe_pdf_name_part(patient_name))
 
     # توليد PDF نفسه كان بدون أي حماية — أي خطأ يصير أثناء التحويل (خط
     # ناقص، مسار شعار كسران، أي عطل بمكتبة التحويل) كان يطيح الطلب كامل
@@ -3800,7 +3863,7 @@ def _whatsapp_generate_and_queue_multi(db, visit_row, patient_id, patient_name, 
         # فتحت المجلد ولقيت عدة ملفات لنفس الزيارة تعرف فوراً أي ملف
         # لأي تحليل بدون ما تفتحه.
         prefix = f"{_safe_pdf_name_part(patient_name)} - {_safe_pdf_name_part(label)}"
-        pdf_path = pdf_export.make_temp_pdf_path(prefix)
+        pdf_path = pdf_export.named_pdf_path(prefix)
         try:
             pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
         except Exception as exc:
@@ -5251,6 +5314,173 @@ def examining_doctor_move(doctor_id):
     if direction in ("up", "down"):
         move_examining_doctor(db, doctor_id, direction)
     return redirect(url_for("examining_doctors_manage"))
+
+
+# ------------------------------------------------------------------------
+# مكتبة الأختام والتواقيع الرقمية — أيقونة/صفحة إدارة واحدة تسمح بإضافة أي
+# عدد من الأختام (ختم المختبر نفسه + ختم/توقيع كل دكتور فاحص على حدة، لأن
+# كل واحد منهم مختلف عن الثاني) بدون أي حصر. كل صورة تُحفظ دائمًا بخلفية
+# بيضاء صلبة (راجع _save_stamp_image_on_white_bg) حتى تظهر واضحة وكأنها
+# ختم/توقيع حقيقي فوق التقرير المطبوع، وليست "نشازًا". من نفس الشاشة يقدر
+# المدير يربط أي ختم باسم دكتور فاحص محدد من القائمة (اختياري) — هذا الربط
+# بس اقتراح تلقائي لاحقًا، ولا يمنع اختيار أي ختم آخر يدويًا عند إتمام
+# التقرير (راجع stamp_placement_* أدناه لآلية الإلصاق الفعلي فوق تقرير
+# معيّن مع إمكانية سحبه لأي موضع).
+# ------------------------------------------------------------------------
+@app.route("/management/stamps", methods=["GET"])
+@roles_required("admin")
+def stamps_manage():
+    db = get_db()
+    stamps = get_digital_stamps(db, active_only=False)
+    doctors = get_examining_doctors_full(db)
+    return render_template("management/stamps.html", stamps=stamps, doctors=doctors)
+
+
+@app.route("/management/stamps/add", methods=["POST"])
+@roles_required("admin")
+def stamp_add():
+    db = get_db()
+    label = (request.form.get("label") or "").strip()
+    kind = request.form.get("kind") or "stamp"
+    if kind not in ("stamp", "signature", "stamp_signature"):
+        kind = "stamp"
+    linked_doctor_raw = request.form.get("linked_examining_doctor_id") or ""
+    linked_doctor_id = int(linked_doctor_raw) if linked_doctor_raw.isdigit() else None
+    file = request.files.get("image")
+
+    if not label:
+        flash("اسم/تسمية الختم أو التوقيع مطلوبة (مثلاً: ختم د. خليل حمود).")
+        return redirect(url_for("stamps_manage"))
+    if not file or not file.filename:
+        flash("لازم ترفع صورة الختم أو التوقيع.")
+        return redirect(url_for("stamps_manage"))
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext not in ALLOWED_STAMP_EXT:
+        flash("صيغة الصورة غير مدعومة — استخدم PNG أو JPG أو WEBP.")
+        return redirect(url_for("stamps_manage"))
+
+    # نحجز id أولاً بصف مؤقت (اسم ملف فاضي) حتى نقدر نسمّي ملف الصورة
+    # stamp_<id>.png بنفس رقم الصف مباشرة، ثم نحدّثه بعد حفظ الصورة فعليًا.
+    new_id = add_digital_stamp(db, label, kind, image_filename="", 
+                                linked_examining_doctor_id=linked_doctor_id,
+                                created_by=session.get("user_id"))
+    try:
+        filename = _save_stamp_image_on_white_bg(file, new_id)
+    except Exception:
+        delete_digital_stamp(db, new_id)
+        flash("تعذّر معالجة الصورة المرفوعة — تأكد إنها صورة صالحة، وإن مكتبة Pillow مثبّتة على الجهاز (pip install Pillow).")
+        return redirect(url_for("stamps_manage"))
+    db.execute("UPDATE digital_stamps SET image_filename=? WHERE id=?", (filename, new_id))
+    db.commit()
+    log_action("AddDigitalStamp", "digital_stamp", new_id, label)
+    flash(f"تمت إضافة \"{label}\" لمكتبة الأختام والتواقيع.")
+    return redirect(url_for("stamps_manage"))
+
+
+@app.route("/management/stamps/<int:stamp_id>/update", methods=["POST"])
+@roles_required("admin")
+def stamp_update(stamp_id):
+    db = get_db()
+    label = (request.form.get("label") or "").strip()
+    kind = request.form.get("kind") or "stamp"
+    if kind not in ("stamp", "signature", "stamp_signature"):
+        kind = "stamp"
+    linked_doctor_raw = request.form.get("linked_examining_doctor_id") or ""
+    linked_doctor_id = int(linked_doctor_raw) if linked_doctor_raw.isdigit() else None
+    is_active = bool(request.form.get("is_active"))
+    if not label:
+        flash("اسم/تسمية الختم أو التوقيع مطلوبة.")
+        return redirect(url_for("stamps_manage"))
+    update_digital_stamp(db, stamp_id, label, kind, linked_doctor_id, is_active)
+    log_action("UpdateDigitalStamp", "digital_stamp", stamp_id, label)
+    flash(f"تم حفظ تعديلات \"{label}\".")
+    return redirect(url_for("stamps_manage"))
+
+
+@app.route("/management/stamps/<int:stamp_id>/delete", methods=["POST"])
+@roles_required("admin")
+def stamp_delete(stamp_id):
+    db = get_db()
+    stamp = get_digital_stamp(db, stamp_id)
+    if stamp:
+        delete_digital_stamp(db, stamp_id)
+        try:
+            os.remove(os.path.join(STAMPS_UPLOAD_DIR, stamp["image_filename"]))
+        except OSError:
+            pass
+        log_action("DeleteDigitalStamp", "digital_stamp", stamp_id, stamp["label"])
+    flash("تم الحذف.")
+    return redirect(url_for("stamps_manage"))
+
+
+# API خفيف يرجّع قائمة الأختام/التواقيع الفعّالة (JSON) — يُستخدم بالقائمة
+# المنسدلة "إضافة ختم/توقيع" بشاشة إتمام/طباعة أي تقرير (راجع
+# partials/stamp_picker.html).
+@app.route("/api/stamps/list")
+@login_required
+def api_stamps_list():
+    db = get_db()
+    kind = request.args.get("kind") or None
+    stamps = get_digital_stamps(db, kind=kind, active_only=True)
+    return jsonify([{
+        "id": s["id"],
+        "label": s["label"],
+        "kind": s["kind"],
+        "doctor_name": s["doctor_name"],
+        "default_width": s["default_width"],
+        "image_url": url_for("static", filename=f"uploads/stamps/{s['image_filename']}"),
+    } for s in stamps])
+
+
+# إلصاق/تحريك ختم فوق تقرير معيّن (target_type: 'visit' لتقرير موحّد لكل
+# نتائج الزيارة، أو 'order_test' لتحليل مفرد) — تُستدعى بـfetch من جافاسكربت
+# كل ما المستخدم يفلت الختم بمكان جديد بعد سحبه (drag&drop)، فتتحدّث فقط
+# بدل ما تتكرر (راجع upsert_stamp_placement بقاعدة البيانات).
+@app.route("/api/reports/<target_type>/<int:target_id>/stamps", methods=["GET"])
+@login_required
+def api_report_stamps_get(target_type, target_id):
+    if target_type not in ("visit", "order_test"):
+        return jsonify({"error": "target_type غير صحيح"}), 400
+    db = get_db()
+    placements = get_stamp_placements(db, target_type, target_id)
+    return jsonify([{
+        "placement_id": p["id"],
+        "stamp_id": p["stamp_id"],
+        "label": p["label"],
+        "pos_x": p["pos_x"],
+        "pos_y": p["pos_y"],
+        "width": p["width"] or p["default_width"],
+        "image_url": url_for("static", filename=f"uploads/stamps/{p['image_filename']}"),
+    } for p in placements])
+
+
+@app.route("/api/reports/<target_type>/<int:target_id>/stamps", methods=["POST"])
+@login_required
+def api_report_stamps_place(target_type, target_id):
+    if target_type not in ("visit", "order_test"):
+        return jsonify({"error": "target_type غير صحيح"}), 400
+    db = get_db()
+    try:
+        stamp_id = int(request.form.get("stamp_id"))
+        pos_x = float(request.form.get("pos_x", 40))
+        pos_y = float(request.form.get("pos_y", 40))
+        width_raw = request.form.get("width")
+        width = float(width_raw) if width_raw else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "بيانات غير صالحة"}), 400
+    placement_id = upsert_stamp_placement(db, target_type, target_id, stamp_id, pos_x, pos_y,
+                                           width, placed_by=session.get("user_id"))
+    log_action("PlaceStamp", target_type, target_id, f"stamp_id={stamp_id}")
+    return jsonify({"ok": True, "placement_id": placement_id})
+
+
+@app.route("/api/reports/stamps/<int:placement_id>/remove", methods=["POST"])
+@login_required
+def api_report_stamps_remove(placement_id):
+    db = get_db()
+    remove_stamp_placement(db, placement_id)
+    log_action("RemoveStamp", "stamp_placement", placement_id)
+    return jsonify({"ok": True})
 
 
 def _parse_docx_rows(file_storage, parameters):

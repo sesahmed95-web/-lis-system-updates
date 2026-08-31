@@ -404,6 +404,51 @@ CREATE TABLE IF NOT EXISTS whatsapp_sends (
     FOREIGN KEY (patient_id) REFERENCES patients(id)
 );
 
+-- مكتبة الأختام والتواقيع الرقمية — يضيف المدير هنا عدد غير محدود من صور
+-- الأختام/التواقيع (ختم المختبر نفسه، وختم/توقيع كل دكتور فاحص على حدة،
+-- لأن كل واحد منهم يختلف عن الثاني). image_filename هو اسم الملف داخل
+-- static/uploads/stamps فقط (بعد تحويله لخلفية بيضاء صلبة عند الرفع حتى لا
+-- يظهر "نشازًا" فوق التقرير). linked_examining_doctor_id اختياري — لو
+-- انربط بدكتور معيّن من قائمة examining_doctors_list يظهر مقترحًا تلقائيًا
+-- أول ما يُختار ذلك الدكتور كفاحص للزيارة، لكن يبقى بإمكان أي مستخدم
+-- اختيار أي ختم آخر يدويًا بغض النظر عن الربط. default_width/height هي
+-- القياس الافتراضي بالبكسل أول مرة يُسحب فيها الختم فوق أي تقرير (يتغيّر
+-- بعدها حرًا بالسحب لكل تقرير على حدة — راجع report_stamp_placements).
+CREATE TABLE IF NOT EXISTS digital_stamps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,                 -- اسم مختصر يظهر بالقائمة المنسدلة، مثلاً "ختم د. خليل حمود"
+    kind TEXT NOT NULL DEFAULT 'stamp',  -- stamp | signature | stamp_signature (ختم مدموج مع توقيع بصورة وحدة)
+    linked_examining_doctor_id INTEGER,  -- ربط اختياري بدكتور من examining_doctors_list
+    image_filename TEXT NOT NULL,
+    default_width INTEGER DEFAULT 140,
+    sort_order INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_by INTEGER,
+    created_at TEXT,
+    FOREIGN KEY (linked_examining_doctor_id) REFERENCES examining_doctors_list(id)
+);
+
+-- الختم/التوقيع الفعلي المُلصق على تقرير معيّن (زيارة كاملة أو تحليل مفرد)،
+-- مع موضعه بالضبط (pos_x/pos_y بالبكسل من الزاوية العلوية اليسرى لصفحة
+-- التقرير) بعد ما يسحبه المستخدم بالماوس فوق معاينة التقرير. UNIQUE على
+-- (target_type, target_id, stamp_id) يعني: لو نفس الختم انسحب مرة ثانية
+-- لنفس التقرير يتحدّث موضعه فقط (upsert)، بدون أي تكرار — بينما يمكن إضافة
+-- أكثر من ختم/توقيع مختلف لنفس التقرير الواحد (مثلاً ختم المختبر + توقيع
+-- الدكتور الفاحص سوا) لأن كل واحد صف منفصل بـstamp_id مختلف.
+CREATE TABLE IF NOT EXISTS report_stamp_placements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_type TEXT NOT NULL,   -- 'visit' (تقرير موحّد لكل الزيارة) أو 'order_test' (تحليل مفرد)
+    target_id INTEGER NOT NULL,
+    stamp_id INTEGER NOT NULL,
+    pos_x REAL NOT NULL DEFAULT 40,
+    pos_y REAL NOT NULL DEFAULT 40,
+    width REAL,
+    placed_by INTEGER,
+    placed_at TEXT,
+    UNIQUE(target_type, target_id, stamp_id),
+    FOREIGN KEY (stamp_id) REFERENCES digital_stamps(id)
+);
+
 -- التقارير المحفوظة (PDF) لكل زيارة، تُستخدم لأرشيف التقارير والبحث عنها لاحقًا.
 CREATE TABLE IF NOT EXISTS saved_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1508,6 +1553,100 @@ def compute_examining_doctor_fee(db, doctor_name, test_ids):
         if row is not None:
             total += row["rate"] or 0
     return total
+
+
+# ------------------------------------------------------------------------
+# مكتبة الأختام والتواقيع الرقمية (digital_stamps) + مواضعها فوق كل تقرير
+# (report_stamp_placements). راجع تعريف الجدولين بأعلى SCHEMA لشرح كامل.
+# ------------------------------------------------------------------------
+def get_digital_stamps(db, kind=None, active_only=True):
+    """كل الأختام/التواقيع المحفوظة، مع اسم الدكتور المرتبط بيها (إن وجد)
+    لعرضه بالقائمة المنسدلة. kind لو انمرر يفلتر فقط 'stamp' أو 'signature'
+    أو 'stamp_signature'؛ active_only=False تُستخدم بشاشة الإدارة نفسها حتى
+    يقدر المدير يشوف/يفعّل الأختام الموقوفة أيضًا."""
+    q = ("SELECT ds.*, edl.name as doctor_name FROM digital_stamps ds "
+         "LEFT JOIN examining_doctors_list edl ON edl.id = ds.linked_examining_doctor_id WHERE 1=1")
+    params = []
+    if active_only:
+        q += " AND ds.is_active=1"
+    if kind:
+        q += " AND ds.kind=?"
+        params.append(kind)
+    q += " ORDER BY ds.sort_order, ds.id"
+    return db.execute(q, params).fetchall()
+
+
+def get_digital_stamp(db, stamp_id):
+    return db.execute("SELECT * FROM digital_stamps WHERE id=?", (stamp_id,)).fetchone()
+
+
+def add_digital_stamp(db, label, kind, image_filename, linked_examining_doctor_id=None,
+                       default_width=140, created_by=None):
+    max_order = db.execute("SELECT COALESCE(MAX(sort_order), -1) as m FROM digital_stamps").fetchone()["m"]
+    now = datetime.now().isoformat(timespec="seconds")
+    cur = db.execute(
+        "INSERT INTO digital_stamps (label, kind, linked_examining_doctor_id, image_filename, "
+        "default_width, sort_order, is_active, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        (label, kind, linked_examining_doctor_id or None, image_filename, default_width,
+         max_order + 1, created_by, now),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def update_digital_stamp(db, stamp_id, label, kind, linked_examining_doctor_id=None, is_active=True):
+    """تعديل بيانات ختم موجود بدون تغيير صورته (تغيير الصورة نفسها يكون
+    بحذف الختم وإضافته من جديد، تفاديًا لتعقيد استبدال الملف على القرص)."""
+    db.execute(
+        "UPDATE digital_stamps SET label=?, kind=?, linked_examining_doctor_id=?, is_active=? WHERE id=?",
+        (label, kind, linked_examining_doctor_id or None, 1 if is_active else 0, stamp_id),
+    )
+    db.commit()
+
+
+def delete_digital_stamp(db, stamp_id):
+    """يحذف الختم من المكتبة وأي أماكن لصقه سابقًا فوق تقارير — لا يحذف
+    ملف الصورة نفسه من القرص (يبقى الطرف المستدعي بـapp.py مسؤول عن ذلك
+    إن أراد، عبر image_filename المرجَع من get_digital_stamp قبل الحذف)."""
+    db.execute("DELETE FROM report_stamp_placements WHERE stamp_id=?", (stamp_id,))
+    db.execute("DELETE FROM digital_stamps WHERE id=?", (stamp_id,))
+    db.commit()
+
+
+def get_stamp_placements(db, target_type, target_id):
+    """كل الأختام/التواقيع الملصوقة حاليًا فوق تقرير معيّن (زيارة أو تحليل
+    مفرد)، بمواضعها بالضبط — تُستخدم لرسمها فوق معاينة/طباعة التقرير."""
+    return db.execute(
+        "SELECT rsp.*, ds.image_filename, ds.label, ds.kind, ds.default_width "
+        "FROM report_stamp_placements rsp JOIN digital_stamps ds ON ds.id = rsp.stamp_id "
+        "WHERE rsp.target_type=? AND rsp.target_id=? ORDER BY rsp.id",
+        (target_type, target_id),
+    ).fetchall()
+
+
+def upsert_stamp_placement(db, target_type, target_id, stamp_id, pos_x, pos_y, width=None, placed_by=None):
+    """يضيف ختمًا جديدًا فوق التقرير أو يحدّث موضعه لو كان ملصوقًا أصلاً
+    (نفس stamp_id لنفس target) — بهذا السحب المتكرر لنفس الختم يحرّكه فقط
+    بدل ما يكرره. يرجّع id الصف بعد الإضافة/التحديث."""
+    now = datetime.now().isoformat(timespec="seconds")
+    db.execute(
+        "INSERT INTO report_stamp_placements (target_type, target_id, stamp_id, pos_x, pos_y, width, "
+        "placed_by, placed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(target_type, target_id, stamp_id) DO UPDATE SET "
+        "pos_x=excluded.pos_x, pos_y=excluded.pos_y, width=excluded.width, "
+        "placed_by=excluded.placed_by, placed_at=excluded.placed_at",
+        (target_type, target_id, stamp_id, pos_x, pos_y, width, placed_by, now),
+    )
+    db.commit()
+    return db.execute(
+        "SELECT id FROM report_stamp_placements WHERE target_type=? AND target_id=? AND stamp_id=?",
+        (target_type, target_id, stamp_id),
+    ).fetchone()["id"]
+
+
+def remove_stamp_placement(db, placement_id):
+    db.execute("DELETE FROM report_stamp_placements WHERE id=?", (placement_id,))
+    db.commit()
 
 
 if __name__ == "__main__":

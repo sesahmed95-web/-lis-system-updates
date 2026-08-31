@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block page_title %}الأختام والتواقيع{% endblock %}
+{% block content %}
+<div class="card" style="max-width:760px;">
+  <h3>➕ إضافة ختم أو توقيع جديد</h3>
+  <p class="muted">
+    أضف هنا ختم المختبر نفسه، وختم/توقيع كل دكتور فاحص على حدة — بدون أي حد
+    أقصى للعدد. أي صورة ترفعها تتحول تلقائيًا لخلفية بيضاء صلبة (حتى لو
+    كانت شفافة أو ملوّنة) حتى تظهر واضحة وكأنها ختم/توقيع حقيقي فوق التقرير،
+    وليست "نشازًا". لاحقًا، عند إتمام أو طباعة أي تقرير، تقدر تختار أي ختم
+    من هذي القائمة وتسحبه لموضعه المناسب فوق التقرير مباشرة.
+  </p>
+  <form method="POST" action="{{ url_for('stamp_add') }}" enctype="multipart/form-data" class="form-grid">
+    <div class="form-field">
+      <label>التسمية *</label>
+      <input type="text" name="label" required placeholder="مثال: ختم د. خليل حمود">
+    </div>
+    <div class="form-field">
+      <label>النوع</label>
+      <select name="kind">
+        <option value="stamp">ختم فقط</option>
+        <option value="signature">توقيع فقط</option>
+        <option value="stamp_signature">ختم + توقيع بصورة واحدة</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>ربط بدكتور فاحص (اختياري)</label>
+      <select name="linked_examining_doctor_id">
+        <option value="">— بدون ربط (مثلاً: ختم المختبر نفسه) —</option>
+        {% for d in doctors %}
+        <option value="{{ d['id'] }}">{{ d['name'] }}</option>
+        {% endfor %}
+      </select>
+      <small class="muted">هذا فقط اقتراح تلقائي لاحقًا عند اختيار نفس الدكتور كفاحص للزيارة — يبقى بالإمكان اختيار أي ختم آخر يدويًا دائمًا.</small>
+    </div>
+    <div class="form-field">
+      <label>صورة الختم/التوقيع *</label>
+      <input type="file" name="image" accept=".png,.jpg,.jpeg,.webp" required>
+      <span class="muted">PNG / JPG / WEBP — يفضَّل صورة عالية الوضوح بخلفية بيضاء أو شفافة.</span>
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">إضافة للمكتبة</button>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <h3>مكتبة الأختام والتواقيع الحالية</h3>
+  {% if not stamps %}
+  <p class="muted">لا يوجد أي ختم أو توقيع مُضاف بعد.</p>
+  {% endif %}
+  {% for s in stamps %}
+  <div style="border:1px solid var(--border, #E2E8F0); border-radius:8px; padding:12px 14px; margin-bottom:12px; display:flex; gap:14px; align-items:flex-start; {{ 'opacity:.55;' if not s['is_active'] }}">
+    <img src="{{ url_for('static', filename='uploads/stamps/' + s['image_filename']) }}" alt="{{ s['label'] }}"
+         style="width:90px; height:90px; object-fit:contain; background:#fff; border:1px solid var(--border, #E2E8F0); border-radius:6px; padding:4px;">
+    <form method="POST" action="{{ url_for('stamp_update', stamp_id=s['id']) }}" class="form-grid" style="flex:1; min-width:280px;">
+      <div class="form-field">
+        <label>التسمية *</label>
+        <input type="text" name="label" value="{{ s['label'] }}" required>
+      </div>
+      <div class="form-field">
+        <label>النوع</label>
+        <select name="kind">
+          <option value="stamp" {{ 'selected' if s['kind']=='stamp' }}>ختم فقط</option>
+          <option value="signature" {{ 'selected' if s['kind']=='signature' }}>توقيع فقط</option>
+          <option value="stamp_signature" {{ 'selected' if s['kind']=='stamp_signature' }}>ختم + توقيع بصورة واحدة</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>ربط بدكتور فاحص</label>
+        <select name="linked_examining_doctor_id">
+          <option value="">— بدون ربط —</option>
+          {% for d in doctors %}
+          <option value="{{ d['id'] }}" {{ 'selected' if s['linked_examining_doctor_id']==d['id'] }}>{{ d['name'] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="checkbox-item" style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+          <input type="checkbox" name="is_active" {{ 'checked' if s['is_active'] }}>
+          فعّال (يظهر بقائمة الاختيار عند الطباعة)
+        </label>
+      </div>
+      <div class="form-field" style="display:flex; gap:8px; align-items:flex-end;">
+        <button class="btn small" type="submit">💾 حفظ</button>
+      </div>
+    </form>
+    <form method="POST" action="{{ url_for('stamp_delete', stamp_id=s['id']) }}"
+          onsubmit="return confirm('حذف \'{{ s['label'] }}\' نهائيًا؟ أي أماكن سبق أن لصقته بها فوق تقارير قديمة ستفقد الختم أيضًا.');">
+      <button class="btn small" type="submit" style="background:#DC2626; color:#fff;">🗑️ حذف</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

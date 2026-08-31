@@ -15,7 +15,7 @@
   @media print { @page { size: A4; margin: 0; } }
   .report-scope { font-family: "Times New Roman", "Traditional Arabic", Tahoma, Arial, sans-serif;
                    font-size: {{ font_size|default(16) }}px; color: #14213D; }
-  .sheet { max-width: 760px; margin: 0 auto; padding: 6px 4px 20px 4px; }
+  .sheet { max-width: 760px; margin: 0 auto; padding: 6px 4px 20px 4px; position: relative; }
 
   .doc-col.logo-col { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
   .doc-col.logo-col img { width: {{ logo_width|default(100) }}px; height: auto; }
@@ -404,6 +404,8 @@
             </div>
           </div>
           {% endif %}
+
+          {% include "partials/stamp_picker.html" %}
 
           <div class="footer-block">
             {% block extra_note %}{% endblock %}
