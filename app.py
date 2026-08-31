@@ -5785,7 +5785,7 @@ def preview_report_design(test_definition_id):
 
     return render_template(
         template_name,
-        ot={"test_name": test["name"]}, params=params, ranges={}, cbc_groups=cbc_groups,
+       ot={"test_name": test["name"]}, params=params, ranges={}, units=units_by_name, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         custom_unit_column=custom_unit_column,
