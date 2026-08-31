@@ -1,0 +1,132 @@
+
+================================================================================
+2026-08-31T13:33:25  order_test_id=3
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 3323, in print_report
+    return _print_report_impl(order_test_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 3592, in _print_report_impl
+    return render_template(
+        template_name,
+    ...<13 lines>...
+        referring_doctor_name=ot["referring_doctor_name"] or "",
+    )
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\custom.html", line 1, in top-level template code
+    {% extends "reports/base_report.html" %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 408, in top-level template code
+    {% include "partials/stamp_picker.html" %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 66, in get_source
+    return self._get_source_fast(environment, template)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 100, in _get_source_fast
+    raise TemplateNotFound(template)
+jinja2.exceptions.TemplateNotFound: partials/stamp_picker.html
+
+================================================================================
+2026-08-31T13:33:25  order_test_id=5
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 3323, in print_report
+    return _print_report_impl(order_test_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 3592, in _print_report_impl
+    return render_template(
+        template_name,
+    ...<13 lines>...
+        referring_doctor_name=ot["referring_doctor_name"] or "",
+    )
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\blood_film.html", line 1, in top-level template code
+    {% extends "reports/base_report.html" %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 408, in top-level template code
+    {% include "partials/stamp_picker.html" %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 66, in get_source
+    return self._get_source_fast(environment, template)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 100, in _get_source_fast
+    raise TemplateNotFound(template)
+jinja2.exceptions.TemplateNotFound: partials/stamp_picker.html
+
+================================================================================
+2026-08-31T13:33:25  order_test_id=6
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 3323, in print_report
+    return _print_report_impl(order_test_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 3592, in _print_report_impl
+    return render_template(
+        template_name,
+    ...<13 lines>...
+        referring_doctor_name=ot["referring_doctor_name"] or "",
+    )
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\cbc.html", line 1, in top-level template code
+    {% extends "reports/base_report.html" %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 408, in top-level template code
+    {% include "partials/stamp_picker.html" %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 66, in get_source
+    return self._get_source_fast(environment, template)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 100, in _get_source_fast
+    raise TemplateNotFound(template)
+jinja2.exceptions.TemplateNotFound: partials/stamp_picker.html
+
+================================================================================
+2026-08-31T13:33:53  preview test_definition_id=5
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 5723, in preview_report_design
+    return _preview_report_design_impl(test_definition_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 5811, in _preview_report_design_impl
+    return render_template(
+        template_name,
+    ...<12 lines>...
+        referring_doctor_name="—", is_design_preview=True, preview_test_id=test_definition_id,
+    )
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\blood_film.html", line 1, in top-level template code
+    {% extends "reports/base_report.html" %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 408, in top-level template code
+    {% include "partials/stamp_picker.html" %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 66, in get_source
+    return self._get_source_fast(environment, template)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 100, in _get_source_fast
+    raise TemplateNotFound(template)
+jinja2.exceptions.TemplateNotFound: partials/stamp_picker.html
