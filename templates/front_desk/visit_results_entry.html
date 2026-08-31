@@ -11,9 +11,15 @@
      onclick="openReportModal('{{ url_for('print_combined_panel', visit_id=visit['id']) }}', 'اللوحة المجمّعة')"
      title="يجمع تحاليل الكيمياء/الفايروسات/الهرمونات/الفيتامينات وأي قسم آخر بورقة A4 وحدة، مرتّبة حسب القسم">🧾 طباعة اللوحة المجمّعة</button>
   {% if visit['phone'] %}
-  <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id'], completed_only=1) }}"
-        style="display:inline;" onsubmit="return confirm('إرسال كل النتائج المكتملة لهذه الزيارة بملف PDF واحد عبر واتساب لرقم المريض؟');">
-    <button class="btn small" type="submit">📱 إرسال كل النتائج المكتملة واتساب</button>
+  <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id']) }}"
+        style="display:inline;" onsubmit="return confirm('إرسال كل النتائج المكتملة لهذه الزيارة بملف PDF واحد مجمّع عبر واتساب لرقم المريض؟');">
+    <input type="hidden" name="mode" value="combined">
+    <button class="btn small" type="submit">📱 إرسال الكل واتساب (ملف واحد)</button>
+  </form>
+  <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id']) }}"
+        style="display:inline;" onsubmit="return confirm('إرسال كل النتائج المكتملة لهذه الزيارة — كل تحليل بملف PDF منفصل — عبر واتساب لرقم المريض؟');">
+    <input type="hidden" name="mode" value="separate">
+    <button class="btn small secondary" type="submit">📱 إرسال الكل واتساب (ملفات منفصلة)</button>
   </form>
   {% else %}
   <span class="muted" style="margin-inline-start:8px;">لا يوجد رقم واتساب مسجّل لهذا المريض</span>

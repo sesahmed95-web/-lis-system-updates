@@ -27,7 +27,7 @@
         <td>
           <div style="display:flex; flex-direction:column; gap:4px; min-width:190px;">
             <button type="button" class="btn small secondary print-link"
-               onclick="openReportModal('{{ url_for('print_visit_results', visit_id=r['visit_id'], completed_only=1) }}')">🖨 طباعة كل النتائج</button>
+               onclick="openReportModal('{{ url_for('print_visit_results_bundle', visit_id=r['visit_id']) }}')">🖨 طباعة كل النتائج</button>
             {% if r['tests_list'] %}
             <div style="display:flex; gap:4px;">
               <select id="testSel_{{ r['visit_id'] }}" style="flex:1; font-size:12px;">

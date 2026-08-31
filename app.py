@@ -2501,7 +2501,7 @@ def print_visit_results(visit_id):
 def print_visit_results_bundle(visit_id):
     db = get_db()
     visit = db.execute(
-        "SELECT v.*, p.full_name FROM visits v JOIN patients p ON p.id = v.patient_id WHERE v.id=?",
+        "SELECT v.*, p.full_name, p.phone FROM visits v JOIN patients p ON p.id = v.patient_id WHERE v.id=?",
         (visit_id,),
     ).fetchone()
     if not visit:
@@ -2551,6 +2551,79 @@ def print_visit_results_bundle(visit_id):
         reports.append({"order_test_id": ot["id"], "test_name": ot["test_name"]})
 
     return render_template("front_desk/print_results_bundle.html", visit=visit, reports=reports)
+
+
+# يبني ملف HTML واحد مدمج من كل التقاريـر المصممة الحقيقية (نفس تصميم
+# كل تحليل بالضبط لو طُبع لحاله عبر print_report) لكل تحليل مكتمل بهذي
+# الزيارة — يُستخدم لتوليد PDF واحد (أرشفة/واتساب) بدل الجدول العام
+# البسيط القديم (print_visit_results)، الذي لا يعكس تصميم أي تقرير.
+# نفس منطق الترتيب ودمج Blood Film/Retic المستخدم بصفحة "طباعة كل
+# النتائج المكتملة" (print_visit_results_bundle فوق) بالضبط، حتى يطابق
+# ملف الـPDF المُرسَل/المؤرشف شكل وترتيب نفس التقارير المعروضة هناك.
+# يرجّع None لو ما فيه أي تحليل مكتمل بعد (أو تعذّر توليد أي تقرير منها).
+def _build_combined_designed_reports_html(visit_id):
+    db = get_db()
+    order_tests = db.execute(
+        "SELECT ot.id, ot.status, td.code as test_code, td.name as test_name, td.department as test_department "
+        "FROM order_tests ot JOIN orders o ON o.id = ot.order_id "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "WHERE o.visit_id=? AND ot.status IN ('Completed', 'Verified') ORDER BY ot.id",
+        (visit_id,),
+    ).fetchall()
+    order_pref_raw = get_setting(db, "results_entry_test_order", "")
+    order_pref = [ln.strip() for ln in order_pref_raw.splitlines() if ln.strip()]
+    if order_pref:
+        rank = {name: i for i, name in enumerate(order_pref)}
+        order_tests = sorted(
+            order_tests,
+            key=lambda row: (
+                rank.get(row["test_name"], len(order_pref)),
+                department_priority_rank(row["test_department"]),
+                row["id"],
+            ),
+        )
+    else:
+        order_tests = sorted(
+            order_tests,
+            key=lambda row: (department_priority_rank(row["test_department"]), row["id"]),
+        )
+
+    seen_codes = set()
+    order_test_ids = []
+    for ot in order_tests:
+        code = ot["test_code"]
+        if code in BF_RETIC_LINK and BF_RETIC_LINK[code] in seen_codes:
+            continue
+        seen_codes.add(code)
+        order_test_ids.append(ot["id"])
+
+    head_html = None
+    body_sections = []
+    for otid in order_test_ids:
+        try:
+            report_html = print_report(otid)
+        except Exception:
+            continue
+        if not isinstance(report_html, str):
+            continue  # print_report رجّع redirect (لا يوجد تصميم لهذا التحليل) — نتجاهله بصمت ونكمل الباقي
+        head_match = re.search(r"<head\b[^>]*>(.*?)</head>", report_html, re.S)
+        body_match = re.search(r"<body\b[^>]*>(.*?)</body>", report_html, re.S)
+        if not body_match:
+            continue
+        if head_html is None and head_match:
+            head_html = head_match.group(1)
+        page_break = "" if not body_sections else ' style="page-break-before:always;"'
+        body_sections.append(f"<div{page_break}>{body_match.group(1)}</div>")
+
+    if not body_sections:
+        return None
+    return (
+        "<!DOCTYPE html><html lang=\"ar\" dir=\"rtl\"><head>"
+        + (head_html or "")
+        + "</head><body>"
+        + "".join(body_sections)
+        + "</body></html>"
+    )
 
 
 # الجدول الموحّد: يدمج نتائج زيارة أو أكثر (عادة زيارة قديمة + الزيارة الجديدة)
@@ -3604,11 +3677,11 @@ def _maybe_auto_whatsapp_send(db, visit_id):
         return False  # سبق إرسال/طابور كل نتائج هذي الزيارة مجموعة من قبل
 
     try:
-        html_content = print_visit_results(visit_id)
+        html_content = _build_combined_designed_reports_html(visit_id)
     except Exception:
         return False
-    if not isinstance(html_content, str):
-        return False  # print_visit_results رجّع redirect/خطأ بدل HTML — نتجاهل بصمت
+    if not html_content:
+        return False
 
     ok, error = _whatsapp_generate_and_queue(
         db, visit, visit["patient_id"], visit["full_name"], visit["phone"],
@@ -3668,10 +3741,10 @@ def _maybe_archive_visit_pdf(db, visit_id):
         return False  # لسا فيه تحليل ناقص نتيجة — ما نؤرشف بعد
 
     try:
-        html_content = print_visit_results(visit_id)
+        html_content = _build_combined_designed_reports_html(visit_id)
     except Exception:
         return False
-    if not isinstance(html_content, str):
+    if not html_content:
         return False
 
     import pdf_export
@@ -3699,11 +3772,91 @@ def _maybe_archive_visit_pdf(db, visit_id):
     return True
 
 
-@app.route("/whatsapp/send-result/<int:order_test_id>", methods=["POST"])
-@login_required
-def whatsapp_send_result(order_test_id):
-    """إرسال نتيجة تحليل واحد محدّد (مو كل نتائج الزيارة) عبر واتساب —
-    نفس زر '🖨 طباعة التقرير' لكن يولّد PDF ويرسله بدل ما يفتحه بالمتصفح."""
+def _whatsapp_generate_and_queue_multi(db, visit_row, patient_id, patient_name, phone, items):
+    """نفس _whatsapp_generate_and_queue فوق، بس لعدة تحاليل كملفات PDF
+    منفصلة دفعة وحدة (بدل ملف مجمّع واحد) — items: قائمة عناصر بشكل
+    (label, html_content, order_test_id). يولّد كل الملفات بنفس المجلد،
+    يسجّل صف طابور لكل واحد منها، ثم يفتح واتساب مرة وحدة + يفتح نفس
+    المجلد (بدون تحديد ملف معيّن، خلافاً عن opened_folder المفرد) حتى
+    يقدر المستخدم يحدد كل الملفات مرة وحدة (Ctrl+A أو تحديد متعدد)
+    ويسحبها كلها سوا لمحادثة واتساب بضغطة وحدة."""
+    import pdf_export
+
+    now = datetime.now().isoformat(timespec="seconds")
+    generated_paths = []
+    for label, html_content, order_test_id in items:
+        pdf_path = pdf_export.make_temp_pdf_path(f"visit{visit_row['id']}_{order_test_id or 'x'}")
+        try:
+            pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+        except Exception as exc:
+            db.execute(
+                "INSERT INTO whatsapp_sends (visit_id, order_test_id, patient_id, patient_name, "
+                "phone, label, pdf_path, status, attempts, error, requested_by, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', 1, ?, ?, ?)",
+                (visit_row["id"], order_test_id, patient_id, patient_name, phone, label,
+                 pdf_path, f"فشل توليد PDF: {exc}", session.get("user_id"), now),
+            )
+            continue
+        generated_paths.append((pdf_path, label, order_test_id))
+
+    if not generated_paths:
+        db.commit()
+        return False, "تعذّر توليد أي ملف PDF لأي تحليل."
+
+    # نفتح واتساب مرة وحدة بس (مو لكل ملف)، ونفتح مجلد الملفات (بدون
+    # تحديد ملف معيّن — عكس _open_whatsapp_with_pdf المفرد اللي يحدد ملف
+    # واحد بعينه) حتى يقدر المستخدم يحدد كل الملفات المولَّدة الجديدة
+    # مرة وحدة ويسحبها سوا.
+    import re as _re
+    digits = _re.sub(r"\D", "", phone or "")
+    country_code = get_setting(db, "whatsapp_country_code", "964")
+    if digits.startswith("00"):
+        digits = digits[2:]
+    elif digits.startswith("0"):
+        digits = country_code + digits[1:]
+    elif digits and not digits.startswith(country_code):
+        digits = country_code + digits
+
+    opened_wa = False
+    if digits:
+        try:
+            os.startfile(f"whatsapp://send?phone={digits}")
+            opened_wa = True
+        except OSError:
+            try:
+                webbrowser.open(f"https://wa.me/{digits}")
+                opened_wa = True
+            except Exception:
+                opened_wa = False
+
+    try:
+        folder = os.path.dirname(os.path.normpath(generated_paths[0][0]))
+        subprocess.run(["explorer", folder])
+    except Exception:
+        pass
+
+    status = "opened" if opened_wa else "failed"
+    error = None if opened_wa else "تعذّر فتح تطبيق واتساب — تأكد إنه مثبّت على هذا الجهاز."
+    for pdf_path, label, order_test_id in generated_paths:
+        db.execute(
+            "INSERT INTO whatsapp_sends (visit_id, order_test_id, patient_id, patient_name, "
+            "phone, label, pdf_path, status, attempts, error, requested_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+            (visit_row["id"], order_test_id, patient_id, patient_name, phone, label,
+             pdf_path, status, error, session.get("user_id"), now),
+        )
+    db.commit()
+
+    if opened_wa:
+        return True, f"جهّزنا {len(generated_paths)} ملف PDF منفصل وفتحنا واتساب + مجلد الملفات — حدد كل الملفات (Ctrl+A) واسحبها سوا للمحادثة."
+    return False, error
+
+
+def _do_whatsapp_send_result(order_test_id):
+    """المنطق الفعلي لإرسال نتيجة تحليل واحد عبر واتساب — يرجّع (ok, message,
+    visit_id أو None). تُستخدم من مسارين: الرابط الكلاسيكي (فورم + flash +
+    redirect) للاستخدام خارج أي iframe، والـAPI JSON (fetch من جوّه مودال
+    'طباعة كل النتائج المكتملة') بدون أي تنقّل/إعادة تحميل."""
     db = get_db()
     ot = db.execute(
         "SELECT ot.*, td.name as test_name, v.id as visit_id, "
@@ -3716,35 +3869,28 @@ def whatsapp_send_result(order_test_id):
         (order_test_id,),
     ).fetchone()
     if not ot:
-        flash("النتيجة غير موجودة.")
-        return redirect(url_for("results_list"))
+        return False, "النتيجة غير موجودة.", None
     if not ot["phone"]:
-        flash("لا يوجد رقم هاتف مسجّل لهذا المريض — أضِفه من ملف المريض أولًا.")
-        return redirect(url_for("visit_results_entry", visit_id=ot["visit_id"]))
+        return False, "لا يوجد رقم هاتف مسجّل لهذا المريض — أضِفه من ملف المريض أولًا.", ot["visit_id"]
 
     html_content = print_report(order_test_id)
     if not isinstance(html_content, str):
-        # print_report يرجّع redirect (تنبيه) لو ما فيه تصميم طباعة لهذا
-        # التحليل بعد — نفس الحالة تنطبق هنا فنعيد نفس التوجيه.
-        return html_content
+        return False, "لا يوجد تصميم طباعة لهذا التحليل بعد.", ot["visit_id"]
 
     ok, error = _whatsapp_generate_and_queue(
         db, ot, ot["patient_id"], ot["patient_name"], ot["phone"],
         ot["test_name"], html_content, order_test_id=order_test_id,
     )
-    if ok:
-        flash(f"📎 جهّزنا ملف PDF لنتيجة {ot['test_name']} وفتحنا واتساب على رقم المريض — اسحب الملف من نافذة المجلد وأرفقه بالمحادثة واضغط إرسال.")
-    else:
-        flash(f"❌ {error}")
     log_action("WhatsAppSend", "order_test", order_test_id, "opened" if ok else f"failed: {error}")
-    return redirect(url_for("visit_results_entry", visit_id=ot["visit_id"]))
+    if ok:
+        return True, f"📎 جهّزنا ملف PDF لنتيجة {ot['test_name']} وفتحنا واتساب — اسحب الملف من نافذة المجلد وأرفقه بالمحادثة.", ot["visit_id"]
+    return False, error, ot["visit_id"]
 
 
-@app.route("/whatsapp/send-visit/<int:visit_id>", methods=["POST"])
-@login_required
-def whatsapp_send_visit(visit_id):
-    """إرسال كل نتائج الزيارة مجموعة بملف PDF واحد (الجدول الموحّد) عبر
-    واتساب — يستخدم نفس صفحة print_visit_results."""
+def _do_whatsapp_send_visit(visit_id, mode):
+    """المنطق الفعلي لإرسال كل نتائج الزيارة عبر واتساب — mode='combined'
+    (ملف PDF واحد مجمّع، الافتراضي القديم) أو 'separate' (ملف PDF مستقل
+    لكل تحليل مكتمل). يرجّع (ok, message)."""
     db = get_db()
     visit = db.execute(
         "SELECT v.*, p.id as patient_id, p.full_name, p.phone FROM visits v "
@@ -3752,26 +3898,93 @@ def whatsapp_send_visit(visit_id):
         (visit_id,),
     ).fetchone()
     if not visit:
-        flash("الزيارة غير موجودة.")
-        return redirect(url_for("results_list"))
+        return False, "الزيارة غير موجودة."
     if not visit["phone"]:
-        flash("لا يوجد رقم هاتف مسجّل لهذا المريض — أضِفه من ملف المريض أولًا.")
-        return redirect(url_for("visit_results_entry", visit_id=visit_id))
+        return False, "لا يوجد رقم هاتف مسجّل لهذا المريض — أضِفه من ملف المريض أولًا."
 
-    html_content = print_visit_results(visit_id)
-    if not isinstance(html_content, str):
-        return html_content
+    if mode == "separate":
+        order_tests = db.execute(
+            "SELECT ot.id, td.code as test_code, td.name as test_name "
+            "FROM order_tests ot JOIN orders o ON o.id = ot.order_id "
+            "JOIN test_definitions td ON td.id = ot.test_definition_id "
+            "WHERE o.visit_id=? AND ot.status IN ('Completed', 'Verified') ORDER BY ot.id",
+            (visit_id,),
+        ).fetchall()
+        seen_codes = set()
+        items = []
+        for ot in order_tests:
+            code = ot["test_code"]
+            if code in BF_RETIC_LINK and BF_RETIC_LINK[code] in seen_codes:
+                continue
+            seen_codes.add(code)
+            report_html = print_report(ot["id"])
+            if not isinstance(report_html, str):
+                continue
+            items.append((ot["test_name"], report_html, ot["id"]))
+        if not items:
+            return False, "لا توجد نتائج مكتملة بهذي الزيارة لإرسالها بعد."
+        ok, error = _whatsapp_generate_and_queue_multi(
+            db, visit, visit["patient_id"], visit["full_name"], visit["phone"], items,
+        )
+        log_action("WhatsAppSend", "visit", visit_id, "opened" if ok else f"failed: {error}")
+        return ok, error
+
+    html_content = _build_combined_designed_reports_html(visit_id)
+    if not html_content:
+        return False, "لا توجد نتائج مكتملة بهذي الزيارة لإرسالها بعد."
 
     ok, error = _whatsapp_generate_and_queue(
         db, visit, visit["patient_id"], visit["full_name"], visit["phone"],
         "كل نتائج الزيارة", html_content, order_test_id=None,
     )
-    if ok:
-        flash("📎 جهّزنا ملف PDF بكل نتائج الزيارة وفتحنا واتساب على رقم المريض — اسحب الملف من نافذة المجلد وأرفقه بالمحادثة واضغط إرسال.")
-    else:
-        flash(f"❌ {error}")
     log_action("WhatsAppSend", "visit", visit_id, "opened" if ok else f"failed: {error}")
+    if ok:
+        return True, "📎 جهّزنا ملف PDF واحد بكل نتائج الزيارة وفتحنا واتساب — اسحب الملف من نافذة المجلد وأرفقه بالمحادثة."
+    return False, error
+
+
+@app.route("/whatsapp/send-result/<int:order_test_id>", methods=["POST"])
+@login_required
+def whatsapp_send_result(order_test_id):
+    """إرسال نتيجة تحليل واحد محدّد (مو كل نتائج الزيارة) عبر واتساب —
+    نفس زر '🖨 طباعة التقرير' لكن يولّد PDF ويرسله بدل ما يفتحه بالمتصفح.
+    (فورم كلاسيكي: flash + redirect — للاستخدام خارج أي iframe)."""
+    ok, message, visit_id = _do_whatsapp_send_result(order_test_id)
+    flash(message if ok else f"❌ {message}")
+    return redirect(url_for("visit_results_entry", visit_id=visit_id) if visit_id else url_for("results_list"))
+
+
+@app.route("/whatsapp/api/send-result/<int:order_test_id>", methods=["POST"])
+@login_required
+def whatsapp_api_send_result(order_test_id):
+    """نفس whatsapp_send_result فوق بالضبط، بس يرجّع JSON بدل flash+redirect —
+    يُستخدم بزر 📱 المفرد جوّه مودال 'طباعة كل النتائج المكتملة' (iframe)
+    عبر fetch()، حتى ما يحتاج أي تنقّل/إعادة تحميل يكسر المودال."""
+    ok, message, _visit_id = _do_whatsapp_send_result(order_test_id)
+    return jsonify({"ok": ok, "message": message})
+
+
+@app.route("/whatsapp/send-visit/<int:visit_id>", methods=["POST"])
+@login_required
+def whatsapp_send_visit(visit_id):
+    """إرسال كل نتائج الزيارة عبر واتساب — mode بحقل الفورم: 'combined'
+    (الافتراضي، ملف PDF واحد مجمّع) أو 'separate' (ملف PDF مستقل لكل
+    تحليل). فورم كلاسيكي: flash + redirect — للاستخدام خارج أي iframe."""
+    mode = request.form.get("mode", "combined")
+    ok, message = _do_whatsapp_send_visit(visit_id, mode)
+    flash(message if ok else f"❌ {message}")
     return redirect(url_for("visit_results_entry", visit_id=visit_id))
+
+
+@app.route("/whatsapp/api/send-visit/<int:visit_id>", methods=["POST"])
+@login_required
+def whatsapp_api_send_visit(visit_id):
+    """نفس whatsapp_send_visit فوق بالضبط، بس يرجّع JSON بدل flash+redirect —
+    يُستخدم بأزرار 📱 'إرسال الكل' جوّه مودال 'طباعة كل النتائج المكتملة'
+    (iframe) عبر fetch()."""
+    mode = request.form.get("mode", "combined")
+    ok, message = _do_whatsapp_send_visit(visit_id, mode)
+    return jsonify({"ok": ok, "message": message})
 
 
 @app.route("/reports/archive")
