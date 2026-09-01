@@ -4019,6 +4019,41 @@ def _do_whatsapp_send_visit(visit_id, mode):
     return False, error
 
 
+def _do_whatsapp_send_result(order_test_id):
+    """المنطق الفعلي لإرسال نتيجة تحليل واحد عبر واتساب — يرجّع (ok, message,
+    visit_id أو None). تُستخدم من مسارين: الرابط الكلاسيكي (فورم + flash +
+    redirect) للاستخدام خارج أي iframe، والـAPI JSON (fetch من جوّه مودال
+    'طباعة كل النتائج المكتملة') بدون أي تنقّل/إعادة تحميل."""
+    db = get_db()
+    ot = db.execute(
+        "SELECT ot.*, td.name as test_name, v.id as visit_id, "
+        "p.id as patient_id, p.full_name as patient_name, p.phone "
+        "FROM order_tests ot "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "JOIN orders o ON o.id = ot.order_id "
+        "JOIN visits v ON v.id = o.visit_id "
+        "JOIN patients p ON p.id = v.patient_id WHERE ot.id=?",
+        (order_test_id,),
+    ).fetchone()
+    if not ot:
+        return False, "النتيجة غير موجودة.", None
+    if not ot["phone"]:
+        return False, "لا يوجد رقم هاتف مسجّل لهذا المريض — أضِفه من ملف المريض أولًا.", ot["visit_id"]
+
+    html_content = print_report(order_test_id)
+    if not isinstance(html_content, str):
+        return False, "لا يوجد تصميم طباعة لهذا التحليل بعد.", ot["visit_id"]
+
+    ok, error = _whatsapp_generate_and_queue(
+        db, ot, ot["patient_id"], ot["patient_name"], ot["phone"],
+        ot["test_name"], html_content, order_test_id=order_test_id,
+    )
+    log_action("WhatsAppSend", "order_test", order_test_id, "opened" if ok else f"failed: {error}")
+    if ok:
+        return True, f"📎 جهّزنا ملف PDF لنتيجة {ot['test_name']} وفتحنا واتساب — اسحب الملف من نافذة المجلد وأرفقه بالمحادثة.", ot["visit_id"]
+    return False, error, ot["visit_id"]
+
+
 @app.route("/whatsapp/send-result/<int:order_test_id>", methods=["POST"])
 @login_required
 def whatsapp_send_result(order_test_id):
@@ -4754,6 +4789,80 @@ def unit_converter_apply(param_id):
     return redirect(url_for("unit_converter"))
 
 
+
+# تصنيف تلقائي لحقل "الريبورت المجمّع" (report_group) — يطابق اسم كل
+# تحليل مع كلمات مفتاحية شائعة تحدد أي من المجاميع الثابتة الخمس ينتمي
+# لها، حتى تصير كل تحاليل "سكر/دهون/سكر تراكمي/وظائف كلى/وظائف كبد/
+# كالسيوم/مغنيسيوم/إلكترولايت" تحت "Biochemistry Tests" مجتمعة، وهكذا
+# لبقية المجاميع — بدل ما الأدمن يدخل كل تحليل لحاله يدويًا. لا تلمس أي
+# تحليل مصنّف يدويًا من قبل (report_group غير فاضي) إطلاقًا، حتى لا تلغي
+# أي تخصيص سابق.
+FIXED_REPORT_GROUPS = [
+    "Biochemistry Tests", "Hormones Tests", "Vitamins Tests",
+    "Virology Screening", "Tumor Marker",
+]
+
+_REPORT_GROUP_KEYWORDS = [
+    ("Tumor Marker", [
+        "cea", "afp", "psa", "ca125", "ca 125", "ca19-9", "ca 19-9", "ca15-3",
+        "ca 15-3", "beta-hcg", "b-hcg", "tumor marker", "tumour marker",
+    ]),
+    ("Virology Screening", [
+        "hbsag", "hbsab", "anti-hbs", "anti-hcv", "hcv", "hiv", "hbcab",
+        "rubella", "toxoplasma", "cmv", "ebv", "vdrl", "tpha", "hepatitis",
+        "measles", "mumps", "varicella", "widal", "brucella",
+    ]),
+    ("Vitamins Tests", ["vitamin", "folate", "folic acid", "b12"]),
+    ("Hormones Tests", [
+        "tsh", " t3", " t4", "ft3", "ft4", "fsh", " lh", "prolactin",
+        "cortisol", "testosterone", "estrogen", "estradiol", "progesterone",
+        "insulin", "pth", "parathyroid", "growth hormone", " gh ", "acth", "dhea",
+    ]),
+    ("Biochemistry Tests", [
+        "fbs", "glucose", "sugar", "rbs", "hba1c", "glycated", "lipid",
+        "cholesterol", "triglyceride", "hdl", "ldl", "vldl", "urea",
+        "creatinine", "uric acid", "bun", "kidney", "renal", " alt", " ast",
+        " alp", "sgot", "sgpt", "bilirubin", "albumin", "total protein",
+        "liver", "ggt", "calcium", "magnesium", "phosphorus", "phosphate",
+        "sodium", "potassium", "chloride", "electrolyte", "amylase",
+        "lipase", "ferritin", "tibc", "crp", "esr", "ldh",
+    ]),
+]
+
+
+def _guess_report_group(test_name):
+    name = f" {(test_name or '').strip().lower()} "
+    for group, keywords in _REPORT_GROUP_KEYWORDS:
+        for kw in keywords:
+            if kw in name:
+                return group
+    return None
+
+
+@app.route("/master/test-catalog/auto-assign-report-groups", methods=["POST"])
+@roles_required("supervisor")
+def auto_assign_report_groups():
+    """يعبّي report_group تلقائيًا لكل تحليل ماله تصنيف بعد (لا يلمس أي
+    تحليل مصنّف يدويًا من قبل) بمطابقة اسمه مع الكلمات المفتاحية فوق.
+    يرجّع JSON بعدد التحاليل المصنَّفة، وأسماء أي تحاليل ما انطابقت مع أي
+    كلمة (تحتاج تصنيف يدوي من الأدمن)."""
+    db = get_db()
+    tests = db.execute(
+        "SELECT id, name FROM test_definitions WHERE report_group IS NULL OR TRIM(report_group)=''"
+    ).fetchall()
+    updated = 0
+    unmatched = []
+    for t in tests:
+        group = _guess_report_group(t["name"])
+        if group:
+            db.execute("UPDATE test_definitions SET report_group=? WHERE id=?", (group, t["id"]))
+            updated += 1
+        else:
+            unmatched.append(t["name"])
+    db.commit()
+    return jsonify({"ok": True, "updated": updated, "unmatched": unmatched})
+
+
 @app.route("/master/test-catalog", methods=["GET", "POST"])
 @roles_required("supervisor")
 def test_catalog():
@@ -4797,7 +4906,7 @@ def test_catalog():
     # بحقل الإدخال (datalist) حتى يعيد الأدمن استخدام نفس الاسم بالضبط بدل
     # ما يكتبه بصيغة مختلفة شوي فينفصل عن مجموعته بالخطأ (مثلاً "Viral
     # study" مرة و"Viral Study" مرة ثانية تصيران مجموعتين منفصلتين).
-    report_groups = sorted({
+    report_groups = sorted(set(FIXED_REPORT_GROUPS) | {
         row["report_group"].strip() for row in tests if row["report_group"] and row["report_group"].strip()
     })
     return render_template("master/test_catalog.html", tests=tests, report_groups=report_groups)

@@ -2,6 +2,19 @@
 {% block page_title %}{{ t('test_catalog') }}{% endblock %}
 {% block content %}
 <div class="card">
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+    <div>
+      <h3 style="margin:0;">⚡ تصنيف تلقائي لـ"الريبورت المجمّع"</h3>
+      <p class="muted" style="margin:4px 0 0;">
+        يعبّي عمود "الريبورت المجمّع" بالجدول تحت تلقائيًا لكل تحليل ماله تصنيف بعد (سكر/دهون/سكر تراكمي/كلى/كبد/كالسيوم/مغنيسيوم/إلكترولايت → Biochemistry Tests، وهكذا للفيتامينات والهرمونات والفايروسات والـTumor Markers) — بدون ما يلمس أي تحليل مصنّف يدويًا من قبل.
+      </p>
+    </div>
+    <button type="button" class="btn" id="autoAssignBtn" onclick="autoAssignReportGroups()">⚡ تصنيف تلقائي الآن</button>
+  </div>
+  <div id="autoAssignResult" style="margin-top:10px; font-size:13px;"></div>
+</div>
+
+<div class="card">
   <h3>{{ t('add_test') }}</h3>
   <form method="POST" class="form-grid">
     <div class="form-field">
@@ -168,5 +181,38 @@ document.querySelectorAll('.report-group-input').forEach(function (input) {
     timer = setTimeout(save, 600);
   });
 });
+</script>
+<script>
+function autoAssignReportGroups() {
+  const btn = document.getElementById('autoAssignBtn');
+  const resultEl = document.getElementById('autoAssignResult');
+  if (!confirm('يعبّي "الريبورت المجمّع" تلقائيًا لكل تحليل ماله تصنيف بعد، بدون لمس أي تحليل مصنّف يدويًا مسبقًا. متأكد؟')) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري التصنيف...';
+  fetch("{{ url_for('auto_assign_report_groups') }}", { method: 'POST' })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.ok) {
+        let msg = `✅ تم تصنيف ${data.updated} تحليل تلقائيًا.`;
+        if (data.unmatched && data.unmatched.length) {
+          msg += ` لم نتعرف على تصنيف ${data.unmatched.length} تحليل (تحتاج تصنيف يدوي): ${data.unmatched.join('، ')}`;
+        }
+        resultEl.style.color = '#2e7d32';
+        resultEl.textContent = msg;
+        setTimeout(() => location.reload(), 1800);
+      } else {
+        resultEl.style.color = '#c62828';
+        resultEl.textContent = '❌ حدث خطأ أثناء التصنيف.';
+      }
+    })
+    .catch(() => {
+      resultEl.style.color = '#c62828';
+      resultEl.textContent = '❌ تعذّر الاتصال بالسيرفر.';
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.textContent = '⚡ تصنيف تلقائي الآن';
+    });
+}
 </script>
 {% endblock %}
