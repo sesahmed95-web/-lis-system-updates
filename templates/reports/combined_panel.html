@@ -1,55 +1,57 @@
 {% extends "reports/base_report.html" %}
 {% block report_body %}
 <style>
-  /* عنوان كل قسم (Biochemical Test / Virology screen / Hormones / Vitamins...)
-     — خط أصغر من عنوان التقرير الرئيسي، بلون مميز، مع خط تحته يفصله عن
-     الجدول اللي تحته، حتى تبقى الأقسام واضحة ومرتبة بورقة وحدة بدون خبطة. */
+  /* عنوان كل قسم (BIOCHEMISTRY TESTS / HORMONES TESTS / VITAMINS TESTS /
+     VIROLOGY SCREENING...) — غامق، وسط الصفحة، بحروف كبيرة (text-transform
+     يكبّرها تلقائياً حتى لو الأدمن كتبها بحروف عادية بكتالوج التحاليل)،
+     مع خط فاصل تحته وتحت الجدول كامل يفصل كل قسم عن اللي بعده بوضوح. */
   .panel-dept-heading {
     font-weight: bold;
     font-size: 1.05em;
     color: #26529C;
-    border-bottom: 1.5px solid #26529C;
-    padding-bottom: 3px;
-    margin: 14px 0 6px 0;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 16px 0 6px 0;
   }
   .panel-dept-heading:first-child { margin-top: 0; }
-  /* نفس نسبة عرض عمود اسم التحليل (ضعف باقي الأعمدة) بكل أقسام اللوحة،
-     حتى تبقى الأعمدة مصطفّة بنفس القياس بدون أي فرق بين قسم وآخر. عمود
-     "Previous" أعرض شوي من الأعمدة الجانبية حتى يتّسع للقيمة + التاريخ. */
-  .panel-table col.col-name { width: 32%; }
+  .panel-table { border-bottom: 1px dashed #94A3B8; padding-bottom: 6px; margin-bottom: 4px; }
+  .panel-table th {
+    border-bottom: 1.5px solid #26529C; padding-bottom: 4px; font-size: 0.92em;
+  }
+  .panel-table col.col-name { width: 34%; }
   .panel-table col.col-result,
-  .panel-table col.col-unit,
-  .panel-table col.col-low,
-  .panel-table col.col-high { width: 13%; }
-  .panel-table col.col-prev { width: 16%; }
+  .panel-table col.col-unit { width: 20%; }
+  .panel-table col.col-range { width: 26%; }
+  .panel-secondary-line { font-size: 0.72em; color: #64748B; display: block; margin-top: 1px; }
 </style>
 
 {% for group in panel_groups %}
 <div class="panel-dept-heading">{{ group.department }}</div>
 <table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;">
   <colgroup>
-    <col class="col-name"><col class="col-result"><col class="col-unit"><col class="col-low"><col class="col-high"><col class="col-prev">
+    <col class="col-name"><col class="col-result"><col class="col-unit"><col class="col-range">
   </colgroup>
   <tr>
-    <th>Test</th><th>Result</th><th>Unit</th><th>Low</th><th>High</th><th>Previous</th>
+    <th style="text-align:left;">{{ group.name_header }}</th>
+    <th>Result</th>
+    <th>Unit</th>
+    <th>{{ group.range_header }}</th>
   </tr>
   {% for row in group.rows %}
   <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
     <td style="text-align:left; font-weight:bold; font-size:{{ test_name_font_size|default(16) }}px;{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.name }}</td>
-    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>{{ row.result }}</td>
-    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>{{ row.unit }}</td>
-    {% if row.range_text %}
-    <td colspan="2">{{ row.range_text }}</td>
-    {% else %}
-    <td>{{ row.low if row.low is not none else '' }}</td>
-    <td>{{ row.high if row.high is not none else '' }}</td>
-    {% endif %}
-    <td class="prev-col">
-      {% if row.previous_value not in (None, '') %}
-        {{ row.previous_value }}{% if row.previous_date %}<span class="prev-inline"><br>{{ row.previous_date }}</span>{% endif %}
-      {% else %}
-        &nbsp;
-      {% endif %}
+    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
+      <span style="font-weight:bold;">{{ row.result }}</span>
+      {% if row.value2 is not none %}<span class="panel-secondary-line">{{ row.value2 }}</span>{% endif %}
+    </td>
+    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
+      {{ row.unit }}
+      {% if row.unit2 %}<span class="panel-secondary-line">{{ row.unit2 }}</span>{% endif %}
+    </td>
+    <td>
+      {{ row.range_display }}
+      {% if row.range2_display %}<span class="panel-secondary-line">{{ row.range2_display }}</span>{% endif %}
     </td>
   </tr>
   {% endfor %}
