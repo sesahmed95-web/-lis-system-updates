@@ -24,6 +24,16 @@
   .panel-table col.col-unit { width: 20%; }
   .panel-table col.col-range { width: 26%; }
   .panel-secondary-line { font-size: 0.72em; color: #64748B; display: block; margin-top: 1px; }
+  /* صف "Previous" — نتيجة تحليل قديم انوافَق صراحة على دمجها بهذا التقرير
+     (راجع visit_previous_merges بـapp.py)، يظهر بلون خلفية خفيف مميّز
+     تحت صف النتيجة الحالية مباشرة (أو لحاله لو ما فيه نتيجة حالية مطابقة
+     بهذي الزيارة) — حتى يبين واضح إنه بيانات من زيارة سابقة، مو نتيجة
+     هذي الزيارة. */
+  .panel-previous-row td {
+    background: #EFF6FF; color: #1D4ED8; font-size: 0.78em; text-align: left;
+    padding-top: 3px; padding-bottom: 3px; border-top: none;
+  }
+  .panel-previous-icon { font-weight: bold; }
 </style>
 
 {% for group in panel_groups %}
@@ -39,6 +49,7 @@
     <th>{{ group.range_header }}</th>
   </tr>
   {% for row in group.rows %}
+  {% if row.result is not none %}
   <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
     <td style="text-align:left; font-weight:bold; font-size:{{ test_name_font_size|default(16) }}px;{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.name }}</td>
     <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
@@ -54,6 +65,14 @@
       {% if row.range2_display %}<span class="panel-secondary-line">{{ row.range2_display }}</span>{% endif %}
     </td>
   </tr>
+  {% endif %}
+  {% if row.previous_display %}
+  <tr class="panel-previous-row"{% if row.page_break_before and row.result is none %} style="page-break-before: always; break-before: page;"{% endif %}>
+    <td colspan="4">
+      <span class="panel-previous-icon">↩</span> Previous — {{ row.previous_display }}
+    </td>
+  </tr>
+  {% endif %}
   {% endfor %}
 </table>
 {% else %}

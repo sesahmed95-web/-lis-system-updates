@@ -464,6 +464,25 @@ CREATE TABLE IF NOT EXISTS saved_reports (
     FOREIGN KEY (visit_id) REFERENCES visits(id),
     FOREIGN KEY (patient_id) REFERENCES patients(id)
 );
+
+-- موافقة الموظف على دمج نتيجة تحليل قديم (من زيارة سابقة لنفس المريض)
+-- بتقرير الزيارة الجديدة — تُسجَّل فقط عند التأكيد الصريح بشاشة "زيارة
+-- جديدة" (بنك تنبيه الزيارة السابقة)، ولا يوجد أي عرض تلقائي بدونها.
+-- source_order_test_id يشير للتحليل القديم نفسه (من الزيارة السابقة)،
+-- بغض النظر إن كان نفس التحليل معاد طلبه بالزيارة الجديدة أو لا — هذا ما
+-- يسمح بعرضه كصف "Previous" جنب تحليل مطابق بالزيارة الجديدة، أو كصف
+-- مستقل إضافي بنفس مجموعة القسم لو ما تكرر طلبه. UNIQUE يمنع تكرار نفس
+-- الموافقة مرتين لو ضغط الموظف الزر أكثر من مرة بالغلط.
+CREATE TABLE IF NOT EXISTS visit_previous_merges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visit_id INTEGER NOT NULL,
+    source_order_test_id INTEGER NOT NULL,
+    approved_by INTEGER,
+    approved_at TEXT,
+    UNIQUE(visit_id, source_order_test_id),
+    FOREIGN KEY (visit_id) REFERENCES visits(id),
+    FOREIGN KEY (source_order_test_id) REFERENCES order_tests(id)
+);
 """
 
 
@@ -1652,3 +1671,87 @@ def remove_stamp_placement(db, placement_id):
 if __name__ == "__main__":
     init_db()
     print("Database initialized at", DB_PATH)
+
+
+# ============== دمج نتائج الزيارة السابقة (visit_previous_merges) ==============
+def find_last_visit_by_name_age(db, full_name, age, exclude_patient_id=None):
+    """آخر زيارة سابقة (الأحدث) لمريض بنفس الاسم الثلاثي + العمر بالضبط —
+    تُستخدم بشاشة 'زيارة جديدة' لحظة كتابة الاسم والعمر لاكتشاف مراجعة
+    سابقة. exclude_patient_id اختياري (مو مستخدم حاليًا، محجوز لو احتجنا
+    نستثني نفس بطاقة المريض المختارة يدويًا مستقبلاً)."""
+    return db.execute(
+        "SELECT v.id as visit_id, v.created_at, p.id as patient_id, p.full_name, p.age, p.age_unit, p.gender "
+        "FROM visits v JOIN patients p ON p.id = v.patient_id "
+        "WHERE LOWER(TRIM(p.full_name)) = LOWER(TRIM(?)) AND p.age = ? "
+        "ORDER BY v.created_at DESC LIMIT 1",
+        (full_name or "", age),
+    ).fetchone()
+
+
+def get_visit_completed_tests(db, visit_id):
+    """كل تحاليل هذي الزيارة اللي عندها نتيجة مكتملة/معتمدة — تُستخدم لعرض
+    خيارات الدمج (Biochemistry/Hormones/...) أو رسالة إعلامية بس
+    (Blood Film/Retic/...) بشاشة 'زيارة جديدة'."""
+    return db.execute(
+        "SELECT ot.id as order_test_id, ot.test_definition_id, td.name as test_name, "
+        "td.code as test_code, td.department FROM order_tests ot "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "WHERE ot.order_id IN (SELECT id FROM orders WHERE visit_id=?) "
+        "AND ot.status IN ('Completed', 'Verified') ORDER BY ot.id",
+        (visit_id,),
+    ).fetchall()
+
+
+def save_visit_previous_merges(db, visit_id, source_order_test_ids):
+    """يسجّل موافقة الموظف على دمج كل تحليل قديم اختاره (من نافذة تنبيه
+    الزيارة السابقة) — يُستدعى مرة وحدة بعد إنشاء الزيارة الجديدة."""
+    now = datetime.now().isoformat(timespec="seconds")
+    for otid in source_order_test_ids:
+        try:
+            db.execute(
+                "INSERT OR IGNORE INTO visit_previous_merges "
+                "(visit_id, source_order_test_id, approved_by, approved_at) VALUES (?, ?, ?, ?)",
+                (visit_id, int(otid), None, now),
+            )
+        except (TypeError, ValueError):
+            continue
+    db.commit()
+
+
+def get_visit_previous_merges(db, visit_id):
+    """كل التحاليل القديمة الموافَق على دمجها بهذي الزيارة تحديدًا، مع
+    اسم التحليل وقسمه وتاريخ زيارتها الأصلية ونتائجها — تُستخدم من طبقة
+    التقارير (المفرد والمجمّع) لعرض صف/بطاقة 'Previous' فقط لما توجد
+    موافقة صريحة، بدون أي عرض تلقائي."""
+    rows = db.execute(
+        "SELECT vpm.source_order_test_id, ot.test_definition_id, td.name as test_name, "
+        "td.code as test_code, td.department, v.created_at as source_visit_created_at "
+        "FROM visit_previous_merges vpm "
+        "JOIN order_tests ot ON ot.id = vpm.source_order_test_id "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "JOIN orders o ON o.id = ot.order_id JOIN visits v ON v.id = o.visit_id "
+        "WHERE vpm.visit_id=?",
+        (visit_id,),
+    ).fetchall()
+    out = []
+    for row in rows:
+        results = db.execute(
+            "SELECT r.*, tp.name as param_name FROM results r "
+            "JOIN test_parameters tp ON tp.id = r.test_parameter_id WHERE r.order_test_id=?",
+            (row["source_order_test_id"],),
+        ).fetchall()
+        try:
+            dt = datetime.fromisoformat(row["source_visit_created_at"])
+            date_display = f"{dt.day}/{dt.month}/{dt.year}"
+        except (TypeError, ValueError):
+            date_display = row["source_visit_created_at"] or ""
+        out.append({
+            "source_order_test_id": row["source_order_test_id"],
+            "test_definition_id": row["test_definition_id"],
+            "test_name": row["test_name"],
+            "test_code": row["test_code"],
+            "department": row["department"],
+            "date_display": date_display,
+            "results": {r["param_name"]: (r["value_text"] if r["value_text"] not in (None, "") else r["value_numeric"]) for r in results},
+        })
+    return out

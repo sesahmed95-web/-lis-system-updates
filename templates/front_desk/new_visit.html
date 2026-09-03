@@ -31,6 +31,23 @@
     padding: 8px 10px; border: 1px solid #E2E8F0; border-radius: 6px; margin-bottom: 6px; font-size: 12.5px; }
   #previousVisitsPanel .prev-visit-row .tests-chip { color: #64748B; }
   #previousVisitsPanel .prev-visit-row .actions { margin-inline-start: auto; display: flex; gap: 6px; align-items: center; }
+  /* بنك تنبيه "زار المختبر سابقًا" — يطلع تلقائيًا فقط لما يكتب الموظف
+     الاسم الثلاثي + العمر مع بعض ويطابقوا زيارة سابقة بالضبط (راجع
+     /api/patients/previous-visit-check بـapp.py). منفصل تمامًا عن
+     previousVisitsPanel فوق (ذاك يعرض تاريخ الزيارات كامل بعد اختيار
+     مريض من نتائج البحث، وهذا يطلع تلقائيًا بدون أي بحث/اختيار). */
+  #prevVisitMergeBanner { display:none; grid-column: span 2; margin: 6px 0 10px; }
+  #prevVisitMergeBanner .pvm-intro { background:#EFF6FF; border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+  #prevVisitMergeBanner .pvm-intro p { margin:0; font-size:12.5px; }
+  #prevVisitMergeBanner .pvm-intro p.pvm-title { font-weight:600; margin-bottom:3px; }
+  #prevVisitMergeBanner .pvm-group { border:1px solid #E2E8F0; border-radius:8px; overflow:hidden; margin-bottom:8px; }
+  #prevVisitMergeBanner .pvm-group-title { padding:6px 10px; font-size:11.5px; font-weight:600; color:#1D4ED8;
+    background:#F8FAFC; border-bottom:1px solid #E2E8F0; }
+  #prevVisitMergeBanner .pvm-group.pvm-info .pvm-group-title { color:#64748B; }
+  #prevVisitMergeBanner label.pvm-check { display:flex; align-items:center; gap:8px; padding:7px 10px;
+    font-size:12.5px; border-bottom:1px solid #F1F5F9; }
+  #prevVisitMergeBanner label.pvm-check:last-child { border-bottom:none; }
+  #prevVisitMergeBanner .pvm-info-text { font-size:12px; color:#64748B; padding:7px 10px; margin:0; }
   #visitCreatedPanel { display: none; margin-top: 14px; padding: 16px; text-align: center; }
   #visitCreatedPanel h3 { margin: 0 0 10px; font-size: 15px; color: #15803D; }
   #visitCreatedPanel .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
@@ -60,6 +77,7 @@
 <form method="POST" id="newVisitForm">
   <input type="hidden" name="existing_patient_id" id="existing_patient_id" value="">
   <input type="hidden" name="include_visit_ids" id="include_visit_ids" value="">
+  <input type="hidden" name="merge_previous_order_test_ids" id="merge_previous_order_test_ids" value="">
   <div class="nv-layout">
     <div class="nv-left">
     <div class="card">
@@ -88,6 +106,20 @@
         <div id="previousVisitsPanel" style="grid-column: span 2;">
           <h3 style="font-size:13px;">زياراته السابقة</h3>
           <div id="previousVisitsList"></div>
+        </div>
+        <div id="prevVisitMergeBanner">
+          <div class="pvm-intro">
+            <p class="pvm-title">↩ هذا المريض راجع المختبر سابقًا بتاريخ <span id="pvmDate"></span></p>
+            <p>اختر أي تحليل تريد دمج نتيجته السابقة بالتقرير الجديد.</p>
+          </div>
+          <div class="pvm-group" id="pvmMergeableGroup" style="display:none;">
+            <div class="pvm-group-title">Biochemistry / Hormones / Vitamins / Virology / Tumor marker / Coagulation</div>
+            <div id="pvmMergeableList"></div>
+          </div>
+          <div class="pvm-group pvm-info" id="pvmInfoGroup" style="display:none;">
+            <div class="pvm-group-title">Blood film / Retic / Fluid exam / BMA / BMB</div>
+            <p class="pvm-info-text" id="pvmInfoText"></p>
+          </div>
         </div>
         <div class="form-field">
           <label>{{ t('gender') }}</label>
@@ -855,6 +887,87 @@
     if (checked) includedVisitIds.add(visitId); else includedVisitIds.delete(visitId);
     includeVisitIdsInput.value = Array.from(includedVisitIds).join(',');
   };
+
+  // ------------------------------------------------------------------
+  // بنك "زار المختبر سابقًا" — يطلع تلقائيًا (بدون أي بحث/اختيار من
+  // الموظف) لما يكتب الاسم الثلاثي + العمر مع بعض ويطابقوا زيارة سابقة
+  // بالضبط. مختلف عن previousVisitsPanel فوق: هذا لا يعرض تاريخ كامل ولا
+  // خيار "تضمين بجدول موحّد" — يعرض بس آخر زيارة، ويفصل تحاليلها بين
+  // "قابلة للدمج" (checkbox اختياري لكل وحدة) و"إعلامية بس" (بدون أي
+  // خيار)، ويجمع اختيار الموظف بحقل merge_previous_order_test_ids ليُرسَل
+  // مع الفورم ويُسجَّل كموافقة صريحة بجدول visit_previous_merges.
+  // ------------------------------------------------------------------
+  const ageInput = document.getElementById('age_input');
+  const pvmBanner = document.getElementById('prevVisitMergeBanner');
+  const pvmDateEl = document.getElementById('pvmDate');
+  const pvmMergeableGroup = document.getElementById('pvmMergeableGroup');
+  const pvmMergeableList = document.getElementById('pvmMergeableList');
+  const pvmInfoGroup = document.getElementById('pvmInfoGroup');
+  const pvmInfoText = document.getElementById('pvmInfoText');
+  const mergeIdsInput = document.getElementById('merge_previous_order_test_ids');
+  let pvmDebounce = null;
+  let checkedMergeIds = new Set();
+
+  function hidePvmBanner() {
+    pvmBanner.style.display = 'none';
+    pvmMergeableGroup.style.display = 'none';
+    pvmInfoGroup.style.display = 'none';
+    pvmMergeableList.innerHTML = '';
+    checkedMergeIds = new Set();
+    mergeIdsInput.value = '';
+  }
+
+  function checkPreviousVisit() {
+    const name = patientNameInput.value.trim();
+    const age = ageInput.value.trim();
+    if (!name || !age) { hidePvmBanner(); return; }
+    fetch('/api/patients/previous-visit-check?full_name=' + encodeURIComponent(name) + '&age=' + encodeURIComponent(age))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.found || (!data.mergeable.length && !data.info_only.length)) { hidePvmBanner(); return; }
+        pvmDateEl.textContent = data.date_display;
+        checkedMergeIds = new Set();
+        mergeIdsInput.value = '';
+
+        if (data.mergeable.length) {
+          pvmMergeableList.innerHTML = data.mergeable.map(function (t) {
+            return '<label class="pvm-check">' +
+              '<input type="checkbox" onchange="togglePvmMerge(' + t.order_test_id + ', this.checked)"> ' +
+              t.name + (t.summary ? ' — ' + t.summary : '') + ' <span style="color:#94A3B8;">(دمج بالتقرير)</span>' +
+              '</label>';
+          }).join('');
+          pvmMergeableGroup.style.display = 'block';
+        } else {
+          pvmMergeableGroup.style.display = 'none';
+          pvmMergeableList.innerHTML = '';
+        }
+
+        if (data.info_only.length) {
+          pvmInfoText.textContent = 'تم فحص ' + data.info_only.map(function (t) { return t.name; }).join('، ') +
+            ' بتاريخ ' + data.date_display + ' (بدون خيار دمج).';
+          pvmInfoGroup.style.display = 'block';
+        } else {
+          pvmInfoGroup.style.display = 'none';
+        }
+
+        pvmBanner.style.display = 'block';
+      })
+      .catch(function () { hidePvmBanner(); });
+  }
+
+  window.togglePvmMerge = function (orderTestId, checked) {
+    if (checked) checkedMergeIds.add(orderTestId); else checkedMergeIds.delete(orderTestId);
+    mergeIdsInput.value = Array.from(checkedMergeIds).join(',');
+  };
+
+  patientNameInput.addEventListener('input', function () {
+    clearTimeout(pvmDebounce);
+    pvmDebounce = setTimeout(checkPreviousVisit, 400);
+  });
+  ageInput.addEventListener('input', function () {
+    clearTimeout(pvmDebounce);
+    pvmDebounce = setTimeout(checkPreviousVisit, 400);
+  });
 
   {% if current_role in ('admin', 'supervisor') %}
   // ------------------------------------------------------------------

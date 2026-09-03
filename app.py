@@ -23,7 +23,9 @@ from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        save_saved_report, get_saved_report, search_saved_reports,
                        get_digital_stamps, get_digital_stamp, add_digital_stamp,
                        update_digital_stamp, delete_digital_stamp,
-                       get_stamp_placements, upsert_stamp_placement, remove_stamp_placement)
+                       get_stamp_placements, upsert_stamp_placement, remove_stamp_placement,
+                       find_last_visit_by_name_age, get_visit_completed_tests,
+                       save_visit_previous_merges, get_visit_previous_merges)
 from translations import t
 from barcode_gen import generate_code39, generate_code128, generate_qr
 import astm_host
@@ -1239,6 +1241,16 @@ def new_visit():
         log_action("Collect", "visit", visit_id, f"sample_collected_at_registration reg#{reg_number}")
         flash(f"Visit #{reg_number} created successfully.")
 
+        # موافقة الموظف على دمج نتائج تحاليل قديمة (من آخر زيارة سابقة
+        # لنفس المريض) بتقرير هذي الزيارة الجديدة — تُسجَّل هنا بس عند
+        # التأكيد الصريح من بنك تنبيه الزيارة السابقة بشاشة "زيارة جديدة"،
+        # راجع visit_previous_merges لتفاصيل الآلية.
+        merge_ids_raw = request.form.get("merge_previous_order_test_ids", "").strip()
+        if merge_ids_raw:
+            merge_ids = [x for x in merge_ids_raw.split(",") if x.strip().isdigit()]
+            if merge_ids:
+                save_visit_previous_merges(db, visit_id, merge_ids)
+
         # إذا اختار موظف الاستقبال تضمين زيارة/زيارات سابقة مع هذي الزيارة
         # الجديدة بجدول موحّد، يروح مباشرة لصفحة الجدول الموحّد بدل قائمة الزيارات.
         include_visit_ids = request.form.get("include_visit_ids", "").strip()
@@ -1536,6 +1548,67 @@ def api_patients_search():
 # ملخص زيارات مريض سبق أن راجع (تُستدعى من شاشة "زيارة جديدة" بعد اختيار
 # مطابقة من البحث الفوري) — تاريخ كل زيارة والتحاليل التي أُجريت بها، حتى
 # تظهر أزرار مشاهدة / طباعة / تضمين لكل زيارة قديمة.
+
+# كشف زيارة سابقة لنفس المريض (بمطابقة الاسم الثلاثي + العمر بالضبط) لحظة
+# كتابة الاسم والعمر بشاشة "زيارة جديدة" — تُرجع بس آخر زيارة (الأحدث، لا
+# كل التاريخ)، وتحاليلها المكتملة مقسّمة لمجموعتين حسب سياسة الدمج:
+# "mergeable" (Biochemistry/Hormones/Vitamins/Virology/Tumor Marker/
+# Coagulation — نفس PREVIOUS_VALUE_DEPARTMENT_KEYWORDS) يعرضها الموظف
+# كخيارات دمج اختيارية، و"info_only" (Blood Film/Retic/Fluid Exam/BMA/
+# BMB — نفس REPORT_TEMPLATE_MAP) تُعرض كرسالة إعلامية بس بدون أي خيار
+# دمج. أي تحليل من قسم غير مذكور بأي من القائمتين يُهمَل بصمت (لا داعي
+# له بهذا التنبيه أصلاً).
+@app.route("/api/patients/previous-visit-check")
+@login_required
+def api_previous_visit_check():
+    full_name = (request.args.get("full_name") or "").strip()
+    age_raw = (request.args.get("age") or "").strip()
+    if not full_name or not age_raw:
+        return jsonify({"found": False})
+    try:
+        age = float(age_raw)
+    except ValueError:
+        return jsonify({"found": False})
+
+    db = get_db()
+    match = find_last_visit_by_name_age(db, full_name, age)
+    if not match:
+        return jsonify({"found": False})
+
+    try:
+        dt = datetime.fromisoformat(match["created_at"])
+        date_display = f"{dt.day}/{dt.month}/{dt.year}"
+    except (TypeError, ValueError):
+        date_display = match["created_at"] or ""
+
+    tests = get_visit_completed_tests(db, match["visit_id"])
+    mergeable, info_only = [], []
+    for tst in tests:
+        if department_shows_previous_values(tst["department"]):
+            results = db.execute(
+                "SELECT r.*, tp.name as param_name FROM results r "
+                "JOIN test_parameters tp ON tp.id = r.test_parameter_id WHERE r.order_test_id=? LIMIT 1",
+                (tst["order_test_id"],),
+            ).fetchone()
+            summary = ""
+            if results:
+                val = results["value_text"] if results["value_text"] not in (None, "") else results["value_numeric"]
+                summary = f"{results['param_name']}: {val}" if val not in (None, "") else ""
+            mergeable.append({
+                "order_test_id": tst["order_test_id"], "name": tst["test_name"], "summary": summary,
+            })
+        elif tst["test_code"] in REPORT_TEMPLATE_MAP:
+            info_only.append({"order_test_id": tst["order_test_id"], "name": tst["test_name"]})
+
+    return jsonify({
+        "found": True,
+        "patient_id": match["patient_id"],
+        "date_display": date_display,
+        "mergeable": mergeable,
+        "info_only": info_only,
+    })
+
+
 @app.route("/api/patients/<int:patient_id>/visits-summary")
 @login_required
 def api_patient_visits_summary(patient_id):
@@ -3218,6 +3291,17 @@ def print_combined_panel(visit_id):
         (visit_id,),
     ).fetchall()
 
+    # التحاليل القديمة (من زيارات سابقة) اللي وافق الموظف صراحة على دمج
+    # نتائجها بهذي الزيارة تحديداً — راجع visit_previous_merges. مبوّبة
+    # حسب test_definition_id لتسهيل مطابقتها مع تحاليل نفس النوع بالزيارة
+    # الحالية (تُعرض كصف "Previous" جنبها)، أو كصف مستقل لو ما تكرر طلب
+    # نفس التحليل بهذي الزيارة (راجع الحلقة بعد الحلقة الرئيسية أدناه).
+    merged_previous = get_visit_previous_merges(db, visit_id)
+    merged_by_test_def = {}
+    for m in merged_previous:
+        merged_by_test_def.setdefault(m["test_definition_id"], []).append(m)
+    current_test_def_ids = {ot["test_definition_id"] for ot in order_tests if ot["test_code"] not in REPORT_TEMPLATE_MAP}
+
     groups_by_dept = {}
     dept_order = []
     for ot in order_tests:
@@ -3271,14 +3355,26 @@ def print_combined_panel(visit_id):
                         range2_display = f"{round(rng['low'] * factor, 2)} - {round(rng['high'] * factor, 2)}"
                 except (TypeError, ValueError):
                     value2 = unit2 = range2_display = None
+            display_name = p["name"] if multi_param else ot["test_name"]
+            # صف "Previous" — يظهر بس لو الموظف وافق صراحة على دمج نتيجة
+            # هذا التحليل بالضبط (نفس test_definition_id) من زيارة سابقة،
+            # ولنفس اسم الباراميتر تحديداً (يدعم التحاليل متعددة
+            # الباراميترات بدون خلط قيم باراميترات مختلفة مع بعض).
+            previous_display = None
+            for m in merged_by_test_def.get(ot["test_definition_id"], []):
+                prev_val = m["results"].get(p["name"])
+                if prev_val not in (None, ""):
+                    previous_display = f"{display_name}: {prev_val} ({m['date_display']})"
+                    break
             rows.append({
-                "name": p["name"] if multi_param else ot["test_name"],
+                "name": display_name,
                 "result": value,
                 "unit": p["unit"] or "",
                 "range_display": range_display,
                 "value2": value2,
                 "unit2": unit2,
                 "range2_display": range2_display,
+                "previous_display": previous_display,
                 # لون مخصص + فاصل صفحة اختياريان — الأولوية دائماً للباراميتر
                 # المفرد (test_parameters.panel_color/panel_page_break، يُضبط
                 # من "مصمم التقارير" لكل باراميتر لحاله)؛ لو غير مضبوط له
@@ -3306,6 +3402,41 @@ def print_combined_panel(visit_id):
             groups_by_dept[dept] = []
             dept_order.append(dept)
         groups_by_dept[dept].extend(rows)
+
+    # تحاليل قديمة موافَق على دمجها بس ما تكرر طلب نفس نوعها بهذي الزيارة
+    # الجديدة إطلاقاً — تُضاف كصفوف "Previous" مستقلة (بدون نتيجة حالية
+    # مقابلة) بنفس مجموعة قسمها، بدل ما تُفقَد لأن ما فيه صف حالي تُرفَق
+    # جنبه.
+    for test_def_id, merges in merged_by_test_def.items():
+        if test_def_id in current_test_def_ids:
+            continue
+        td_row = db.execute(
+            "SELECT department, report_group FROM test_definitions WHERE id=?", (test_def_id,)
+        ).fetchone()
+        if not td_row:
+            continue
+        old_params = db.execute(
+            "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (test_def_id,)
+        ).fetchall()
+        multi_param_prev = len(old_params) > 1
+        dept = (td_row["report_group"] or "").strip() or td_row["department"] or "Other"
+        for m in merges:
+            prev_rows = []
+            for p in old_params:
+                val = m["results"].get(p["name"])
+                if val in (None, ""):
+                    continue
+                pname = p["name"] if multi_param_prev else m["test_name"]
+                prev_rows.append({
+                    "name": pname, "result": None, "unit": "", "range_display": "",
+                    "value2": None, "unit2": None, "range2_display": None, "color": None,
+                    "previous_display": f"{pname}: {val} ({m['date_display']})",
+                })
+            if prev_rows:
+                if dept not in groups_by_dept:
+                    groups_by_dept[dept] = []
+                    dept_order.append(dept)
+                groups_by_dept[dept].extend(prev_rows)
 
     # ترتيب طباعة أقسام اللوحة المجمّعة — افتراضيًا أبجدي (كما هو بالاستعلام
     # فوق)؛ لو الأدمن حدد ترتيبًا مخصصًا من الإعدادات (combined_panel_group_order)
@@ -3498,20 +3629,23 @@ def _print_report_impl(order_test_id):
     except (TypeError, ValueError):
         visit_date = ot["visit_created_at"] or ""
 
-    # زيارة سابقة لنفس الشخص (تطابق كامل بالاسم + العمر + الجنس) لنفس هذا
-    # التحليل: تُذكر دائمًا كتاريخ فقط أسفل التقرير، وتُذكر مع القيم السابقة
-    # لكل باراميتر فقط إذا كان قسم التحليل كيمياء أو تخثر — وهذا الافتراضي
-    # يمديك تتجاوزه لحظة الطباعة بمربع "إظهار النتيجة السابقة" بشاشة إدخال
-    # النتائج (؟show_prev=1/0)، لأن عرضها بالتقرير المطبوع اختياري دائماً
-    # وليس شرطاً حتى لو القسم كيمياء/تخثر.
-    show_prev_values = department_shows_previous_values(ot["test_department"])
-    show_prev_override = request.args.get("show_prev")
-    if show_prev_override in ("0", "1"):
-        show_prev_values = show_prev_override == "1"
-    previous_visit_date, previous_values = find_previous_reference(
-        db, ot["patient_name"], ot["age"], ot["gender"], ot["test_definition_id"],
-        ot["test_department"], ot["visit_id"], ot["visit_created_at"],
+    # زيارة سابقة لنفس الشخص (تطابق كامل بالاسم + العمر) — تُعرض بالتقرير
+    # (تاريخها + قيم باراميتراتها) فقط إذا وافق الموظف صراحة على دمجها
+    # لحظة تسجيل هذي الزيارة (بنك تنبيه الزيارة السابقة بشاشة "زيارة
+    # جديدة")، راجع visit_previous_merges — لا يوجد أي عرض تلقائي بعد
+    # اليوم بغض النظر عن قسم التحليل. ?show_prev=0 يبقى يقدر يخفيها لحظة
+    # الطباعة حتى لو انوافَق عليها، لكن ?show_prev=1 ما يقدر يظهرها من
+    # غير موافقة أصلاً (مافيه بيانات تُعرض أصلاً بهاي الحالة).
+    merged_previous = get_visit_previous_merges(db, ot["visit_id"])
+    matched_merge = next(
+        (m for m in merged_previous if m["test_definition_id"] == ot["test_definition_id"]), None,
     )
+    show_prev_values = matched_merge is not None
+    show_prev_override = request.args.get("show_prev")
+    if show_prev_override == "0":
+        show_prev_values = False
+    previous_visit_date = matched_merge["date_display"] if matched_merge else None
+    previous_values = matched_merge["results"] if matched_merge else {}
 
     cbc_groups = None
     if ot["test_code"] == "CBC":
