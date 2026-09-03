@@ -1,0 +1,71 @@
+{#
+  General Stool Examination (GSE) — نفس بنية urine_exam.html بالضبط، يرث
+  الشعار/الأطباء/اسم المختبر من reports/base_report.html بدون أي تعديل.
+#}
+{% extends "reports/base_report.html" %}
+
+{% macro row(label, pname) %}
+{% set rng = ranges.get(pname) %}
+{% set unit = units.get(pname, '') %}
+{% set range_text = '' %}
+{% if rng %}
+  {% if rng['range_text'] %}
+    {% set range_text = rng['range_text'] %}
+  {% elif rng['low'] is not none and rng['high'] is not none %}
+    {% set range_text = (rng['low']|string) ~ ' - ' ~ (rng['high']|string) ~ (' ' ~ unit if unit else '') %}
+  {% endif %}
+  {% if rng['note'] %}
+    {% set range_text = rng['note'] ~ (' (' ~ range_text ~ ')' if range_text else '') %}
+  {% endif %}
+{% endif %}
+<div class="gue-row">
+  <div class="gue-name">{{ label }}</div>
+  <div>:</div>
+  <div class="gue-val">{{ params.get(pname, '') }}{% if unit %} <span class="gue-unit">{{ unit }}</span>{% endif %}</div>
+  <div class="gue-range">{{ range_text }}</div>
+</div>
+{% if param_notes.get(pname) %}
+<div class="gue-row"><div class="gue-note">📝 {{ param_notes.get(pname) }}</div></div>
+{% endif %}
+{% endmacro %}
+
+{% block report_body %}
+<style>
+  .gue-wrap{ font-family: Georgia, "Times New Roman", serif; direction: ltr; text-align: left; color:#1a1a1a; }
+  .gue-section{ font-weight:700; font-size:14.5px; color:#111; border-top:1px solid #AEBBCB; padding-top:8px; margin:14px 0 4px 0; }
+  .gue-section:first-child{ border-top:none; margin-top:2px; }
+  .gue-row{ display:grid; grid-template-columns:190px 20px 160px 1fr; align-items:baseline; padding:3px 0; font-size:13.5px; gap:2px; }
+  .gue-name{ color:#1a1a1a; }
+  .gue-val{ color:#0B3D91; font-weight:500; }
+  .gue-unit{ color:#1a1a1a; font-size:11.5px; margin-left:4px; }
+  .gue-range{ color:#0B3D91; font-weight:500; }
+  .gue-note{ grid-column:1 / -1; font-size:11px; color:#92650A; background:#FEF9E7; border:1px dashed #F4D06F; border-radius:3px; padding:2px 7px; margin:1px 0 3px 0; font-family:"Segoe UI", Tahoma, Arial, sans-serif; }
+</style>
+<div class="report-heading">General Stool Examination</div>
+
+<div class="gue-wrap">
+  <div class="gue-section">Macroscopic Examination</div>
+  {{ row('Color', 'Color') }}
+  {{ row('Consistency', 'Consistency') }}
+  {{ row('Mucus', 'Mucus') }}
+  {{ row('Blood', 'Blood') }}
+  {{ row('Worms / Helminths', 'Worms') }}
+
+  <div class="gue-section">Microscopic Examination</div>
+  {{ row('Pus Cells', 'Pus Cells') }}
+  {{ row('RBCs', 'RBCs') }}
+  {{ row('Amoeba (E. histolytica)', 'Amoeba') }}
+  {{ row('Giardia lamblia', 'Giardia') }}
+  {{ row('Helminthes Ova', 'Helminthes Ova') }}
+  {{ row('Undigested Food Particles', 'Undigested Food') }}
+  {{ row('Fungi / Yeast', 'Fungi') }}
+</div>
+{% endblock %}
+
+{% block extra_note %}
+{% if report_comment %}
+<div class="box-field" style="font-family:'Segoe UI', Tahoma, Arial, sans-serif; font-size:12px; margin-top:14px;">
+  <b>Comment:</b> {{ report_comment }}
+</div>
+{% endif %}
+{% endblock %}
