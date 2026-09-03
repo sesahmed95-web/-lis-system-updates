@@ -318,6 +318,7 @@
   .no-print { text-align: center; margin: 14px 0; }
   @media print { .preview-bar, .no-print { display: none; } }
 </style>
+{% block report_styles %}{% endblock %}
 </head>
 <body>
 
@@ -380,6 +381,7 @@
             {% endif %}
           </div>
 
+          {% block patient_meta %}
           <table class="meta-table">
             <tr>
               <td class="meta-label">الدكتور المرسل: {{ referring_doctor_name }}</td>
@@ -390,6 +392,7 @@
               <td class="meta-side"><b>Age:</b> {{ age }} &nbsp;&nbsp; <b>Sex:</b> {{ sex }}</td>
             </tr>
           </table>
+          {% endblock %}
         </td></tr>
       {% if repeat_header_on_print %}</thead>{% else %}</tbody>{% endif %}
       <tbody>

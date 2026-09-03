@@ -26,7 +26,6 @@ from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_stamp_placements, upsert_stamp_placement, remove_stamp_placement,
                        find_last_visit_by_name_age, get_visit_completed_tests,
                        save_visit_previous_merges, get_visit_previous_merges)
-from daily_counter import get_patient_number_of_day
 from translations import t
 from barcode_gen import generate_code39, generate_code128, generate_qr
 import astm_host
@@ -3774,10 +3773,6 @@ def _print_report_impl(order_test_id):
         visit_date=visit_date, sex=ot["gender"] or "", age=age_display,
         patient_name=ot["patient_name"], patient_id=ot["registration_number"],
         referring_doctor_name=ot["referring_doctor_name"] or "",
-        sample_no=ot["barcode"] if "barcode" in ot.keys() else "",
-        sample_time=(ot["collected_at"] or ot["accessioned_at"] or "") if "collected_at" in ot.keys() else "",
-        number_of=get_patient_number_of_day(db, order_test_id),
-        patient_name_en=(patient["full_name_en"] if patient and "full_name_en" in patient.keys() else ""),
     )
 
 

@@ -1,85 +1,65 @@
-{#
-  General Urine Examination (GUE)
-  يرث كل شي من reports/base_report.html بدون أي تعديل عليه — نفس الشعار،
-  نفس أسماء الأطباء، نفس اسم المختبر بالضبط متل custom.html وfluid_examination.html.
-  هذا الملف يملأ فقط block report_body وextra_note.
-
-  يستخدم نفس المتغيرات اللي أصلاً تنمرّر لكل تقرير بدون استثناء (راجع تعليق
-  "units" بـ_print_report_impl): params (dict), units (dict), ranges (dict:
-  اسم الباراميتر -> صف reference_ranges الخام أو None) — بالإضافة لمتغيرين
-  جدد لازم يتمرّروا فقط لهذا القالب وGSE/SFA: param_notes (dict: اسم
-  الباراميتر -> ملاحظة قصيرة أو فاضي)، report_comment (نص الملاحظة العامة
-  أسفل التقرير، أو فاضي).
-#}
 {% extends "reports/base_report.html" %}
+{% import "reports/partials/exam_report_shared.html" as shared %}
 
-{% macro row(label, pname) %}
-{% set rng = ranges.get(pname) %}
-{% set unit = units.get(pname, '') %}
-{% set range_text = '' %}
-{% if rng %}
-  {% if rng['range_text'] %}
-    {% set range_text = rng['range_text'] %}
-  {% elif rng['low'] is not none and rng['high'] is not none %}
-    {% set range_text = (rng['low']|string) ~ ' - ' ~ (rng['high']|string) ~ (' ' ~ unit if unit else '') %}
-  {% endif %}
-  {% if rng['note'] %}
-    {% set range_text = rng['note'] ~ (' (' ~ range_text ~ ')' if range_text else '') %}
-  {% endif %}
-{% endif %}
-<div class="gue-row">
-  <div class="gue-name">{{ label }}</div>
-  <div>:</div>
-  <div class="gue-val">{{ params.get(pname, '') }}{% if unit %} <span class="gue-unit">{{ unit }}</span>{% endif %}</div>
-  <div class="gue-range">{{ range_text }}</div>
-</div>
-{% if param_notes.get(pname) %}
-<div class="gue-row"><div class="gue-note">📝 {{ param_notes.get(pname) }}</div></div>
-{% endif %}
-{% endmacro %}
+{# ============================================================================
+   يعتمد على base_report.html المُحدَّث (نسخة base_report.html المرفقة معه):
+     - {% block patient_meta %} يستبدل قسم بيانات المريض بتصميم Sample No./
+       Patient No./الاسم الإنكليزي/Number Of — باقي التقارير (CBC، فلم الدم)
+       غير متأثرة إطلاقًا لأنها ما تعرّف هذا البلوك.
+     - {% block report_styles %} موجود بأعلى <head> لحقن CSS إضافي.
+     - {% block report_body %} هو محتوى التقرير نفسه (اسمه الصحيح، مو content).
+   المتغيرات الجديدة المطلوبة من app.py عند render_template لهذي التقارير:
+     sample_no, sample_time, number_of, patient_name_en (كلها اختيارية
+     بفضل |default بالماكرو، فما تكسر العرض لو ناقصة مؤقتًا).
+============================================================================ #}
 
-{% block report_body %}
-<style>
-  .gue-wrap{ font-family: Georgia, "Times New Roman", serif; direction: ltr; text-align: left; color:#1a1a1a; }
-  .gue-section{ font-weight:700; font-size:14.5px; color:#111; border-top:1px solid #AEBBCB; padding-top:8px; margin:14px 0 4px 0; }
-  .gue-section:first-child{ border-top:none; margin-top:2px; }
-  .gue-row{ display:grid; grid-template-columns:190px 20px 160px 1fr; align-items:baseline; padding:3px 0; font-size:13.5px; gap:2px; }
-  .gue-name{ color:#1a1a1a; }
-  .gue-val{ color:#0B3D91; font-weight:500; }
-  .gue-unit{ color:#1a1a1a; font-size:11.5px; margin-left:4px; }
-  .gue-range{ color:#0B3D91; font-weight:500; }
-  .gue-note{ grid-column:1 / -1; font-size:11px; color:#92650A; background:#FEF9E7; border:1px dashed #F4D06F; border-radius:3px; padding:2px 7px; margin:1px 0 3px 0; font-family:"Segoe UI", Tahoma, Arial, sans-serif; }
-</style>
-<div class="report-heading">General Urine Examination</div>
-
-<div class="gue-wrap">
-  <div class="gue-section">Macroscopic Examination</div>
-  {{ row('Color', 'Color') }}
-  {{ row('Specific Gravity', 'Specific Gravity') }}
-  {{ row('Reaction (pH)', 'Reaction') }}
-  {{ row('Glucose', 'Glucose') }}
-  {{ row('Protein', 'Protein') }}
-  {{ row('Ketone', 'Ketone') }}
-  {{ row('Bile Pigment', 'Bile Pigment') }}
-  {{ row('Urobilinogen', 'Urobilinogen') }}
-  {{ row('Nitrite', 'Nitrite') }}
-
-  <div class="gue-section">Microscopic Examination</div>
-  {{ row('RBCs', 'RBCs') }}
-  {{ row('PUS (WBCs)', 'PUS') }}
-  {{ row('Casts', 'Casts') }}
-  {{ row('Epithelial Cells', 'Epithelial Cells') }}
-  {{ row('Amorphous', 'Amorphous') }}
-  {{ row('Mucus', 'Mucus') }}
-  {{ row('Crystals', 'Crystals') }}
-  {{ row('Parasites / Others', 'Parasites') }}
-</div>
+{% block report_styles %}
+  {{ super() if self.report_styles is defined else '' }}
+  {{ shared.styles() }}
 {% endblock %}
 
-{% block extra_note %}
-{% if report_comment %}
-<div class="box-field" style="font-family:'Segoe UI', Tahoma, Arial, sans-serif; font-size:12px; margin-top:14px;">
-  <b>Comment:</b> {{ report_comment }}
+{% block patient_meta %}{{ shared.patient_meta_v2() }}{% endblock %}
+
+{% block report_body %}
+<div class="report-page">
+
+  {# اسم التحليل: دائمًا بالمنتصف، كامل غير مختصر، بالإنكليزي — إلزامي #}
+  <div class="report-title editable" data-field="report_title" data-param-id="">General Urine Examination</div>
+
+  <div class="section-title editable" data-field="section_title" data-param-id="">Macroscopic Examination</div>
+  {% set macro_names = ["Color","Specific Gravity","Reaction (pH)","Glucose","Protein","Ketone","Bile Pigment","Urobilinogen","Nitrite"] %}
+  {% for p in params if p['name'] in macro_names %}
+    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), (results_by_name.get(p['name'])['value_text'] if results_by_name.get(p['name']) else results_by_name.get(p['name'])['value_numeric'] if results_by_name.get(p['name']) else None), param_notes.get(p['name'], ''), order_test_id) }}
+  {% endfor %}
+  {{ shared.add_param_row('urine_macro', order_test_id) }}
+
+  <div class="section-title editable" data-field="section_title" data-param-id="">Microscopic Examination</div>
+  {% set micro_names = ["RBCs","PUS","Casts","Epithelial Cells","Amorphous","Mucus","Crystals","Parasites","Parasites / Others"] %}
+  {% for p in params if p['name'] in micro_names %}
+    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), (results_by_name.get(p['name'])['value_text'] if results_by_name.get(p['name']) else results_by_name.get(p['name'])['value_numeric'] if results_by_name.get(p['name']) else None), param_notes.get(p['name'], ''), order_test_id) }}
+  {% endfor %}
+  {# أي باراميتر انضاف يدويًا لهذا الفحص ومو بأي من القائمتين فوق (زر + إضافة باراميتر) يظهر هنا تلقائيًا #}
+  {% for p in params if p['name'] not in macro_names and p['name'] not in micro_names %}
+    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), (results_by_name.get(p['name'])['value_text'] if results_by_name.get(p['name']) else results_by_name.get(p['name'])['value_numeric'] if results_by_name.get(p['name']) else None), param_notes.get(p['name'], ''), order_test_id) }}
+  {% endfor %}
+  {{ shared.add_param_row('urine_micro', order_test_id) }}
+
+  <div class="bottom-note">
+    <label>📝 ملاحظة عامة أسفل التقرير (اختيارية)</label>
+    <textarea id="report-comment" data-order-test-id="{{ order_test_id }}"
+              placeholder="مثال: يُنصح بإعادة الفحص بعد أسبوع...">{{ report_comment or '' }}</textarea>
+  </div>
+
 </div>
-{% endif %}
+
+{{ shared.editor_script(order_test_id) }}
+<script>
+document.getElementById('report-comment').addEventListener('blur', function(){
+  fetch('/order-tests/{{ order_test_id }}/report-comment', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'report_comment=' + encodeURIComponent(this.value)
+  });
+});
+</script>
 {% endblock %}
