@@ -1,5 +1,9 @@
 ﻿# Al-Karama LIS - launcher (PowerShell version, no VBScript / WSH needed)
-$ErrorActionPreference = "SilentlyContinue"
+# ملاحظة مهمة (إصلاح لاحق): كان فيه "$ErrorActionPreference = SilentlyContinue"
+# هنا يشمل السكربت كامل — هذا كان يخفي أي خطأ حقيقي بتشغيل بايثون/السيرفر
+# بصمت، فيفتح المتصفح على الرابط حتى لو السيرفر فشل يشتغل أصلاً، وتطلع
+# "تعذر الوصول لهذا الموقع" بدون أي تفسير. صار الآن مقصور بس على أوامر
+# الترميز التجميلية (chcp/OutputEncoding) اللي فعلاً ما يهم فشلها.
 try { chcp 65001 | Out-Null } catch {}
 try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -8,6 +12,7 @@ try {
 $AppDir = $PSScriptRoot
 Set-Location $AppDir
 $PidFile = Join-Path $AppDir "server.pid"
+$LogFile = Join-Path $AppDir "server_start_error.log"
 $AppUrl  = "http://localhost:9090"
 $host.UI.RawUI.WindowTitle = "برنامج مختبر أمراض الدم"
 
@@ -40,14 +45,34 @@ if ($serverRunning) {
     Write-Host "البرنامج شغال من قبل، بس بفتح النافذة..."
 } else {
     Write-Host "جاري التحقق من وجود Python..."
+    # نبحث عن بايثون بمسارات معروفة صريحة أولاً (نفس النسخة المؤكد إنها
+    # تشتغل صح لما تُشغَّل يدويًا من PowerShell) قبل الاعتماد على PATH —
+    # لأن لما تُشغَّل هذي النافذة من أيقونة سطح المكتب (لا شل تفاعلي)،
+    # قد يلتقط Get-Command نسخة بايثون مختلفة أو "وهمية" يحطها ويندوز
+    # افتراضيًا بمجلد WindowsApps (تفتح متجر مايكروسوفت بس وما تشغّل أي
+    # شي فعليًا) بدل التنصيب الحقيقي — وهذا كان سبب الفشل الصامت.
     $pyCmd = $null
-    if (Get-Command py -ErrorAction SilentlyContinue) { $pyCmd = "py" }
-    elseif (Get-Command python -ErrorAction SilentlyContinue) { $pyCmd = "python" }
+    $knownPythonPaths = @(
+        "C:\Python314\python.exe",
+        "$env:LocalAppData\Programs\Python\Python314\python.exe",
+        "$env:LocalAppData\Programs\Python\Python313\python.exe",
+        "$env:LocalAppData\Programs\Python\Python312\python.exe"
+    )
+    foreach ($p in $knownPythonPaths) {
+        if (Test-Path $p) { $pyCmd = $p; break }
+    }
     if (-not $pyCmd) {
-        $msg = "تعذر العثور على Python على هذا الجهاز." + "`n`n" + 'ثبت Python من https://www.python.org/downloads/ وفعل خيار "Add python.exe to PATH" اثناء التثبيت، ثم اعد تشغيل الجهاز وجرب مرة اخرى.'
+        # احتياطي: نفحص PATH، بس نتجاهل أي نسخة تطلع من مجلد WindowsApps
+        # (نفس نسخة ويندوز الوهمية اللي تسبب المشكلة).
+        $candidates = @(Get-Command py -ErrorAction SilentlyContinue, Get-Command python -ErrorAction SilentlyContinue) |
+            Where-Object { $_ -and $_.Source -notmatch "WindowsApps" }
+        if ($candidates) { $pyCmd = $candidates[0].Source }
+    }
+    if (-not $pyCmd) {
+        $msg = "تعذر العثور على Python الحقيقي على هذا الجهاز (تم تجاهل أي نسخة وهمية من WindowsApps)." + "`n`n" + 'ثبت Python من https://www.python.org/downloads/ وفعل خيار "Add python.exe to PATH" اثناء التثبيت، ثم اعد تشغيل الجهاز وجرب مرة اخرى.'
         Fail $msg
     }
-    Write-Host "Python موجود. جاري التحقق من المكتبات المطلوبة..."
+    Write-Host "Python موجود ($pyCmd). جاري التحقق من المكتبات المطلوبة..."
 
     # نتحقق في كل تشغيلة (فحص سريع جدًا) بدل الاعتماد على ملف علامة واحد
     # يخلي التحقق يتخطى نفسه للأبد؛ هذا يضمن إن أي مكتبة جديدة تنضاف
@@ -66,8 +91,20 @@ if ($serverRunning) {
     }
 
     Write-Host "جاري تشغيل السيرفر..."
+    if (Test-Path $LogFile) { Remove-Item $LogFile -ErrorAction SilentlyContinue }
     try {
-        $proc = Start-Process -FilePath $pyCmd -ArgumentList @("app.py") -WorkingDirectory $AppDir -WindowStyle Hidden -PassThru
+        # نسجّل أي خطأ فعلي يطبعه بايثون وقت الإقلاع (مثلاً مكتبة ناقصة،
+        # خطأ صياغة بملف .py، تعارض منفذ...) بملف نصي، بدل ما يضيع لأن
+        # النافذة مخفية (-WindowStyle Hidden) — لو صار فشل صامت زي المرات
+        # الماضية، هذا الملف يوضح السبب الحقيقي بالضبط.
+        $proc = Start-Process -FilePath $pyCmd -ArgumentList @("app.py") -WorkingDirectory $AppDir `
+            -WindowStyle Hidden -PassThru -RedirectStandardError $LogFile
+        Start-Sleep -Milliseconds 800
+        if ($proc.HasExited) {
+            $errText = ""
+            if (Test-Path $LogFile) { $errText = Get-Content $LogFile -Raw }
+            Fail ("تعذر تشغيل السيرفر — توقف فورًا بعد الإقلاع.`n`n" + $errText)
+        }
         Set-Content -Path $PidFile -Value $proc.Id
     } catch {
         Fail ("تعذر تشغيل السيرفر: " + $_.Exception.Message)
