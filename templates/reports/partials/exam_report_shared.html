@@ -1,144 +1,124 @@
-{# ============================================================================
-   partials/exam_report_shared.html
-   ============================================================================
-   عناصر مشتركة تُستخدم من الثلاث قوالب الجديدة (urine_exam.html /
-   stool_exam.html / seminal_fluid.html)، ومصممة للاستخدام لاحقًا بأي تقرير
-   ثاني بالنظام (CBC، blood_film...) — نفس الفكرة المذكورة بتعليقات
-   database.py الأصلية ("macro row()").
+{# =============================================================================
+   reports/partials/exam_report_shared.html
+   =============================================================================
+   يستورده كل من: reports/urine_exam.html (GUE), reports/stool_exam.html (GSE),
+   reports/seminal_fluid.html (SFA) — وأي تقرير "فحص" مستقبلي بنفس النمط
+   (باراميترات نصية/رقمية موزّعة على أقسام Macroscopic/Microscopic بدل جدول
+   CBC أو بطاقات الكيمياء).
 
-   يوفر:
-     1) ماكرو exam_row(...) لرسم سطر نتيجة واحد (اسم + قيمة + نسبة طبيعية
-        بصيغة "التعليق (أدنى - أعلى وحدة)" + زر ملاحظة قابل للطي).
-     2) CSS كامل يطابق preview_5.html حرفيًا (العنوان بالمنتصف، الأعمدة،
-        الألوان...).
-     3) JS للـ click-to-edit (contenteditable) + toggle للملاحظات + إضافة
-        باراميتر جديد — يرسل التغييرات فعليًا لسيرفر Flask (مو مجرد شكل).
-
-   الاستيراد بأي قالب تقرير:
-     {% import "reports/partials/exam_report_shared.html" as shared %}
-     {{ shared.styles() }}
-     {{ shared.exam_row(p, ranges, units, param_notes, order_test_id) }}
-     {{ shared.editor_script(order_test_id) }}
-============================================================================ #}
+   يُستورد بـ "with context" إلزاميًا من القالب المستدعي:
+       {% import "reports/partials/exam_report_shared.html" as shared with context %}
+   حتى تتوفر لكل الماكرو هنا نفس متغيرات الـ render_template الممرّرة من
+   _print_report_impl (patient_name, referring_doctor_name, sample_no...)
+   دون الحاجة لتمريرها يدويًا كوسائط لكل استدعاء.
+============================================================================= #}
 
 {% macro styles() %}
 <style>
-  .report-page{ font-family:Georgia,"Times New Roman",serif; direction:ltr; text-align:left; color:#1a1a1a; }
-  .report-head{
-    display:flex; justify-content:space-between; align-items:flex-start;
-    font-family:"Segoe UI", Tahoma, Arial, sans-serif; border-bottom:1px solid #E2E8F0;
-    padding-bottom:10px; margin-bottom:6px;
-  }
-  .report-head .lab-name{font-size:18px; font-weight:700; color:#163a54;}
-  .report-head .lab-sub{font-size:11px; color:#64748B;}
-  .report-head .logo-ph{ width:52px; height:52px; }
-  .patient-info-v2{
-    display:flex; justify-content:space-between; gap:36px; margin:4px 0 14px 0;
-    font-family:"Segoe UI", Tahoma, Arial, sans-serif; font-size:13.5px;
-    direction:ltr !important; text-align:left;
-  }
-  .info-col{flex:1;}
-  .info-row{display:grid; grid-template-columns:104px 12px 1fr; padding:3px 0; align-items:baseline;}
-  .info-label{font-weight:700; color:#111;}
-  .info-colon{color:#111;}
-  .info-val{color:#1E3A8A; font-weight:600;}
-  .info-val.ar-name{color:#7C2D12; direction:rtl; unicode-bidi:isolate; text-align:left; font-family:"Segoe UI", Tahoma, Arial, sans-serif;}
-  .auto-badge{
-    font-size:9.5px; background:#EAF2F8; color:#163a54; padding:1px 6px;
-    border-radius:10px; margin-inline-start:7px; font-weight:400; direction:ltr; unicode-bidi:isolate;
-  }
-  /* اسم التحليل: دائمًا بمنتصف الصفحة، كامل غير مختصر — إلزامي بالشاشة والطباعة والـPDF */
-  .report-title{
-    text-align:center; font-size:19px; font-weight:700; font-style:italic;
-    text-decoration:underline; text-underline-offset:4px; margin:6px 0 18px 0;
-  }
-  .section-title{
-    font-weight:700; font-size:15px; color:#111;
-    border-top:1px solid #AEBBCB; padding-top:9px; margin-top:16px; margin-bottom:4px;
-  }
-  .result-row{
-    display:grid; grid-template-columns:210px 26px 180px 170px 24px; align-items:baseline;
-    padding:5px 0; font-size:15px; gap:2px; max-width:640px;
-  }
-  .result-row .rname{color:#1a1a1a;}
-  .result-row .rcolon{color:#1a1a1a;}
-  .result-row .rval{color:#0B3D91; font-weight:500;}
-  .result-row .runit{color:#1a1a1a; font-size:13px; margin-inline-start:4px;}
-  .result-row .rnorm{color:#0B3D91; font-weight:500;}
-  .result-row .rnote-btn{ justify-self:end; opacity:0; border:none; background:none; cursor:pointer; font-size:12px; }
-  .result-row:hover .rnote-btn{opacity:0.55;}
-  .result-row .rnote-btn:hover{opacity:1;}
-  .inline-note{
-    grid-column:1 / -1; font-size:12px; color:#92650A; background:#FEF9E7;
-    border:1px dashed #F4D06F; border-radius:4px; padding:4px 8px; margin:2px 0 4px 0;
-    font-family:"Segoe UI", Tahoma, Arial, sans-serif;
-  }
-  .add-param-row{ display:flex; align-items:center; gap:8px; padding:6px 0; font-family:"Segoe UI", Tahoma, Arial, sans-serif; font-size:12.5px; }
-  .add-param-row button{ border:1px dashed #205072; color:#205072; background:#fff; border-radius:5px; padding:4px 10px; font-size:12px; cursor:pointer; font-family:inherit; }
-  .bottom-note{ margin-top:20px; font-family:"Segoe UI", Tahoma, Arial, sans-serif; font-size:12.5px; }
-  .bottom-note textarea{
-    width:100%; min-height:120px; border:1px dashed #E2E8F0; border-radius:5px;
-    padding:8px; font-family:inherit; font-size:12.5px; color:#92650A; background:#FFFDF6; resize:vertical;
-  }
-  .bottom-note label{display:block; font-weight:600; color:#475569; margin-bottom:4px;}
-  .sign-box{ margin-top:26px; display:flex; justify-content:flex-end; font-family:"Segoe UI", Tahoma, Arial, sans-serif; }
-  .sign-box .box{ border:1px solid #E2E8F0; border-radius:6px; padding:14px 30px; text-align:center; font-size:12px; color:#64748B; }
+  /* .report-page يعيش داخل .sheet الموروثة من base_report.html (نفس الحد
+     الأقصى للعرض والحشو موجودان هناك) — هنا فقط اتجاه/محاذاة المحتوى
+     الإنكليزي بخلاف اتجاه RTL الافتراضي لباقي الصفحة. */
+  .report-page { direction: ltr; text-align: left; }
 
-  /* click-to-edit */
-  .editable{cursor:text; border-radius:3px; padding:0 2px; margin:0 -2px;}
-  .editable:hover{outline:1px dashed #205072; outline-offset:2px;}
-  .editable:focus, .editable.editing{ outline:2px solid #205072; outline-offset:2px; background:#FFFDF0; }
-  .save-flash{color:#15803D; font-size:11px; font-weight:700; margin-inline-start:3px;}
-  @media print{
-    .rnote-btn, .add-param-row{ display:none !important; }
-    .editable:hover, .editable:focus{ outline:none !important; background:none !important; }
+  /* ============== ترويسة بيانات المريض/العينة (patient_meta_v2) ============== */
+  .patient-info-v2 {
+    display: flex; justify-content: space-between; gap: 36px;
+    margin: 4px 0 14px 0; direction: ltr;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 13.5px;
+  }
+  .info-col { flex: 1; }
+  .info-row { display: grid; grid-template-columns: 108px 12px 1fr; padding: 3px 0; align-items: baseline; }
+  .info-label { font-weight: 700; color: #111; }
+  .info-colon { color: #111; }
+  .info-val { color: #1E3A8A; font-weight: 600; }
+  .info-val.ar-name {
+    color: #7A1F1F; direction: rtl; unicode-bidi: isolate; text-align: right;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  }
+
+  /* ============== عنوان التحليل + عناوين الأقسام ============== */
+  .report-title {
+    text-align: center; font-size: 1.25em; font-weight: 700; font-style: italic;
+    text-decoration: underline; text-underline-offset: 4px; margin: 6px 0 18px 0;
+    color: #14213D;
+  }
+  .section-title {
+    font-weight: 700; font-size: 1.05em; color: #111;
+    border-top: 1px solid #AEBBCB; padding-top: 9px; margin-top: 16px; margin-bottom: 4px;
+  }
+
+  /* ============== صف نتيجة مفردة (اسم : نتيجة  |  المدى الطبيعي  | 📝) ============== */
+  .result-row {
+    display: grid; grid-template-columns: 210px 26px 180px 1fr 26px;
+    align-items: baseline; padding: 5px 0; font-size: 1em; gap: 2px;
+  }
+  .result-row .rname { color: #1a1a1a; }
+  .result-row .rcolon { color: #1a1a1a; }
+  .result-row .rval { color: #1F3B7A; font-weight: 600; }
+  .result-row .runit { color: #1a1a1a; font-size: 0.85em; margin-inline-start: 4px; font-weight: normal; }
+  .result-row .rnorm { color: #1F3B7A; font-weight: 600; }
+  .result-row .rnote-btn {
+    justify-self: end; opacity: 0; border: none; background: none; cursor: pointer; font-size: 12px;
+  }
+  .result-row:hover .rnote-btn { opacity: 0.55; }
+  .result-row .rnote-btn:hover { opacity: 1; }
+  @media print { .result-row .rnote-btn { display: none; } }
+
+  .inline-note {
+    grid-column: 1 / -1; font-size: 12px; color: #92650A; background: #FEF9E7;
+    border: 1px dashed #F4D06F; border-radius: 4px; padding: 4px 8px; margin: 2px 0 4px 0;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  }
+  .inline-note textarea {
+    width: 100%; min-height: 30px; font-family: inherit; font-size: 12px;
+    border: none; background: transparent; resize: vertical;
+  }
+
+  .add-param-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 0;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 12.5px;
+  }
+  .add-param-row button {
+    border: 1px dashed #26529C; color: #26529C; background: #fff; border-radius: 5px;
+    padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  @media print { .add-param-row { display: none; } }
+
+  .bottom-note {
+    margin-top: 20px; font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 12.5px;
+  }
+  .bottom-note label { display: block; font-weight: 600; color: #475569; margin-bottom: 4px; }
+  .bottom-note textarea {
+    width: 100%; min-height: 46px; border: 1px dashed #E2E8F0; border-radius: 5px;
+    padding: 8px; font-family: inherit; font-size: 12.5px; color: #92650A; background: #FFFDF6;
+  }
+  @media print {
+    .bottom-note label { display: none; }
+    .bottom-note textarea {
+      border: none; background: transparent; padding: 0; color: #1a1a1a;
+      font-style: italic; resize: none;
+    }
   }
 </style>
 {% endmacro %}
 
-{#
-  exam_row: يرسم سطر نتيجة واحد.
-  المعاملات:
-    p          : dict فيه على الأقل name و id (صف من parameters)
-    rng        : صف reference_ranges المطابق (فيه low/high/note) أو None
-    unit       : نص الوحدة أو ""
-    note_text  : ملاحظة الموظف أمام هذا الباراميتر بالذات (results.note) أو ""
-    value      : القيمة المدخلة فعليًا
-    order_test_id : لاستخدامه بمسار الحفظ الفوري (click-to-edit)
-#}
-{% macro exam_row(p, rng, unit, value, note_text, order_test_id) %}
-  {% set norm_parts = [] %}
-  {% if rng and rng['note'] %}{% set _ = norm_parts.append(rng['note']) %}{% endif %}
-  {% if rng and (rng['low'] is not none or rng['high'] is not none) %}
-    {% set range_txt = (rng['low']|string if rng['low'] is not none else '') ~ ' - ' ~ (rng['high']|string if rng['high'] is not none else '') %}
-    {% if unit %}{% set range_txt = range_txt ~ ' ' ~ unit %}{% endif %}
-    {% set _ = norm_parts.append('(' ~ range_txt ~ ')' if norm_parts else range_txt) %}
-  {% endif %}
-<div class="result-row">
-  <span class="rname editable" data-field="param_name" data-param-id="{{ p['id'] }}">{{ p['name'] }}</span>
-  <span class="rcolon">:</span>
-  <span class="rval editable" data-field="result_value" data-order-test-id="{{ order_test_id }}" data-param-id="{{ p['id'] }}">{{ value if value is not none else '' }}{% if unit %} <span class="runit">{{ unit }}</span>{% endif %}</span>
-  <span class="rnorm editable" data-field="reference_note" data-param-id="{{ p['id'] }}">{{ norm_parts|join(' ') }}</span>
-  <button class="rnote-btn" type="button" onclick="toggleParamNote('note-{{ p['id'] }}')">📝</button>
-</div>
-<div class="inline-note" id="note-{{ p['id'] }}" data-param-id="{{ p['id'] }}" data-order-test-id="{{ order_test_id }}"
-     contenteditable="true"
-     style="display:{{ 'block' if note_text else 'none' }};">{{ note_text or '' }}</div>
-{% endmacro %}
 
-{#
-  patient_meta_v2: قسم بيانات المريض بالتصميم الجديد (يستبدل الجدول العربي
-  البسيط لتقارير GUE/GSE/SFA فقط عبر {% block patient_meta %} — باقي
-  التقارير بالنظام ما تتأثر لأنها ما تعرّف هذا البلوك).
-  كل المتغيرات اختيارية (|default('')) حتى ما ينكسر العرض إذا app.py لسا
-  ما يمرر sample_no/sample_time/number_of/patient_name_en.
+{# ============== ترويسة بيانات المريض/العينة — نسخة v2 (تطابق الصورة المرجعية) ==============
+   يستبدل قسم "الدكتور المرسل / اسم المريض" الافتراضي بـ base_report.html
+   بتخطيط عمودين: يمين = الاسم عربي+انكليزي/العمر/الجنس/الاستشاري، يسار =
+   رقم العينة/رقم المريض/تاريخ ووقت العينة/Number Of. يمكن لأي تقرير آخر
+   تبنّي نفس الترويسة بمجرد إضافة السطرين التاليين لبدايته:
+     {% import "reports/partials/exam_report_shared.html" as shared with context %}
+     {% block patient_meta %}{{ shared.patient_meta_v2() }}{% endblock %}
 #}
 {% macro patient_meta_v2() %}
-<div class="patient-info-v2" dir="ltr">
+<div class="patient-info-v2">
   <div class="info-col">
     <div class="info-row"><span class="info-label">Patient Name</span><span class="info-colon">:</span><span class="info-val ar-name">{{ patient_name|default('') }}</span></div>
-    <div class="info-row"><span class="info-label">Patient Name</span><span class="info-colon">:</span><span class="info-val">{{ patient_name_en|default('') }}{% if patient_name_en %} <span class="auto-badge">🔤 auto</span>{% endif %}</span></div>
-    <div class="info-row"><span class="info-label">Age</span><span class="info-colon">:</span><span class="info-val">{{ age|default('') }}{% if age %} Year(s){% endif %}</span></div>
+    {% if patient_name_en|default('') %}
+    <div class="info-row"><span class="info-label">Patient Name</span><span class="info-colon">:</span><span class="info-val">{{ patient_name_en }}</span></div>
+    {% endif %}
+    <div class="info-row"><span class="info-label">Age</span><span class="info-colon">:</span><span class="info-val">{{ age|default('') }}</span></div>
     <div class="info-row"><span class="info-label">Sex</span><span class="info-colon">:</span><span class="info-val">{{ sex|default('') }}</span></div>
     <div class="info-row"><span class="info-label">Consultant</span><span class="info-colon">:</span><span class="info-val">{{ referring_doctor_name|default('') }}</span></div>
   </div>
@@ -147,97 +127,95 @@
     <div class="info-row"><span class="info-label">Patient No.</span><span class="info-colon">:</span><span class="info-val">{{ patient_id|default('') }}</span></div>
     <div class="info-row"><span class="info-label">Sample Date</span><span class="info-colon">:</span><span class="info-val">{{ visit_date|default('') }}</span></div>
     <div class="info-row"><span class="info-label">Sample Time</span><span class="info-colon">:</span><span class="info-val">{{ sample_time|default('') }}</span></div>
-    <div class="info-row"><span class="info-label">Number Of</span><span class="info-colon">:</span><span class="info-val">{{ number_of|default(1) }}</span></div>
+    <div class="info-row"><span class="info-label">Number Of</span><span class="info-colon">:</span><span class="info-val">{{ number_of|default('') }}</span></div>
   </div>
 </div>
 {% endmacro %}
 
-{% macro add_param_row(section_key, order_test_id) %}
+
+{# ============== صف نتيجة مفردة ==============
+   param: صف test_parameters (يوفّر param['id'] و param['name']).
+   range_row: صف reference_ranges أو None (find_reference_range من app.py).
+   unit: نص الوحدة (units.get(name, '')).
+   result_value: قيمة النتيجة (نص أو رقم) أو None.
+   note: نص الملاحظة الخاصة بهذا الباراميتر (param_notes.get(name, '')) أو ''.
+   order_test_id: رقم طلب التحليل — يُستخدم لحفظ الملاحظة عبر editor_script.
+#}
+{# يرجّع نص النتيجة الفعلي من صف results: يفضّل value_text لو موجود
+   وغير فاضي، وإلا يرجع value_numeric — بدل الاعتماد على value_text وحده
+   (لو النتيجة رقمية بحتة وvalue_text=NULL كان سيطبع فاضي دائمًا). #}
+{% macro resolve_value(row) -%}
+{%- if row -%}
+  {%- if row['value_text'] not in (none, '') -%}{{ row['value_text'] }}{%- elif row['value_numeric'] is not none -%}{{ row['value_numeric'] }}{%- endif -%}
+{%- endif -%}
+{%- endmacro %}
+
+
+{% macro exam_row(param, range_row, unit, result_value, note, order_test_id) %}
+{% set normal_range = '' %}
+{% if range_row %}
+  {% if range_row['range_text'] %}
+    {% set normal_range = range_row['range_text'] %}
+  {% elif range_row['low'] is not none and range_row['high'] is not none %}
+    {% set normal_range = (range_row['low']|string) ~ ' - ' ~ (range_row['high']|string) %}
+  {% elif range_row['low'] is not none %}
+    {% set normal_range = '> ' ~ (range_row['low']|string) %}
+  {% elif range_row['high'] is not none %}
+    {% set normal_range = '< ' ~ (range_row['high']|string) %}
+  {% endif %}
+{% endif %}
+<div class="result-row">
+  <span class="rname editable" data-field="param_name" data-param-id="{{ param['id'] }}">{{ param['name'] }}</span>
+  <span class="rcolon">:</span>
+  <span class="rval editable" data-field="result" data-param-id="{{ param['id'] }}">{{ result_value if result_value not in (none, '') else '' }}{% if unit and result_value not in (none, '') %} <span class="runit">{{ unit }}</span>{% endif %}</span>
+  <span class="rnorm">{{ normal_range }}</span>
+  <button type="button" class="rnote-btn" onclick="examToggleNote({{ param['id'] }}, {{ order_test_id }})" title="إضافة/تعديل ملاحظة أمام هذا الباراميتر">📝</button>
+</div>
+<div class="inline-note" id="exam-note-{{ param['id'] }}" style="{{ '' if note else 'display:none;' }}">{% if note %}💬 {{ note }}{% endif %}</div>
+{% endmacro %}
+
+
+{% macro add_param_row(section_id, order_test_id) %}
 <div class="add-param-row">
-  <button type="button" onclick="addNewParam('{{ section_key }}', {{ order_test_id }})">+ إضافة باراميتر جديد لهذا القسم</button>
+  <button type="button" onclick="alert('إضافة باراميتر جديد لهذا التحليل مباشرة من هنا ميزة قادمة قريبًا. بالوقت الحالي أضف الباراميتر من: الإدارة ← كتالوج التحاليل ← هذا التحليل ← إضافة باراميتر، وسيظهر تلقائيًا هنا بالمرة القادمة.')">+ إضافة باراميتر جديد لهذا القسم</button>
 </div>
 {% endmacro %}
 
+
 {% macro editor_script(order_test_id) %}
 <script>
-(function(){
-  function flash(el){
-    var f = document.createElement('span');
-    f.textContent = '✓'; f.className = 'save-flash';
-    el.insertAdjacentElement('afterend', f);
-    setTimeout(function(){ f.remove(); }, 900);
-  }
-
-  // ------- click-to-edit: كل عنصر .editable يرسل حفظ فوري عند الخروج/Enter -------
-  function bindEditable(el){
-    if(el.dataset.bound) return; el.dataset.bound = '1';
-    el.setAttribute('contenteditable', 'true');
-    el.addEventListener('keydown', function(e){
-      if(e.key === 'Enter'){ e.preventDefault(); el.blur(); }
-      if(e.key === 'Escape'){ el.blur(); }
-    });
-    el.addEventListener('focus', function(){ el.classList.add('editing'); });
-    el.addEventListener('blur', function(){
-      el.classList.remove('editing');
-      saveField(el);
-    });
-  }
-
-  function saveField(el){
-    var payload = {
-      field: el.dataset.field,
-      value: el.textContent.trim(),
-      param_id: el.dataset.paramId || null,
-      order_test_id: el.dataset.orderTestId || {{ order_test_id }},
-    };
-    fetch('/reports/inline-edit', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    }).then(function(r){ return r.json(); })
-      .then(function(resp){ if(resp && resp.ok) flash(el); })
-      .catch(function(){ /* صامت — لا نكسر الطباعة لو فشل الحفظ */ });
-  }
-
-  document.addEventListener('DOMContentLoaded', function(){
-    document.querySelectorAll(
-      '.report-page .lab-name, .report-page .lab-sub, ' +
-      '.report-page .info-val, .report-page .report-title, .report-page .section-title, ' +
-      '.report-page .rname, .report-page .rval, .report-page .rnorm'
-    ).forEach(bindEditable);
-  });
-
-  // ------- ملاحظة أمام باراميتر: حفظ عند الخروج من الصندوق -------
-  window.toggleParamNote = function(id){
-    var el = document.getElementById(id);
-    if(!el) return;
-    var showing = el.style.display !== 'none';
-    el.style.display = showing ? 'none' : 'block';
-    if(!showing) el.focus();
-  };
-  document.addEventListener('DOMContentLoaded', function(){
-    document.querySelectorAll('.inline-note').forEach(function(el){
-      el.addEventListener('blur', function(){
-        fetch('/order-tests/' + el.dataset.orderTestId + '/param-note', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: 'param_name=' + encodeURIComponent(el.dataset.paramId) + '&note=' + encodeURIComponent(el.textContent.trim())
-        }).then(function(){ flash(el); });
-      });
-    });
-  });
-
-  // ------- إضافة باراميتر جديد لقسم -------
-  window.addNewParam = function(sectionKey, orderTestId){
-    var name = prompt('اسم الباراميتر الجديد (بالإنكليزي):');
-    if(!name) return;
-    fetch('/order-tests/' + orderTestId + '/add-parameter', {
+// يفتح/يحفظ ملاحظة قصيرة أمام باراميتر واحد بالذات (زر 📝 بكل صف نتيجة).
+// الحفظ عبر POST /order-tests/<order_test_id>/param-note بحقل
+// test_parameter_id (نفس id بجدول test_parameters، وليس اسم الباراميتر)
+// — راجع order_test_param_note() بـ app.py.
+function examToggleNote(paramId, orderTestId) {
+  var box = document.getElementById('exam-note-' + paramId);
+  if (!box || box.dataset.editing === '1') return;
+  var currentText = box.textContent.replace('💬', '').trim();
+  box.dataset.editing = '1';
+  box.style.display = 'block';
+  box.innerHTML = '';
+  var ta = document.createElement('textarea');
+  ta.value = currentText;
+  ta.placeholder = 'ملاحظة أمام هذا الباراميتر...';
+  box.appendChild(ta);
+  ta.focus();
+  ta.addEventListener('blur', function () {
+    var note = ta.value.trim();
+    fetch('/order-tests/' + orderTestId + '/param-note', {
       method: 'POST',
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-      body: 'section=' + encodeURIComponent(sectionKey) + '&name=' + encodeURIComponent(name)
-    }).then(function(r){ return r.json(); })
-      .then(function(resp){ if(resp && resp.ok) location.reload(); });
-  };
-})();
+      body: 'test_parameter_id=' + encodeURIComponent(paramId) + '&note=' + encodeURIComponent(note)
+    });
+    box.dataset.editing = '0';
+    if (note) {
+      box.textContent = '💬 ' + note;
+      box.style.display = 'block';
+    } else {
+      box.textContent = '';
+      box.style.display = 'none';
+    }
+  });
+}
 </script>
 {% endmacro %}

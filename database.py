@@ -495,6 +495,12 @@ def migrate(conn):
             ("lab_card_number", "TEXT"), ("contact_method", "TEXT DEFAULT 'None'"),
             ("title", "TEXT DEFAULT 'Mr.'"), ("travel_certificate_number", "TEXT"),
             ("age_unit", "TEXT DEFAULT 'Years'"),
+            # full_name_en: الاسم الإنكليزي — app.py يقرأ/يكتب هذا العمود
+            # أصلاً (تسجيل مريض جديد، تعديل مريض، تعديل زيارة، وطباعة
+            # التقرير عبر _pt_en_row) لكن العمود ما كان مُضافًا هنا بقاعدة
+            # البيانات، فكان أي حفظ لمريض أو طباعة تقرير سينهار فورًا
+            # بخطأ "no such column: full_name_en". هذا العمود هو الإصلاح.
+            ("full_name_en", "TEXT"),
         ],
         "doctors": [("email", "TEXT"), ("commission_percent", "REAL DEFAULT 0")],
         # phone: رقم واتساب مدير المختبر المُرسِل (لإرسال كشف الحساب الشهري له)
@@ -502,6 +508,10 @@ def migrate(conn):
         "order_tests": [
             ("doctor_id", "INTEGER"), ("collected_at", "TEXT"), ("accessioned_at", "TEXT"),
             ("price", "REAL"),
+            # report_comment: الملاحظة العامة أسفل تقرير الفحص (GUE/GSE/SFA
+            # وأي تقرير فحص مستقبلي بنمط exam_report_shared.html) — سطر حر
+            # لكل طلب تحليل، يُحفظ عبر /order-tests/<id>/report-comment.
+            ("report_comment", "TEXT"),
         ],
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
         "visits": [("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
@@ -579,6 +589,10 @@ def migrate(conn):
         # يغيّر أي تصميم محفوظ إلا إذا عبّاه المدير صراحةً من شاشة إدارة
         # الدكاترة لدكتور معيّن.
         "examining_doctors_list": [("font_size", "INTEGER")],
+        # note: ملاحظة قصيرة أمام باراميتر واحد بالذات (زر 📝 بتقارير الفحص
+        # GUE/GSE/SFA — راجع exam_row بـ exam_report_shared.html)، مستقلة
+        # تمامًا عن order_tests.report_comment (الملاحظة العامة للتقرير كامل).
+        "results": [("note", "TEXT")],
     }
     for table, columns in needed.items():
         existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -671,6 +685,101 @@ def migrate(conn):
                 (pcur.lastrowid, low, high, range_text),
             )
         conn.commit()
+
+    # GUE / GSE / SFA (فحص البول العام، فحص البراز العام، تحليل السائل
+    # المنوي) — تقارير طباعة ثابتة جديدة (reports/urine_exam.html،
+    # reports/stool_exam.html، reports/seminal_fluid.html — راجع
+    # REPORT_TEMPLATE_MAP بـ app.py) بدل مسار "مصمم التقارير" العام. أسماء
+    # الباراميترات هنا يجب أن تطابق بالضبط أسماء macro_names/micro_names
+    # المكتوبة داخل تلك القوالب (حساسة لحالة الأحرف والمسافات) حتى تظهر كل
+    # نتيجة تحت قسمها الصحيح بالتقرير المطبوع. لا يُنشئ التحليل من الصفر لو
+    # كان موجودًا أصلاً (بأي اسم/قسم عدّله المستخدم) — فقط يُكمّل الباراميترات
+    # الناقصة له (بدون تكرار لو الاسم موجود أصلاً، بغض النظر عمّن أضافه).
+    exam_test_specs = [
+        ("GUE", "General Urine Examination", "فحص البول العام", "Others", "Urine", [
+            ("Color", "", "Text", None, None, "Yellow"),
+            ("Specific Gravity", "", "Numeric", 1.005, 1.030, None),
+            ("Reaction (pH)", "", "Numeric", 5.0, 8.0, None),
+            ("Glucose", "", "Text", None, None, "Negative"),
+            ("Protein", "", "Text", None, None, "Negative"),
+            ("Ketone", "", "Text", None, None, "Negative"),
+            ("Bile Pigment", "", "Text", None, None, "Negative"),
+            ("Urobilinogen", "eu/dl", "Numeric", 0.2, 1.0, None),
+            ("Nitrite", "", "Text", None, None, "Negative"),
+            ("RBCs", "/HPF", "Text", None, None, "0-2"),
+            ("PUS", "/HPF", "Text", None, None, "0-5"),
+            ("Casts", "", "Text", None, None, "Nil"),
+            ("Epithelial Cells", "/HPF", "Text", None, None, "0-2"),
+            ("Amorphous", "", "Text", None, None, "Nil"),
+            ("Mucus", "", "Text", None, None, "Nil"),
+            ("Crystals", "", "Text", None, None, "Nil"),
+            ("Parasites / Others", "", "Text", None, None, "Nil"),
+        ]),
+        ("GSE", "General Stool Examination", "فحص البراز العام", "Others", "Stool", [
+            ("Color", "", "Text", None, None, "Brown"),
+            ("Consistency", "", "Text", None, None, "Formed"),
+            ("Mucus", "", "Text", None, None, "Nil"),
+            ("Blood", "", "Text", None, None, "Nil"),
+            ("Worms / Helminths", "", "Text", None, None, "Nil"),
+            ("Pus Cells", "/HPF", "Text", None, None, "0-2"),
+            ("RBCs", "", "Text", None, None, "Nil"),
+            ("Amoeba (E. histolytica)", "", "Text", None, None, "Not seen"),
+            ("Giardia lamblia", "", "Text", None, None, "Not seen"),
+            ("Helminthes Ova", "", "Text", None, None, "Not seen"),
+            ("Undigested Food Particles", "", "Text", None, None, "Nil"),
+            ("Fungi / Yeast", "", "Text", None, None, "Nil"),
+        ]),
+        ("SFA", "Seminal Fluid Analysis", "تحليل السائل المنوي", "Others", "Semen", [
+            ("Volume", "mL", "Numeric", 1.5, 5.0, None),
+            ("Color / Appearance", "", "Text", None, None, "Grey-white / Opalescent"),
+            ("Liquefaction Time", "min", "Numeric", 15, 30, None),
+            ("Viscosity", "", "Text", None, None, "Normal"),
+            ("pH", "", "Numeric", 7.2, 8.0, None),
+            ("Sperm Count", "M/mL", "Numeric", None, None, "≥ 16 Million/mL"),
+            ("Total Sperm Count", "M", "Numeric", None, None, "≥ 39 Million/ejaculate"),
+            ("Active (Progressive)", "%", "Numeric", None, None, "≥ 30%"),
+            ("Sluggish (Non-progressive)", "%", "Numeric", None, None, None),
+            ("Immotile", "%", "Numeric", None, None, None),
+            ("Normal Forms", "%", "Numeric", None, None, "≥ 4%"),
+            ("Abnormal Forms", "%", "Numeric", None, None, None),
+            ("Pus Cells", "/HPF", "Text", None, None, "< 1 Million/mL"),
+            ("RBCs", "/HPF", "Text", None, None, "Nil"),
+            ("Agglutination", "", "Text", None, None, "Nil"),
+        ]),
+    ]
+    for code, name, name_ar, department, sample_type, param_specs in exam_test_specs:
+        existing_def = conn.execute(
+            "SELECT id FROM test_definitions WHERE code=?", (code,)
+        ).fetchone()
+        if existing_def:
+            test_def_id = existing_def["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO test_definitions (code, name, name_ar, department, sample_type, price) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (code, name, name_ar, department, sample_type, 0),
+            )
+            test_def_id = cur.lastrowid
+        existing_param_names = {
+            row["name"] for row in conn.execute(
+                "SELECT name FROM test_parameters WHERE test_definition_id=?", (test_def_id,)
+            ).fetchall()
+        }
+        for pname, unit, rtype, low, high, range_text in param_specs:
+            if pname in existing_param_names:
+                continue
+            pcur = conn.execute(
+                "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) "
+                "VALUES (?, ?, ?, ?)",
+                (test_def_id, pname, unit, rtype),
+            )
+            if low is not None or high is not None or range_text is not None:
+                conn.execute(
+                    "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_to, low, high, range_text) "
+                    "VALUES (?, 'Both', 0, 120, ?, ?, ?)",
+                    (pcur.lastrowid, low, high, range_text),
+                )
+    conn.commit()
 
     # الشعار (logo_path) صار يُضاف افتراضيًا للتنصيبات الجديدة فقط عبر seed()،
     # فأي قاعدة بيانات موجودة من قبل هذا التحديث ما عندها هذا الإعداد إطلاقًا

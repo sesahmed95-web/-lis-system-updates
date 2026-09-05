@@ -1,5 +1,5 @@
 {% extends "reports/base_report.html" %}
-{% import "reports/partials/exam_report_shared.html" as shared %}
+{% import "reports/partials/exam_report_shared.html" as shared with context %}
 
 {# ============================================================================
    يعتمد على base_report.html المُحدَّث (نسخة base_report.html المرفقة معه):
@@ -29,18 +29,18 @@
   <div class="section-title editable" data-field="section_title" data-param-id="">Macroscopic Examination</div>
   {% set macro_names = ["Color","Specific Gravity","Reaction (pH)","Glucose","Protein","Ketone","Bile Pigment","Urobilinogen","Nitrite"] %}
   {% for p in params if p['name'] in macro_names %}
-    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), (results_by_name.get(p['name'])['value_text'] if results_by_name.get(p['name']) else results_by_name.get(p['name'])['value_numeric'] if results_by_name.get(p['name']) else None), param_notes.get(p['name'], ''), order_test_id) }}
+    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), shared.resolve_value(results_by_name.get(p['name'])), param_notes.get(p['name'], ''), order_test_id) }}
   {% endfor %}
   {{ shared.add_param_row('urine_macro', order_test_id) }}
 
   <div class="section-title editable" data-field="section_title" data-param-id="">Microscopic Examination</div>
   {% set micro_names = ["RBCs","PUS","Casts","Epithelial Cells","Amorphous","Mucus","Crystals","Parasites","Parasites / Others"] %}
   {% for p in params if p['name'] in micro_names %}
-    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), (results_by_name.get(p['name'])['value_text'] if results_by_name.get(p['name']) else results_by_name.get(p['name'])['value_numeric'] if results_by_name.get(p['name']) else None), param_notes.get(p['name'], ''), order_test_id) }}
+    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), shared.resolve_value(results_by_name.get(p['name'])), param_notes.get(p['name'], ''), order_test_id) }}
   {% endfor %}
   {# أي باراميتر انضاف يدويًا لهذا الفحص ومو بأي من القائمتين فوق (زر + إضافة باراميتر) يظهر هنا تلقائيًا #}
   {% for p in params if p['name'] not in macro_names and p['name'] not in micro_names %}
-    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), (results_by_name.get(p['name'])['value_text'] if results_by_name.get(p['name']) else results_by_name.get(p['name'])['value_numeric'] if results_by_name.get(p['name']) else None), param_notes.get(p['name'], ''), order_test_id) }}
+    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), shared.resolve_value(results_by_name.get(p['name'])), param_notes.get(p['name'], ''), order_test_id) }}
   {% endfor %}
   {{ shared.add_param_row('urine_micro', order_test_id) }}
 

@@ -175,7 +175,8 @@ BF_RETIC_LINK = {"BF": "RETIC", "RETIC": "BF"}
 # personally examine), since every one of those needs a stamp/signature line
 # on its printed report. CBC and the other non-examining report types don't
 # get this box.
-EXAM_SIGNATURE_TEST_CODES = {"BF", "BFRETIC", "RETIC", "FLUIDEXAM", "HBPREP", "SICKLE", "BMA", "BMBIOPSY", "WBCDIFF"}
+EXAM_SIGNATURE_TEST_CODES = {"BF", "BFRETIC", "RETIC", "FLUIDEXAM", "HBPREP", "SICKLE", "BMA", "BMBIOPSY", "WBCDIFF",
+                              "GUE", "GSE", "SFA"}
 
 # CBC results are grouped on the printed report with a blank spacer row
 # between each group, matching the reference report layout.
@@ -3828,7 +3829,60 @@ def _print_report_impl(order_test_id):
         sample_time=(ot["collected_at"] or ot["accessioned_at"] or "") if "collected_at" in ot.keys() else "",
         number_of=get_patient_number_of_day(db, order_test_id),
         patient_name_en=patient_name_en_value,
+        # order_test_id / results_by_name / param_notes / report_comment:
+        # مطلوبة لقوالب فحوصات exam_report_shared.html (GUE/GSE/SFA وأي
+        # تحليل مستقبلي بنفس النمط) — تُمرَّر دائمًا بلا استثناء (نفس منطق
+        # units أعلاه) حتى لا تتكرر مشكلة NameError/UndefinedError.
+        order_test_id=order_test_id,
+        results_by_name=results_by_name,
+        param_notes={name: r["note"] for name, r in results_by_name.items() if r["note"]},
+        report_comment=(ot["report_comment"] if "report_comment" in ot.keys() else "") or "",
     )
+
+
+# ---------------------------------------------------------------- exam reports --
+# نقطتا API لقوالب الفحص الجديدة (GUE/GSE/SFA — reports/urine_exam.html
+# وغيرها، عبر editor_script() بـ exam_report_shared.html): ملاحظة عامة أسفل
+# التقرير كامل، وملاحظة قصيرة أمام باراميتر واحد بالذات. مفصولتان تمامًا
+# (جدولان مختلفان) حتى تُحفظ كل وحدة بشكل مستقل دون التأثير على الثانية.
+@app.route("/order-tests/<int:order_test_id>/report-comment", methods=["POST"])
+@login_required
+def order_test_report_comment(order_test_id):
+    db = get_db()
+    order_test = db.execute("SELECT id FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    if not order_test:
+        return jsonify({"error": "Not found"}), 404
+    comment = request.form.get("report_comment", "")
+    db.execute("UPDATE order_tests SET report_comment=? WHERE id=?", (comment, order_test_id))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/order-tests/<int:order_test_id>/param-note", methods=["POST"])
+@login_required
+def order_test_param_note(order_test_id):
+    db = get_db()
+    order_test = db.execute("SELECT id FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    if not order_test:
+        return jsonify({"error": "Not found"}), 404
+    try:
+        test_parameter_id = int(request.form.get("test_parameter_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "بيانات غير صالحة"}), 400
+    note = request.form.get("note", "")
+    existing = db.execute(
+        "SELECT id FROM results WHERE order_test_id=? AND test_parameter_id=?",
+        (order_test_id, test_parameter_id),
+    ).fetchone()
+    if existing:
+        db.execute("UPDATE results SET note=? WHERE id=?", (note, existing["id"]))
+    else:
+        db.execute(
+            "INSERT INTO results (order_test_id, test_parameter_id, note) VALUES (?, ?, ?)",
+            (order_test_id, test_parameter_id, note),
+        )
+    db.commit()
+    return jsonify({"ok": True})
 
 
 def _whatsapp_flush_pdf_dir():
