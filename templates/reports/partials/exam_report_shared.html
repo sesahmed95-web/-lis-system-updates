@@ -35,6 +35,7 @@
   .patient-info-v2{
     display:flex; justify-content:space-between; gap:36px; margin:4px 0 14px 0;
     font-family:"Segoe UI", Tahoma, Arial, sans-serif; font-size:13.5px;
+    direction:ltr !important; text-align:left;
   }
   .info-col{flex:1;}
   .info-row{display:grid; grid-template-columns:104px 12px 1fr; padding:3px 0; align-items:baseline;}
@@ -133,7 +134,7 @@
   ما يمرر sample_no/sample_time/number_of/patient_name_en.
 #}
 {% macro patient_meta_v2() %}
-<div class="patient-info-v2">
+<div class="patient-info-v2" dir="ltr">
   <div class="info-col">
     <div class="info-row"><span class="info-label">Patient Name</span><span class="info-colon">:</span><span class="info-val ar-name">{{ patient_name|default('') }}</span></div>
     <div class="info-row"><span class="info-label">Patient Name</span><span class="info-colon">:</span><span class="info-val">{{ patient_name_en|default('') }}{% if patient_name_en %} <span class="auto-badge">🔤 auto</span>{% endif %}</span></div>

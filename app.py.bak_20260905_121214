@@ -156,9 +156,6 @@ REPORT_TEMPLATE_MAP = {
     "WBCDIFF": "reports/wbc_differential.html",
     "FLUIDEXAM": "reports/fluid_examination.html",
     "COAG": "reports/coagulation.html",
-    "GUE": "reports/urine_exam.html",
-    "GSE": "reports/stool_exam.html",
-    "SFA": "reports/seminal_fluid.html",
 }
 
 # Blood Film and Retic Count are two SEPARATE orderable tests, but when both
@@ -3803,11 +3800,6 @@ def _print_report_impl(order_test_id):
     # بسلوكها القديم تمامًا). راجع base_report.html لآلية التكرار الفعلية.
     repeat_header_on_print = department_shows_previous_values(ot["test_department"])
 
-    _pt_en_row = db.execute(
-        "SELECT full_name_en FROM patients WHERE id=?", (ot["patient_id"],)
-    ).fetchone()
-    patient_name_en_value = (_pt_en_row["full_name_en"] or "") if _pt_en_row else ""
-
     return render_template(
         template_name,
         ot=ot, params=params, ranges=ranges, units=units, cbc_groups=cbc_groups,
@@ -3827,7 +3819,7 @@ def _print_report_impl(order_test_id):
         sample_no=ot["barcode"] if "barcode" in ot.keys() else "",
         sample_time=(ot["collected_at"] or ot["accessioned_at"] or "") if "collected_at" in ot.keys() else "",
         number_of=get_patient_number_of_day(db, order_test_id),
-        patient_name_en=patient_name_en_value,
+        patient_name_en=(patient["full_name_en"] if patient and "full_name_en" in patient.keys() else ""),
     )
 
 
