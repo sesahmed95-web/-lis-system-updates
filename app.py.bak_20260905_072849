@@ -27,41 +27,6 @@ from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        find_last_visit_by_name_age, get_visit_completed_tests,
                        save_visit_previous_merges, get_visit_previous_merges)
 from daily_counter import get_patient_number_of_day
-
-ARABIC_NAME_TRANSLITERATION_MAP = [
-    ("عبدال", "Abdul"), ("عبد ال", "Abdul"), ("أبو", "Abu"), ("ابو", "Abu"),
-    ("ال", "Al"), ("إ", "I"), ("أ", "A"), ("آ", "Aa"), ("ا", "a"),
-    ("ب", "b"), ("ت", "t"), ("ث", "th"), ("ج", "j"), ("ح", "h"), ("خ", "kh"),
-    ("د", "d"), ("ذ", "th"), ("ر", "r"), ("ز", "z"), ("س", "s"), ("ش", "sh"),
-    ("ص", "s"), ("ض", "d"), ("ط", "t"), ("ظ", "th"), ("ع", "'"), ("غ", "gh"),
-    ("ف", "f"), ("ق", "q"), ("ك", "k"), ("ل", "l"), ("م", "m"), ("ن", "n"),
-    ("ه", "h"), ("و", "w"), ("ي", "y"), ("ى", "a"), ("ة", "a"), ("ء", "'"),
-    (" ", " "),
-]
-
-def transliterate_arabic_name(name):
-    """يرجّع اقتراح إنكليزي أولي لاسم عربي (تحويل صوتي تقريبي) — اقتراح
-    فقط، قابل للتعديل يدويًا لاحقًا من الواجهة."""
-    if not name:
-        return ""
-    remaining = name.strip()
-    out = []
-    i = 0
-    n = len(remaining)
-    while i < n:
-        matched = False
-        for ar, en in ARABIC_NAME_TRANSLITERATION_MAP:
-            if remaining[i:i + len(ar)] == ar:
-                out.append(en)
-                i += len(ar)
-                matched = True
-                break
-        if not matched:
-            out.append(remaining[i])
-            i += 1
-    result = "".join(out)
-    return " ".join(w.capitalize() if w else w for w in result.split(" "))
-
 from translations import t
 from barcode_gen import generate_code39, generate_code128, generate_qr
 import astm_host
@@ -1169,13 +1134,12 @@ def new_visit():
                 patient_id = existing["id"]
 
         if patient_id is None:
-            name_en = (request.form.get("patient_name_en") or "").strip() or transliterate_arabic_name(name)
             cur = db.execute(
-                "INSERT INTO patients (full_name, full_name_en, gender, age, age_unit, phone, address, contact_method, "
+                "INSERT INTO patients (full_name, gender, age, age_unit, phone, address, contact_method, "
                 "title, email, national_id, passport_number, travel_certificate_number, lab_card_number, "
                 "branch_id, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (name, name_en, gender, age, age_unit, phone, address, contact_method,
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (name, gender, age, age_unit, phone, address, contact_method,
                  title, email, national_id, passport_number, travel_certificate_number, lab_card_number,
                  session.get("branch_id"), now),
             )
@@ -1354,13 +1318,11 @@ def patient_new():
     db = get_db()
     if request.method == "POST":
         now = datetime.now().isoformat(timespec="seconds")
-        _pn_name = request.form.get("full_name", "").strip()
-        _pn_name_en = (request.form.get("full_name_en") or "").strip() or transliterate_arabic_name(_pn_name)
         db.execute(
-            "INSERT INTO patients (full_name, full_name_en, gender, age, age_unit, phone, email, address, national_id, "
+            "INSERT INTO patients (full_name, gender, age, age_unit, phone, email, address, national_id, "
             "passport_number, lab_card_number, contact_method, title, travel_certificate_number, "
-            "branch_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (_pn_name, _pn_name_en, request.form.get("gender"),
+            "branch_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (request.form.get("full_name", "").strip(), request.form.get("gender"),
              request.form.get("age") or None, request.form.get("age_unit") or "Years",
              request.form.get("phone"), request.form.get("email"),
              request.form.get("address"), request.form.get("national_id"),
@@ -1382,13 +1344,11 @@ def patient_edit(patient_id):
     if not patient:
         return "Not found", 404
     if request.method == "POST":
-        _pe_name = request.form.get("full_name", "").strip()
-        _pe_name_en = (request.form.get("full_name_en") or "").strip() or transliterate_arabic_name(_pe_name)
         db.execute(
-            "UPDATE patients SET full_name=?, full_name_en=?, gender=?, age=?, age_unit=?, phone=?, email=?, address=?, "
+            "UPDATE patients SET full_name=?, gender=?, age=?, age_unit=?, phone=?, email=?, address=?, "
             "national_id=?, passport_number=?, lab_card_number=?, contact_method=?, title=?, "
             "travel_certificate_number=? WHERE id=?",
-            (_pe_name, _pe_name_en, request.form.get("gender"),
+            (request.form.get("full_name", "").strip(), request.form.get("gender"),
              request.form.get("age") or None, request.form.get("age_unit") or "Years",
              request.form.get("phone"), request.form.get("email"),
              request.form.get("address"), request.form.get("national_id"),
@@ -2225,12 +2185,10 @@ def visit_edit(visit_id):
             flash("This invoice is locked and cannot be edited.")
             return redirect(url_for("visits_list"))
 
-        _ve_name = request.form.get("patient_name", "").strip()
-        _ve_name_en = (request.form.get("patient_name_en") or "").strip() or transliterate_arabic_name(_ve_name)
         db.execute(
-            "UPDATE patients SET full_name=?, full_name_en=?, gender=?, age=?, age_unit=?, phone=?, title=?, email=?, "
+            "UPDATE patients SET full_name=?, gender=?, age=?, age_unit=?, phone=?, title=?, email=?, "
             "national_id=?, passport_number=?, travel_certificate_number=?, lab_card_number=? WHERE id=?",
-            (_ve_name, _ve_name_en, request.form.get("gender"),
+            (request.form.get("patient_name", "").strip(), request.form.get("gender"),
              request.form.get("age") or None, request.form.get("age_unit") or "Years",
              request.form.get("phone"), request.form.get("title", "Mr."), request.form.get("email", "").strip(),
              request.form.get("national_id", "").strip(), request.form.get("passport_number", "").strip(),
