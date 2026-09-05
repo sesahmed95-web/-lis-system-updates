@@ -319,7 +319,7 @@
   .no-print { text-align: center; margin: 14px 0; }
   @media print { .preview-bar, .no-print { display: none; } }
 </style>
-{% block report_styles %}{% endblock %}
+{% block report_styles %}{{ shared.styles() }}{% endblock %}
 </head>
 <body>
 
