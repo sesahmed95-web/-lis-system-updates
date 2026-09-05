@@ -1,3 +1,4 @@
+{% import "reports/partials/exam_report_shared.html" as shared %}
 <!DOCTYPE html>
 <!-- صفحة مستقلة تمامًا (ما تمتد base.html) — عمدًا، حتى ما تظهر القائمة
      الجانبية ولا الشريط العلوي لبرنامج المختبر إطلاقاً بهذي الصفحة، لا
@@ -381,18 +382,7 @@
             {% endif %}
           </div>
 
-          {% block patient_meta %}
-          <table class="meta-table">
-            <tr>
-              <td class="meta-label">الدكتور المرسل: {{ referring_doctor_name }}</td>
-              <td class="meta-side"><b>Date:</b> {{ visit_date }}</td>
-            </tr>
-            <tr>
-              <td class="meta-label">اسم المريض: <span class="patient-name-hl">{{ patient_name }}</span></td>
-              <td class="meta-side"><b>Age:</b> {{ age }} &nbsp;&nbsp; <b>Sex:</b> {{ sex }}</td>
-            </tr>
-          </table>
-          {% endblock %}
+          {% block patient_meta %}{{ shared.patient_meta_v2() }}{% endblock %}
         </td></tr>
       {% if repeat_header_on_print %}</thead>{% else %}</tbody>{% endif %}
       <tbody>

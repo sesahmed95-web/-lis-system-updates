@@ -130,3 +130,41 @@ Traceback (most recent call last):
   File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 100, in _get_source_fast
     raise TemplateNotFound(template)
 jinja2.exceptions.TemplateNotFound: partials/stamp_picker.html
+
+================================================================================
+2026-09-05T07:34:19  order_test_id=5
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 3531, in print_report
+    return _print_report_impl(order_test_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 3821, in _print_report_impl
+    number_of=get_patient_number_of_day(db, order_test_id),
+              ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\daily_counter.py", line 16, in get_patient_number_of_day
+    row = db.execute(
+          ~~~~~~~~~~^
+        "SELECT COALESCE(collected_at, accessioned_at) AS d, patient_id, id "
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        "FROM order_tests WHERE id=?", (order_test_id,)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ).fetchone()
+    ^
+sqlite3.OperationalError: no such column: patient_id
+
+================================================================================
+2026-09-05T07:34:44  order_test_id=6
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 3531, in print_report
+    return _print_report_impl(order_test_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 3821, in _print_report_impl
+    number_of=get_patient_number_of_day(db, order_test_id),
+              ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\daily_counter.py", line 16, in get_patient_number_of_day
+    row = db.execute(
+          ~~~~~~~~~~^
+        "SELECT COALESCE(collected_at, accessioned_at) AS d, patient_id, id "
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        "FROM order_tests WHERE id=?", (order_test_id,)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ).fetchone()
+    ^
+sqlite3.OperationalError: no such column: patient_id
