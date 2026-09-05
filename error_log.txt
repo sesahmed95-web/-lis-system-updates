@@ -168,3 +168,36 @@ Traceback (most recent call last):
     ).fetchone()
     ^
 sqlite3.OperationalError: no such column: patient_id
+
+================================================================================
+2026-09-05T08:01:47  preview test_definition_id=9
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 6011, in preview_report_design
+    return _preview_report_design_impl(test_definition_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 6099, in _preview_report_design_impl
+    return render_template(
+        template_name,
+    ...<12 lines>...
+        referring_doctor_name="—", is_design_preview=True, preview_test_id=test_definition_id,
+    )
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\custom.html", line 1, in top-level template code
+    {% extends "reports/base_report.html" %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 401, in top-level template code
+    {% include "partials/stamp_picker.html" %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 66, in get_source
+    return self._get_source_fast(environment, template)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 100, in _get_source_fast
+    raise TemplateNotFound(template)
+jinja2.exceptions.TemplateNotFound: partials/stamp_picker.html
