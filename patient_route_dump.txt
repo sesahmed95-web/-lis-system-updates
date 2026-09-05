@@ -1,0 +1,472 @@
+=== دوال فيها INSERT/UPDATE على جدول patients: ['new_visit', 'patient_new', 'patient_edit', 'visit_edit'] ===
+
+
+================================================================================
+### new_visit ###
+================================================================================
+
+def new_visit():
+    db = get_db()
+    if request.method == "POST":
+        # زر "✅ تم سحب العينة" إلزامي بهذي الصفحة (نقطة #9) — يمثّل تأكيد
+        # الاستقبال إنه سحب العينة فعليًا وقت تسجيل الزيارة (حالة شائعة
+        # بالمختبرات الصغيرة حيث الاستقبال هو نفسه يسحب العينة). لو ما
+        # انضغط، نرفض الحفظ من السيرفر (مو بس تحقق JS بالواجهة) قبل أي
+        # INSERT بقاعدة البيانات. تأثيره: order_tests تُنشأ مباشرة بحالة
+        # 'Collected' (بدل 'Accepted' الافتراضية) فتتخطى طابور "سحب
+        # العينة" وتظهر مباشرة بطابور "استلام العينة" — راجع
+        # samples_collection/samples_accession لنفس منطق الحالتين.
+        sample_collected = request.form.get("sample_collected") == "1"
+        if not sample_collected:
+            error_msg = "لازم تأكيد \"تم سحب العينة\" قبل حفظ الزيارة."
+            if request.headers.get("X-LIS-Ajax") == "1":
+                return jsonify({"ok": False, "error": error_msg}), 400
+            flash(error_msg)
+            return redirect(url_for("new_visit"))
+
+        name = request.form.get("patient_name", "").strip()
+        title = request.form.get("title", "Mr.")
+        gender = request.form.get("gender", "")
+        age = request.form.get("age") or None
+        age_unit = request.form.get("age_unit") or "Years"
+        phone = request.form.get("phone", "")
+        email = request.form.get("email", "").strip()
+        address = request.form.get("address", "")
+        national_id = request.form.get("national_id", "").strip()
+        passport_number = request.form.get("passport_number", "").strip()
+        travel_certificate_number = request.form.get("travel_certificate_number", "").strip()
+        lab_card_number = request.form.get("lab_card_number", "").strip()
+        fasting = request.form.get("fasting", "Undefined")
+        notes = request.form.get("notes", "")
+        # المعلومات الصحية (Health Information) — خاصة بهذي الزيارة تحديداً.
+        weight = request.form.get("weight") or None
+        height = request.form.get("height") or None
+        symptoms = request.form.get("symptoms", "")
+        disease = request.form.get("disease", "")
+        therapy = request.form.get("therapy", "")
+        # الزيارة المنزلية (Home Visit)
+        is_home_visit = 1 if request.form.get("is_home_visit") == "1" else 0
+        home_visit_address = request.form.get("home_visit_address", "") if is_home_visit else ""
+        try:
+            home_visit_fee = float(request.form.get("home_visit_fee") or 0) if is_home_visit else 0.0
+        except ValueError:
+            home_visit_fee = 0.0
+        examining_doctor = request.form.get("examining_doctor", "")
+        expenses = request.form.get("expenses") or 0
+        # حقل "الدكتور الفاحص" (attending_doctor) صار نفس "دكتور المختبر
+        # الفاحص" (examining_doctor) — كانا حقلين منفصلين بالشاشة سابقًا
+        # وصار واحد بس بناءً على طلب المستخدم، وهذا العمود يُملأ تلقائيًا
+        # بنفس القيمة حتى يبقى عمود "الزيارات" شغّالاً بدون أي تغيير.
+        attending_doctor = examining_doctor
+        contact_method = request.form.get("contact_method", "None")
+        test_ids = request.form.getlist("tests")
+        now = datetime.now().isoformat(timespec="seconds")
+
+        # الطبيب المُحيل (خارجي) — إذا هذا أول مرة يذكر اسمه، ينحفظ تلقائيًا
+        # بجدول الأطباء حتى يظهر بالاقتراحات بالمرات الجاية.
+        referring_doctor_id = find_or_create_doctor(db, request.form.get("doctor_name", ""))
+
+        # المختبر المُرسِل لهذه العينة (لو النموذج وارد من مختبر ثاني مو من
+        # مراجع مباشر) — تُستخدم فقط للمحاسبة الداخلية بين المختبرين؛ اسم
+        # هذا المختبر ما ينطبع بأي تقرير أبدًا (راجع print_report/from_other_lab).
+        # يُكتب كاسم حر (نفس أسلوب حقل الدكتور المُحيل) بدل قائمة منسدلة
+        # ثابتة، فيُنشأ المختبر تلقائيًا بأول مرة يُذكر اسمه — ما تحتاج
+        # الاستقبال تضيفه مسبقًا من صفحة إدارة المختبرات المُحيلة.
+        referral_center_id = find_or_create_referral_center(db, request.form.get("referral_lab_name", ""))
+
+        # إذا اختار موظف الاستقبال مريضًا سبق أن زار المختبر (من نتائج البحث
+        # الفوري)، تُستخدم بطاقته الحالية بدل إنشاء بطاقة مريض مكررة جديدة.
+        existing_patient_id = request.form.get("existing_patient_id") or None
+        patient_id = None
+        if existing_patient_id:
+            existing = db.execute(
+                "SELECT id FROM patients WHERE id=?", (existing_patient_id,)
+            ).fetchone()
+            if existing:
+                patient_id = existing["id"]
+
+        if patient_id is None:
+            cur = db.execute(
+                "INSERT INTO patients (full_name, gender, age, age_unit, phone, address, contact_method, "
+                "title, email, national_id, passport_number, travel_certificate_number, lab_card_number, "
+                "branch_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (name, gender, age, age_unit, phone, address, contact_method,
+                 title, email, national_id, passport_number, travel_certificate_number, lab_card_number,
+                 session.get("branch_id"), now),
+            )
+            patient_id = cur.lastrowid
+
+        examining_doctor_fee = compute_examining_doctor_fee(db, examining_doctor, test_ids)
+
+        reg_number = next_registration_number(db)
+        visit_type = "home-visit" if is_home_visit else "walk-in"
+        cur = db.execute(
+            "INSERT INTO visits (registration_number, patient_id, doctor_id, referral_center_id, visit_type, fasting, notes, "
+            "examining_doctor, expenses, examining_doctor_fee, attending_doctor, weight, height, symptoms, disease, therapy, "
+            "is_home_visit, home_visit_address, home_visit_fee, status, branch_id, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', ?, ?, ?)",
+            (reg_number, patient_id, referring_doctor_id, referral_center_id, visit_type, fasting, notes, examining_doctor, expenses,
+             examining_doctor_fee, attending_doctor, weight, height, symptoms, disease, therapy,
+             is_home_visit, home_visit_address, home_visit_fee, session.get("branch_id"), session["user_id"], now),
+        )
+        visit_id = cur.lastrowid
+
+        order_cur = db.execute("INSERT INTO orders (visit_id, status, created_at) VALUES (?, 'Open', ?)",
+                                (visit_id, now))
+        order_id = order_cur.lastrowid
+
+        total = 0.0
+        for tid in test_ids:
+            test = db.execute("SELECT * FROM test_definitions WHERE id=?", (tid,)).fetchone()
+            if not test:
+                continue
+            price = get_test_price(db, tid, referring_doctor_id)
+            barcode = f"{reg_number}{tid.zfill(3)}"
+            # الحالة تبدأ 'Collected' مباشرة (مو 'Accepted') لأن زر "تم سحب
+            # العينة" الإلزامي فوق تأكد إنها انسحبت فعليًا هذي اللحظة —
+            # فتتخطى طابور "سحب العينة" وتظهر مباشرة بطابور "استلام العينة".
+            db.execute(
+                "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, "
+                "collected_at, created_at) VALUES (?, ?, 'Collected', ?, ?, ?, ?, ?)",
+                (order_id, tid, barcode, price, referring_doctor_id, now, now),
+            )
+            total += price or 0
+
+        # أجرة الزيارة المنزلية الإضافية (إن فُعِّلت) تُضاف لمجموع الفحوصات
+        # قبل حساب الفاتورة، بنفس أسلوب أي بند إضافي بالمجموع.
+        total += home_visit_fee
+
+        # "المبلغ الكلي" بصفحة الزيارة الجديدة يبدأ محسوبًا تلقائيًا من
+        # مجموع أسعار التحاليل المختارة، بس موظف الاستقبال يقدر يعدّله يدويًا
+        # (مثلاً لخصم أو تسوية) — الفرق بين المجموع الفعلي والمبلغ المُعدَّل
+        # يُسجَّل بعمودي discount_amount/extra_charges حتى يبقى مجموع أسعار
+        # التحاليل الأصلي محفوظًا للمراجعة.
+        computed_total = total
+        total_override_raw = request.form.get("total_amount_input")
+        try:
+            total_override = float(total_override_raw) if total_override_raw not in (None, "") else None
+        except ValueError:
+            total_override = None
+        invoice_total = total_override if (total_override is not None and total_override >= 0) else computed_total
+        discount_amount = max(0.0, computed_total - invoice_total)
+        extra_charges = max(0.0, invoice_total - computed_total)
+
+        # "الواصل" — أي مبلغ استلمه الاستقبال نقدًا وقت تسجيل الزيارة نفسها.
+        # يُسجَّل كدفعة فعلية بجدول payments (نفس آلية /billing/pay) حتى يظهر
+        # بسجلات المحاسبة والتقارير، و"الباقي" يُحسب تلقائيًا من الفرق.
+        try:
+            paid_amount = float(request.form.get("paid_amount") or 0)
+        except ValueError:
+            paid_amount = 0.0
+        paid_amount = max(0.0, paid_amount)
+        if invoice_total > 0:
+            paid_amount = min(paid_amount, invoice_total)
+            invoice_status = "Paid" if paid_amount >= invoice_total else ("Partial" if paid_amount > 0 else "Unpaid")
+        else:
+            invoice_status = "Paid" if paid_amount <= 0 else "Partial"
+
+        inv_cur = db.execute(
+            "INSERT INTO invoices (visit_id, total_amount, discount_amount, extra_charges, paid_amount, status, "
+            "created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (visit_id, invoice_total, discount_amount, extra_charges, paid_amount, invoice_status,
+             session["user_id"], now),
+        )
+        invoice_id = inv_cur.lastrowid
+
+        if paid_amount > 0:
+            db.execute(
+                "INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) VALUES (?, ?, 'Cash', ?, ?)",
+                (invoice_id, paid_amount, session["user_id"], now),
+            )
+            log_action("Payment", "invoice", invoice_id, f"amount={paid_amount} (at registration)")
+
+
+        if contact_method != "None":
+            db.execute(
+                "INSERT INTO patient_followups (patient_id, visit_id, status, followup_date, created_at) "
+                "VALUES (?, ?, 'Pending', ?, ?)",
+                (patient_id, visit_id, now[:10], now),
+            )
+
+        db.commit()
+        log_action("Create", "visit", visit_id, f"reg#{reg_number}")
+        log_action("Collect", "visit", visit_id, f"sample_collected_at_registration reg#{reg_number}")
+        flash(f"Visit #{reg_number} created successfully.")
+
+        # موافقة الموظف على دمج نتائج تحاليل قديمة (من آخر زيارة سابقة
+        # لنفس المريض) بتقرير هذي الزيارة الجديدة — تُسجَّل هنا بس عند
+        # التأكيد الصريح من بنك تنبيه الزيارة السابقة بشاشة "زيارة جديدة"،
+        # راجع visit_previous_merges لتفاصيل الآلية.
+        merge_ids_raw = request.form.get("merge_previous_order_test_ids", "").strip()
+        if merge_ids_raw:
+            merge_ids = [x for x in merge_ids_raw.split(",") if x.strip().isdigit()]
+            if merge_ids:
+                save_visit_previous_merges(db, visit_id, merge_ids)
+
+        # إذا اختار موظف الاستقبال تضمين زيارة/زيارات سابقة مع هذي الزيارة
+        # الجديدة بجدول موحّد، يروح مباشرة لصفحة الجدول الموحّد بدل قائمة الزيارات.
+        include_visit_ids = request.form.get("include_visit_ids", "").strip()
+        if include_visit_ids:
+            all_ids = [visit_id_str for visit_id_str in include_visit_ids.split(",") if visit_id_str.strip().isdigit()]
+            all_ids.append(str(visit_id))
+            redirect_url = url_for("combined_visits_report", visit_ids=",".join(all_ids))
+        else:
+            redirect_url = url_for("visits_list")
+
+        # صفحة "زيارة جديدة" تُرسل الفورم بـ AJAX حتى تقدر تعرض زر "طباعة
+        # الباركود" وتطبع من نفس الصفحة (بدون فتح تبويب/متصفح جديد) قبل ما
+        # تنتقل لقائمة الزيارات. لو الطلب اجى بالطريقة العادية (بدون JS)،
+        # نكمل بنفس سلوك التحويل المباشر كما كان سابقًا.
+        if request.headers.get("X-LIS-Ajax") == "1":
+            return jsonify({
+                "ok": True,
+                "visit_id": visit_id,
+                "registration_number": reg_number,
+                "patient_name": name,
+                "redirect_url": redirect_url,
+            })
+
+        return redirect(redirect_url)
+
+    tests = db.execute("SELECT * FROM test_definitions WHERE is_active=1 ORDER BY department, name").fetchall()
+    quick_items = db.execute(
+        "SELECT td.id, td.name FROM quick_add_items q JOIN test_definitions td ON td.id = q.test_definition_id "
+        "WHERE q.is_active=1 ORDER BY q.display_order"
+    ).fetchall()
+    doctors, doctor_prices, doctor_name_to_id = doctor_pricing_context(db)
+    test_default_prices = {str(tst["id"]): tst["price"] for tst in tests}
+    examining_test_ids = [row["id"] for row in get_examining_tests(db)]
+    referral_labs = db.execute(
+        "SELECT * FROM referral_centers WHERE name != 'Walk-in' ORDER BY name"
+    ).fetchall()
+    return render_template("front_desk/new_visit.html", tests=tests, quick_items=quick_items,
+                            examining_doctors=get_examining_doctors(db), doctors=doctors,
+                            doctor_prices=doctor_prices, doctor_name_to_id=doctor_name_to_id,
+                            test_default_prices=test_default_prices,
+                            examining_test_ids=examining_test_ids,
+                            examining_rates=get_examining_rates_map(db),
+                            referral_labs=referral_labs)
+
+
+@app.route("/front-desk/patients")
+@login_required
+
+
+================================================================================
+### patient_new ###
+================================================================================
+
+def patient_new():
+    db = get_db()
+    if request.method == "POST":
+        now = datetime.now().isoformat(timespec="seconds")
+        db.execute(
+            "INSERT INTO patients (full_name, gender, age, age_unit, phone, email, address, national_id, "
+            "passport_number, lab_card_number, contact_method, title, travel_certificate_number, "
+            "branch_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (request.form.get("full_name", "").strip(), request.form.get("gender"),
+             request.form.get("age") or None, request.form.get("age_unit") or "Years",
+             request.form.get("phone"), request.form.get("email"),
+             request.form.get("address"), request.form.get("national_id"),
+             request.form.get("passport_number"), request.form.get("lab_card_number"),
+             request.form.get("contact_method", "None"), request.form.get("title", "Mr."),
+             request.form.get("travel_certificate_number"), session.get("branch_id"), now),
+        )
+        db.commit()
+        flash("Patient added.")
+        return redirect(url_for("patients_list"))
+    return render_template("front_desk/patient_form.html", patient=None)
+
+
+@app.route("/front-desk/patients/<int:patient_id>/edit", methods=["GET", "POST"])
+@login_required
+
+
+================================================================================
+### patient_edit ###
+================================================================================
+
+def patient_edit(patient_id):
+    db = get_db()
+    patient = db.execute("SELECT * FROM patients WHERE id=?", (patient_id,)).fetchone()
+    if not patient:
+        return "Not found", 404
+    if request.method == "POST":
+        db.execute(
+            "UPDATE patients SET full_name=?, gender=?, age=?, age_unit=?, phone=?, email=?, address=?, "
+            "national_id=?, passport_number=?, lab_card_number=?, contact_method=?, title=?, "
+            "travel_certificate_number=? WHERE id=?",
+            (request.form.get("full_name", "").strip(), request.form.get("gender"),
+             request.form.get("age") or None, request.form.get("age_unit") or "Years",
+             request.form.get("phone"), request.form.get("email"),
+             request.form.get("address"), request.form.get("national_id"),
+             request.form.get("passport_number"), request.form.get("lab_card_number"),
+             request.form.get("contact_method", "None"), request.form.get("title", "Mr."),
+             request.form.get("travel_certificate_number"), patient_id),
+        )
+        db.commit()
+        log_action("Update", "patient", patient_id)
+        flash("Patient updated.")
+        return redirect(url_for("patients_list"))
+    return render_template("front_desk/patient_form.html", patient=patient)
+
+
+@app.route("/front-desk/patients/<int:patient_id>/delete", methods=["POST"])
+@roles_required("admin")
+
+
+================================================================================
+### visit_edit ###
+================================================================================
+
+def visit_edit(visit_id):
+    db = get_db()
+    visit = db.execute(
+        "SELECT v.*, p.full_name, p.gender, p.age, p.age_unit, p.phone, p.title, p.email, "
+        "p.national_id, p.passport_number, p.travel_certificate_number, p.lab_card_number "
+        "FROM visits v JOIN patients p ON p.id = v.patient_id WHERE v.id=?", (visit_id,),
+    ).fetchone()
+    if not visit:
+        return "Not found", 404
+    order = db.execute("SELECT * FROM orders WHERE visit_id=?", (visit_id,)).fetchone()
+    invoice = db.execute("SELECT * FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+
+    if request.method == "POST":
+        if invoice and invoice["is_locked"]:
+            flash("This invoice is locked and cannot be edited.")
+            return redirect(url_for("visits_list"))
+
+        db.execute(
+            "UPDATE patients SET full_name=?, gender=?, age=?, age_unit=?, phone=?, title=?, email=?, "
+            "national_id=?, passport_number=?, travel_certificate_number=?, lab_card_number=? WHERE id=?",
+            (request.form.get("patient_name", "").strip(), request.form.get("gender"),
+             request.form.get("age") or None, request.form.get("age_unit") or "Years",
+             request.form.get("phone"), request.form.get("title", "Mr."), request.form.get("email", "").strip(),
+             request.form.get("national_id", "").strip(), request.form.get("passport_number", "").strip(),
+             request.form.get("travel_certificate_number", "").strip(), request.form.get("lab_card_number", "").strip(),
+             visit["patient_id"]),
+        )
+        referring_doctor_id = find_or_create_doctor(db, request.form.get("doctor_name", ""))
+        doctor_changed = referring_doctor_id != visit["doctor_id"]
+
+        examining_doctor = request.form.get("examining_doctor", "")
+        # نفس منطق شاشة "زيارة جديدة" — attending_doctor يتبع examining_doctor
+        # تلقائيًا الآن بعد ما صار حقلاً واحدًا بالشاشة.
+        attending_doctor = examining_doctor
+        referral_center_id = find_or_create_referral_center(db, request.form.get("referral_lab_name", ""))
+        # المعلومات الصحية + الزيارة المنزلية — نفس حقول شاشة "زيارة جديدة".
+        weight = request.form.get("weight") or None
+        height = request.form.get("height") or None
+        symptoms = request.form.get("symptoms", "")
+        disease = request.form.get("disease", "")
+        therapy = request.form.get("therapy", "")
+        is_home_visit = 1 if request.form.get("is_home_visit") == "1" else 0
+        home_visit_address = request.form.get("home_visit_address", "") if is_home_visit else ""
+        try:
+            home_visit_fee = float(request.form.get("home_visit_fee") or 0) if is_home_visit else 0.0
+        except ValueError:
+            home_visit_fee = 0.0
+        db.execute(
+            "UPDATE visits SET doctor_id=?, referral_center_id=?, fasting=?, notes=?, examining_doctor=?, "
+            "expenses=?, attending_doctor=?, weight=?, height=?, symptoms=?, disease=?, therapy=?, "
+            "is_home_visit=?, home_visit_address=?, home_visit_fee=? WHERE id=?",
+            (referring_doctor_id, referral_center_id, request.form.get("fasting", "Undefined"), request.form.get("notes", ""),
+             examining_doctor, request.form.get("expenses") or 0, attending_doctor,
+             weight, height, symptoms, disease, therapy,
+             is_home_visit, home_visit_address, home_visit_fee, visit_id))
+
+        new_test_id = request.form.get("add_test")
+        if new_test_id:
+            test = db.execute("SELECT * FROM test_definitions WHERE id=?", (new_test_id,)).fetchone()
+            if test:
+                reg = visit["registration_number"]
+                barcode = f"{reg}{new_test_id.zfill(3)}"
+                price = get_test_price(db, new_test_id, referring_doctor_id)
+                db.execute(
+                    "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, created_at) "
+                    "VALUES (?, ?, 'Accepted', ?, ?, ?, ?)",
+                    (order["id"], new_test_id, barcode, price, referring_doctor_id,
+                     datetime.now().isoformat(timespec="seconds")),
+                )
+
+        # نعيد حساب أجر دكتور المختبر الفاحص حسب كل الفحوصات الحالية بالزيارة
+        # (بعد أي حذف/إضافة) واسم الدكتور الفاحص المختار حاليًا.
+        current_test_ids = [
+            row["test_definition_id"]
+            for row in db.execute("SELECT test_definition_id FROM order_tests WHERE order_id=?", (order["id"],)).fetchall()
+        ]
+        examining_doctor_fee = compute_examining_doctor_fee(db, examining_doctor, current_test_ids)
+        db.execute("UPDATE visits SET examining_doctor_fee=? WHERE id=?", (examining_doctor_fee, visit_id))
+
+        # إذا انتغيّر الطبيب المُحيل، نعيد تسعير كل التحاليل الموجودة أصلاً
+        # بالزيارة حسب جدول أسعار الطبيب الجديد (أو السعر الافتراضي إذا ماكو
+        # طبيب / ماكو سعر خاص إله).
+        if doctor_changed:
+            existing = db.execute(
+                "SELECT id, test_definition_id FROM order_tests WHERE order_id=?", (order["id"],)
+            ).fetchall()
+            for row in existing:
+                new_price = get_test_price(db, row["test_definition_id"], referring_doctor_id)
+                db.execute("UPDATE order_tests SET price=?, doctor_id=? WHERE id=?",
+                           (new_price, referring_doctor_id, row["id"]))
+
+        extra_charges = float(request.form.get("extra_charges") or 0)
+        discount_amount = float(request.form.get("discount_amount") or 0)
+        new_total = db.execute(
+            "SELECT COALESCE(SUM(ot.price),0) as total FROM order_tests ot WHERE ot.order_id=?",
+            (order["id"],),
+        ).fetchone()["total"]
+        # أجرة الزيارة المنزلية (إن فُعِّلت) تُضاف لمجموع الفحوصات، نفس أسلوب
+        # شاشة "زيارة جديدة" — منفصلة عن حقل "Extra Charges" اليدوي.
+        new_total += home_visit_fee
+        if invoice:
+            db.execute(
+                "UPDATE invoices SET total_amount=?, extra_charges=?, discount_amount=? WHERE id=?",
+                (new_total + extra_charges, extra_charges, discount_amount, invoice["id"]),
+            )
+        db.commit()
+        log_action("Update", "visit", visit_id)
+        flash("Visit updated.")
+        return redirect(url_for("visits_list"))
+
+    order_tests = db.execute(
+        "SELECT ot.id, ot.status, ot.test_definition_id, td.name, COALESCE(ot.price, td.price) as price "
+        "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id WHERE ot.order_id=?",
+        (order["id"] if order else 0,),
+    ).fetchall()
+    all_tests = db.execute("SELECT * FROM test_definitions WHERE is_active=1 ORDER BY department, name").fetchall()
+    current_doctor_name = ""
+    if visit["doctor_id"]:
+        d = db.execute("SELECT full_name FROM doctors WHERE id=?", (visit["doctor_id"],)).fetchone()
+        current_doctor_name = d["full_name"] if d else ""
+    current_referral_lab_name = ""
+    if visit["referral_center_id"]:
+        rl = db.execute("SELECT name FROM referral_centers WHERE id=?", (visit["referral_center_id"],)).fetchone()
+        current_referral_lab_name = rl["name"] if rl else ""
+    doctors, doctor_prices, doctor_name_to_id = doctor_pricing_context(db)
+    test_default_prices = {str(tst["id"]): tst["price"] for tst in all_tests}
+    last_removed_row = db.execute(
+        "SELECT rot.*, td.name as test_name FROM removed_order_tests rot "
+        "JOIN test_definitions td ON td.id = rot.test_definition_id "
+        "WHERE rot.visit_id=? AND rot.restored=0 ORDER BY rot.id DESC LIMIT 1",
+        (visit_id,),
+    ).fetchone()
+    last_removed = dict(last_removed_row) if last_removed_row else None
+
+    examining_test_ids = [row["id"] for row in get_examining_tests(db)]
+    referral_labs = db.execute(
+        "SELECT * FROM referral_centers WHERE name != 'Walk-in' ORDER BY name"
+    ).fetchall()
+    return render_template("front_desk/visit_edit.html", visit=visit, order_tests=order_tests,
+                            all_tests=all_tests, invoice=invoice, examining_doctors=get_examining_doctors(db),
+                            doctors=doctors, doctor_prices=doctor_prices, doctor_name_to_id=doctor_name_to_id,
+                            current_doctor_name=current_doctor_name,
+                            current_referral_lab_name=current_referral_lab_name,
+                            test_default_prices=test_default_prices,
+                            last_removed=last_removed, examining_test_ids=examining_test_ids,
+                            examining_rates=get_examining_rates_map(db), referral_labs=referral_labs)
+
+
+@app.route("/front-desk/visits/<int:visit_id>/order-tests/<int:order_test_id>/price", methods=["POST"])
+@login_required
