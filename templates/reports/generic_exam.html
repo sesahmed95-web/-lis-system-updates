@@ -1,0 +1,44 @@
+{% extends "reports/base_report.html" %}
+{% import "reports/partials/exam_report_shared.html" as shared with context %}
+
+{# =============================================================================
+   reports/generic_exam.html
+   =============================================================================
+   قالب "ابنِ تقرير من الصفر" — يُفعَّل لأي تحليل عبر
+   /management/report-designer/<id>/start-generic-exam (زر "🧪 ابدأ تصميم
+   فحص من الصفر" بصفحة مصمم التقارير)، بدل كتابة قالب HTML يدوي مثل
+   urine_exam.html وغيره.
+
+   الفرق الوحيد عن تلك القوالب: sections_def هنا قسم افتراضي واحد بس
+   ("Other Results") يحتوي كل باراميترات التحليل — بدل أقسام Macroscopic/
+   Microscopic ثابتة بأسماء محددة سلفًا. المدير يسمّي الأقسام ويسحب
+   الباراميترات بينها بنفسه من زر "✏️ تعديل التصميم" بصفحة المعاينة
+   (نفس آلية report_layout.sections/section_order المستخدمة بكل تقارير
+   exam_report_shared.html — راجع شرح كامل بأعلى ذاك الملف)، فيصير عنده
+   عملياً تحليل جديد كامل بدون كتابة أي كود.
+============================================================================= #}
+
+{% block report_styles %}
+  {{ super() if self.report_styles is defined else '' }}
+  {{ shared.styles() }}
+{% endblock %}
+
+{% block patient_meta %}{{ shared.patient_meta_v2() }}{% endblock %}
+
+{% block report_body %}
+{% set sections_def = [
+  ("other", "Other Results", params|map(attribute="name")|list),
+] %}
+{{ shared.render_report_body(ot["test_name"] or ot["test_code"], sections_def, params, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+
+{{ shared.editor_script(order_test_id) }}
+<script>
+document.getElementById('report-comment').addEventListener('blur', function(){
+  fetch('/order-tests/{{ order_test_id }}/report-comment', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'report_comment=' + encodeURIComponent(this.value)
+  });
+});
+</script>
+{% endblock %}

@@ -563,7 +563,14 @@ def migrate(conn):
                                # لهذا التحليل بالجدول المجمّع؛ panel_page_break
                                # يجبر أول صف تابع له يبدأ بأعلى صفحة جديدة.
                                # فاضي/0 = السلوك الافتراضي بدون أي تغيير.
-                               ("panel_color", "TEXT"), ("panel_page_break", "INTEGER DEFAULT 0")],
+                               ("panel_color", "TEXT"), ("panel_page_break", "INTEGER DEFAULT 0"),
+                               # report_style: لو 'generic_exam' يطبع هذا التحليل عبر
+                               # reports/generic_exam.html (قوالب فحص عام قابل للبناء
+                               # كامل من صفحة المعاينة نفسها — سحب أقسام/باراميترات،
+                               # بدون كتابة قالب HTML يدوي أصلاً) بدل مسار "مصمم
+                               # التقارير" العام. راجع _print_report_impl بـ app.py
+                               # وشرح كامل بأعلى reports/generic_exam.html.
+                               ("report_style", "TEXT")],
         "reference_ranges": [("age_from_unit", "TEXT DEFAULT 'Years'"), ("age_to_unit", "TEXT DEFAULT 'Years'")],
         # unit2 / unit2_factor: وحدة ثانية اختيارية تُعرض تلقائيًا جنب النتيجة
         # الأصلية وقت الطباعة (مثلاً mg/dL بالإضافة لـ mmol/L). القيمة الثانية

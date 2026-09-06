@@ -382,6 +382,10 @@
             {% endif %}
           </div>
 
+          {% if session.get('role') == 'admin' %}
+          {{ shared.doctors_manager_button_and_modal() }}
+          {% endif %}
+
           {% block patient_meta %}{{ shared.patient_meta_v2() }}{% endblock %}
         </td></tr>
       {% if repeat_header_on_print %}</thead>{% else %}</tbody>{% endif %}

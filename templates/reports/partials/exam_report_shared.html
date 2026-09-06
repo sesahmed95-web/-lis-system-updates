@@ -191,7 +191,50 @@
   .exam-style-actions button.clear { background: #FEE2E2; color: #991B1B; }
   .exam-style-actions button.close { background: #F1F5F9; color: #334155; }
 
-  @media print { .exam-toolbar, .exam-scope-modal, .exam-style-popover { display: none !important; } }
+  /* ============== زر + نافذة إدارة دكاترة الترويسة ============== */
+  .doctors-manage-btn {
+    border: 1px dashed #94A3B8; color: #475569; background: #fff; border-radius: 6px;
+    padding: 3px 9px; font-size: 11.5px; cursor: pointer; font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    margin: 2px 0 8px 0;
+  }
+  .doctors-manage-btn:hover { background: #F1F5F9; }
+  .doctors-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .doctors-modal-box {
+    background: #fff; border-radius: 10px; padding: 18px 20px; width: 460px; max-width: 92vw;
+    max-height: 85vh; overflow-y: auto; font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    direction: rtl; box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  }
+  .doctors-modal-box h3 { margin: 0 0 12px 0; color: #14213D; font-size: 15px; }
+  .doc-row {
+    display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid #F1F5F9;
+    font-size: 12.5px;
+  }
+  .doc-row .doc-row-name { flex: 1; font-weight: 600; color: #14213D; }
+  .doc-row .doc-row-degree { flex: 1; color: #64748B; font-size: 11.5px; }
+  .doc-row button { border: none; background: none; cursor: pointer; font-size: 13px; padding: 2px 5px; }
+  .doc-form { margin-top: 12px; border-top: 1px dashed #E2E8F0; padding-top: 12px; }
+  .doc-form label { display: block; font-size: 11.5px; color: #334155; margin-top: 6px; }
+  .doc-form input[type="text"], .doc-form textarea {
+    width: 100%; padding: 5px 7px; border: 1px solid #E2E8F0; border-radius: 5px; margin-top: 2px;
+    font-family: inherit; font-size: 12.5px;
+  }
+  .doc-form textarea { min-height: 40px; resize: vertical; }
+  .doc-form-row { display: flex; gap: 8px; }
+  .doc-form-row > div { flex: 1; }
+  .doc-form-checkbox { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; }
+  .doc-form-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .doc-form-actions button {
+    flex: 1; border: none; border-radius: 6px; padding: 8px; font-size: 12.5px; cursor: pointer;
+  }
+  .doc-save-btn { background: #26529C; color: #fff; }
+  .doc-cancel-btn { background: #F1F5F9; color: #334155; }
+  .doctors-modal-close { display: block; margin-top: 12px; width: 100%; border: none; background: #F1F5F9;
+    color: #334155; border-radius: 6px; padding: 8px; cursor: pointer; font-size: 12.5px; }
+
+  @media print { .exam-toolbar, .exam-scope-modal, .exam-style-popover, .doctors-manage-btn, .doctors-modal { display: none !important; } }
 </style>
 {% endmacro %}
 
@@ -420,6 +463,123 @@
     <button type="button" onclick="document.getElementById('examScopeModal').style.display='none'">إلغاء</button>
   </div>
 </div>
+{% endmacro %}
+
+
+{% macro doctors_manager_button_and_modal() %}
+<button type="button" class="doctors-manage-btn no-print" onclick="docsOpenModal()">✏️ إدارة الدكاترة</button>
+<div id="docsModal" class="doctors-modal" style="display:none;">
+  <div class="doctors-modal-box">
+    <h3>دكاترة ترويسة التقرير</h3>
+    <div id="docsList">جاري التحميل...</div>
+    <div class="doc-form">
+      <input type="hidden" id="docEditId" value="">
+      <label>الاسم
+        <input type="text" id="docName" placeholder="اسم الدكتور">
+      </label>
+      <div class="doc-form-row">
+        <div>
+          <label>اللقب
+            <input type="text" id="docTitle" placeholder="الدكتور" value="الدكتور">
+          </label>
+        </div>
+        <div>
+          <label>حجم الخط (px، اختياري)
+            <input type="text" id="docFontSize" placeholder="افتراضي">
+          </label>
+        </div>
+      </div>
+      <label>الشهادة (عربي)
+        <textarea id="docDegreeAr" placeholder="مثلاً: بورد أمراض الدم"></textarea>
+      </label>
+      <label>الشهادة (إنكليزي)
+        <textarea id="docDegreeEn" placeholder="e.g. Board of Hematology"></textarea>
+      </label>
+      <div class="doc-form-checkbox">
+        <input type="checkbox" id="docShowOnLetterhead" checked>
+        <label for="docShowOnLetterhead" style="margin:0;">إظهار بترويسة التقرير</label>
+      </div>
+      <div class="doc-form-actions">
+        <button type="button" class="doc-save-btn" onclick="docsSave()">حفظ</button>
+        <button type="button" class="doc-cancel-btn" onclick="docsResetForm()">جديد / إلغاء التعديل</button>
+      </div>
+    </div>
+    <button type="button" class="doctors-modal-close" onclick="docsCloseModal()">إغلاق</button>
+  </div>
+</div>
+<script>
+function docsOpenModal() {
+  document.getElementById('docsModal').style.display = 'flex';
+  docsRefreshList();
+}
+function docsCloseModal() {
+  document.getElementById('docsModal').style.display = 'none';
+}
+function docsResetForm() {
+  document.getElementById('docEditId').value = '';
+  document.getElementById('docName').value = '';
+  document.getElementById('docTitle').value = 'الدكتور';
+  document.getElementById('docFontSize').value = '';
+  document.getElementById('docDegreeAr').value = '';
+  document.getElementById('docDegreeEn').value = '';
+  document.getElementById('docShowOnLetterhead').checked = true;
+}
+function docsRefreshList() {
+  fetch('/api/examining-doctors').then(function (r) { return r.json(); }).then(function (res) {
+    var list = document.getElementById('docsList');
+    list.innerHTML = '';
+    (res.doctors || []).forEach(function (d) {
+      var row = document.createElement('div');
+      row.className = 'doc-row';
+      row.innerHTML =
+        '<span class="doc-row-name">' + (d.show_on_letterhead ? '👁️ ' : '🚫 ') + d.name + '</span>' +
+        '<span class="doc-row-degree">' + (d.degree_ar || d.degree_en || '') + '</span>' +
+        '<button type="button" title="تعديل" onclick="docsEdit(' + d.id + ')">✏️</button>' +
+        '<button type="button" title="حذف" onclick="docsDelete(' + d.id + ')">🗑️</button>';
+      row.dataset.doctor = JSON.stringify(d);
+      list.appendChild(row);
+    });
+    window._docsCache = res.doctors || [];
+  });
+}
+function docsEdit(id) {
+  var d = (window._docsCache || []).find(function (x) { return x.id === id; });
+  if (!d) return;
+  document.getElementById('docEditId').value = d.id;
+  document.getElementById('docName').value = d.name || '';
+  document.getElementById('docTitle').value = d.title || 'الدكتور';
+  document.getElementById('docFontSize').value = d.font_size || '';
+  document.getElementById('docDegreeAr').value = d.degree_ar || '';
+  document.getElementById('docDegreeEn').value = d.degree_en || '';
+  document.getElementById('docShowOnLetterhead').checked = !!d.show_on_letterhead;
+}
+function docsDelete(id) {
+  if (!confirm('حذف هذا الدكتور نهائيًا من ترويسة كل التقارير؟')) return;
+  fetch('/api/examining-doctors/' + id + '/delete', {method: 'POST'})
+    .then(function (r) { return r.json(); })
+    .then(function () { docsRefreshList(); location.reload(); });
+}
+function docsSave() {
+  var id = document.getElementById('docEditId').value;
+  var payload = {
+    name: document.getElementById('docName').value.trim(),
+    title: document.getElementById('docTitle').value.trim(),
+    font_size: document.getElementById('docFontSize').value.trim(),
+    degree_ar: document.getElementById('docDegreeAr').value.trim(),
+    degree_en: document.getElementById('docDegreeEn').value.trim(),
+    show_on_letterhead: document.getElementById('docShowOnLetterhead').checked,
+  };
+  if (!payload.name) { alert('اكتب اسم الدكتور أولاً.'); return; }
+  var url = id ? ('/api/examining-doctors/' + id) : '/api/examining-doctors';
+  fetch(url, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    if (res.error) { alert('صار خطأ: ' + res.error); return; }
+    docsResetForm();
+    location.reload();
+  }).catch(function () { alert('تعذّر الاتصال — تأكد أن البرنامج شغّال.'); });
+}
+</script>
 {% endmacro %}
 
 

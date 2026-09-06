@@ -3663,6 +3663,15 @@ def _print_report_impl(order_test_id):
 
     custom_template = None
     if not template_name:
+        # report_style='generic_exam': تحليل بُني بالكامل من صفحة المعاينة
+        # نفسها (سحب أقسام/باراميترات) بدل قالب HTML مكتوب يدويًا — راجع
+        # /management/report-designer/<id>/start-generic-exam أدناه.
+        td_row = db.execute(
+            "SELECT report_style FROM test_definitions WHERE id=?", (ot["test_definition_id"],)
+        ).fetchone()
+        if td_row and td_row["report_style"] == "generic_exam":
+            template_name = "reports/generic_exam.html"
+    if not template_name:
         custom_template = get_report_template(db, ot["test_definition_id"])
         if not custom_template:
             if session.get("role") == "admin":
@@ -4030,6 +4039,71 @@ def api_report_layout_reset():
     reset_report_layout(db, scope, scope_id)
     log_action("ResetReportLayout", scope, scope_id)
     return jsonify({"ok": True})
+
+
+# ============== إدارة دكاترة الترويسة من نفس صفحة معاينة الطباعة ==============
+# نسخة JSON خفيفة من نفس شاشة (الإدارة ← الإعدادات ← إدارة قائمة الدكاترة)
+# — تفتح كنافذة منبثقة فوق أي معاينة تقرير (زر "✏️ إدارة الدكاترة" بجانب
+# صف الدكاترة بـ base_report.html) بدل الاضطرار للخروج من المعاينة والذهاب
+# للإعدادات. تستخدم نفس دوال database.py الموجودة أصلاً بشاشة الإعدادات
+# القديمة حرفيًا — القائمتان تبقيان متطابقتين ومتزامنتين دائمًا.
+@app.route("/api/examining-doctors", methods=["GET"])
+@roles_required("admin")
+def api_examining_doctors_list():
+    db = get_db()
+    rows = get_examining_doctors_full(db)
+    return jsonify({"doctors": [dict(r) for r in rows]})
+
+
+@app.route("/api/examining-doctors", methods=["POST"])
+@roles_required("admin")
+def api_examining_doctors_add():
+    db = get_db()
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "اسم الدكتور مطلوب"}), 400
+    font_size = body.get("font_size")
+    try:
+        font_size = int(font_size) if font_size not in (None, "") else None
+    except (TypeError, ValueError):
+        font_size = None
+    add_examining_doctor_full(
+        db, name, body.get("title") or "الدكتور", body.get("degree_ar") or "", body.get("degree_en") or "",
+        bool(body.get("show_on_letterhead", True)), font_size,
+    )
+    log_action("AddExaminingDoctor", "examining_doctors_list", None, name)
+    return jsonify({"ok": True, "doctors": [dict(r) for r in get_examining_doctors_full(db)]})
+
+
+@app.route("/api/examining-doctors/<int:doctor_id>", methods=["POST"])
+@roles_required("admin")
+def api_examining_doctors_update(doctor_id):
+    db = get_db()
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "اسم الدكتور مطلوب"}), 400
+    font_size = body.get("font_size")
+    try:
+        font_size = int(font_size) if font_size not in (None, "") else None
+    except (TypeError, ValueError):
+        font_size = None
+    update_examining_doctor(
+        db, doctor_id, name, body.get("title") or "الدكتور", body.get("degree_ar") or "", body.get("degree_en") or "",
+        bool(body.get("show_on_letterhead", True)), font_size,
+    )
+    log_action("UpdateExaminingDoctor", "examining_doctors_list", doctor_id, name)
+    return jsonify({"ok": True, "doctors": [dict(r) for r in get_examining_doctors_full(db)]})
+
+
+@app.route("/api/examining-doctors/<int:doctor_id>/delete", methods=["POST"])
+@roles_required("admin")
+def api_examining_doctors_delete(doctor_id):
+    db = get_db()
+    delete_examining_doctor(db, doctor_id)
+    log_action("DeleteExaminingDoctor", "examining_doctors_list", doctor_id)
+    return jsonify({"ok": True, "doctors": [dict(r) for r in get_examining_doctors_full(db)]})
 
 
 def _whatsapp_flush_pdf_dir():
@@ -5814,6 +5888,73 @@ def examining_doctor_move(doctor_id):
 
 
 # ------------------------------------------------------------------------
+# نسخة JSON من نفس إدارة "دكتور المختبر الفاحص" أعلاه (name/title/degree_ar/
+# degree_en/show_on_letterhead/font_size) — تُستخدم من نافذة منبثقة فوق
+# معاينة الطباعة نفسها (زر "👨‍⚕️ إدارة الدكاترة" بـ exam_report_shared.html)
+# بدل التنقل لصفحة إعدادات منفصلة. دائمًا عامة لكل التقارير (لا يوجد خيار
+# "لهذا المريض فقط" هنا — الترويسة نفسها مشتركة بكل تقرير أصلاً).
+@app.route("/api/examining-doctors/full-list", methods=["GET"])
+@login_required
+def api_examining_doctors_full_list():
+    db = get_db()
+    doctors = get_examining_doctors_full(db)
+    return jsonify([dict(d) for d in doctors])
+
+
+@app.route("/api/examining-doctors/add-full", methods=["POST"])
+@login_required
+def api_examining_doctor_add_full():
+    db = get_db()
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "اسم الدكتور مطلوب"}), 400
+    title = (body.get("title") or "الدكتور").strip()
+    degree_ar = (body.get("degree_ar") or "").strip() or None
+    degree_en = (body.get("degree_en") or "").strip() or None
+    show_on_letterhead = bool(body.get("show_on_letterhead", True))
+    font_size = body.get("font_size")
+    try:
+        font_size = max(8, min(30, int(font_size))) if font_size not in (None, "") else None
+    except (TypeError, ValueError):
+        font_size = None
+    add_examining_doctor_full(db, name, title, degree_ar, degree_en, show_on_letterhead, font_size)
+    log_action("AddExaminingDoctor", "examining_doctor", 0, name)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/examining-doctors/<int:doctor_id>/update-full", methods=["POST"])
+@login_required
+def api_examining_doctor_update_full(doctor_id):
+    db = get_db()
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "اسم الدكتور مطلوب"}), 400
+    title = (body.get("title") or "الدكتور").strip()
+    degree_ar = (body.get("degree_ar") or "").strip() or None
+    degree_en = (body.get("degree_en") or "").strip() or None
+    show_on_letterhead = bool(body.get("show_on_letterhead", True))
+    font_size = body.get("font_size")
+    try:
+        font_size = max(8, min(30, int(font_size))) if font_size not in (None, "") else None
+    except (TypeError, ValueError):
+        font_size = None
+    update_examining_doctor(db, doctor_id, name, title, degree_ar, degree_en, show_on_letterhead, font_size)
+    log_action("UpdateExaminingDoctor", "examining_doctor", doctor_id, name)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/examining-doctors/<int:doctor_id>/delete-full", methods=["POST"])
+@login_required
+def api_examining_doctor_delete_full(doctor_id):
+    db = get_db()
+    delete_examining_doctor(db, doctor_id)
+    log_action("DeleteExaminingDoctor", "examining_doctor", doctor_id)
+    return jsonify({"ok": True})
+
+
+# ------------------------------------------------------------------------
 # مكتبة الأختام والتواقيع الرقمية — أيقونة/صفحة إدارة واحدة تسمح بإضافة أي
 # عدد من الأختام (ختم المختبر نفسه + ختم/توقيع كل دكتور فاحص على حدة، لأن
 # كل واحد منهم مختلف عن الثاني) بدون أي حصر. كل صورة تُحفظ دائمًا بخلفية
@@ -6029,6 +6170,35 @@ def _parse_docx_rows(file_storage, parameters):
             matched += 1
         rows.append({"param_name": pname or "", "label": line})
     return rows, matched, len(raw_lines)
+
+
+@app.route("/management/report-designer/<int:test_definition_id>/start-generic-exam", methods=["GET", "POST"])
+@roles_required("admin")
+def start_generic_exam_report(test_definition_id):
+    """يفعّل مسار reports/generic_exam.html لهذا التحليل بدل مسار "مصمم
+    التقارير" العام — يبني تقرير فحص كامل (أقسام Macroscopic/Microscopic
+    قابلة للتسمية، وباراميترات تُسحب بينها) من نفس صفحة معاينة الطباعة،
+    بدون كتابة أي قالب HTML يدوي. لصق زر/رابط لهذا المسار بصفحة "مصمم
+    التقارير" (management/report_designer.html) يفعّله لأي تحليل تختاره:
+      <a href="/management/report-designer/{{ test.id }}/start-generic-exam">
+        🧪 ابدأ تصميم فحص من الصفر (Macroscopic/Microscopic)
+      </a>
+    """
+    db = get_db()
+    test = db.execute("SELECT id, name, code FROM test_definitions WHERE id=?", (test_definition_id,)).fetchone()
+    if not test:
+        flash("التحليل غير موجود.")
+        return redirect(url_for("report_designer"))
+    db.execute("UPDATE test_definitions SET report_style='generic_exam' WHERE id=?", (test_definition_id,))
+    db.commit()
+    log_action("StartGenericExamReport", "test_definition", test_definition_id, test["name"])
+    flash(
+        f"تم تفعيل تصميم فحص من الصفر لـ \"{test['name']}\" ({test['code']}). "
+        "اطبع أي نتيجة لهذا التحليل الآن (Results/Orders) — يطلع بقسم واحد "
+        "افتراضي (Other Results) فيه كل الباراميترات، وتقدر تسمّي الأقسام "
+        "وتسحب الباراميترات بينها وتلوّنها من زر ✏️ تعديل التصميم بأعلى المعاينة."
+    )
+    return redirect(url_for("report_designer", test_definition_id=test_definition_id))
 
 
 @app.route("/management/report-designer", methods=["GET", "POST"])
