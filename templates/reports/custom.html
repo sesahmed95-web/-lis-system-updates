@@ -1,77 +1,77 @@
 {% extends "reports/base_report.html" %}
 {% block report_body %}
+<style>
+  /* نفس التنسيق البصري لجدول اللوحة المجمّعة (combined_panel.html) —
+     موحّد الآن مع طباعة تحليل مفرد لحاله، حتى يطابق شكل التقرير الرسمي
+     بغض النظر هل يُطبع وحده أو ضمن لوحة مجمّعة. */
+  .panel-table { border-bottom: 1px dashed #94A3B8; padding-bottom: 6px; margin-bottom: 4px; }
+  .panel-table th { border-bottom: 1.5px solid #26529C; padding-bottom: 4px; font-size: 0.92em; }
+  .panel-table col.col-name { width: 34%; }
+  .panel-table col.col-result, .panel-table col.col-unit { width: 20%; }
+  .panel-table col.col-range { width: 26%; }
+  .panel-secondary-line { font-size: 0.72em; color: #64748B; display: block; margin-top: 1px; }
+  .panel-previous-row td {
+    background: #EFF6FF; color: #1D4ED8; font-size: 0.78em; text-align: left;
+    padding-top: 3px; padding-bottom: 3px; border-top: none;
+  }
+  .panel-previous-icon { font-weight: bold; }
+  .lt-range-title { font-weight: 600; color: #475569; margin-inline-end: 6px; }
+</style>
+
 <div class="report-heading" style="text-align: {{ custom_heading_align|default('center') }};">{{ custom_heading }}</div>
 
 {% set show_si = custom_rows|selectattr('unit2')|list|length > 0 %}
 
-<div class="lt-table {{ 'no-si' if not show_si else '' }}">
-  <div class="lt-head">
-    <div>Laboratory Test Results</div>
-    <div>Conventional Units</div>
-    {% if show_si %}<div>SI Units</div>{% endif %}
-  </div>
+<table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;">
+  <colgroup>
+    <col class="col-name"><col class="col-result"><col class="col-unit"><col class="col-range">
+    {% if show_si %}<col class="col-range">{% endif %}
+  </colgroup>
+  <tr>
+    <th style="text-align:left;">Laboratory Test Results</th>
+    <th>Result</th>
+    <th>Unit</th>
+    <th>Conventional Units</th>
+    {% if show_si %}<th>SI Units</th>{% endif %}
+  </tr>
 
   {% for row in custom_rows %}
   {% set name_align = row.name_align or custom_rows_align|default('right') %}
-  {% set name_flip = row.name_side == 'right' %}
-  <div class="lt-group{% if row.page_break_before %} lt-page-break{% endif %}">
 
-    {% if custom_unit_column %}
-    <div class="lt-row lt-name-row lt-row-3col{% if name_flip %} lt-flip{% endif %}">
-      <div class="lt-name" style="text-align: {{ name_align }};{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.label }}</div>
-      <div class="lt-val lt-val-center"{% if row.color %} style="color: {{ row.color }};"{% endif %}>{% if row.result not in (None, '') %}<span class="val">{{ row.result }}</span>{% endif %}</div>
-      <div class="lt-unit"{% if row.color %} style="color: {{ row.color }};"{% endif %}>{{ row.unit or '' }}</div>
-    </div>
-    {% else %}
-    <div class="lt-row lt-name-row{% if name_flip %} lt-flip{% endif %}">
-      <div class="lt-name" style="text-align: {{ name_align }};{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.label }}</div>
-      <div class="lt-val"{% if row.color %} style="color: {{ row.color }};"{% endif %}>{% if row.result not in (None, '') %}<span class="val">{{ row.result }}</span>{% if row.unit %} <span class="unit">{{ row.unit }}</span>{% endif %}{% endif %}</div>
-      {% if show_si %}
-      <div class="lt-val2"{% if row.color %} style="color: {{ row.color }};"{% endif %}>{% if row.result2 %}<span class="val">{{ row.result2 }}</span>{% if row.unit2 %} <span class="unit">{{ row.unit2 }}</span>{% endif %}{% endif %}</div>
-      {% endif %}
-    </div>
-    {% endif %}
-
-    {% if show_prev_values and row.previous %}
-    <div class="lt-row lt-prev-row">
-      <div class="lt-name"><span class="prev-label">Previous Result</span>{% if previous_visit_date %}<span class="prev-date">{{ previous_visit_date }}</span>{% endif %}</div>
-      <div class="lt-val"><span class="prev-val">{{ row.previous }}</span>{% if row.unit %} <span class="unit">{{ row.unit }}</span>{% endif %}</div>
-      {% if show_si %}<div class="lt-val2"></div>{% endif %}
-    </div>
-    {% endif %}
-
-    {% if row.range_tiers %}
-      {% if row.range_position == 'below' %}
-      <div class="lt-row lt-range-below">
-        <div class="range-block">
-          <div class="range-title">Normal Range :</div>
-          <div class="range-tiers">
-            {% for tier in row.range_tiers %}
-            <div class="range-tier-row">
-              {% if tier.label %}<span class="tier-label">{{ tier.label }}</span>{% endif %}
-              <span class="tier-value">{{ tier.value }}{% if row.normal_range2 and loop.first and loop.last %} &nbsp;&nbsp; <span class="unit">{{ row.normal_range2 }}{% if row.unit2 %} {{ row.unit2 }}{% endif %}</span>{% endif %}</span>
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-      </div>
-      {% else %}
+  <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
+    <td style="text-align:{{ name_align }}; font-weight:bold;{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.label }}</td>
+    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
+      {% if row.result not in (None, '') %}<span style="font-weight:bold;">{{ row.result }}</span>{% endif %}
+    </td>
+    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
+      {{ row.unit or '' }}
+    </td>
+    <td>
+      {% if row.range_tiers %}
         {% for tier in row.range_tiers %}
-        <div class="lt-row lt-range-row{% if name_flip %} lt-flip{% endif %}">
-          <div class="lt-name">
-            <span class="lt-range-title"{% if not loop.first %} style="visibility:hidden"{% endif %}>Normal Range :</span>
-            {% if tier.label %}<span class="lt-tier-label">{{ tier.label }}</span>{% endif %}
-          </div>
-          <div class="lt-val">{{ tier.value }}</div>
-          {% if show_si %}
-          <div class="lt-val2">{% if row.normal_range2 and loop.first and loop.last %}{{ row.normal_range2 }}{% if row.unit2 %} <span class="unit">{{ row.unit2 }}</span>{% endif %}{% endif %}</div>
-          {% endif %}
+        <div>
+          {% if tier.label %}<span class="lt-range-title">{{ tier.label }}</span>{% endif %}
+          <span>{{ tier.value }}</span>
         </div>
         {% endfor %}
       {% endif %}
+    </td>
+    {% if show_si %}
+    <td>
+      {% if row.result2 %}<span style="font-weight:bold;">{{ row.result2 }}</span>{% if row.unit2 %} {{ row.unit2 }}{% endif %}{% endif %}
+      {% if row.normal_range2 %}<span class="panel-secondary-line">{{ row.normal_range2 }}{% if row.unit2 %} {{ row.unit2 }}{% endif %}</span>{% endif %}
+    </td>
     {% endif %}
+  </tr>
 
-  </div>
+  {% if show_prev_values and row.previous %}
+  <tr class="panel-previous-row">
+    <td colspan="{{ 5 if show_si else 4 }}">
+      <span class="panel-previous-icon">↩</span> Previous Result{% if previous_visit_date %} ({{ previous_visit_date }}){% endif %} —
+      {{ row.label }}: {{ row.previous }}{% if row.unit %} {{ row.unit }}{% endif %}
+    </td>
+  </tr>
+  {% endif %}
   {% endfor %}
-</div>
+</table>
 {% endblock %}
