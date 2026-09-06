@@ -24,6 +24,7 @@ from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_digital_stamps, get_digital_stamp, add_digital_stamp,
                        update_digital_stamp, delete_digital_stamp,
                        get_stamp_placements, upsert_stamp_placement, remove_stamp_placement,
+                       get_report_layout, save_report_layout, reset_report_layout, get_raw_layout,
                        find_last_visit_by_name_age, get_visit_completed_tests,
                        save_visit_previous_merges, get_visit_previous_merges)
 from daily_counter import get_patient_number_of_day
@@ -160,6 +161,67 @@ REPORT_TEMPLATE_MAP = {
     "GSE": "reports/stool_exam.html",
     "SFA": "reports/seminal_fluid.html",
 }
+
+# نفس القوائم Macroscopic/Microscopic المكتوبة داخل reports/urine_exam.html،
+# reports/stool_exam.html، reports/seminal_fluid.html — نسخة مصدرها الوحيد
+# هنا بـ Python (بدل التكرار داخل كل قالب) حتى يقدر _build_exam_sections
+# يفرز الباراميترات ويرتبها (مع احترام تخصيص المستخدم عبر تصميم/معاينة
+# التقرير: تحريك باراميتر لقسم ثاني، إعادة ترتيب) قبل ما توصل للقالب أصلاً.
+# أي تعديل مستقبلي على هذي القوائم يكفي هنا فقط — القوالب تلقائيًا تتبعه.
+EXAM_SECTION_NAMES = {
+    "GUE": {
+        "macro": ["Color", "Specific Gravity", "Reaction (pH)", "Glucose", "Protein", "Ketone",
+                  "Bile Pigment", "Urobilinogen", "Nitrite"],
+        "micro": ["RBCs", "PUS", "Casts", "Epithelial Cells", "Amorphous", "Mucus", "Crystals",
+                  "Parasites", "Parasites / Others"],
+    },
+    "GSE": {
+        "macro": ["Color", "Consistency", "Mucus", "Blood", "Worms", "Worms / Helminths"],
+        "micro": ["Pus Cells", "RBCs", "Amoeba (E. histolytica)", "Giardia lamblia", "Helminthes Ova",
+                  "Undigested Food Particles", "Fungi", "Fungi / Yeast"],
+    },
+    "SFA": {
+        "macro": ["Volume", "Color", "Color / Appearance", "Liquefaction Time", "Viscosity", "pH"],
+        "micro": ["Sperm Count", "Total Sperm Count", "Active", "Active (Progressive)", "Sluggish",
+                  "Sluggish (Non-progressive)", "Immotile", "Normal Forms", "Abnormal Forms",
+                  "Pus Cells", "RBCs", "Agglutination"],
+    },
+}
+
+
+def _build_exam_sections(test_code, params, report_layout):
+    """يفرز params لقسمين (macro/micro) حسب EXAM_SECTION_NAMES، مع احترام:
+    - report_layout['section_order'][اسم الباراميتر]: يفرض قسم مختلف عن
+      الافتراضي (نقل باراميتر من Macroscopic لـ Microscopic أو العكس، من
+      لوحة تعديل المعاينة).
+    - report_layout['param_order'][اسم الباراميتر]: رقم ترتيب صريح ضمن
+      قسمه — الباراميترات غير المرتّبة يدويًا تحافظ على ترتيبها الأصلي
+      نسبةً لبعضها (sort مستقر) وتُذيّل قائمة قسمها.
+    الباراميترات غير المذكورة إطلاقًا بـ EXAM_SECTION_NAMES (أُضيفت لاحقًا
+    لهذا التحليل من كتالوج التحاليل) تنزل افتراضيًا بقسم Microscopic —
+    بنفس سلوك حلقة "الباقي" القديمة بالقوالب.
+    """
+    names = EXAM_SECTION_NAMES.get(test_code, {"macro": [], "micro": []})
+    section_overrides = (report_layout or {}).get("section_order") or {}
+    param_order = (report_layout or {}).get("param_order") or {}
+
+    def default_section(pname):
+        if pname in names["macro"]:
+            return "macro"
+        return "micro"
+
+    macro_list, micro_list = [], []
+    for p in params:
+        section = section_overrides.get(p["name"], default_section(p["name"]))
+        (macro_list if section == "macro" else micro_list).append(p)
+
+    def sort_key(p):
+        return param_order.get(p["name"], 10_000)
+
+    macro_list.sort(key=sort_key)
+    micro_list.sort(key=sort_key)
+    return macro_list, micro_list
+
 
 # Blood Film and Retic Count are two SEPARATE orderable tests, but when both
 # are ordered for the same visit they should print as ONE Blood-Film-shaped
@@ -3809,6 +3871,15 @@ def _print_report_impl(order_test_id):
     ).fetchone()
     patient_name_en_value = (_pt_en_row["full_name_en"] or "") if _pt_en_row else ""
 
+    # تخصيص مظهر التقرير (سحب باراميتر، لون/خط/حجم، إزاحة صفحة...) —
+    # يُمزَج مستوى التحليل (كل المرضى) مع استثناء هذا المريض بالذات لو
+    # موجود. report_layout_has_patient_override يتحكم بإظهار زر "إرجاع
+    # لتصميم افتراضي" بالقالب (يظهر فقط لو فيه استثناء فعلي لهذا المريض).
+    report_layout, report_layout_has_patient_override = get_report_layout(
+        db, ot["test_definition_id"], order_test_id
+    )
+    macro_params, micro_params = _build_exam_sections(ot["test_code"], params, report_layout)
+
     return render_template(
         template_name,
         ot=ot, params=params, ranges=ranges, units=units, cbc_groups=cbc_groups,
@@ -3837,7 +3908,13 @@ def _print_report_impl(order_test_id):
         results_by_name=results_by_name,
         param_notes={name: r["note"] for name, r in results_by_name.items() if r["note"]},
         report_comment=(ot["report_comment"] if "report_comment" in ot.keys() else "") or "",
+        test_definition_id=ot["test_definition_id"],
+        report_layout=report_layout,
+        report_layout_has_patient_override=report_layout_has_patient_override,
+        macro_params=macro_params,
+        micro_params=micro_params,
     )
+
 
 
 # ---------------------------------------------------------------- exam reports --
@@ -3882,6 +3959,76 @@ def order_test_param_note(order_test_id):
             (order_test_id, test_parameter_id, note),
         )
     db.commit()
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------- report layout --
+# نظام تخصيص مظهر التقرير (سحب باراميتر، لون/خط/حجم، إزاحة صفحة، إخفاء/
+# تسمية عرض مخصصة) — راجع editor_script + applyReportLayout بـ
+# exam_report_shared.html. "scope" دائمًا واحدة من: "test" (scope_id =
+# test_definition_id، يطبّق على كل مريض عنده هذا التحليل) أو "order_test"
+# (scope_id = order_test_id، استثناء خاص بمريض واحد بالذات، يتفوّق على
+# scope="test" لو موجود ولا يأثر على أي مريض ثاني).
+VALID_LAYOUT_SCOPES = ("test", "order_test")
+
+
+@app.route("/api/reports/layout/<int:test_definition_id>", methods=["GET"])
+@login_required
+def api_report_layout_get(test_definition_id):
+    db = get_db()
+    order_test_id = request.args.get("order_test_id", type=int)
+    test_layout = get_raw_layout(db, "test", test_definition_id)
+    patient_layout = None
+    merged = test_layout
+    has_patient_override = False
+    if order_test_id:
+        merged, has_patient_override = get_report_layout(db, test_definition_id, order_test_id)
+        if has_patient_override:
+            patient_layout = get_raw_layout(db, "order_test", order_test_id)
+    return jsonify({
+        "test_layout": test_layout,
+        "patient_layout": patient_layout,
+        "merged": merged,
+        "has_patient_override": has_patient_override,
+    })
+
+
+@app.route("/api/reports/layout", methods=["POST"])
+@login_required
+def api_report_layout_save():
+    db = get_db()
+    body = request.get_json(silent=True) or {}
+    scope = body.get("scope")
+    scope_id = body.get("scope_id")
+    layout = body.get("layout")
+    if scope not in VALID_LAYOUT_SCOPES:
+        return jsonify({"error": "scope غير صحيح"}), 400
+    try:
+        scope_id = int(scope_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "scope_id غير صالح"}), 400
+    if not isinstance(layout, dict):
+        return jsonify({"error": "layout غير صالح"}), 400
+    save_report_layout(db, scope, scope_id, layout, user_id=session.get("user_id"))
+    log_action("SaveReportLayout", scope, scope_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/reports/layout/reset", methods=["POST"])
+@login_required
+def api_report_layout_reset():
+    db = get_db()
+    body = request.get_json(silent=True) or {}
+    scope = body.get("scope")
+    scope_id = body.get("scope_id")
+    if scope not in VALID_LAYOUT_SCOPES:
+        return jsonify({"error": "scope غير صحيح"}), 400
+    try:
+        scope_id = int(scope_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "scope_id غير صالح"}), 400
+    reset_report_layout(db, scope, scope_id)
+    log_action("ResetReportLayout", scope, scope_id)
     return jsonify({"ok": True})
 
 

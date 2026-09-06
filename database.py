@@ -483,6 +483,29 @@ CREATE TABLE IF NOT EXISTS visit_previous_merges (
     FOREIGN KEY (visit_id) REFERENCES visits(id),
     FOREIGN KEY (source_order_test_id) REFERENCES order_tests(id)
 );
+
+-- ============================================================================
+-- تخصيص مظهر التقرير المطبوع (سحب باراميتر، لون/خط/حجم نتيجة، إزاحة
+-- الصفحة، موضع الختم...) — راجع editor_script بـ exam_report_shared.html
+-- و get_report_layout/save_report_layout بـ app.py.
+-- scope='test'       : scope_id = test_definition_id — يطبّق على كل مريض
+--                       عنده هذا التحليل (التصميم "الافتراضي" الجديد).
+-- scope='order_test'  : scope_id = order_test_id — استثناء خاص بمريض واحد
+--                       بالذات فقط، يتفوّق دائمًا على تخصيص scope='test'
+--                       لو موجود، ولا يأثر على أي مريض ثاني إطلاقًا.
+-- layout_json: نص JSON حر الشكل (param_order, param_overrides بالاسم
+-- {color, font_family, font_size, label}, section_order, page_offset_mm,
+-- stamp_pos) — قابل للتوسّع بدون أي تعديل بقاعدة البيانات مستقبلاً.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS report_layout_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL,
+    scope_id INTEGER NOT NULL,
+    layout_json TEXT NOT NULL,
+    updated_by INTEGER,
+    updated_at TEXT,
+    UNIQUE(scope, scope_id)
+);
 """
 
 
@@ -1774,6 +1797,78 @@ def upsert_stamp_placement(db, target_type, target_id, stamp_id, pos_x, pos_y, w
 
 def remove_stamp_placement(db, placement_id):
     db.execute("DELETE FROM report_stamp_placements WHERE id=?", (placement_id,))
+    db.commit()
+
+
+# ============== تخصيص مظهر التقرير المطبوع (report_layout_overrides) ==============
+# راجع شرح الجدول بأعلى SCHEMA. الدمج دائمًا: تخصيص المريض المفرد
+# (scope='order_test') يتفوّق على تخصيص نوع التحليل (scope='test') حقل
+# حقل — مو استبدال كامل — حتى لو المريض بدّل بس اللون، يبقى الترتيب
+# والخط المحفوظين على مستوى التحليل كما هم.
+def _get_layout_row(db, scope, scope_id):
+    row = db.execute(
+        "SELECT layout_json FROM report_layout_overrides WHERE scope=? AND scope_id=?",
+        (scope, scope_id),
+    ).fetchone()
+    if not row:
+        return {}
+    try:
+        parsed = json.loads(row["layout_json"])
+        return parsed if isinstance(parsed, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def get_raw_layout(db, scope, scope_id):
+    """نفس _get_layout_row لكن عامة (تُستخدم مباشرة من app.py — شاشة تحرير
+    التقرير تحتاج القيم الخام غير المدموجة لكل مستوى على حدة، عكس
+    get_report_layout اللي ترجّع نسخة مدموجة جاهزة للطباعة فقط)."""
+    return _get_layout_row(db, scope, scope_id)
+
+
+def get_report_layout(db, test_definition_id, order_test_id):
+    """يرجّع (merged_layout, has_patient_override). merged_layout جاهز
+    يُمرَّر مباشرة كمتغيّر Jinja report_layout للقالب. has_patient_override
+    يتحكم بإظهار زر "إرجاع لتصميم افتراضي" (يظهر فقط لو فيه استثناء خاص
+    فعلاً بهذا المريض)."""
+    test_layout = _get_layout_row(db, "test", test_definition_id)
+    patient_layout = _get_layout_row(db, "order_test", order_test_id)
+    merged = dict(test_layout)
+    for key, value in patient_layout.items():
+        if key == "param_overrides" and isinstance(value, dict):
+            merged_po = dict(test_layout.get("param_overrides", {}))
+            for pname, pval in value.items():
+                merged_row = dict(merged_po.get(pname, {}))
+                merged_row.update(pval)
+                merged_po[pname] = merged_row
+            merged["param_overrides"] = merged_po
+        else:
+            merged[key] = value
+    return merged, bool(patient_layout)
+
+
+def save_report_layout(db, scope, scope_id, layout_dict, user_id=None):
+    layout_json = json.dumps(layout_dict, ensure_ascii=False)
+    now = datetime.now().isoformat(timespec="seconds")
+    existing = db.execute(
+        "SELECT id FROM report_layout_overrides WHERE scope=? AND scope_id=?", (scope, scope_id)
+    ).fetchone()
+    if existing:
+        db.execute(
+            "UPDATE report_layout_overrides SET layout_json=?, updated_by=?, updated_at=? WHERE id=?",
+            (layout_json, user_id, now, existing["id"]),
+        )
+    else:
+        db.execute(
+            "INSERT INTO report_layout_overrides (scope, scope_id, layout_json, updated_by, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (scope, scope_id, layout_json, user_id, now),
+        )
+    db.commit()
+
+
+def reset_report_layout(db, scope, scope_id):
+    db.execute("DELETE FROM report_layout_overrides WHERE scope=? AND scope_id=?", (scope, scope_id))
     db.commit()
 
 

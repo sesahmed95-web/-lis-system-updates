@@ -2,15 +2,10 @@
 {% import "reports/partials/exam_report_shared.html" as shared with context %}
 
 {# ============================================================================
-   يعتمد على base_report.html المُحدَّث (نسخة base_report.html المرفقة معه):
-     - {% block patient_meta %} يستبدل قسم بيانات المريض بتصميم Sample No./
-       Patient No./الاسم الإنكليزي/Number Of — باقي التقارير (CBC، فلم الدم)
-       غير متأثرة إطلاقًا لأنها ما تعرّف هذا البلوك.
-     - {% block report_styles %} موجود بأعلى <head> لحقن CSS إضافي.
-     - {% block report_body %} هو محتوى التقرير نفسه (اسمه الصحيح، مو content).
-   المتغيرات الجديدة المطلوبة من app.py عند render_template لهذي التقارير:
-     sample_no, sample_time, number_of, patient_name_en (كلها اختيارية
-     بفضل |default بالماكرو، فما تكسر العرض لو ناقصة مؤقتًا).
+   يعتمد على base_report.html المُحدَّث + exam_report_shared.html (نظام
+   تخصيص المظهر report_layout — راجع شرح كامل بأعلى ذاك الملف). محتوى
+   التقرير كله يُبنى الآن عبر shared.render_report_body() بدل حلقات يدوية،
+   حتى يدعم السحب/الإخفاء/التلوين/الخطوط تلقائيًا بلا أي كود إضافي هنا.
 ============================================================================ #}
 
 {% block report_styles %}
@@ -21,36 +16,11 @@
 {% block patient_meta %}{{ shared.patient_meta_v2() }}{% endblock %}
 
 {% block report_body %}
-<div class="report-page">
-
-  {# اسم التحليل: دائمًا بالمنتصف، كامل غير مختصر، بالإنكليزي — إلزامي #}
-  <div class="report-title editable" data-field="report_title" data-param-id="">General Urine Examination</div>
-
-  <div class="section-title editable" data-field="section_title" data-param-id="">Macroscopic Examination</div>
-  {% set macro_names = ["Color","Specific Gravity","Reaction (pH)","Glucose","Protein","Ketone","Bile Pigment","Urobilinogen","Nitrite"] %}
-  {% for p in params if p['name'] in macro_names %}
-    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), shared.resolve_value(results_by_name.get(p['name'])), param_notes.get(p['name'], ''), order_test_id) }}
-  {% endfor %}
-  {{ shared.add_param_row('urine_macro', order_test_id) }}
-
-  <div class="section-title editable" data-field="section_title" data-param-id="">Microscopic Examination</div>
-  {% set micro_names = ["RBCs","PUS","Casts","Epithelial Cells","Amorphous","Mucus","Crystals","Parasites","Parasites / Others"] %}
-  {% for p in params if p['name'] in micro_names %}
-    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), shared.resolve_value(results_by_name.get(p['name'])), param_notes.get(p['name'], ''), order_test_id) }}
-  {% endfor %}
-  {# أي باراميتر انضاف يدويًا لهذا الفحص ومو بأي من القائمتين فوق (زر + إضافة باراميتر) يظهر هنا تلقائيًا #}
-  {% for p in params if p['name'] not in macro_names and p['name'] not in micro_names %}
-    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), shared.resolve_value(results_by_name.get(p['name'])), param_notes.get(p['name'], ''), order_test_id) }}
-  {% endfor %}
-  {{ shared.add_param_row('urine_micro', order_test_id) }}
-
-  <div class="bottom-note">
-    <label>📝 ملاحظة عامة أسفل التقرير (اختيارية)</label>
-    <textarea id="report-comment" data-order-test-id="{{ order_test_id }}"
-              placeholder="مثال: يُنصح بإعادة الفحص بعد أسبوع...">{{ report_comment or '' }}</textarea>
-  </div>
-
-</div>
+{% set sections_def = [
+  ("macro", "Macroscopic Examination", ["Color","Specific Gravity","Reaction (pH)","Glucose","Protein","Ketone","Bile Pigment","Urobilinogen","Nitrite"]),
+  ("micro", "Microscopic Examination", ["RBCs","PUS","Casts","Epithelial Cells","Amorphous","Mucus","Crystals","Parasites","Parasites / Others"]),
+] %}
+{{ shared.render_report_body("General Urine Examination", sections_def, params, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
 
 {{ shared.editor_script(order_test_id) }}
 <script>

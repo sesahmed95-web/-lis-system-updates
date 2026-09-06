@@ -9,34 +9,11 @@
 {% block patient_meta %}{{ shared.patient_meta_v2() }}{% endblock %}
 
 {% block report_body %}
-<div class="report-page">
-
-  <div class="report-title editable" data-field="report_title" data-param-id="">General Stool Examination</div>
-
-  <div class="section-title editable" data-field="section_title" data-param-id="">Macroscopic Examination</div>
-  {% set macro_names = ["Color","Consistency","Mucus","Blood","Worms","Worms / Helminths"] %}
-  {% for p in params if p['name'] in macro_names %}
-    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), shared.resolve_value(results_by_name.get(p['name'])), param_notes.get(p['name'], ''), order_test_id) }}
-  {% endfor %}
-  {{ shared.add_param_row('stool_macro', order_test_id) }}
-
-  <div class="section-title editable" data-field="section_title" data-param-id="">Microscopic Examination</div>
-  {% set micro_names = ["Pus Cells","RBCs","Amoeba (E. histolytica)","Giardia lamblia","Helminthes Ova","Undigested Food Particles","Fungi","Fungi / Yeast"] %}
-  {% for p in params if p['name'] in micro_names %}
-    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), shared.resolve_value(results_by_name.get(p['name'])), param_notes.get(p['name'], ''), order_test_id) }}
-  {% endfor %}
-  {% for p in params if p['name'] not in macro_names and p['name'] not in micro_names %}
-    {{ shared.exam_row(p, ranges.get(p['name']), units.get(p['name'], ''), shared.resolve_value(results_by_name.get(p['name'])), param_notes.get(p['name'], ''), order_test_id) }}
-  {% endfor %}
-  {{ shared.add_param_row('stool_micro', order_test_id) }}
-
-  <div class="bottom-note">
-    <label>📝 ملاحظة عامة أسفل التقرير (اختيارية)</label>
-    <textarea id="report-comment" data-order-test-id="{{ order_test_id }}"
-              placeholder="مثال: يُنصح بإعادة الفحص بعد أسبوع...">{{ report_comment or '' }}</textarea>
-  </div>
-
-</div>
+{% set sections_def = [
+  ("macro", "Macroscopic Examination", ["Color","Consistency","Mucus","Blood","Worms","Worms / Helminths"]),
+  ("micro", "Microscopic Examination", ["Pus Cells","RBCs","Amoeba (E. histolytica)","Giardia lamblia","Helminthes Ova","Undigested Food Particles","Fungi","Fungi / Yeast"]),
+] %}
+{{ shared.render_report_body("General Stool Examination", sections_def, params, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
 
 {{ shared.editor_script(order_test_id) }}
 <script>

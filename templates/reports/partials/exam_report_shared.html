@@ -2,23 +2,36 @@
    reports/partials/exam_report_shared.html
    =============================================================================
    يستورده كل من: reports/urine_exam.html (GUE), reports/stool_exam.html (GSE),
-   reports/seminal_fluid.html (SFA) — وأي تقرير "فحص" مستقبلي بنفس النمط
-   (باراميترات نصية/رقمية موزّعة على أقسام Macroscopic/Microscopic بدل جدول
-   CBC أو بطاقات الكيمياء).
+   reports/seminal_fluid.html (SFA) — وأي تقرير "فحص" مستقبلي بنفس النمط.
 
    يُستورد بـ "with context" إلزاميًا من القالب المستدعي:
        {% import "reports/partials/exam_report_shared.html" as shared with context %}
-   حتى تتوفر لكل الماكرو هنا نفس متغيرات الـ render_template الممرّرة من
-   _print_report_impl (patient_name, referring_doctor_name, sample_no...)
-   دون الحاجة لتمريرها يدويًا كوسائط لكل استدعاء.
+
+   نظام تخصيص المظهر (report_layout): يُبنى بـ app.py عبر get_report_layout()
+   (دمج مستوى التحليل scope='test' + استثناء المريض scope='order_test')
+   ويُمرَّر كمتغيّر Jinja "report_layout" (dict) لكل قوالب هذا النمط دائمًا
+   — راجع _print_report_impl. الشكل المتوقع لمحتواه:
+     {
+       "section_order": ["macro","micro"],           # اختياري
+       "sections": {"macro": [...names...], "micro": [...]},  # اختياري
+       "hidden_params": ["Crystals"],                 # اختياري
+       "param_overrides": {"Urobilinogen": {"label":"...", "color":"#C0392B", "font_size":15}},
+       "page_offset_px": 14,
+       "font_family_ar": "'Segoe UI', Tahoma, Arial, sans-serif",
+       "font_family_en": "Georgia, 'Times New Roman', serif"
+     }
+   كل مفتاح اختياري تمامًا — غيابه يرجّع نفس السلوك الافتراضي القديم بالضبط.
 ============================================================================= #}
 
 {% macro styles() %}
+{% set rl = report_layout|default({}) %}
 <style>
-  /* .report-page يعيش داخل .sheet الموروثة من base_report.html (نفس الحد
-     الأقصى للعرض والحشو موجودان هناك) — هنا فقط اتجاه/محاذاة المحتوى
-     الإنكليزي بخلاف اتجاه RTL الافتراضي لباقي الصفحة. */
-  .report-page { direction: ltr; text-align: left; }
+  :root {
+    --exam-font-ar: {{ rl.get('font_family_ar') or "'Segoe UI', Tahoma, Arial, sans-serif" }};
+    --exam-font-en: {{ rl.get('font_family_en') or "Georgia, 'Times New Roman', serif" }};
+  }
+
+  .report-page { direction: ltr; text-align: left; font-family: var(--exam-font-en); }
 
   /* ============== ترويسة بيانات المريض/العينة (patient_meta_v2) ============== */
   .patient-info-v2 {
@@ -33,7 +46,7 @@
   .info-val { color: #1E3A8A; font-weight: 600; }
   .info-val.ar-name {
     color: #7A1F1F; direction: rtl; unicode-bidi: isolate; text-align: right;
-    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    font-family: var(--exam-font-ar);
   }
 
   /* ============== عنوان التحليل + عناوين الأقسام ============== */
@@ -42,27 +55,47 @@
     text-decoration: underline; text-underline-offset: 4px; margin: 6px 0 18px 0;
     color: #14213D;
   }
+  .exam-section { position: relative; }
   .section-title {
     font-weight: 700; font-size: 1.05em; color: #111;
     border-top: 1px solid #AEBBCB; padding-top: 9px; margin-top: 16px; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 6px;
   }
+  .report-page.exam-editing .exam-section { outline: 1px dashed transparent; border-radius: 4px; }
+  .report-page.exam-editing .exam-section:hover { outline-color: #AEBBCB; cursor: grab; }
 
-  /* ============== صف نتيجة مفردة (اسم : نتيجة  |  المدى الطبيعي  | 📝) ============== */
+  /* ============== صف نتيجة مفردة ============== */
   .result-row {
-    display: grid; grid-template-columns: 210px 26px 180px 1fr 26px;
-    align-items: baseline; padding: 5px 0; font-size: 1em; gap: 2px;
+    display: grid; grid-template-columns: 18px 200px 18px 160px 1fr auto;
+    align-items: center; padding: 5px 0; font-size: 1em; gap: 2px;
   }
   .result-row .rname { color: #1a1a1a; }
   .result-row .rcolon { color: #1a1a1a; }
   .result-row .rval { color: #1F3B7A; font-weight: 600; }
   .result-row .runit { color: #1a1a1a; font-size: 0.85em; margin-inline-start: 4px; font-weight: normal; }
   .result-row .rnorm { color: #1F3B7A; font-weight: 600; }
-  .result-row .rnote-btn {
-    justify-self: end; opacity: 0; border: none; background: none; cursor: pointer; font-size: 12px;
+  .row-tools { display: flex; gap: 2px; justify-self: end; }
+  .row-tools button {
+    opacity: 0; border: none; background: none; cursor: pointer; font-size: 12px; padding: 2px;
   }
-  .result-row:hover .rnote-btn { opacity: 0.55; }
-  .result-row .rnote-btn:hover { opacity: 1; }
-  @media print { .result-row .rnote-btn { display: none; } }
+  .result-row:hover .row-tools button.rnote-btn { opacity: 0.55; }
+  .row-tools button.rnote-btn:hover { opacity: 1; }
+  @media print { .row-tools, .row-drag-handle, .section-drag-handle { display: none !important; } }
+
+  .row-drag-handle, .section-drag-handle { display: none; cursor: grab; color: #94A3B8; font-size: 12px; user-select: none; }
+  .row-style-btn, .row-hide-btn { display: none; }
+  .report-page.exam-editing .row-drag-handle,
+  .report-page.exam-editing .section-drag-handle,
+  .report-page.exam-editing .row-style-btn,
+  .report-page.exam-editing .row-hide-btn { display: inline-flex; opacity: 0.6; }
+  .report-page.exam-editing .row-style-btn:hover,
+  .report-page.exam-editing .row-hide-btn:hover,
+  .report-page.exam-editing .row-drag-handle:hover,
+  .report-page.exam-editing .section-drag-handle:hover { opacity: 1; }
+
+  .result-row.exam-row-hidden { display: none; }
+  .report-page.exam-editing .result-row.exam-row-hidden { display: grid; opacity: 0.4; background: #FEF2F2; }
+  @media print { .result-row.exam-row-hidden { display: none !important; } }
 
   .inline-note {
     grid-column: 1 / -1; font-size: 12px; color: #92650A; background: #FEF9E7;
@@ -99,18 +132,71 @@
       font-style: italic; resize: none;
     }
   }
+
+  /* ============== شريط أدوات التعديل ============== */
+  .exam-toolbar {
+    position: fixed; top: 90px; left: 12px; z-index: 500;
+    background: #14213D; color: #fff; border-radius: 10px; padding: 8px 10px;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 12.5px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25); display: flex; flex-direction: column; gap: 6px;
+    max-width: 230px;
+  }
+  .exam-toolbar > button { align-self: flex-start; }
+  .exam-toolbar button {
+    background: #26529C; color: #fff; border: none; border-radius: 6px;
+    padding: 6px 10px; cursor: pointer; font-size: 12px; font-family: inherit;
+  }
+  .exam-toolbar button:hover { background: #2F63B8; }
+  .exam-toolbar-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .exam-toolbar-group label { font-size: 11px; opacity: 0.85; }
+  .exam-toolbar-group select { font-size: 11px; border-radius: 4px; border: none; padding: 2px 4px; }
+  #examEditControls { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #334; padding-top: 6px; }
+  .exam-save-btn { background: #15803D !important; }
+  .exam-save-btn:hover { background: #16974A !important; }
+
+  /* ============== نافذة اختيار نطاق الحفظ ============== */
+  .exam-scope-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 600;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .exam-scope-box {
+    background: #fff; border-radius: 10px; padding: 20px 24px; min-width: 280px;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; text-align: center; direction: rtl;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  }
+  .exam-scope-box p { margin: 0 0 14px 0; font-weight: 600; color: #14213D; }
+  .exam-scope-box button {
+    display: block; width: 100%; margin-bottom: 8px; padding: 9px 12px; border-radius: 6px;
+    border: 1px solid #E2E8F0; background: #F8FAFC; color: #14213D; cursor: pointer; font-size: 13px;
+  }
+  .exam-scope-box button.primary { background: #26529C; color: #fff; border-color: #26529C; }
+
+  /* ============== نافذة تخصيص صف (لون/حجم/تسمية) ============== */
+  .exam-style-popover {
+    position: absolute; z-index: 550; background: #fff; border: 1px solid #E2E8F0;
+    border-radius: 8px; padding: 10px 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 12.5px; direction: rtl;
+    min-width: 190px;
+  }
+  .exam-style-popover label { display: block; margin-bottom: 6px; color: #334155; }
+  .exam-style-popover input[type="text"], .exam-style-popover input[type="number"] {
+    width: 100%; padding: 4px 6px; border: 1px solid #E2E8F0; border-radius: 4px; margin-top: 2px;
+  }
+  .exam-style-popover input[type="color"] { width: 100%; height: 28px; margin-top: 2px; border: 1px solid #E2E8F0; border-radius: 4px; }
+  .exam-style-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .exam-style-actions button {
+    flex: 1; border: none; border-radius: 5px; padding: 6px 4px; font-size: 11.5px; cursor: pointer;
+  }
+  .exam-style-actions button.apply { background: #26529C; color: #fff; }
+  .exam-style-actions button.clear { background: #FEE2E2; color: #991B1B; }
+  .exam-style-actions button.close { background: #F1F5F9; color: #334155; }
+
+  @media print { .exam-toolbar, .exam-scope-modal, .exam-style-popover { display: none !important; } }
 </style>
 {% endmacro %}
 
 
-{# ============== ترويسة بيانات المريض/العينة — نسخة v2 (تطابق الصورة المرجعية) ==============
-   يستبدل قسم "الدكتور المرسل / اسم المريض" الافتراضي بـ base_report.html
-   بتخطيط عمودين: يمين = الاسم عربي+انكليزي/العمر/الجنس/الاستشاري، يسار =
-   رقم العينة/رقم المريض/تاريخ ووقت العينة/Number Of. يمكن لأي تقرير آخر
-   تبنّي نفس الترويسة بمجرد إضافة السطرين التاليين لبدايته:
-     {% import "reports/partials/exam_report_shared.html" as shared with context %}
-     {% block patient_meta %}{{ shared.patient_meta_v2() }}{% endblock %}
-#}
+{# ============== ترويسة بيانات المريض/العينة — نسخة v2 ============== #}
 {% macro patient_meta_v2() %}
 <div class="patient-info-v2">
   <div class="info-col">
@@ -133,17 +219,6 @@
 {% endmacro %}
 
 
-{# ============== صف نتيجة مفردة ==============
-   param: صف test_parameters (يوفّر param['id'] و param['name']).
-   range_row: صف reference_ranges أو None (find_reference_range من app.py).
-   unit: نص الوحدة (units.get(name, '')).
-   result_value: قيمة النتيجة (نص أو رقم) أو None.
-   note: نص الملاحظة الخاصة بهذا الباراميتر (param_notes.get(name, '')) أو ''.
-   order_test_id: رقم طلب التحليل — يُستخدم لحفظ الملاحظة عبر editor_script.
-#}
-{# يرجّع نص النتيجة الفعلي من صف results: يفضّل value_text لو موجود
-   وغير فاضي، وإلا يرجع value_numeric — بدل الاعتماد على value_text وحده
-   (لو النتيجة رقمية بحتة وvalue_text=NULL كان سيطبع فاضي دائمًا). #}
 {% macro resolve_value(row) -%}
 {%- if row -%}
   {%- if row['value_text'] not in (none, '') -%}{{ row['value_text'] }}{%- elif row['value_numeric'] is not none -%}{{ row['value_numeric'] }}{%- endif -%}
@@ -151,7 +226,12 @@
 {%- endmacro %}
 
 
-{% macro exam_row(param, range_row, unit, result_value, note, order_test_id) %}
+{# ============== صف نتيجة مفردة ==============
+   style: dict اختياري {label, color, font_size} من report_layout.param_overrides.
+   is_hidden: بول — لو True يُطبع الصف مخفي (display:none) خارج وضع التعديل. #}
+{% macro exam_row(param, range_row, unit, result_value, note, order_test_id, style=none, is_hidden=false) %}
+{% set style = style or {} %}
+{% set display_name = style.get('label') or param['name'] %}
 {% set normal_range = '' %}
 {% if range_row %}
   {% if range_row['range_text'] %}
@@ -164,12 +244,24 @@
     {% set normal_range = '< ' ~ (range_row['high']|string) %}
   {% endif %}
 {% endif %}
-<div class="result-row">
-  <span class="rname editable" data-field="param_name" data-param-id="{{ param['id'] }}">{{ param['name'] }}</span>
+<div class="result-row{% if is_hidden %} exam-row-hidden{% endif %}"
+     data-param-name="{{ param['name'] }}"
+     data-param-id="{{ param['id'] }}"
+     data-hidden="{{ '1' if is_hidden else '0' }}"
+     {% if style.get('color') %}data-color="{{ style.get('color') }}"{% endif %}
+     {% if style.get('font_size') %}data-font-size="{{ style.get('font_size') }}"{% endif %}
+     {% if style.get('label') %}data-label="{{ style.get('label') }}"{% endif %}
+     {% if style.get('font_size') %}style="font-size:{{ style.get('font_size') }}px;"{% endif %}>
+  <span class="row-drag-handle" title="اسحب لتغيير ترتيب هذا الصف">⋮⋮</span>
+  <span class="rname">{{ display_name }}</span>
   <span class="rcolon">:</span>
-  <span class="rval editable" data-field="result" data-param-id="{{ param['id'] }}">{{ result_value if result_value not in (none, '') else '' }}{% if unit and result_value not in (none, '') %} <span class="runit">{{ unit }}</span>{% endif %}</span>
+  <span class="rval" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% endif %}>{{ result_value if result_value not in (none, '') else '' }}{% if unit and result_value not in (none, '') %} <span class="runit">{{ unit }}</span>{% endif %}</span>
   <span class="rnorm">{{ normal_range }}</span>
-  <button type="button" class="rnote-btn" onclick="examToggleNote({{ param['id'] }}, {{ order_test_id }})" title="إضافة/تعديل ملاحظة أمام هذا الباراميتر">📝</button>
+  <span class="row-tools">
+    <button type="button" class="row-style-btn" onclick="examOpenStylePopover(event, this)" title="لون / حجم / تسمية العرض">🎨</button>
+    <button type="button" class="row-hide-btn" onclick="examToggleHidden(this)" title="إخفاء/إظهار هذا الصف بالتقرير">{{ '👁️' if is_hidden else '🗑️' }}</button>
+    <button type="button" class="rnote-btn" onclick="examToggleNote({{ param['id'] }}, {{ order_test_id }})" title="إضافة/تعديل ملاحظة أمام هذا الباراميتر">📝</button>
+  </span>
 </div>
 <div class="inline-note" id="exam-note-{{ param['id'] }}" style="{{ '' if note else 'display:none;' }}">{% if note %}💬 {{ note }}{% endif %}</div>
 {% endmacro %}
@@ -182,12 +274,158 @@
 {% endmacro %}
 
 
+{# ============== جسم التقرير كامل — مبني ديناميكيًا من report_layout ==============
+   report_title: نص عنوان التحليل بالمنتصف.
+   sections_def: قائمة tuples (section_key, section_title, default_param_names).
+   test_definition_id / order_test_id: تُكتب كـ data-* على .report-page، يقرأها الـ JS
+   وقت الحفظ لمعرفة scope_id لكل خيار (تحليل كامل / هذا المريض فقط). #}
+{% macro render_report_body(report_title, sections_def, params, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) %}
+{% set rl = report_layout|default({}) %}
+{% set params_by_name = {} %}
+{% for p in params %}{% set _ = params_by_name.update({p['name']: p}) %}{% endfor %}
+{% set hidden = rl.get('hidden_params', []) %}
+{% set param_overrides = rl.get('param_overrides', {}) %}
+{% set layout_sections = rl.get('sections') %}
+{% set section_order = rl.get('section_order') %}
+{% if not section_order %}
+  {% set section_order = [] %}
+  {% for key, title, default_names in sections_def %}{% set _ = section_order.append(key) %}{% endfor %}
+{% endif %}
+{% set shown = [] %}
+
+<div class="report-page" data-test-definition-id="{{ test_definition_id }}" data-order-test-id="{{ order_test_id }}"
+     style="{% if rl.get('page_offset_px') %}margin-top:{{ rl.get('page_offset_px') }}px;{% endif %}">
+
+  <div class="report-title">{{ report_title }}</div>
+
+  {% set sections_def_map = {} %}
+  {% for k2, t2, d2 in sections_def %}{% set _ = sections_def_map.update({k2: (t2, d2)}) %}{% endfor %}
+
+  {% for key in section_order %}
+    {% set title = sections_def_map.get(key, ('', []))[0] %}
+    {% set default_names = sections_def_map.get(key, ('', []))[1] %}
+    {% set names = (layout_sections.get(key) if layout_sections else none) %}
+    {% if names is none %}{% set names = default_names %}{% endif %}
+    <div class="exam-section" data-section-key="{{ key }}">
+      <div class="section-title"><span class="section-drag-handle" title="اسحب لتحريك هذا القسم كامل">⋮⋮</span>{{ title }}</div>
+      {% for name in names %}
+        {% if name in params_by_name %}
+          {% set _ = shown.append(name) %}
+          {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name)), param_notes.get(name, ''), order_test_id, param_overrides.get(name), name in hidden) }}
+        {% endif %}
+      {% endfor %}
+      {{ add_param_row(key, order_test_id) }}
+    </div>
+  {% endfor %}
+
+  {% set leftover_names = [] %}
+  {% for p in params %}
+    {% if p['name'] not in shown %}{% set _ = leftover_names.append(p['name']) %}{% endif %}
+  {% endfor %}
+  {% if leftover_names %}
+    <div class="exam-section" data-section-key="_leftover">
+      <div class="section-title"><span class="section-drag-handle" title="اسحب لتحريك هذا القسم كامل">⋮⋮</span>Other Results</div>
+      {% for name in leftover_names %}
+        {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name)), param_notes.get(name, ''), order_test_id, param_overrides.get(name), name in hidden) }}
+      {% endfor %}
+      {{ add_param_row('_leftover', order_test_id) }}
+    </div>
+  {% endif %}
+
+  <div class="bottom-note">
+    <label>📝 ملاحظة عامة أسفل التقرير (اختيارية)</label>
+    <textarea id="report-comment" data-order-test-id="{{ order_test_id }}"
+              placeholder="مثال: يُنصح بإعادة الفحص...">{{ report_comment or '' }}</textarea>
+  </div>
+
+</div>
+
+{{ edit_toolbar() }}
+{{ style_popover() }}
+{{ scope_modal() }}
+{% endmacro %}
+
+
+{% macro edit_toolbar() %}
+{% set rl = report_layout|default({}) %}
+<div class="exam-toolbar no-print">
+  <button type="button" id="examEditToggleBtn" onclick="examToggleEditMode()">✏️ تعديل التصميم</button>
+  <div id="examEditControls" style="display:none;">
+    <div class="exam-toolbar-group">
+      <span>موضع التقرير:</span>
+      <button type="button" onclick="examShiftPage(-4)" title="ارفع التقرير لأعلى">▲</button>
+      <button type="button" onclick="examShiftPage(4)" title="أنزل التقرير لأسفل">▼</button>
+    </div>
+    <div class="exam-toolbar-group">
+      <label>خط عربي
+        <select id="examFontAr" onchange="examSetFont('ar', this.value)">
+          <option value="">افتراضي</option>
+          <option value="Tahoma">Tahoma</option>
+          <option value="'Traditional Arabic'">Traditional Arabic</option>
+          <option value="'Simplified Arabic'">Simplified Arabic</option>
+          <option value="'Segoe UI'">Segoe UI</option>
+          <option value="'Sakkal Majalla'">Sakkal Majalla</option>
+        </select>
+      </label>
+    </div>
+    <div class="exam-toolbar-group">
+      <label>English font
+        <select id="examFontEn" onchange="examSetFont('en', this.value)">
+          <option value="">Default</option>
+          <option value="Georgia">Georgia</option>
+          <option value="'Times New Roman'">Times New Roman</option>
+          <option value="Arial">Arial</option>
+          <option value="'Segoe UI'">Segoe UI</option>
+          <option value="Calibri">Calibri</option>
+          <option value="'Courier New'">Courier New</option>
+        </select>
+      </label>
+    </div>
+    <button type="button" class="exam-save-btn" onclick="examSaveLayout()">💾 حفظ التعديلات</button>
+    <button type="button" onclick="examDiscardChanges()">✖ تراجع عن التعديلات</button>
+    {% if report_layout_has_patient_override|default(false) %}
+    <button type="button" onclick="examResetPatientLayout()">↩ إرجاع لتصميم افتراضي (هذا المريض)</button>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+
+{% macro style_popover() %}
+<div id="examStylePopover" class="exam-style-popover" style="display:none;">
+  <label>تسمية العرض (اسم الباراميتر بهذا التقرير)
+    <input type="text" id="examStyleLabel">
+  </label>
+  <label>اللون
+    <input type="color" id="examStyleColor">
+  </label>
+  <label>حجم الخط (px)
+    <input type="number" id="examStyleSize" min="8" max="40">
+  </label>
+  <div class="exam-style-actions">
+    <button type="button" class="apply" onclick="examApplyStyle()">تطبيق</button>
+    <button type="button" class="clear" onclick="examClearStyle()">إزالة</button>
+    <button type="button" class="close" onclick="examCloseStylePopover()">إغلاق</button>
+  </div>
+</div>
+{% endmacro %}
+
+
+{% macro scope_modal() %}
+<div id="examScopeModal" class="exam-scope-modal" style="display:none;">
+  <div class="exam-scope-box">
+    <p>حفظ هذا التعديل لـ:</p>
+    <button type="button" class="primary" onclick="examConfirmSave('order_test')">هذا المريض فقط</button>
+    <button type="button" onclick="examConfirmSave('test')">كل مرضى هذا التحليل</button>
+    <button type="button" onclick="document.getElementById('examScopeModal').style.display='none'">إلغاء</button>
+  </div>
+</div>
+{% endmacro %}
+
+
 {% macro editor_script(order_test_id) %}
 <script>
-// يفتح/يحفظ ملاحظة قصيرة أمام باراميتر واحد بالذات (زر 📝 بكل صف نتيجة).
-// الحفظ عبر POST /order-tests/<order_test_id>/param-note بحقل
-// test_parameter_id (نفس id بجدول test_parameters، وليس اسم الباراميتر)
-// — راجع order_test_param_note() بـ app.py.
+// ============== ملاحظة قصيرة أمام باراميتر (موجودة أصلاً، بدون تغيير) ==============
 function examToggleNote(paramId, orderTestId) {
   var box = document.getElementById('exam-note-' + paramId);
   if (!box || box.dataset.editing === '1') return;
@@ -208,13 +446,198 @@ function examToggleNote(paramId, orderTestId) {
       body: 'test_parameter_id=' + encodeURIComponent(paramId) + '&note=' + encodeURIComponent(note)
     });
     box.dataset.editing = '0';
-    if (note) {
-      box.textContent = '💬 ' + note;
-      box.style.display = 'block';
-    } else {
-      box.textContent = '';
-      box.style.display = 'none';
-    }
+    if (note) { box.textContent = '💬 ' + note; box.style.display = 'block'; }
+    else { box.textContent = ''; box.style.display = 'none'; }
+  });
+}
+
+// ============== وضع التعديل المباشر ==============
+var examDndAttached = false;
+var examStyleTargetRow = null;
+
+function examToggleEditMode() {
+  var page = document.querySelector('.report-page');
+  var controls = document.getElementById('examEditControls');
+  var editing = page.classList.toggle('exam-editing');
+  controls.style.display = editing ? 'flex' : 'none';
+  if (editing) {
+    document.querySelectorAll('.result-row').forEach(function (r) { r.draggable = true; });
+    document.querySelectorAll('.exam-section').forEach(function (s) { s.draggable = true; });
+    if (!examDndAttached) { examAttachDnD(); examDndAttached = true; }
+  } else {
+    document.querySelectorAll('.result-row').forEach(function (r) { r.draggable = false; });
+    document.querySelectorAll('.exam-section').forEach(function (s) { s.draggable = false; });
+  }
+}
+
+function examDiscardChanges() {
+  location.reload();
+}
+
+// ---- سحب/إفلات: صف نتيجة داخل/بين الأقسام، وقسم كامل ضمن الصفحة ----
+var examDragEl = null;
+
+function examAttachDnD() {
+  document.querySelectorAll('.result-row').forEach(function (row) {
+    row.addEventListener('dragstart', function (e) {
+      examDragEl = row; e.stopPropagation();
+      e.dataTransfer.effectAllowed = 'move';
+    });
+  });
+  document.querySelectorAll('.exam-section').forEach(function (sec) {
+    sec.addEventListener('dragstart', function (e) {
+      if (examDragEl && examDragEl.classList.contains('result-row')) return;
+      examDragEl = sec; e.dataTransfer.effectAllowed = 'move';
+    });
+    sec.addEventListener('dragover', function (e) {
+      if (!examDragEl || !examDragEl.classList.contains('result-row')) return;
+      e.preventDefault();
+      var rows = Array.prototype.slice.call(sec.querySelectorAll('.result-row'));
+      var after = rows.find(function (r) {
+        var rect = r.getBoundingClientRect();
+        return e.clientY < rect.top + rect.height / 2;
+      });
+      var noteBoxAfter = after ? document.getElementById('exam-note-' + after.dataset.paramId) : null;
+      if (after) sec.insertBefore(examDragEl, after);
+      else { var footer = sec.querySelector('.add-param-row'); sec.insertBefore(examDragEl, footer); }
+      // يحرّك صندوق الملاحظة (لو موجود) مع صفه دائمًا
+      var myNote = document.getElementById('exam-note-' + examDragEl.dataset.paramId);
+      if (myNote) sec.insertBefore(myNote, examDragEl.nextSibling);
+    });
+  });
+  var container = document.querySelector('.report-page');
+  container.addEventListener('dragover', function (e) {
+    if (!examDragEl || !examDragEl.classList.contains('exam-section')) return;
+    e.preventDefault();
+    var secs = Array.prototype.slice.call(container.querySelectorAll('.exam-section'));
+    var after = secs.find(function (s) {
+      var rect = s.getBoundingClientRect();
+      return e.clientY < rect.top + rect.height / 2;
+    });
+    var bottomNote = container.querySelector('.bottom-note');
+    if (after) container.insertBefore(examDragEl, after);
+    else container.insertBefore(examDragEl, bottomNote);
+  });
+  document.addEventListener('dragend', function () { examDragEl = null; });
+}
+
+// ---- إخفاء/إظهار صف ----
+function examToggleHidden(btn) {
+  var row = btn.closest('.result-row');
+  var hidden = row.classList.toggle('exam-row-hidden');
+  row.dataset.hidden = hidden ? '1' : '0';
+  btn.textContent = hidden ? '👁️' : '🗑️';
+}
+
+// ---- تخصيص لون/حجم/تسمية صف ----
+function examOpenStylePopover(event, btn) {
+  event.stopPropagation();
+  var row = btn.closest('.result-row');
+  examStyleTargetRow = row;
+  var pop = document.getElementById('examStylePopover');
+  document.getElementById('examStyleLabel').value = row.dataset.label || '';
+  document.getElementById('examStyleColor').value = row.dataset.color || '#1f3b7a';
+  document.getElementById('examStyleSize').value = row.dataset.fontSize || '';
+  var rect = btn.getBoundingClientRect();
+  pop.style.top = (window.scrollY + rect.bottom + 4) + 'px';
+  pop.style.left = (window.scrollX + rect.left - 150) + 'px';
+  pop.style.display = 'block';
+}
+function examCloseStylePopover() {
+  document.getElementById('examStylePopover').style.display = 'none';
+  examStyleTargetRow = null;
+}
+function examApplyStyle() {
+  if (!examStyleTargetRow) return;
+  var row = examStyleTargetRow;
+  var label = document.getElementById('examStyleLabel').value.trim();
+  var color = document.getElementById('examStyleColor').value;
+  var size = document.getElementById('examStyleSize').value;
+  var nameEl = row.querySelector('.rname');
+  var valEl = row.querySelector('.rval');
+  if (label) { nameEl.textContent = label; row.dataset.label = label; }
+  if (color) { valEl.style.color = color; row.dataset.color = color; }
+  if (size) { row.style.fontSize = size + 'px'; row.dataset.fontSize = size; }
+  examCloseStylePopover();
+}
+function examClearStyle() {
+  if (!examStyleTargetRow) return;
+  var row = examStyleTargetRow;
+  var nameEl = row.querySelector('.rname');
+  nameEl.textContent = row.dataset.paramName;
+  var valEl = row.querySelector('.rval');
+  valEl.style.color = '';
+  row.style.fontSize = '';
+  delete row.dataset.label; delete row.dataset.color; delete row.dataset.fontSize;
+  examCloseStylePopover();
+}
+
+// ---- إزاحة الصفحة عموديًا ----
+var examPageOffset = parseInt((document.querySelector('.report-page').style.marginTop || '0'), 10) || 0;
+function examShiftPage(delta) {
+  examPageOffset += delta;
+  document.querySelector('.report-page').style.marginTop = examPageOffset + 'px';
+}
+
+// ---- خطوط عربي/إنكليزي (تُطبَّق فورًا عبر متغيّرات CSS على مستوى الصفحة) ----
+function examSetFont(kind, value) {
+  document.documentElement.style.setProperty('--exam-font-' + kind, value || '');
+}
+
+// ---- الحفظ: يفتح نافذة اختيار النطاق، ثم يبني JSON من DOM الحالي ----
+function examSaveLayout() {
+  document.getElementById('examScopeModal').style.display = 'flex';
+}
+function examSerializeLayout() {
+  var container = document.querySelector('.report-page');
+  var sectionEls = Array.prototype.slice.call(container.querySelectorAll('.exam-section'));
+  var section_order = sectionEls.map(function (s) { return s.dataset.sectionKey; });
+  var sections = {}; var hidden_params = []; var param_overrides = {};
+  sectionEls.forEach(function (s) {
+    var key = s.dataset.sectionKey;
+    var rows = Array.prototype.slice.call(s.querySelectorAll('.result-row'));
+    sections[key] = rows.map(function (r) { return r.dataset.paramName; });
+    rows.forEach(function (r) {
+      if (r.dataset.hidden === '1') hidden_params.push(r.dataset.paramName);
+      var ov = {};
+      if (r.dataset.color) ov.color = r.dataset.color;
+      if (r.dataset.fontSize) ov.font_size = parseInt(r.dataset.fontSize, 10);
+      if (r.dataset.label) ov.label = r.dataset.label;
+      if (Object.keys(ov).length) param_overrides[r.dataset.paramName] = ov;
+    });
+  });
+  var fontAr = document.getElementById('examFontAr').value;
+  var fontEn = document.getElementById('examFontEn').value;
+  var layout = { section_order: section_order, sections: sections, hidden_params: hidden_params,
+                 param_overrides: param_overrides, page_offset_px: examPageOffset };
+  if (fontAr) layout.font_family_ar = fontAr;
+  if (fontEn) layout.font_family_en = fontEn;
+  return layout;
+}
+function examConfirmSave(scope) {
+  document.getElementById('examScopeModal').style.display = 'none';
+  var container = document.querySelector('.report-page');
+  var scopeId = scope === 'test' ? container.dataset.testDefinitionId : container.dataset.orderTestId;
+  var layout = examSerializeLayout();
+  fetch('/api/reports/layout', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({scope: scope, scope_id: scopeId, layout: layout})
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    if (res.ok) location.reload();
+    else alert('صار خطأ: ' + (res.error || ''));
+  }).catch(function () { alert('تعذّر الاتصال — تأكد أن البرنامج شغّال.'); });
+}
+function examResetPatientLayout() {
+  if (!confirm('متأكد تريد ترجّع هذا التقرير لتصميمه الافتراضي (يمسح استثناء هذا المريض فقط)؟')) return;
+  var container = document.querySelector('.report-page');
+  fetch('/api/reports/layout/reset', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({scope: 'order_test', scope_id: container.dataset.orderTestId})
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    if (res.ok) location.reload();
+    else alert('صار خطأ: ' + (res.error || ''));
   });
 }
 </script>
