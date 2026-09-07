@@ -3966,14 +3966,9 @@ def _print_report_impl(order_test_id):
 @app.route("/order-tests/<int:order_test_id>/report-comment", methods=["POST"])
 @login_required
 def order_test_report_comment(order_test_id):
-    db = get_db()
-    order_test = db.execute("SELECT id FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
-    if not order_test:
-        return jsonify({"error": "Not found"}), 404
-    comment = request.form.get("report_comment", "")
-    db.execute("UPDATE order_tests SET report_comment=? WHERE id=?", (comment, order_test_id))
-    db.commit()
-    return jsonify({"ok": True})
+    # الميزة أُلغيت نهائيًا (المطلوب 1) — العمود report_comment يبقى بقاعدة
+    # البيانات بدون استخدام، لكن هذا الراوت ما يعود يحفظ فيه أي شي بعد الآن.
+    return jsonify({"ok": False, "error": "This feature has been removed."}), 410
 
 
 @app.route("/order-tests/<int:order_test_id>/param-note", methods=["POST"])
