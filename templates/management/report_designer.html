@@ -6,6 +6,18 @@
 <div class="card" id="designCard">
   <h3>تصميم تقرير: {{ selected_test['name'] }} ({{ selected_test['code'] }})</h3>
 
+  <form method="POST" style="margin-bottom:18px;">
+    <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">
+    <input type="hidden" name="mode" value="stamp">
+    <div class="form-field">
+      <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="checkbox" name="enable_stamp_widget" {{ 'checked' if selected_test['enable_stamp_widget'] }}>
+        🖋️ تفعيل خيار "إضافة ختم / توقيع" لهذا التحليل عند الطباعة (معطّل افتراضيًا لكل التحاليل)
+      </label>
+    </div>
+    <button class="btn small" type="submit">حفظ</button>
+  </form>
+
   {% if selected_test['code'] in ('CBC','BF','WBCDIFF','FLUIDEXAM') %}
     <p class="muted">هذا التحليل إله تصميم مدمج جاهز بالفعل ولا يحتاج تصميم إضافي.</p>
     <a class="btn" href="{{ url_for('preview_report_design', test_definition_id=selected_test['id']) }}">👁️ معاينة التصميم الآن</a>

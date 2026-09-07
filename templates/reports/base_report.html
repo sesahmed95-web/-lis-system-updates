@@ -342,7 +342,7 @@
 </div>
 
 <div class="report-scope">
-  <div class="sheet">
+  <div class="sheet" data-test-definition-id="{{ test_definition_id or '' }}" data-order-test-id="{{ order_test_id or 0 }}">
     <table class="page-repeat-table">
       {% if repeat_header_on_print %}<thead>{% else %}<tbody>{% endif %}
         <tr><td>
@@ -393,6 +393,27 @@
         <tr><td>
           {% block report_body %}{% endblock %}
 
+          {#
+            شريط "✏️ تعديل التصميم" + حفظ/تراجع — كان سابقًا يظهر فقط جوّا
+            القوالب اللي تستخدم render_report_body() (GUE/GSE/SFA وما شابه)،
+            فيطلع تنبيه "غير مدعوم" بأي تقرير ثاني (CBC، كيمياء...) عند
+            الضغط على ✏️ عناوين/حقول الترويسة. نقلناه هنا لصف base_report.html
+            المشترك فيشتغل بكل أنواع التقارير بدون استثناء، لأن الـAPI
+            (/api/reports/layout) والـJS (examSerializeLayout) أصلاً عامّين
+            ومايعتمدون على وجود أقسام امتحان (.exam-section) — لو ماكو
+            أقسام (متل CBC/كيمياء) بيحفظ بس عنوان التقرير وحقول ترويسة
+            المريض المعدَّلة، وهذا بالضبط المطلوب. لو القالب نفسه (قوالب
+            الفحص القديمة) عنده استدعاء قديم لنفس الشريط/السكريبت جوّا
+            report_body، تكراره غير ضار (يعيد تعريف نفس الدوال بلا أي أثر
+            سلبي) — ما يحتاج حذفه فورًا.
+          #}
+          {% if session.get('role') == 'admin' %}
+          {{ shared.edit_toolbar() }}
+          {{ shared.style_popover() }}
+          {{ shared.scope_modal() }}
+          {{ shared.editor_script(order_test_id or 0) }}
+          {% endif %}
+
           {% if show_exam_signature %}
           <div class="exam-signature-row">
             <div class="exam-signature-box">
@@ -402,7 +423,9 @@
           </div>
           {% endif %}
 
+          {% if enable_stamp_widget %}
           {% include "partials/stamp_picker.html" %}
+          {% endif %}
 
           <div class="footer-block">
             {% block extra_note %}{% endblock %}

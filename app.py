@@ -3643,7 +3643,7 @@ def _print_report_impl(order_test_id):
     db = get_db()
     ot = db.execute(
         "SELECT ot.*, td.code as test_code, td.name as test_name, td.department as test_department, "
-        "td.is_examining_test as is_examining_test, "
+        "td.is_examining_test as is_examining_test, td.enable_stamp_widget as enable_stamp_widget, "
         "p.id as patient_id, p.full_name as patient_name, p.gender, p.age, p.age_unit, "
         "v.id as visit_id, v.created_at as visit_created_at, v.registration_number, "
         "v.doctor_id, v.referral_center_id, "
@@ -3918,6 +3918,12 @@ def _print_report_impl(order_test_id):
         previous_values=previous_values, repeat_header_on_print=repeat_header_on_print,
         logo_url=logo_url, from_other_lab=from_other_lab, font_size=font_size,
         show_exam_signature=show_exam_signature,
+        # enable_stamp_widget: يتحكم فقط بصندوق "إضافة ختم / توقيع" التفاعلي
+        # (stamp_picker.html) — منفصل تماماً عن show_exam_signature أعلاه
+        # (صندوق التوقيع الثابت الخاص بالفحوصات). الافتراضي 0 لأي تحليل ما
+        # فُعِّل له صراحةً من مصمم التقارير.
+        enable_stamp_widget=bool(ot["enable_stamp_widget"]) if "enable_stamp_widget" in ot.keys() else False,
+        test_definition_id=ot["test_definition_id"],
         stamp_target_type="order_test", stamp_target_id=order_test_id,
         digital_stamps=get_digital_stamps(db),
         stamp_placements=get_stamp_placements(db, "order_test", order_test_id),
@@ -4131,6 +4137,41 @@ def api_examining_doctors_delete(doctor_id):
     delete_examining_doctor(db, doctor_id)
     log_action("DeleteExaminingDoctor", "examining_doctors_list", doctor_id)
     return jsonify({"ok": True, "doctors": [dict(r) for r in get_examining_doctors_full(db)]})
+
+
+# ============== إضافة باراميتر جديد مباشرة من صفحة معاينة التقرير ==============
+# يستدعيه زر "+ إضافة باراميتر جديد لهذا القسم" (add_param_row بـ
+# exam_report_shared.html) — بديل حقيقي عن رسالة placeholder السابقة.
+# ينشئ صف test_parameters فعلي (اسم فقط، بلا وحدة/مدى طبيعي — تُضاف لاحقًا
+# من كتالوج التحاليل لو احتاجها الأدمن)؛ ينزل تلقائيًا بقسم "Other Results"
+# بأي تقرير فحص لهذا التحليل لحد ما يُسحب لمكانه الصحيح ويُحفظ التصميم.
+@app.route("/api/test-parameters", methods=["POST"])
+@roles_required("admin")
+def api_add_test_parameter():
+    db = get_db()
+    body = request.get_json(silent=True) or {}
+    try:
+        test_definition_id = int(body.get("test_definition_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "بيانات غير صالحة"}), 400
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "اسم الباراميتر مطلوب"}), 400
+    td = db.execute("SELECT id FROM test_definitions WHERE id=?", (test_definition_id,)).fetchone()
+    if not td:
+        return jsonify({"error": "التحليل غير موجود"}), 404
+    existing = db.execute(
+        "SELECT id FROM test_parameters WHERE test_definition_id=? AND name=?", (test_definition_id, name)
+    ).fetchone()
+    if existing:
+        return jsonify({"error": "فيه باراميتر بنفس هذا الاسم أصلاً لهذا التحليل"}), 400
+    cur = db.execute(
+        "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, ?, '', 'Text')",
+        (test_definition_id, name),
+    )
+    db.commit()
+    log_action("AddTestParameter", "test_parameters", cur.lastrowid, name)
+    return jsonify({"ok": True, "id": cur.lastrowid, "name": name})
 
 
 def _whatsapp_flush_pdf_dir():
@@ -6154,6 +6195,17 @@ def report_designer():
         heading_align = request.form.get("heading_align") or (existing_tpl["heading_align"] if existing_tpl else None) or "center"
         rows_align = request.form.get("rows_align") or (existing_tpl["rows_align"] if existing_tpl else None) or "right"
 
+        if mode == "stamp":
+            # تفعيل/تعطيل صندوق "إضافة ختم / توقيع" التفاعلي لهذا التحليل —
+            # عام لكل أنواع التقارير (جاهزة أو مخصصة)، منفصل تمامًا عن تصميم
+            # الجدول نفسه. معطّل افتراضيًا (0) بكل التحاليل القديمة والجديدة.
+            enable_stamp_widget = 1 if request.form.get("enable_stamp_widget") else 0
+            db.execute("UPDATE test_definitions SET enable_stamp_widget=? WHERE id=?", (enable_stamp_widget, test_id))
+            db.commit()
+            log_action("UpdateStampWidgetSetting", "test_definition", int(test_id), str(enable_stamp_widget))
+            flash("تم حفظ إعداد صندوق الختم/التوقيع.")
+            return redirect(url_for("report_designer", test_definition_id=test_id))
+
         if mode == "docx":
             file = request.files.get("docx_file")
             if not file or not file.filename:
@@ -6369,7 +6421,14 @@ def _preview_report_design_impl(test_definition_id):
     ).fetchall()
     units_by_name = {p["name"]: p["unit"] for p in parameters}
     highlight_by_name = {p["name"]: bool(p["highlight"]) for p in parameters}
-    show_prev_values = department_shows_previous_values(test["department"])
+    # show_prev_values يبقى False دائمًا بالمعاينة (بلا استثناء) — هذي معاينة
+    # تصميم بدون مريض حقيقي، فمافيه "نتيجة سابقة" فعلية أصلاً لأي تحليل. كان
+    # يُحسب سابقًا من department_shows_previous_values(department) فقط، فيطلع
+    # "Previous Result — X: — mg/dL" فاضي بكل تحليل قسمه يدعم النتيجة
+    # السابقة، حتى لو ما فيه مريض إطلاقًا. النتيجة السابقة الحقيقية تُحسب
+    # وتُعرض فقط بالطباعة الفعلية (_print_report_impl) لما تكون موجودة
+    # وموثّقة لنفس المريض تحديداً.
+    show_prev_values = False
     logo_path = get_setting(db, "logo_path", "")
     logo_url = url_for("static", filename=logo_path) if logo_path else None
 
@@ -6428,11 +6487,15 @@ def _preview_report_design_impl(test_definition_id):
         repeat_header_on_print=department_shows_previous_values(test["department"]),
         logo_url=logo_url, from_other_lab=False, font_size=14 if test["code"] == "CBC" else 16,
         show_exam_signature=False,
+        # نفس تفعيل/تعطيل صندوق الختم المحفوظ فعليًا لهذا التحليل، حتى تشوف
+        # بالمعاينة بالضبط نفس اللي رح يطلع بالطباعة الحقيقية.
+        enable_stamp_widget=bool(test["enable_stamp_widget"]) if "enable_stamp_widget" in test.keys() else False,
         stamp_target_type="test_definition", stamp_target_id=test_definition_id,
         digital_stamps=[], stamp_placements=[],
         visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}", sex="—", age="—",
         patient_name="اسم المريض — معاينة تصميم فقط", patient_id="0000",
         referring_doctor_name="—", is_design_preview=True, preview_test_id=test_definition_id,
+        test_definition_id=test_definition_id,
         sample_no="—", sample_time="—", number_of="—", patient_name_en="",
         order_test_id=0, results_by_name={}, param_notes={}, report_comment="",
         test_definition_id=test_definition_id,

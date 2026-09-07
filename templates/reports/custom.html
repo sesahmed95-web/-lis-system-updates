@@ -15,7 +15,15 @@
     padding-top: 3px; padding-bottom: 3px; border-top: none;
   }
   .panel-previous-icon { font-weight: bold; }
-  .lt-range-title { font-weight: 600; color: #475569; margin-inline-end: 6px; }
+  /* lt-range-title: تسمية مستوى المدى الطبيعي (Borderline high, Normal...) —
+     ملصقة بأقصى يسار خليتها (margin-inline-start:0)، مو بمنتصفها، بناءً على
+     طلب المستخدم. lt-range-row تعرض كل مستوى بسطر مستقل (تسمية + قيمة) بدل
+     تكديسها بلا تنظيم. */
+  .lt-range-label { font-weight: 600; color: #475569; margin: 6px 0 1px 0; text-align: left; }
+  .lt-range-row { display: flex; justify-content: space-between; gap: 10px; text-align: left; }
+  .lt-range-row .lt-range-title { font-weight: 600; color: #475569; margin-inline-start: 0; }
+  .lt-comment-box { margin-top: 14px; font-size: 0.85em; }
+  .lt-comment-box b { color: #475569; }
 </style>
 
 <div class="report-heading" style="text-align: {{ custom_heading_align|default('center') }};">{{ custom_heading }}</div>
@@ -24,13 +32,11 @@
 
 <table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;">
   <colgroup>
-    <col class="col-name"><col class="col-result"><col class="col-unit"><col class="col-range">
-    {% if show_si %}<col class="col-range">{% endif %}
+    <col class="col-name"><col style="width:{{ '33%' if show_si else '66%' }}">
+    {% if show_si %}<col style="width:33%">{% endif %}
   </colgroup>
   <tr>
     <th style="text-align:left;">Laboratory Test Results</th>
-    <th>Result</th>
-    <th>Unit</th>
     <th>Conventional Units</th>
     {% if show_si %}<th>SI Units</th>{% endif %}
   </tr>
@@ -41,32 +47,29 @@
   <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
     <td style="text-align:{{ name_align }}; font-weight:bold;{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.label }}</td>
     <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
-      {% if row.result not in (None, '') %}<span style="font-weight:bold;">{{ row.result }}</span>{% endif %}
-    </td>
-    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
-      {{ row.unit or '' }}
-    </td>
-    <td>
+      {% if row.result not in (None, '') %}<span style="font-weight:bold;">{{ row.result }}</span>{% if row.unit %} {{ row.unit }}{% endif %}{% endif %}
       {% if row.range_tiers %}
+        {% if row.range_tiers|length == 1 and not row.range_tiers[0].label %}
+        <div class="lt-range-label">Normal Range : {{ row.range_tiers[0].value }}</div>
+        {% else %}
+        <div class="lt-range-label">Normal Range :</div>
         {% for tier in row.range_tiers %}
-        <div>
-          {% if tier.label %}<span class="lt-range-title">{{ tier.label }}</span>{% endif %}
-          <span>{{ tier.value }}</span>
-        </div>
+        <div class="lt-range-row"><span class="lt-range-title">{{ tier.label }}</span><span>{{ tier.value }}</span></div>
         {% endfor %}
+        {% endif %}
       {% endif %}
     </td>
     {% if show_si %}
     <td>
       {% if row.result2 %}<span style="font-weight:bold;">{{ row.result2 }}</span>{% if row.unit2 %} {{ row.unit2 }}{% endif %}{% endif %}
-      {% if row.normal_range2 %}<span class="panel-secondary-line">{{ row.normal_range2 }}{% if row.unit2 %} {{ row.unit2 }}{% endif %}</span>{% endif %}
+      {% if row.normal_range2 %}<div class="lt-range-label">Normal Range : {{ row.normal_range2 }}{% if row.unit2 %} {{ row.unit2 }}{% endif %}</div>{% endif %}
     </td>
     {% endif %}
   </tr>
 
   {% if show_prev_values and row.previous %}
   <tr class="panel-previous-row">
-    <td colspan="{{ 5 if show_si else 4 }}">
+    <td colspan="{{ 3 if show_si else 2 }}">
       <span class="panel-previous-icon">↩</span> Previous Result{% if previous_visit_date %} ({{ previous_visit_date }}){% endif %} —
       {{ row.label }}: {{ row.previous }}{% if row.unit %} {{ row.unit }}{% endif %}
     </td>
@@ -74,4 +77,8 @@
   {% endif %}
   {% endfor %}
 </table>
+
+{% if report_comment %}
+<div class="lt-comment-box"><b>Comment:</b> {{ report_comment }}</div>
+{% endif %}
 {% endblock %}
