@@ -27,9 +27,9 @@
 
 {% block report_body %}
 {% set sections_def = [
-  ("other", "Other Results", params|map(attribute="name")|list),
+  ("other", "Other Results", params_list|map(attribute="name")|list),
 ] %}
-{{ shared.render_report_body(ot["test_name"] or ot["test_code"], sections_def, params, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+{{ shared.render_report_body(ot["test_name"] or ot["test_code"], sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
 
 {{ shared.editor_script(order_test_id) }}
 <script>

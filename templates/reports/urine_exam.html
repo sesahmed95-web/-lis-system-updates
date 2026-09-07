@@ -20,7 +20,7 @@
   ("macro", "Macroscopic Examination", ["Color","Specific Gravity","Reaction (pH)","Glucose","Protein","Ketone","Bile Pigment","Urobilinogen","Nitrite"]),
   ("micro", "Microscopic Examination", ["RBCs","PUS","Casts","Epithelial Cells","Amorphous","Mucus","Crystals","Parasites","Parasites / Others"]),
 ] %}
-{{ shared.render_report_body("General Urine Examination", sections_def, params, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+{{ shared.render_report_body("General Urine Examination", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
 
 {{ shared.editor_script(order_test_id) }}
 <script>

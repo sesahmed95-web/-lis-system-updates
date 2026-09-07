@@ -13,7 +13,7 @@
   ("macro", "Macroscopic Examination", ["Color","Consistency","Mucus","Blood","Worms","Worms / Helminths"]),
   ("micro", "Microscopic Examination", ["Pus Cells","RBCs","Amoeba (E. histolytica)","Giardia lamblia","Helminthes Ova","Undigested Food Particles","Fungi","Fungi / Yeast"]),
 ] %}
-{{ shared.render_report_body("General Stool Examination", sections_def, params, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+{{ shared.render_report_body("General Stool Examination", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
 
 {{ shared.editor_script(order_test_id) }}
 <script>

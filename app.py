@@ -191,19 +191,33 @@ EXAM_SECTION_NAMES = {
 
 def _build_exam_sections(test_code, params, report_layout):
     """يفرز params لقسمين (macro/micro) حسب EXAM_SECTION_NAMES، مع احترام:
-    - report_layout['section_order'][اسم الباراميتر]: يفرض قسم مختلف عن
+    - report_layout['param_section'][اسم الباراميتر]: يفرض قسم مختلف عن
       الافتراضي (نقل باراميتر من Macroscopic لـ Microscopic أو العكس، من
-      لوحة تعديل المعاينة).
+      لوحة تعديل المعاينة). هذا المفتاح الصحيح والوحيد لهذا الغرض.
+    - report_layout['section_order'] القديم: كان يُستخدم لنفس الغرض (dict
+      بنفس الشكل)، لكن اسمه تعارض مع مفهوم ثانٍ مختلف كليًا (ترتيب عرض
+      الأقسام كقائمة نصوص بقوالب أخرى) وانخزنت له قيمة list بالغلط بقاعدة
+      بيانات بعض التحاليل، مما كان يسبب AttributeError دائم عند كل طباعة/
+      معاينة لذاك التحليل من هذيك اللحظة فصاعدًا. لهذا صار القسم يتجاهل أي
+      قيمة بـ section_order إلا إذا كانت dict فعلاً (توافق قديم آمن) —
+      وأي نوع بيانات غلط (list أو غيره) يُتجاهل بهدوء بدل ما يكسر الطباعة.
     - report_layout['param_order'][اسم الباراميتر]: رقم ترتيب صريح ضمن
       قسمه — الباراميترات غير المرتّبة يدويًا تحافظ على ترتيبها الأصلي
-      نسبةً لبعضها (sort مستقر) وتُذيّل قائمة قسمها.
+      نسبةً لبعضها (sort مستقر) وتُذيّل قائمة قسمها. نفس الحماية من نوع
+      بيانات غلط مطبّقة هنا كمان.
     الباراميترات غير المذكورة إطلاقًا بـ EXAM_SECTION_NAMES (أُضيفت لاحقًا
     لهذا التحليل من كتالوج التحاليل) تنزل افتراضيًا بقسم Microscopic —
     بنفس سلوك حلقة "الباقي" القديمة بالقوالب.
     """
     names = EXAM_SECTION_NAMES.get(test_code, {"macro": [], "micro": []})
-    section_overrides = (report_layout or {}).get("section_order") or {}
-    param_order = (report_layout or {}).get("param_order") or {}
+    report_layout = report_layout if isinstance(report_layout, dict) else {}
+    section_overrides = report_layout.get("param_section")
+    if not isinstance(section_overrides, dict):
+        legacy = report_layout.get("section_order")
+        section_overrides = legacy if isinstance(legacy, dict) else {}
+    param_order = report_layout.get("param_order")
+    if not isinstance(param_order, dict):
+        param_order = {}
 
     def default_section(pname):
         if pname in names["macro"]:
@@ -3663,6 +3677,15 @@ def _print_report_impl(order_test_id):
 
     custom_template = None
     if not template_name:
+        # report_style='generic_exam': تحليل بُني بالكامل من صفحة المعاينة
+        # نفسها (سحب أقسام/باراميترات) بدل قالب HTML مكتوب يدويًا — راجع
+        # /management/report-designer/<id>/start-generic-exam أدناه.
+        td_row = db.execute(
+            "SELECT report_style FROM test_definitions WHERE id=?", (ot["test_definition_id"],)
+        ).fetchone()
+        if td_row and td_row["report_style"] == "generic_exam":
+            template_name = "reports/generic_exam.html"
+    if not template_name:
         custom_template = get_report_template(db, ot["test_definition_id"])
         if not custom_template:
             if session.get("role") == "admin":
@@ -3918,6 +3941,14 @@ def _print_report_impl(order_test_id):
         report_layout_has_patient_override=report_layout_has_patient_override,
         macro_params=macro_params,
         micro_params=micro_params,
+        # params_list: نفس "parameters" (قائمة صفوف test_parameters الخام)
+        # بس باسم متاح مباشرة للقالب — قوالب الفحص (urine_exam.html وغيرها)
+        # تستدعي shared.render_report_body(..., params_list, ...) بالضبط
+        # بهذا الاسم (مو "params" — هذاك محجوز لصيغة dict القديمة name→value
+        # اللي تستخدمها cbc.html/custom.html، وتمرير القائمة تحت نفس الاسم
+        # كان يكسر عرض GUE/GSE/SFA بالكامل: كل صف يطلع فاضي بلا اسم/قيمة
+        # لأن render_report_body يتكرر على مفاتيح الـ dict بدل صفوف Row).
+        params_list=parameters,
     )
 
 
@@ -4035,6 +4066,71 @@ def api_report_layout_reset():
     reset_report_layout(db, scope, scope_id)
     log_action("ResetReportLayout", scope, scope_id)
     return jsonify({"ok": True})
+
+
+# ============== إدارة دكاترة الترويسة من نفس صفحة معاينة الطباعة ==============
+# نسخة JSON خفيفة من نفس شاشة (الإدارة ← الإعدادات ← إدارة قائمة الدكاترة
+# examining_doctors_manage أعلاه) — تفتح كنافذة منبثقة فوق أي معاينة تقرير
+# بدل الاضطرار للخروج من المعاينة والذهاب للإعدادات. تستخدم نفس دوال
+# database.py حرفيًا (get/add/update/delete_examining_doctor*) فالقائمتان
+# يبقيان متطابقتين ومتزامنتين دائمًا.
+@app.route("/api/examining-doctors", methods=["GET"])
+@roles_required("admin")
+def api_examining_doctors_list():
+    db = get_db()
+    rows = get_examining_doctors_full(db)
+    return jsonify({"doctors": [dict(r) for r in rows]})
+
+
+@app.route("/api/examining-doctors", methods=["POST"])
+@roles_required("admin")
+def api_examining_doctors_add():
+    db = get_db()
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "اسم الدكتور مطلوب"}), 400
+    font_size = body.get("font_size")
+    try:
+        font_size = max(8, min(30, int(font_size))) if font_size not in (None, "") else None
+    except (TypeError, ValueError):
+        font_size = None
+    add_examining_doctor_full(
+        db, name, body.get("title") or "الدكتور", body.get("degree_ar") or "", body.get("degree_en") or "",
+        bool(body.get("show_on_letterhead", True)), font_size,
+    )
+    log_action("AddExaminingDoctor", "examining_doctors_list", None, name)
+    return jsonify({"ok": True, "doctors": [dict(r) for r in get_examining_doctors_full(db)]})
+
+
+@app.route("/api/examining-doctors/<int:doctor_id>", methods=["POST"])
+@roles_required("admin")
+def api_examining_doctors_update(doctor_id):
+    db = get_db()
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "اسم الدكتور مطلوب"}), 400
+    font_size = body.get("font_size")
+    try:
+        font_size = max(8, min(30, int(font_size))) if font_size not in (None, "") else None
+    except (TypeError, ValueError):
+        font_size = None
+    update_examining_doctor(
+        db, doctor_id, name, body.get("title") or "الدكتور", body.get("degree_ar") or "", body.get("degree_en") or "",
+        bool(body.get("show_on_letterhead", True)), font_size,
+    )
+    log_action("UpdateExaminingDoctor", "examining_doctors_list", doctor_id, name)
+    return jsonify({"ok": True, "doctors": [dict(r) for r in get_examining_doctors_full(db)]})
+
+
+@app.route("/api/examining-doctors/<int:doctor_id>/delete", methods=["POST"])
+@roles_required("admin")
+def api_examining_doctors_delete(doctor_id):
+    db = get_db()
+    delete_examining_doctor(db, doctor_id)
+    log_action("DeleteExaminingDoctor", "examining_doctors_list", doctor_id)
+    return jsonify({"ok": True, "doctors": [dict(r) for r in get_examining_doctors_full(db)]})
 
 
 def _whatsapp_flush_pdf_dir():
@@ -6259,6 +6355,8 @@ def _preview_report_design_impl(test_definition_id):
 
     template_name = REPORT_TEMPLATE_MAP.get(test["code"])
     custom_template = None
+    if not template_name and test["report_style"] == "generic_exam":
+        template_name = "reports/generic_exam.html"
     if not template_name:
         custom_template = get_report_template(db, test_definition_id)
         if not custom_template:
@@ -6342,6 +6440,35 @@ def _preview_report_design_impl(test_definition_id):
         macro_params=macro_params, micro_params=micro_params,
         params_list=parameters,
     )
+
+
+@app.route("/management/report-designer/<int:test_definition_id>/start-generic-exam", methods=["GET", "POST"])
+@roles_required("admin")
+def start_generic_exam_report(test_definition_id):
+    """يفعّل مسار reports/generic_exam.html لهذا التحليل بدل مسار "مصمم
+    التقارير" العام — يبني تقرير فحص كامل (أقسام Macroscopic/Microscopic
+    قابلة للتسمية، وباراميترات تُسحب بينها) من نفس صفحة معاينة الطباعة،
+    بدون كتابة أي قالب HTML يدوي. لصق زر/رابط لهذا المسار بصفحة "مصمم
+    التقارير" (management/report_designer.html) يفعّله لأي تحليل تختاره:
+      <a href="/management/report-designer/{{ test.id }}/start-generic-exam">
+        🧪 ابدأ تصميم فحص من الصفر (Macroscopic/Microscopic)
+      </a>
+    """
+    db = get_db()
+    test = db.execute("SELECT id, name, code FROM test_definitions WHERE id=?", (test_definition_id,)).fetchone()
+    if not test:
+        flash("التحليل غير موجود.")
+        return redirect(url_for("report_designer"))
+    db.execute("UPDATE test_definitions SET report_style='generic_exam' WHERE id=?", (test_definition_id,))
+    db.commit()
+    log_action("StartGenericExamReport", "test_definition", test_definition_id, test["name"])
+    flash(
+        f"تم تفعيل تصميم فحص من الصفر لـ \"{test['name']}\" ({test['code']}). "
+        "اطبع أي نتيجة لهذا التحليل الآن (Results/Orders) — يطلع بقسم واحد "
+        "افتراضي (Other Results) فيه كل الباراميترات، وتقدر تسمّي الأقسام "
+        "وتسحب الباراميترات بينها وتلوّنها من زر ✏️ تعديل التصميم بأعلى المعاينة."
+    )
+    return redirect(url_for("report_designer", test_definition_id=test_definition_id))
 
 
 if __name__ == "__main__":

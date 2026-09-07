@@ -67,6 +67,19 @@
   </form>
   {% endif %}
 
+  <h4>🧪 الطريقة الثالثة — ابدأ تصميم فحص من الصفر (بدون كود)</h4>
+  <p class="muted">
+    مناسبة لتحاليل الفحص (زي GUE/GSE/SFA) اللي نتائجها موزّعة على أقسام
+    (Macroscopic/Microscopic وغيرها) بدل جدول نتيجة/مدى طبيعي بسيط. يبني
+    تقرير كامل بقسم واحد افتراضي "Other Results" فيه كل الباراميترات —
+    وبعدين تسمّي الأقسام وتسحب الباراميترات وتلوّنها وتعدّل خطوطها كلها من
+    نفس زر "✏️ تعديل التصميم" اللي يطلع بأعلى صفحة المعاينة نفسها،
+    من غير ما تكتب أي HTML يدوي.
+  </p>
+  <form method="GET" action="{{ url_for('start_generic_exam_report', test_definition_id=selected_test['id']) }}" style="margin-bottom:22px;">
+    <button class="btn" type="submit">🧪 ابدأ تصميم فحص من الصفر لهذا التحليل</button>
+  </form>
+
   <h4>الطريقة الأولى — استيراد من ملف Word</h4>
   <form method="POST" enctype="multipart/form-data" style="margin-bottom:22px;">
     <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">

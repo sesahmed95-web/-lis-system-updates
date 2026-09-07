@@ -13,7 +13,7 @@
   ("macro", "Macroscopic Examination", ["Volume","Color","Color / Appearance","Liquefaction Time","Viscosity","pH"]),
   ("micro", "Microscopic Examination & Sperm Kinetics", ["Sperm Count","Total Sperm Count","Active","Active (Progressive)","Sluggish","Sluggish (Non-progressive)","Immotile","Normal Forms","Abnormal Forms","Pus Cells","RBCs","Agglutination"]),
 ] %}
-{{ shared.render_report_body("Seminal Fluid Analysis", sections_def, params, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+{{ shared.render_report_body("Seminal Fluid Analysis", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
 
 {{ shared.editor_script(order_test_id) }}
 <script>
