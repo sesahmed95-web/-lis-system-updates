@@ -415,6 +415,8 @@
     </div>
   {% endif %}
 
+  <div class="bottom-note" style="display:none;"></div>
+
 </div>
 
 {{ edit_toolbar() }}
@@ -751,9 +753,9 @@ function examAttachDnD() {
       var rect = s.getBoundingClientRect();
       return e.clientY < rect.top + rect.height / 2;
     });
-    var bottomNote = null;
+    var bottomNote = container.querySelector('.bottom-note');
     if (after) container.insertBefore(examDragEl, after);
-    else container.appendChild(examDragEl);
+    else container.insertBefore(examDragEl, bottomNote);
   });
   document.addEventListener('dragend', function () { examDragEl = null; });
 }
