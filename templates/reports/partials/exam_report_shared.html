@@ -69,7 +69,16 @@
     display: grid; grid-template-columns: 18px 260px 18px 160px 1fr auto;
     align-items: center; padding: var(--exam-row-pad, 5px) 0; font-size: 1em; gap: 2px;
   }
-  .result-row .rname { color: #1a1a1a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result-row .rname {
+    color: #1a1a1a;
+    /* nowrap لحاله بدون overflow:hidden/text-overflow:ellipsis — تجربة
+       سابقة بالقطع (ellipsis) طلعت تقصّ الاسم لحرف وحد بالطباعة الفعلية
+       بمتصفح المستخدم بدل قص لطيف، فرجّعناها overflow ظاهر (السلوك
+       الافتراضي) حتى ما يضيع أي جزء من الاسم أبداً — أسوأ حالة اسم طويل
+       جدًا يتمدد بصريًا فوق العمود المجاور بدل ما ينكسر سطرين أو يُقتطع.
+    */
+    white-space: nowrap;
+  }
   .result-row .rcolon { color: #1a1a1a; }
   .result-row .rval { color: #1F3B7A; font-weight: 600; }
   .result-row .runit { color: #1a1a1a; font-size: 0.85em; margin-inline-start: 4px; font-weight: normal; }
