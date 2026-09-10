@@ -30,9 +30,79 @@
     <button class="btn small" type="submit">حفظ</button>
   </form>
 
+  {% set _rs = selected_test['row_spacing'] if 'row_spacing' in selected_test.keys() else '' %}
+  {% set _rs_preset = _rs if _rs in ('tight', 'normal', 'loose') else ('custom' if _rs else '') %}
+  <form method="POST" style="margin-bottom:18px;">
+    <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">
+    <input type="hidden" name="mode" value="spacing">
+    <div class="form-field">
+      <label>📏 المسافة بين صفوف الباراميترات لهذا التحليل</label>
+      <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
+        <label style="display:flex; align-items:center; gap:5px; font-weight:normal;">
+          <input type="radio" name="row_spacing_preset" value="" {{ 'checked' if not _rs_preset }}> الافتراضي (كما هو حاليًا)
+        </label>
+        <label style="display:flex; align-items:center; gap:5px; font-weight:normal;">
+          <input type="radio" name="row_spacing_preset" value="tight" {{ 'checked' if _rs_preset=='tight' }}> ضيّق
+        </label>
+        <label style="display:flex; align-items:center; gap:5px; font-weight:normal;">
+          <input type="radio" name="row_spacing_preset" value="normal" {{ 'checked' if _rs_preset=='normal' }}> عادي
+        </label>
+        <label style="display:flex; align-items:center; gap:5px; font-weight:normal;">
+          <input type="radio" name="row_spacing_preset" value="loose" {{ 'checked' if _rs_preset=='loose' }}> واسع
+        </label>
+        <label style="display:flex; align-items:center; gap:5px; font-weight:normal;">
+          <input type="radio" name="row_spacing_preset" value="custom" {{ 'checked' if _rs_preset=='custom' }}> رقم بكسل مخصص:
+          <input type="number" name="row_spacing_custom" min="0" max="60" value="{{ _rs if _rs_preset=='custom' else '' }}" style="width:70px;">
+        </label>
+      </div>
+      <span class="muted" style="font-size:0.8em;">ينطبق على exam rows (GUE/GSE/SFA) وcustom cards وCBC وcombined panel لنفس هذا التحليل. "الافتراضي" = رجوع للتباعد القديم بدون أي تغيير.</span>
+    </div>
+    <button class="btn small" type="submit">حفظ التباعد</button>
+  </form>
+
+  {% if selected_parameters %}
+  <form method="POST" style="margin-bottom:18px;">
+    <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">
+    <input type="hidden" name="mode" value="param_overrides">
+    <div class="form-field">
+      <label>🏷️ تسمية العرض ومحاذاة رقم النتيجة لكل باراميتر</label>
+      <span class="muted" style="font-size:0.8em; display:block; margin-bottom:8px;">
+        "تسمية العرض" تُطبع بدل اسم الباراميتر الأصلي بكل مكان يظهر فيه (exam rows، CBC،
+        combined panel، وcustom cards كتسمية افتراضية لو ما فيه تسمية مضبوطة أصلاً من قسم
+        التصميم اليدوي تحت). فاضي = يبقى الاسم الأصلي. المحاذاة تتحكم بموضع رقم النتيجة —
+        "افتراضي" يبقي السلوك القديم كما هو تمامًا.
+      </span>
+      <table>
+        <thead><tr><th>الاسم الأصلي</th><th>تسمية العرض البديلة</th><th>محاذاة رقم النتيجة</th></tr></thead>
+        <tbody>
+          {% for p in selected_parameters %}
+          <tr>
+            <td>{{ p['name'] }}</td>
+            <td><input type="text" name="label_{{ p['id'] }}" value="{{ p['display_label'] or '' }}" dir="ltr" style="width:100%;"></td>
+            <td>
+              <select name="align_{{ p['id'] }}">
+                <option value="" {{ 'selected' if not p['value_align'] }}>افتراضي (كما هو حاليًا)</option>
+                <option value="near_name" {{ 'selected' if p['value_align']=='near_name' }}>قريب من الاسم</option>
+                <option value="center" {{ 'selected' if p['value_align']=='center' }}>بالوسط</option>
+                <option value="near_unit" {{ 'selected' if p['value_align']=='near_unit' }}>قريب من الوحدة</option>
+              </select>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button class="btn small" type="submit">حفظ التسميات والمحاذاة</button>
+  </form>
+  {% endif %}
+
   {% if selected_test['code'] in ('CBC','BF','WBCDIFF','FLUIDEXAM') %}
     <p class="muted">هذا التحليل إله تصميم مدمج جاهز بالفعل ولا يحتاج تصميم إضافي.</p>
+    {% if selected_test['code'] == 'BF' %}
+    <p class="muted" style="font-size:0.82em;">ملاحظة: Blood Film قالبه اليدوي ثابت حاليًا ولا يقرأ التسمية/المحاذاة/التباعد أعلاه بعد — دعمه قادم بمرحلة لاحقة عند تحويله لنظام generic_exam.</p>
+    {% endif %}
     <a class="btn" href="{{ url_for('preview_report_design', test_definition_id=selected_test['id']) }}">👁️ معاينة التصميم الآن</a>
+
   {% else %}
 
   <h4>⚙️ إعدادات "اللوحة المجمّعة" لهذا التحليل</h4>

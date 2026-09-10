@@ -104,7 +104,7 @@
   table.data-table { width: 100%; border-collapse: collapse; margin-top: 4px; margin-bottom: 12px; }
   table.data-table td, table.data-table th {
     border: 1px solid #333;
-    padding: {{ report_row_pad|default(7) }}px {{ report_col_pad|default(12) }}px;
+    padding: var(--row-pad-override, {{ report_row_pad|default(7) }}px) {{ report_col_pad|default(12) }}px;
     /* حجم خط النتيجة (وأي خلية عادية بالجدول: القيمة، النسبة، الوحدة) —
        إعداد عام test_name_font_size / result_value_font_size (Management →
        الإعدادات) ينطبق تلقائيًا على كل التقارير دفعة وحدة. td.field-name

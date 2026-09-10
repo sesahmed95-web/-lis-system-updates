@@ -33,7 +33,7 @@
 
 {% set show_si = custom_rows|selectattr('unit2')|list|length > 0 %}
 
-<table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;">
+<table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;{% if row_spacing_px %} --row-pad-override:{{ row_spacing_px }}px;{% endif %}">
   <colgroup>
     <col class="col-name"><col style="width:{{ '33%' if show_si else '66%' }}">
     {% if show_si %}<col style="width:33%">{% endif %}
@@ -50,7 +50,7 @@
 
   <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
     <td style="text-align:{{ name_align }}; font-weight:bold;{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.label }}</td>
-    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
+    <td{% if row.color or row.value_align %} style="{% if row.color %}color: {{ row.color }};{% endif %}{% if row.value_align %}text-align:{{ row.value_align }};{% endif %}"{% endif %}>
       {% if row.result not in (None, '') %}<span style="font-weight:bold;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ row.result }}</span>{% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="flag-badge" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}{% if row.unit %} {{ row.unit }}{% endif %}{% endif %}
       {% if row.range_tiers %}
         {% if row.range_tiers|length == 1 and not row.range_tiers[0].label %}

@@ -322,7 +322,6 @@ app.jinja_env.globals["parse_range_tiers"] = parse_range_tiers
 AUTO_FLAG_COLORS = {"High": "#D40000", "Critical": "#D40000", "Low": "#B58900"}
 app.jinja_env.globals["AUTO_FLAG_COLORS"] = AUTO_FLAG_COLORS
 
-
 def get_report_flag_settings(db):
     """(auto_flag_color_enabled, show_result_flag) لطباعة أي تقرير — راجع
     شرح كامل عند مفتاحي هذا الإعداد بصفحة settings.html (بطاقة "تلوين/أعلام
@@ -334,6 +333,67 @@ def get_report_flag_settings(db):
         get_setting(db, "auto_flag_color_enabled", "1") == "1",
         get_setting(db, "show_result_flag", "0") == "1",
     )
+
+
+ROW_SPACING_PRESETS = {"tight": 4, "normal": 8, "loose": 14}
+
+
+def row_spacing_px(raw_value):
+    """يحوّل test_definitions.row_spacing (المطلوب 8) لبكسل فعلي — يقبل
+    درجة جاهزة (tight/normal/loose) أو رقم بكسل حر مكتوب كنص. يرجع None
+    لو فاضي/NULL/غير صالح، وهذا مقصود: القوالب تستخدم None لتترك التباعد
+    الافتراضي القديم لكل قالب كما هو تمامًا (بدون أي inline style إضافي)،
+    حتى ما يتغير شكل أي تقرير قديم لم يُضبط له شي بعد."""
+    if not raw_value:
+        return None
+    raw_value = str(raw_value).strip()
+    if raw_value in ROW_SPACING_PRESETS:
+        return ROW_SPACING_PRESETS[raw_value]
+    try:
+        px = int(float(raw_value))
+        return max(0, min(60, px))
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_label(param_row, override_label=None):
+    """اسم العرض النهائي لباراميتر (المطلوب 9ب) — الأولوية: تسمية مخصصة
+    لهذا الصف بالذات إن وُجدت (override_label — مثلاً rows_json.label
+    بـcustom.html، أو param_overrides.label بexam rows) ← display_label
+    المحفوظة على test_parameters نفسها (تنطبق بكل مكان يُطبع فيه هذا
+    الباراميتر) ← الاسم الأصلي name كالسابق تمامًا لو ما فيه أي تخصيص."""
+    if override_label:
+        return override_label
+    if param_row is not None:
+        try:
+            dl = param_row["display_label"]
+        except (KeyError, IndexError, TypeError):
+            dl = None
+        if dl:
+            return dl
+        return param_row["name"]
+    return ""
+
+
+VALUE_ALIGN_CSS = {"near_name": "left", "center": "center", "near_unit": "right"}
+
+
+def resolve_value_align(param_row):
+    """محاذاة CSS لرقم النتيجة (المطلوب 11) حسب test_parameters.value_align
+    — NULL/فاضي/قيمة غير معروفة = None (يعني اترك السلوك الافتراضي القديم
+    لهذا القالب كما هو بدون أي inline style إضافي، حتى ما يتغير أي تقرير
+    قديم لم يُضبط له شي بعد)."""
+    if param_row is None:
+        return None
+    try:
+        va = param_row["value_align"]
+    except (KeyError, IndexError, TypeError):
+        va = None
+    return VALUE_ALIGN_CSS.get(va)
+
+
+app.jinja_env.globals["resolve_label"] = resolve_label
+app.jinja_env.globals["resolve_value_align"] = resolve_value_align
 
 
 ALLOWED_DOCX_EXT = {"docx"}
@@ -3552,7 +3612,7 @@ def print_combined_panel(visit_id):
                         range2_display = f"{round(rng['low'] * factor, 2)} - {round(rng['high'] * factor, 2)}"
                 except (TypeError, ValueError):
                     value2 = unit2 = range2_display = None
-            display_name = p["name"] if multi_param else ot["test_name"]
+            display_name = resolve_label(p) if multi_param else ot["test_name"]
             # صف "Previous" — يظهر بس لو الموظف وافق صراحة على دمج نتيجة
             # هذا التحليل بالضبط (نفس test_definition_id) من زيارة سابقة،
             # ولنفس اسم الباراميتر تحديداً (يدعم التحاليل متعددة
@@ -3570,6 +3630,7 @@ def print_combined_panel(visit_id):
                 "range_display": range_display,
                 "range_tiers": range_tiers,
                 "flag": r["flag"] if "flag" in r.keys() else None,
+                "value_align": resolve_value_align(p) if multi_param else None,
                 "value2": value2,
                 "unit2": unit2,
                 "range2_display": range2_display,
@@ -3667,6 +3728,19 @@ def print_combined_panel(visit_id):
     age_display = f"{visit['age']}{age_unit_abbr.get(visit['age_unit'] or 'Years', 'Y')}" if visit["age"] not in (None, "") else ""
 
     auto_flag_color_enabled, show_result_flag = get_report_flag_settings(db)
+    # تباعد الصفوف باللوحة المجمّعة (المطلوب 8) — الصفحة تجمع أكثر من
+    # تحليل قد يكون لكل واحد إعداد row_spacing مختلف، فنستخدم أول قيمة
+    # مضبوطة فعليًا (غير فاضية) بترتيب ظهور التحاليل بالصفحة كقيمة موحّدة
+    # للصفحة كلها؛ ما فيه أي تحليل مضبوط له شي = يبقى التباعد الافتراضي
+    # القديم تمامًا (بدون أي تغيير).
+    _panel_row_spacing_raw = None
+    for _ot in order_tests:
+        _td_rs = db.execute(
+            "SELECT row_spacing FROM test_definitions WHERE id=?", (_ot["test_definition_id"],)
+        ).fetchone()
+        if _td_rs and _td_rs["row_spacing"]:
+            _panel_row_spacing_raw = _td_rs["row_spacing"]
+            break
     return render_template(
         "reports/combined_panel.html",
         panel_groups=panel_groups, logo_url=logo_url, from_other_lab=from_other_lab,
@@ -3675,6 +3749,7 @@ def print_combined_panel(visit_id):
         referring_doctor_name=visit["referring_doctor_name"] or "",
         show_exam_signature=False,
         auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag,
+        row_spacing_px=row_spacing_px(_panel_row_spacing_raw),
         done_by_notes=done_by_notes,
         # مكتبة الأختام/التواقيع + أي ختم مُلصق فعلاً فوق هذا التقرير الموحّد
         # حاليًا (راجع partials/stamp_picker.html لطريقة استخدامها بالقالب).
@@ -3794,6 +3869,15 @@ def _print_report_impl(order_test_id):
                 parameters.append(p)
                 seen_param_names.add(p["name"])
 
+    # قاموس اسم -> صف test_parameters (المطلوب 9ب/11) — يستخدمه custom_rows
+    # وcbc_groups أدناه لجلب display_label/value_align لكل باراميتر بدون
+    # إعادة الاستعلام لكل صف لحاله.
+    params_by_name_row = {p["name"]: p for p in parameters}
+    _td_row_spacing = db.execute(
+        "SELECT row_spacing FROM test_definitions WHERE id=?", (ot["test_definition_id"],)
+    ).fetchone()
+    row_spacing_px_value = row_spacing_px(_td_row_spacing["row_spacing"] if _td_row_spacing else None)
+
     results = []
     for otid in order_test_ids:
         results.extend(db.execute(
@@ -3873,7 +3957,7 @@ def _print_report_impl(order_test_id):
                 rng = ranges.get(name)
                 res_row = results_by_name.get(name)
                 rows.append({
-                    "name": name,
+                    "name": resolve_label(params_by_name_row.get(name)),
                     "result": params.get(name, ""),
                     "unit": units_by_name.get(name, ""),
                     "low": rng["low"] if rng else "",
@@ -3881,6 +3965,7 @@ def _print_report_impl(order_test_id):
                     "highlight": highlight_by_name.get(name, False),
                     "previous": previous_values.get(name, "") if show_prev_values else "",
                     "flag": res_row["flag"] if res_row else None,
+                    "value_align": resolve_value_align(params_by_name_row.get(name)),
                 })
             cbc_groups.append(rows)
 
@@ -3944,7 +4029,7 @@ def _print_report_impl(order_test_id):
                     normal_range2 = f"{low2} - {high2}"
 
             custom_rows.append({
-                "label": rd.get("label") or pname,
+                "label": resolve_label(params_by_name_row.get(pname), rd.get("label")),
                 "result": result_val,
                 "unit": units_by_name.get(pname, ""),
                 "normal_range": normal_range,
@@ -3962,6 +4047,7 @@ def _print_report_impl(order_test_id):
                 "range_position": rd.get("range_position") or "inline",
                 "name_align": rd.get("name_align"),
                 "color": rd.get("color"),
+                "value_align": resolve_value_align(params_by_name_row.get(pname)),
                 "flag": flag_val,
                 "page_break_before": rd.get("page_break_before", False),
             })
@@ -4035,6 +4121,7 @@ def _print_report_impl(order_test_id):
         macro_params=macro_params,
         micro_params=micro_params,
         auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag,
+        row_spacing_px=row_spacing_px_value,
         done_by_note=(ot["done_by_note"] or "") if "done_by_note" in ot.keys() else "",
         # params_list: نفس "parameters" (قائمة صفوف test_parameters الخام)
         # بس باسم متاح مباشرة للقالب — قوالب الفحص (urine_exam.html وغيرها)
@@ -6331,6 +6418,39 @@ def report_designer():
             flash("تم حفظ سطر Done by.")
             return redirect(url_for("report_designer", test_definition_id=test_id))
 
+        if mode == "spacing":
+            # المسافة بين صفوف الباراميترات (المطلوب 8) — تنطبق على exam
+            # rows وcustom cards وCBC وcombined panel لنفس هذا التحليل.
+            # فاضي = رجوع للتباعد الافتراضي القديم (بدون أي تغيير). راجع
+            # row_spacing_px أعلى الملف لكيفية تفسير القيمة المحفوظة.
+            spacing_choice = request.form.get("row_spacing_preset", "").strip()
+            spacing_custom = request.form.get("row_spacing_custom", "").strip()
+            row_spacing_value = spacing_custom if spacing_choice == "custom" and spacing_custom else (spacing_choice or None)
+            db.execute("UPDATE test_definitions SET row_spacing=? WHERE id=?", (row_spacing_value, test_id))
+            db.commit()
+            log_action("UpdateRowSpacing", "test_definition", int(test_id), row_spacing_value or "")
+            flash("تم حفظ إعداد التباعد بين الصفوف.")
+            return redirect(url_for("report_designer", test_definition_id=test_id))
+
+        if mode == "param_overrides":
+            # تسمية عرض بديلة + محاذاة رقم النتيجة لكل باراميتر (المطلوب 9ب
+            # و11) — فورم واحد يرسل صفوف كل باراميترات هذا التحليل سوا
+            # (label_<param_id> و align_<param_id>). فاضي/"" = رجوع للاسم
+            # الأصلي أو المحاذاة الافتراضية القديمة (بدون أي تغيير).
+            for p in parameters:
+                label_val = request.form.get(f"label_{p['id']}", "").strip() or None
+                align_val = request.form.get(f"align_{p['id']}", "").strip() or None
+                if align_val not in ("near_name", "center", "near_unit"):
+                    align_val = None
+                db.execute(
+                    "UPDATE test_parameters SET display_label=?, value_align=? WHERE id=?",
+                    (label_val, align_val, p["id"]),
+                )
+            db.commit()
+            log_action("UpdateParamOverrides", "test_definition", int(test_id), "")
+            flash("تم حفظ تسميات ومحاذاة الباراميترات.")
+            return redirect(url_for("report_designer", test_definition_id=test_id))
+
         if mode == "docx":
             file = request.files.get("docx_file")
             if not file or not file.filename:
@@ -6546,6 +6666,8 @@ def _preview_report_design_impl(test_definition_id):
     ).fetchall()
     units_by_name = {p["name"]: p["unit"] for p in parameters}
     highlight_by_name = {p["name"]: bool(p["highlight"]) for p in parameters}
+    params_by_name_row = {p["name"]: p for p in parameters}
+    row_spacing_px_value = row_spacing_px(test["row_spacing"] if "row_spacing" in test.keys() else None)
     # show_prev_values يبقى False دائمًا بالمعاينة (بلا استثناء) — هذي معاينة
     # تصميم بدون مريض حقيقي، فمافيه "نتيجة سابقة" فعلية أصلاً لأي تحليل. كان
     # يُحسب سابقًا من department_shows_previous_values(department) فقط، فيطلع
@@ -6561,9 +6683,10 @@ def _preview_report_design_impl(test_definition_id):
     if test["code"] == "CBC":
         cbc_groups = []
         for group in CBC_ROW_GROUPS:
-            rows = [{"name": name, "result": "—", "unit": units_by_name.get(name, ""),
+            rows = [{"name": resolve_label(params_by_name_row.get(name)), "result": "—", "unit": units_by_name.get(name, ""),
                      "low": "", "high": "", "highlight": highlight_by_name.get(name, False),
-                     "previous": "—" if show_prev_values else "", "flag": None}
+                     "previous": "—" if show_prev_values else "", "flag": None,
+                     "value_align": resolve_value_align(params_by_name_row.get(name))}
                     for name in group]
             cbc_groups.append(rows)
 
@@ -6579,7 +6702,7 @@ def _preview_report_design_impl(test_definition_id):
         custom_unit_column = bool(custom_template["unit_column"])
         row_defs = json.loads(custom_template["rows_json"] or "[]")
         custom_rows = [{
-            "label": rd.get("label") or rd.get("param_name", ""),
+            "label": resolve_label(params_by_name_row.get(rd.get("param_name", "")), rd.get("label")),
             "result": "—", "unit": units_by_name.get(rd.get("param_name", ""), ""),
             "normal_range": "—", "range_tiers": [{"label": None, "value": "—"}],
             "normal_range2": None, "result2": None, "unit2": "",
@@ -6588,6 +6711,7 @@ def _preview_report_design_impl(test_definition_id):
             "range_position": rd.get("range_position") or "inline",
             "name_align": rd.get("name_align"),
             "color": rd.get("color"),
+            "value_align": resolve_value_align(params_by_name_row.get(rd.get("param_name", ""))),
             "flag": None,
             "page_break_before": rd.get("page_break_before", False),
         } for rd in row_defs]
@@ -6627,6 +6751,7 @@ def _preview_report_design_impl(test_definition_id):
         sample_no="—", sample_time="—", number_of="—", patient_name_en="",
         order_test_id=0, results_by_name={}, param_notes={},
         auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag,
+        row_spacing_px=row_spacing_px_value,
         done_by_note=(test["done_by_note"] or "") if "done_by_note" in test.keys() else "",
         report_layout=report_layout, report_layout_has_patient_override=report_layout_has_patient_override,
         macro_params=macro_params, micro_params=micro_params,

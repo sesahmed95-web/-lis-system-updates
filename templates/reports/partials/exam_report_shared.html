@@ -66,10 +66,10 @@
 
   /* ============== صف نتيجة مفردة ============== */
   .result-row {
-    display: grid; grid-template-columns: 18px 200px 18px 160px 1fr auto;
-    align-items: center; padding: 5px 0; font-size: 1em; gap: 2px;
+    display: grid; grid-template-columns: 18px 260px 18px 160px 1fr auto;
+    align-items: center; padding: var(--exam-row-pad, 5px) 0; font-size: 1em; gap: 2px;
   }
-  .result-row .rname { color: #1a1a1a; }
+  .result-row .rname { color: #1a1a1a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .result-row .rcolon { color: #1a1a1a; }
   .result-row .rval { color: #1F3B7A; font-weight: 600; }
   .result-row .runit { color: #1a1a1a; font-size: 0.85em; margin-inline-start: 4px; font-weight: normal; }
@@ -300,7 +300,7 @@
    is_hidden: بول — لو True يُطبع الصف مخفي (display:none) خارج وضع التعديل. #}
 {% macro exam_row(param, range_row, unit, result_value, note, order_test_id, style=none, is_hidden=false, flag=none) %}
 {% set style = style or {} %}
-{% set display_name = style.get('label') or param['name'] %}
+{% set display_name = resolve_label(param, style.get('label')) %}
 {% set normal_range = '' %}
 {% if range_row %}
   {% if range_row['range_text'] %}
@@ -331,7 +331,8 @@
   <span class="row-drag-handle" title="اسحب لتغيير ترتيب هذا الصف">⋮⋮</span>
   <span class="rname">{{ display_name }}</span>
   <span class="rcolon">:</span>
-  <span class="rval">{% if result_value not in (none, '') %}<span class="rval-num" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% elif auto_color %}style="color:{{ auto_color }};"{% endif %}>{{ result_value }}</span>{% if show_result_flag is defined and show_result_flag and flag and flag != 'Normal' %}<span class="flag-badge" style="font-size:0.75em; font-weight:bold; margin-inline-start:4px;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ flag }}</span>{% endif %}{% if unit %} <span class="runit">{{ unit }}</span>{% endif %}{% endif %}</span>
+  {% set _val_align = resolve_value_align(param) %}
+  <span class="rval"{% if _val_align %} style="text-align:{{ _val_align }};"{% endif %}>{% if result_value not in (none, '') %}<span class="rval-num" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% elif auto_color %}style="color:{{ auto_color }};"{% endif %}>{{ result_value }}</span>{% if show_result_flag is defined and show_result_flag and flag and flag != 'Normal' %}<span class="flag-badge" style="font-size:0.75em; font-weight:bold; margin-inline-start:4px;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ flag }}</span>{% endif %}{% if unit %} <span class="runit">{{ unit }}</span>{% endif %}{% endif %}</span>
   <span class="rnorm">
     {% if range_tiers|length > 1 %}
       {% for tier in range_tiers %}<div class="exam-range-tier">{% if tier.label %}<b>{{ tier.label }}</b>: {% endif %}{{ tier.value }}</div>{% endfor %}
@@ -378,7 +379,7 @@
 {% set shown = [] %}
 
 <div class="report-page" data-test-definition-id="{{ test_definition_id }}" data-order-test-id="{{ order_test_id }}"
-     style="{% if rl.get('page_offset_px') %}margin-top:{{ rl.get('page_offset_px') }}px;{% endif %}">
+     style="{% if rl.get('page_offset_px') %}margin-top:{{ rl.get('page_offset_px') }}px;{% endif %}{% if row_spacing_px is defined and row_spacing_px %}--exam-row-pad:{{ row_spacing_px }}px;{% endif %}">
 
   <div class="report-title-wrap">
     <span class="report-title" data-editable="report_title">{{ rl.get('report_title') or report_title }}</span>

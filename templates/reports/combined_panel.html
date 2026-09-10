@@ -43,7 +43,7 @@
 
 {% for group in panel_groups %}
 <div class="panel-dept-heading">{{ group.department }}</div>
-<table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;">
+<table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;{% if row_spacing_px %} --row-pad-override:{{ row_spacing_px }}px;{% endif %}">
   <colgroup>
     <col class="col-name"><col class="col-result"><col class="col-unit"><col class="col-range">
   </colgroup>
@@ -58,7 +58,7 @@
   {% if row.result is not none %}
   <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
     <td style="text-align:left; font-weight:bold; font-size:{{ test_name_font_size|default(16) }}px;{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.name }}</td>
-    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
+    <td{% if row.color or row.value_align %} style="{% if row.color %}color: {{ row.color }};{% endif %}{% if row.value_align %}text-align:{{ row.value_align }};{% endif %}"{% endif %}>
       <span style="font-weight:bold;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ row.result }}</span>
       {% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="flag-badge" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}
       {% if row.value2 is not none %}<span class="panel-secondary-line">{{ row.value2 }}</span>{% endif %}

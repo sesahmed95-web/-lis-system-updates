@@ -591,7 +591,15 @@ def migrate(conn):
                                # يظهر أبداً. يُطبع بـ.footer-block (base_report.html)
                                # بكل قوالب التقارير (custom/CBC/panel/exam). بديل
                                # عن reference_ranges.source_note المتوقف عرضه.
-                               ("done_by_note", "TEXT")],
+                               ("done_by_note", "TEXT"),
+                               # row_spacing (المطلوب 8): المسافة بين صفوف
+                               # الباراميترات بتقرير هذا التحليل — 'tight' /
+                               # 'normal' / 'loose' أو رقم بكسل حر (نص رقمي).
+                               # فاضي/NULL = نفس الافتراضي القديم بكل قالب
+                               # (لا يتغير أي تقرير قديم). يُطبّق على exam rows،
+                               # custom cards، CBC، combined panel — راجع
+                               # row_spacing_px بـapp.py لتحويلها لبكسل فعلي.
+                               ("row_spacing", "TEXT")],
         # patient_id: نسبة طبيعية خاصة بمريض واحد بالذات (حالات خاصة/علاج) —
         # NULL يعني نسبة عامة تنطبق على كل المرضى كالمعتاد. تتفوّق على أي
         # نسبة عامة لنفس الباراميتر لو موجودة (راجع find_reference_range).
@@ -620,7 +628,19 @@ def migrate(conn):
                              # أولاً. الافتراضي 0 لكل الباراميترات القديمة، فيبقى
                              # ترتيبها كما هو (حسب id) حتى يعدّلها المدير يدويًا من
                              # صفحة "ترتيب الباراميترات" الجديدة.
-                             ("sort_order", "INTEGER DEFAULT 0")],
+                             ("sort_order", "INTEGER DEFAULT 0"),
+                             # display_label (المطلوب 9ب): تسمية عرض بديلة تُطبع
+                             # بدل name الأصلي بكل القوالب (exam rows، CBC،
+                             # combined panel، وcustom.html كـfallback لو ما
+                             # فيه label مضبوط أصلاً من مصمم التقارير rows_json).
+                             # فاضي = يبقى name الأصلي كالسابق. لا يغيّر name
+                             # الحقيقي المستخدم بحفظ/قراءة النتائج نفسها.
+                             ("display_label", "TEXT"),
+                             # value_align (المطلوب 11): موضع رقم النتيجة —
+                             # near_name / center / near_unit. NULL/فاضي = نفس
+                             # السلوك الحالي القديم تمامًا (لا يتغير أي تقرير
+                             # قديم). راجع resolve_value_align بـapp.py.
+                             ("value_align", "TEXT")],
         # is_trial: يميّز الترخيص التجريبي عن ترخيص العميل العادي (بالأيام)،
         # حتى يظهر شريط "متبقي كم يوم" فقط للتجريبي وليس لكل ترخيص له تاريخ انتهاء.
         # revoked_reason: سبب الإلغاء عن بُعد (يُعبّى تلقائياً لو المصمم ألغى
