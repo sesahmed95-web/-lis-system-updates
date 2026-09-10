@@ -34,6 +34,11 @@
     padding-top: 3px; padding-bottom: 3px; border-top: none;
   }
   .panel-previous-icon { font-weight: bold; }
+  /* مستويات المدى الطبيعي متعددة الأسطر (المطلوب 4ب) — نفس تنسيق custom.html. */
+  .panel-range-label { font-weight: 600; color: #475569; margin: 4px 0 1px 0; text-align: left; font-size: 0.85em; }
+  .panel-range-row { display: flex; justify-content: space-between; gap: 8px; text-align: left; font-size: 0.85em; }
+  .panel-range-row .panel-range-title { font-weight: 600; color: #475569; margin-inline-start: 0; }
+  .flag-badge { font-size: 0.7em; font-weight: bold; margin-inline-start: 5px; }
 </style>
 
 {% for group in panel_groups %}
@@ -49,11 +54,13 @@
     <th>{{ group.range_header }}</th>
   </tr>
   {% for row in group.rows %}
+  {% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and not row.color) else none %}
   {% if row.result is not none %}
   <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
     <td style="text-align:left; font-weight:bold; font-size:{{ test_name_font_size|default(16) }}px;{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.name }}</td>
     <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
-      <span style="font-weight:bold;">{{ row.result }}</span>
+      <span style="font-weight:bold;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ row.result }}</span>
+      {% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="flag-badge" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}
       {% if row.value2 is not none %}<span class="panel-secondary-line">{{ row.value2 }}</span>{% endif %}
     </td>
     <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
@@ -61,7 +68,18 @@
       {% if row.unit2 %}<span class="panel-secondary-line">{{ row.unit2 }}</span>{% endif %}
     </td>
     <td>
-      {{ row.range_display }}
+      {% if row.range_tiers %}
+        {% if row.range_tiers|length == 1 and not row.range_tiers[0].label %}
+        {{ row.range_tiers[0].value }}
+        {% else %}
+        <div class="panel-range-label">Normal Range :</div>
+        {% for tier in row.range_tiers %}
+        <div class="panel-range-row"><span class="panel-range-title">{{ tier.label }}</span><span>{{ tier.value }}</span></div>
+        {% endfor %}
+        {% endif %}
+      {% else %}
+        {{ row.range_display }}
+      {% endif %}
       {% if row.range2_display %}<span class="panel-secondary-line">{{ row.range2_display }}</span>{% endif %}
     </td>
   </tr>

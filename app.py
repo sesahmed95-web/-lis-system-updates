@@ -308,6 +308,34 @@ def parse_range_tiers(text):
     return tiers
 
 
+# متاح مباشرة كدالة Jinja (parse_range_tiers(text)) حتى تقدر القوالب اللي
+# تبني عرض المدى الطبيعي بنفسها (exam_row بـ exam_report_shared.html) تفكّ
+# range_text متعدد الأسطر بدون الحاجة لتمرير النسخة المفكوكة يدويًا من
+# Python لكل صف — نفس الدالة المستخدمة بجانب custom_rows/combined_panel.
+app.jinja_env.globals["parse_range_tiers"] = parse_range_tiers
+
+
+# ألوان تلوين رقم النتيجة تلقائيًا حسب flag (المطلوب 2) — ثابتة دائمًا (لا
+# تُضبط من الإعدادات)، فقط "هل التلوين التلقائي مفعّل أصلاً" قابل للتبديل
+# (auto_flag_color_enabled بالإعدادات). Normal لا يدخل هذا القاموس عمدًا —
+# يعني بدون تلوين، كالسابق.
+AUTO_FLAG_COLORS = {"High": "#D40000", "Critical": "#D40000", "Low": "#B58900"}
+app.jinja_env.globals["AUTO_FLAG_COLORS"] = AUTO_FLAG_COLORS
+
+
+def get_report_flag_settings(db):
+    """(auto_flag_color_enabled, show_result_flag) لطباعة أي تقرير — راجع
+    شرح كامل عند مفتاحي هذا الإعداد بصفحة settings.html (بطاقة "تلوين/أعلام
+    النتائج"). auto_flag_color_enabled افتراضيًا مفعّل (1) — أقرب لسلوك
+    الطلب الأصلي (تلوين تلقائي دائم)، مع إبقاء خيار إيقافه بالكامل لو احتاجه
+    المدير. show_result_flag افتراضيًا معطّل (0) كما بالطلب الأصلي.
+    """
+    return (
+        get_setting(db, "auto_flag_color_enabled", "1") == "1",
+        get_setting(db, "show_result_flag", "0") == "1",
+    )
+
+
 ALLOWED_DOCX_EXT = {"docx"}
 
 # نص الكليشة الجاهز لزر "Normal" بحقول وصف RBC/WBC/Platelets بتقرير الـ Blood
@@ -3124,12 +3152,30 @@ def orders_list():
     return render_template("workbench/orders.html", order_tests=order_tests, status=status)
 
 
-def save_order_test_results(db, ot, parameters, form, user_id, field_prefix=""):
+def save_order_test_results(db, ot, parameters, form, user_id, field_prefix="", patient_id=None):
     """يحفظ نتائج تحليل واحد (order_test) من بيانات نموذج مُرسل، بنفس منطق
     الأعلام (Flag) والمرجعيات وتسجيل التأريخ المستخدم بشاشة إدخال النتائج —
     مشتركة بين شاشة الإدخال المفردة وشاشة الإدخال المُجمّع لكل تحاليل الزيارة
     معًا، حتى لا يتكرر نفس المنطق الحساس بمكانين. تعيد True إذا أُدخلت/عُدّلت
-    أي قيمة فعليًا لهذا التحليل."""
+    أي قيمة فعليًا لهذا التحليل.
+
+    patient_id: يُمرَّر لـfind_reference_range حتى تُستخدم النسبة الطبيعية
+    الخاصة بهذا المريض تحديداً لو موجودة (المطلوب 5) — اختياري، None يعني
+    نفس السلوك القديم (نسبة عامة/حسب الجهاز فقط).
+
+    الجهاز (analyzer): يُقرأ من حقل form["{field_prefix}analyzer"] لو
+    موجود ويُحفظ على order_tests.analyzer قبل حساب أي flag، حتى يُستخدم
+    فورًا بنفس هذا الحفظ (المطلوب 6). حقل غير موجود بالفورم إطلاقاً (شاشة
+    قديمة ما عندها هذا الحقل) لا يغيّر شي؛ حقل موجود وفاضي يمسح القيمة
+    المحفوظة سابقاً.
+    """
+    analyzer_field = f"{field_prefix}analyzer"
+    if analyzer_field in form:
+        analyzer_value = form.get(analyzer_field, "").strip() or None
+        db.execute("UPDATE order_tests SET analyzer=? WHERE id=?", (analyzer_value, ot["id"]))
+    else:
+        analyzer_value = ot["analyzer"] if "analyzer" in ot.keys() else None
+
     now = datetime.now().isoformat(timespec="seconds")
     touched = False
     for param in parameters:
@@ -3138,7 +3184,8 @@ def save_order_test_results(db, ot, parameters, form, user_id, field_prefix=""):
         if value == "":
             continue
         touched = True
-        rng = find_reference_range(db, param["id"], ot["gender"], ot["age"], ot["age_unit"])
+        rng = find_reference_range(db, param["id"], ot["gender"], ot["age"], ot["age_unit"],
+                                    patient_id=patient_id, analyzer=analyzer_value)
         flag = "Normal"
         value_numeric = None
         value_text = None
@@ -3187,7 +3234,8 @@ def save_order_test_results(db, ot, parameters, form, user_id, field_prefix=""):
 def result_entry(order_test_id):
     db = get_db()
     ot = db.execute(
-        "SELECT ot.*, td.name as test_name, td.code as test_code, p.full_name as patient_name, p.gender, p.age, p.age_unit, "
+        "SELECT ot.*, td.name as test_name, td.code as test_code, "
+        "p.id as patient_id, p.full_name as patient_name, p.gender, p.age, p.age_unit, "
         "v.id as visit_id, v.registration_number "
         "FROM order_tests ot JOIN test_definitions td ON td.id=ot.test_definition_id "
         "JOIN orders o ON o.id=ot.order_id JOIN visits v ON v.id=o.visit_id "
@@ -3202,7 +3250,7 @@ def result_entry(order_test_id):
     ).fetchall()
 
     if request.method == "POST":
-        save_order_test_results(db, ot, parameters, request.form, session["user_id"])
+        save_order_test_results(db, ot, parameters, request.form, session["user_id"], patient_id=ot["patient_id"])
         # التحليل المعتمد (Verified) يبقى معتمَد بعد التعديل — الحقول صارت
         # قابلة للتعديل دائمًا حتى بعد الاعتماد (بطلب المستخدم)، وكل تعديل
         # يبقى مسجّل بجدول result_history (القيمة القديمة + مين عدّلها ووقتها)
@@ -3227,7 +3275,8 @@ def result_entry(order_test_id):
     suggestions_map = {}
     history_map = {}
     for p in parameters:
-        r = find_reference_range(db, p["id"], ot["gender"], ot["age"], ot["age_unit"])
+        r = find_reference_range(db, p["id"], ot["gender"], ot["age"], ot["age_unit"],
+                                  patient_id=ot["patient_id"], analyzer=ot["analyzer"] if "analyzer" in ot.keys() else None)
         ranges[p["id"]] = r
         sugg = db.execute("SELECT content FROM suggestions WHERE test_parameter_id=?", (p["id"],)).fetchall()
         suggestions_map[p["id"]] = [s["content"] for s in sugg]
@@ -3262,7 +3311,7 @@ def visit_results_entry(visit_id):
 
     order_tests = db.execute(
         "SELECT ot.*, td.name as test_name, td.code as test_code, td.department as test_department, "
-        "p.gender as gender, p.age as age, p.age_unit as age_unit "
+        "p.id as patient_id, p.gender as gender, p.age as age, p.age_unit as age_unit "
         "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id "
         "JOIN orders o ON o.id = ot.order_id JOIN visits v2 ON v2.id = o.visit_id "
         "JOIN patients p ON p.id = v2.patient_id "
@@ -3311,7 +3360,8 @@ def visit_results_entry(visit_id):
                 "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (ot["test_definition_id"],)
             ).fetchall()
             touched = save_order_test_results(
-                db, ot, parameters, request.form, session["user_id"], field_prefix=f"ot{ot['id']}_"
+                db, ot, parameters, request.form, session["user_id"], field_prefix=f"ot{ot['id']}_",
+                patient_id=ot["patient_id"],
             )
             if touched:
                 any_saved = True
@@ -3342,7 +3392,11 @@ def visit_results_entry(visit_id):
         suggestions_map = {}
         history_map = {}
         for p in parameters:
-            ranges[p["id"]] = find_reference_range(db, p["id"], visit["gender"], visit["age"], visit["age_unit"])
+            ranges[p["id"]] = find_reference_range(
+                db, p["id"], visit["gender"], visit["age"], visit["age_unit"],
+                patient_id=visit["patient_id"],
+                analyzer=ot["analyzer"] if "analyzer" in ot.keys() else None,
+            )
             sugg = db.execute("SELECT content FROM suggestions WHERE test_parameter_id=?", (p["id"],)).fetchall()
             suggestions_map[p["id"]] = [s["content"] for s in sugg]
             history_map[p["id"]] = db.execute(
@@ -3406,13 +3460,22 @@ def print_combined_panel(visit_id):
 
     order_tests = db.execute(
         "SELECT ot.*, td.code as test_code, td.name as test_name, td.department as department, "
-        "td.report_group as report_group "
+        "td.report_group as report_group, td.done_by_note as done_by_note "
         "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id "
         "JOIN orders o ON o.id = ot.order_id "
         "WHERE o.visit_id=? AND ot.status IN ('Completed', 'Verified') "
         "ORDER BY COALESCE(NULLIF(TRIM(td.report_group), ''), td.department), td.name",
         (visit_id,),
     ).fetchall()
+
+    # سطر/أسطر "Done by ..." (المطلوب 7) — كل تحليل داخل هذي اللوحة المجمّعة
+    # ممكن يكون له done_by_note مختلف (أجهزة مختلفة لكل تحليل)، فنجمع كل
+    # القيم غير الفاضية بدون تكرار، بنفس ترتيب ظهور تحاليلها بالتقرير.
+    done_by_notes = []
+    for _ot in order_tests:
+        note = (_ot["done_by_note"] or "").strip() if "done_by_note" in _ot.keys() else ""
+        if note and note not in done_by_notes:
+            done_by_notes.append(note)
 
     # التحاليل القديمة (من زيارات سابقة) اللي وافق الموظف صراحة على دمج
     # نتائجها بهذي الزيارة تحديداً — راجع visit_previous_merges. مبوّبة
@@ -3450,7 +3513,9 @@ def print_combined_panel(visit_id):
             value = r["value_text"] if r["value_text"] not in (None, "") else r["value_numeric"]
             if value in (None, ""):
                 continue
-            rng = find_reference_range(db, p["id"], visit["gender"], visit["age"], visit["age_unit"])
+            rng = find_reference_range(db, p["id"], visit["gender"], visit["age"], visit["age_unit"],
+                                        patient_id=visit["patient_id"],
+                                        analyzer=ot["analyzer"] if "analyzer" in ot.keys() else None)
             # المدى الطبيعي بعمود واحد مدمج (بدون Low/High منفصلة) — نفضّل
             # range_text الجاهز لو موجود (يغطي حالات نصية زي "Non-Reactive
             # (< 1.0)")، وإلا نبنيه يدويًا من low/high الرقميين لو موجودين.
@@ -3464,6 +3529,15 @@ def print_combined_panel(visit_id):
                 range_display = f"≤ {rng['high']}"
             else:
                 range_display = ""
+            # مستويات نص حر متعدد الأسطر (المطلوب 4ب) — نفس منطق custom_rows
+            # بالضبط: لو range_text موجود يُفكّ لعدة مستويات (Label: value لكل
+            # سطر)، وإلا سطر واحد بلا تسمية من range_display الجاهزة أعلاه.
+            if rng and rng["range_text"]:
+                range_tiers = parse_range_tiers(rng["range_text"])
+            elif range_display:
+                range_tiers = [{"label": None, "value": range_display}]
+            else:
+                range_tiers = []
             # الوحدة الثانية (unit2/unit2_factor) — سطر ثاني أصغر تحت
             # النتيجة والوحدة والمدى الطبيعي (زي S. Creatinine بالصورة:
             # mg/dL فوق وµmol/L تحت) — تُحسب فقط للنتائج الرقمية.
@@ -3494,6 +3568,8 @@ def print_combined_panel(visit_id):
                 "result": value,
                 "unit": p["unit"] or "",
                 "range_display": range_display,
+                "range_tiers": range_tiers,
+                "flag": r["flag"] if "flag" in r.keys() else None,
                 "value2": value2,
                 "unit2": unit2,
                 "range2_display": range2_display,
@@ -3552,6 +3628,7 @@ def print_combined_panel(visit_id):
                 pname = p["name"] if multi_param_prev else m["test_name"]
                 prev_rows.append({
                     "name": pname, "result": None, "unit": "", "range_display": "",
+                    "range_tiers": [], "flag": None,
                     "value2": None, "unit2": None, "range2_display": None, "color": None,
                     "previous_display": f"{pname}: {val} ({m['date_display']})",
                 })
@@ -3589,6 +3666,7 @@ def print_combined_panel(visit_id):
     age_unit_abbr = {"Hours": "H", "Days": "D", "Weeks": "W", "Months": "M", "Years": "Y"}
     age_display = f"{visit['age']}{age_unit_abbr.get(visit['age_unit'] or 'Years', 'Y')}" if visit["age"] not in (None, "") else ""
 
+    auto_flag_color_enabled, show_result_flag = get_report_flag_settings(db)
     return render_template(
         "reports/combined_panel.html",
         panel_groups=panel_groups, logo_url=logo_url, from_other_lab=from_other_lab,
@@ -3596,6 +3674,8 @@ def print_combined_panel(visit_id):
         patient_name=visit["patient_name"], patient_id=visit["registration_number"],
         referring_doctor_name=visit["referring_doctor_name"] or "",
         show_exam_signature=False,
+        auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag,
+        done_by_notes=done_by_notes,
         # مكتبة الأختام/التواقيع + أي ختم مُلصق فعلاً فوق هذا التقرير الموحّد
         # حاليًا (راجع partials/stamp_picker.html لطريقة استخدامها بالقالب).
         stamp_target_type="visit", stamp_target_id=visit_id,
@@ -3644,6 +3724,7 @@ def _print_report_impl(order_test_id):
     ot = db.execute(
         "SELECT ot.*, td.code as test_code, td.name as test_name, td.department as test_department, "
         "td.is_examining_test as is_examining_test, td.enable_stamp_widget as enable_stamp_widget, "
+        "td.done_by_note as done_by_note, "
         "p.id as patient_id, p.full_name as patient_name, p.gender, p.age, p.age_unit, "
         "v.id as visit_id, v.created_at as visit_created_at, v.registration_number, "
         "v.doctor_id, v.referral_center_id, "
@@ -3739,7 +3820,9 @@ def _print_report_impl(order_test_id):
         else:
             value = None
         params[p["name"]] = "" if value is None else value
-        ranges[p["name"]] = find_reference_range(db, p["id"], ot["gender"], ot["age"], ot["age_unit"])
+        ranges[p["name"]] = find_reference_range(db, p["id"], ot["gender"], ot["age"], ot["age_unit"],
+                                                  patient_id=ot["patient_id"],
+                                                  analyzer=ot["analyzer"] if "analyzer" in ot.keys() else None)
 
     logo_path = get_setting(db, "logo_path", "")
     logo_url = url_for("static", filename=logo_path) if logo_path else None
@@ -3788,6 +3871,7 @@ def _print_report_impl(order_test_id):
             rows = []
             for name in group:
                 rng = ranges.get(name)
+                res_row = results_by_name.get(name)
                 rows.append({
                     "name": name,
                     "result": params.get(name, ""),
@@ -3796,6 +3880,7 @@ def _print_report_impl(order_test_id):
                     "high": rng["high"] if rng else "",
                     "highlight": highlight_by_name.get(name, False),
                     "previous": previous_values.get(name, "") if show_prev_values else "",
+                    "flag": res_row["flag"] if res_row else None,
                 })
             cbc_groups.append(rows)
 
@@ -3828,6 +3913,8 @@ def _print_report_impl(order_test_id):
                 elif rng["high"] is not None:
                     normal_range = f"< {rng['high']}"
             result_val = params.get(pname, "")
+            res_row = results_by_name.get(pname)
+            flag_val = res_row["flag"] if res_row else None
 
             # حقل "This test done by ... (FDA Approved)" (source_note) أُلغي
             # عرضه نهائيًا بالتقرير المطبوع بناءً على الطلب — يبقى العمود
@@ -3875,6 +3962,7 @@ def _print_report_impl(order_test_id):
                 "range_position": rd.get("range_position") or "inline",
                 "name_align": rd.get("name_align"),
                 "color": rd.get("color"),
+                "flag": flag_val,
                 "page_break_before": rd.get("page_break_before", False),
             })
 
@@ -3908,6 +3996,7 @@ def _print_report_impl(order_test_id):
     # تحليل — هذا الفرق هو سبب انهيار كل طباعة (CBC وGUE/GSE/SFA سوا).
     macro_params, micro_params = _build_exam_sections(ot["test_code"], parameters, report_layout)
 
+    auto_flag_color_enabled, show_result_flag = get_report_flag_settings(db)
     return render_template(
         template_name,
         ot=ot, params=params, ranges=ranges, units=units, cbc_groups=cbc_groups,
@@ -3941,11 +4030,12 @@ def _print_report_impl(order_test_id):
         order_test_id=order_test_id,
         results_by_name=results_by_name,
         param_notes={name: r["note"] for name, r in results_by_name.items() if r["note"]},
-        report_comment=(ot["report_comment"] if "report_comment" in ot.keys() else "") or "",
         report_layout=report_layout,
         report_layout_has_patient_override=report_layout_has_patient_override,
         macro_params=macro_params,
         micro_params=micro_params,
+        auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag,
+        done_by_note=(ot["done_by_note"] or "") if "done_by_note" in ot.keys() else "",
         # params_list: نفس "parameters" (قائمة صفوف test_parameters الخام)
         # بس باسم متاح مباشرة للقالب — قوالب الفحص (urine_exam.html وغيرها)
         # تستدعي shared.render_report_body(..., params_list, ...) بالضبط
@@ -5067,20 +5157,33 @@ def reference_ranges():
         low = request.form.get("low") or None
         high = request.form.get("high") or None
         range_text = request.form.get("range_text") or None
-        source_note = request.form.get("source_note") or None
+        # scope_type="patient" (المطلوب 5): patient_id يقفل هذي النسبة على
+        # مريض واحد بالذات (حالة خاصة/علاج) — تتفوّق تلقائيًا على أي نسبة
+        # عامة لنفس الباراميتر (راجع find_reference_range بـdatabase.py).
+        # range_label اختياري، عرض فقط (مثلاً "مرضى الكورتيزون").
+        scope_type = request.form.get("scope_type") or "all"
+        patient_id = request.form.get("patient_id") or None if scope_type == "patient" else None
+        range_label = request.form.get("range_label") or None
+        # analyzer (المطلوب 6): اسم جهاز حر — فاضي يعني نسبة عامة بغض النظر
+        # عن الجهاز.
+        analyzer = request.form.get("analyzer") or None
         db.execute(
-            "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text, source_note) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (param_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text, source_note),
+            "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, "
+            "low, high, range_text, patient_id, range_label, analyzer) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (param_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text,
+             patient_id, range_label, analyzer),
         )
         db.commit()
         flash("Reference range added.")
         return redirect(url_for("reference_ranges"))
 
     ranges = db.execute(
-        "SELECT rr.*, tp.name as param_name, td.name as test_name FROM reference_ranges rr "
+        "SELECT rr.*, tp.name as param_name, td.name as test_name, p.full_name as patient_name "
+        "FROM reference_ranges rr "
         "JOIN test_parameters tp ON tp.id = rr.test_parameter_id "
         "JOIN test_definitions td ON td.id = tp.test_definition_id "
+        "LEFT JOIN patients p ON p.id = rr.patient_id "
         "ORDER BY td.name LIMIT 200"
     ).fetchall()
     parameters = db.execute(
@@ -5102,10 +5205,15 @@ def update_reference_range(range_id):
     low = request.form.get("low") or None
     high = request.form.get("high") or None
     range_text = request.form.get("range_text") or None
-    source_note = request.form.get("source_note") or None
+    scope_type = request.form.get("scope_type") or "all"
+    patient_id = request.form.get("patient_id") or None if scope_type == "patient" else None
+    range_label = request.form.get("range_label") or None
+    analyzer = request.form.get("analyzer") or None
     db.execute(
-        "UPDATE reference_ranges SET gender=?, age_from=?, age_from_unit=?, age_to=?, age_to_unit=?, low=?, high=?, range_text=?, source_note=? WHERE id=?",
-        (gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text, source_note, range_id),
+        "UPDATE reference_ranges SET gender=?, age_from=?, age_from_unit=?, age_to=?, age_to_unit=?, low=?, high=?, "
+        "range_text=?, patient_id=?, range_label=?, analyzer=? WHERE id=?",
+        (gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text,
+         patient_id, range_label, analyzer, range_id),
     )
     db.commit()
     flash(t(session.get("lang", "en"), "range_updated"))
@@ -5808,6 +5916,17 @@ def app_settings():
         if marker_colors:
             set_setting(db, "conclusion_marker_colors", json.dumps(marker_colors))
 
+        # تلوين/أعلام النتائج (المطلوب 2 و3) — نفس مشكلة أي checkbox بفورم
+        # منفصل عن باقي كروت الإعدادات: checkbox غير محدد ما يظهر إطلاقًا
+        # بالفورم، فما نقدر نميّز "هذا الكرت انحفظ والخيار متروك فارغ" عن
+        # "فورم كرت ثاني انحفظ وهذا الحقل أصلاً مو منه". لذلك نعتمد على
+        # حقل hidden مميّز (flag_settings_form) موجود فقط بفورم هذا الكرت
+        # تحديداً بـsettings.html — لا نلمس هذا الإعداد أبداً إلا لو
+        # الفورم المُرسَل فعلاً هو فورم هذا الكرت.
+        if request.form.get("flag_settings_form") is not None:
+            set_setting(db, "auto_flag_color_enabled", "1" if request.form.get("auto_flag_color_enabled") else "0")
+            set_setting(db, "show_result_flag", "1" if request.form.get("show_result_flag") else "0")
+
         db.commit()
         log_action("UpdateSettings", "settings", 0)
         flash("Settings saved.")
@@ -5832,6 +5951,8 @@ def app_settings():
         "logo_width": get_setting(db, "logo_width", "100"),
         "combined_panel_group_order": get_setting(db, "combined_panel_group_order", ""),
         "results_entry_test_order": get_setting(db, "results_entry_test_order", ""),
+        "auto_flag_color_enabled": get_setting(db, "auto_flag_color_enabled", "1"),
+        "show_result_flag": get_setting(db, "show_result_flag", "0"),
     }
     marker_colors_by_char = get_conclusion_marker_colors(db)
     conclusion_markers = [
@@ -6200,6 +6321,16 @@ def report_designer():
             flash("تم حفظ إعداد صندوق الختم/التوقيع.")
             return redirect(url_for("report_designer", test_definition_id=test_id))
 
+        if mode == "done_by":
+            # سطر "Done by ..." الاختياري لهذا التحليل تحديداً (المطلوب 7) —
+            # فاضي = لا يظهر أبداً بـ.footer-block أي تقرير لهذا التحليل.
+            done_by_note = request.form.get("done_by_note", "").strip() or None
+            db.execute("UPDATE test_definitions SET done_by_note=? WHERE id=?", (done_by_note, test_id))
+            db.commit()
+            log_action("UpdateDoneByNote", "test_definition", int(test_id), done_by_note or "")
+            flash("تم حفظ سطر Done by.")
+            return redirect(url_for("report_designer", test_definition_id=test_id))
+
         if mode == "docx":
             file = request.files.get("docx_file")
             if not file or not file.filename:
@@ -6431,7 +6562,8 @@ def _preview_report_design_impl(test_definition_id):
         cbc_groups = []
         for group in CBC_ROW_GROUPS:
             rows = [{"name": name, "result": "—", "unit": units_by_name.get(name, ""),
-                     "low": "", "high": "", "highlight": highlight_by_name.get(name, False), "previous": "—" if show_prev_values else ""}
+                     "low": "", "high": "", "highlight": highlight_by_name.get(name, False),
+                     "previous": "—" if show_prev_values else "", "flag": None}
                     for name in group]
             cbc_groups.append(rows)
 
@@ -6456,6 +6588,7 @@ def _preview_report_design_impl(test_definition_id):
             "range_position": rd.get("range_position") or "inline",
             "name_align": rd.get("name_align"),
             "color": rd.get("color"),
+            "flag": None,
             "page_break_before": rd.get("page_break_before", False),
         } for rd in row_defs]
 
@@ -6471,6 +6604,7 @@ def _preview_report_design_impl(test_definition_id):
     report_layout, report_layout_has_patient_override = get_report_layout(db, test_definition_id, 0)
     macro_params, micro_params = _build_exam_sections(test["code"], parameters, report_layout)
 
+    auto_flag_color_enabled, show_result_flag = get_report_flag_settings(db)
     return render_template(
         template_name,
         ot={"test_name": test["name"], "test_code": test["code"]}, params=params, ranges={}, units=units_by_name, cbc_groups=cbc_groups,
@@ -6491,7 +6625,9 @@ def _preview_report_design_impl(test_definition_id):
         referring_doctor_name="—", is_design_preview=True, preview_test_id=test_definition_id,
         test_definition_id=test_definition_id,
         sample_no="—", sample_time="—", number_of="—", patient_name_en="",
-        order_test_id=0, results_by_name={}, param_notes={}, report_comment="",
+        order_test_id=0, results_by_name={}, param_notes={},
+        auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag,
+        done_by_note=(test["done_by_note"] or "") if "done_by_note" in test.keys() else "",
         report_layout=report_layout, report_layout_has_patient_override=report_layout_has_patient_override,
         macro_params=macro_params, micro_params=micro_params,
         params_list=parameters,

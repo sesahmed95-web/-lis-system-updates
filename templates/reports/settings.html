@@ -50,6 +50,27 @@
       <input type="number" name="logo_width" min="30" max="300" value="{{ current.logo_width }}" style="width:120px;">
     </div>
 
+    <div class="form-field">
+      <label>🖼️ خلفية شاشة الترحيب (Dashboard)</label>
+      <span class="muted" style="display:block; margin-bottom:8px;">
+        اختر أي صورة (مختبر، مبنى...) — البرنامج يظبطها تلقائياً (يقصّها لتملأ
+        الشاشة، يعتّمها، يموّهها بنفس الدرجة دائماً) حتى تنسجم مع تصميم
+        البرنامج بغض النظر عن حجمها أو ألوانها الأصلية. تظهر فقط بشاشة
+        الترحيب بعد تسجيل الدخول، مو خلف باقي الصفحات. اتركها فاضية للرجوع
+        للخلفية المتدرّجة الافتراضية.
+      </span>
+      {% if dashboard_bg_url %}
+        <img src="{{ dashboard_bg_url }}" alt="dashboard background preview"
+             style="max-height:90px; max-width:220px; object-fit:cover; border:1px solid var(--border); border-radius:8px; padding:4px; display:block; margin-bottom:8px;">
+        <label class="checkbox-item">
+          <input type="checkbox" name="remove_dashboard_bg" value="1">
+          إزالة الصورة الحالية والرجوع للخلفية الافتراضية
+        </label>
+      {% endif %}
+      <input type="file" name="dashboard_bg" accept=".png,.jpg,.jpeg,.webp" style="margin-top:8px;">
+      <span class="muted">PNG / JPG / WEBP</span>
+    </div>
+
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
 </div>
@@ -70,6 +91,35 @@
     "إظهار بترويسة التقرير المطبوع" — يظهر تلقائيًا بجانب باقي الأسماء بكل
     التقارير، بغض النظر هل هو دكتور فاحص فعليًا أو لا.
   </p>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🎨 تلوين وأعلام النتائج بالتقرير المطبوع</h3>
+  <p class="muted">
+    التلوين التلقائي يلوّن رقم النتيجة فقط (مو اسم التحليل ولا الوحدة ولا
+    المدى الطبيعي) أحمر لو High/Critical، وأصفر غامق لو Low — حسب الـflag
+    المحسوب تلقائيًا وقت إدخال النتيجة، بدون أي تدخل يدوي إضافي. لو صف معيّن
+    له لون يدوي مضبوط مسبقًا (من مصمم التقارير أو لوحة الألوان 🎨 بشاشة
+    الفحوصات)، يبقى لهذا اللون اليدوي الأسبقية ولا يتلوّن تلقائيًا. كلمة
+    High/Low/Critical نفسها بجانب النتيجة منفصلة تمامًا عن التلوين — إعداد
+    خاص فيها لحاله تحت.
+  </p>
+  <form method="POST">
+    <input type="hidden" name="flag_settings_form" value="1">
+    <div class="form-field">
+      <label class="checkbox-item" style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" name="auto_flag_color_enabled" value="1" {{ 'checked' if current.auto_flag_color_enabled == '1' }}>
+        تفعيل التلوين التلقائي لرقم النتيجة حسب الـflag
+      </label>
+    </div>
+    <div class="form-field">
+      <label class="checkbox-item" style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" name="show_result_flag" value="1" {{ 'checked' if current.show_result_flag == '1' }}>
+        إظهار كلمة High/Low/Critical جنب النتيجة بالتقرير المطبوع (معطّل افتراضيًا)
+      </label>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
 </div>
 
 <div class="card" style="max-width:640px;">

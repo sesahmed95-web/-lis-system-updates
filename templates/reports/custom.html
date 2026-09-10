@@ -24,6 +24,9 @@
   .lt-range-row .lt-range-title { font-weight: 600; color: #475569; margin-inline-start: 0; }
   .lt-comment-box { margin-top: 14px; font-size: 0.85em; }
   .lt-comment-box b { color: #475569; }
+  /* flag-badge: كلمة High/Low/Critical اختيارية جنب النتيجة (المطلوب 3) —
+     مستقلة تمامًا عن تلوين رقم النتيجة (المطلوب 2). */
+  .flag-badge { font-size: 0.7em; font-weight: bold; margin-inline-start: 5px; }
 </style>
 
 <div class="report-heading" style="text-align: {{ custom_heading_align|default('center') }};">{{ custom_heading }}</div>
@@ -43,11 +46,12 @@
 
   {% for row in custom_rows %}
   {% set name_align = row.name_align or custom_rows_align|default('right') %}
+  {% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and not row.color) else none %}
 
   <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
     <td style="text-align:{{ name_align }}; font-weight:bold;{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.label }}</td>
     <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
-      {% if row.result not in (None, '') %}<span style="font-weight:bold;">{{ row.result }}</span>{% if row.unit %} {{ row.unit }}{% endif %}{% endif %}
+      {% if row.result not in (None, '') %}<span style="font-weight:bold;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ row.result }}</span>{% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="flag-badge" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}{% if row.unit %} {{ row.unit }}{% endif %}{% endif %}
       {% if row.range_tiers %}
         {% if row.range_tiers|length == 1 and not row.range_tiers[0].label %}
         <div class="lt-range-label">Normal Range : {{ row.range_tiers[0].value }}</div>
@@ -77,8 +81,4 @@
   {% endif %}
   {% endfor %}
 </table>
-
-{% if report_comment %}
-<div class="lt-comment-box"><b>Comment:</b> {{ report_comment }}</div>
-{% endif %}
 {% endblock %}

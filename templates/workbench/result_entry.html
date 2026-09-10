@@ -21,6 +21,13 @@
   {% endif %}
 
   <form method="POST">
+    <div class="form-field" style="max-width:260px; margin-bottom:10px;">
+      <label style="font-size:0.85em;">الجهاز (Analyzer) — اختياري</label>
+      <input type="text" name="analyzer" value="{{ ot['analyzer'] if 'analyzer' in ot.keys() and ot['analyzer'] else '' }}"
+             placeholder="مثال: E411 / Pure" dir="ltr" style="width:100%;"
+             {% if ot['status'] == 'Verified' %}disabled{% endif %}>
+    </div>
+
     <table>
       <thead><tr>
         <th>{{ t('parameter') }}</th><th>{{ t('unit') }}</th><th>{{ t('range') }}</th><th>{{ t('result') }}</th><th>{{ t('flag') }}</th>

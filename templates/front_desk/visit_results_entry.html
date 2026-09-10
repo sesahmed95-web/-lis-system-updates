@@ -247,6 +247,12 @@
       </div>
       <p class="muted" style="margin:4px 0 10px;">{{ t('barcode') }}: <span class="mono">{{ ot['barcode'] }}</span></p>
 
+      <div class="form-field" style="max-width:260px; margin-bottom:10px;">
+        <label style="font-size:0.85em;">الجهاز (Analyzer) — اختياري</label>
+        <input type="text" name="ot{{ ot['id'] }}_analyzer" value="{{ ot['analyzer'] if 'analyzer' in ot.keys() and ot['analyzer'] else '' }}"
+               placeholder="مثال: E411 / Pure" dir="ltr" style="width:100%;">
+      </div>
+
       {% if ot['status'] == 'Verified' %}
         {% if current_role in ['supervisor', 'admin'] %}
         <form method="POST" action="{{ url_for('unverify_result', order_test_id=ot['id']) }}"

@@ -298,7 +298,7 @@
 {# ============== صف نتيجة مفردة ==============
    style: dict اختياري {label, color, font_size} من report_layout.param_overrides.
    is_hidden: بول — لو True يُطبع الصف مخفي (display:none) خارج وضع التعديل. #}
-{% macro exam_row(param, range_row, unit, result_value, note, order_test_id, style=none, is_hidden=false) %}
+{% macro exam_row(param, range_row, unit, result_value, note, order_test_id, style=none, is_hidden=false, flag=none) %}
 {% set style = style or {} %}
 {% set display_name = style.get('label') or param['name'] %}
 {% set normal_range = '' %}
@@ -313,6 +313,13 @@
     {% set normal_range = '< ' ~ (range_row['high']|string) %}
   {% endif %}
 {% endif %}
+{# مستويات نص حر متعدد الأسطر (المطلوب 4ب) — نفس منطق custom_rows/combined_panel،
+   عبر parse_range_tiers المسجّلة كـ Jinja global بـapp.py. #}
+{% set range_tiers = parse_range_tiers(range_row['range_text']) if (range_row and range_row['range_text']) else ([{'label': none, 'value': normal_range}] if normal_range else []) %}
+{# تلوين تلقائي لرقم النتيجة حسب flag (المطلوب 2) — فقط لو ما فيه لون يدوي
+   مضبوط مسبقًا لهذا الصف (style.get('color') يبقى له الأسبقية دائمًا)،
+   وفقط لو الإعداد auto_flag_color_enabled مفعّل. #}
+{% set auto_color = AUTO_FLAG_COLORS.get(flag) if (auto_flag_color_enabled is defined and auto_flag_color_enabled and not style.get('color') and flag) else none %}
 <div class="result-row{% if is_hidden %} exam-row-hidden{% endif %}"
      data-param-name="{{ param['name'] }}"
      data-param-id="{{ param['id'] }}"
@@ -324,8 +331,14 @@
   <span class="row-drag-handle" title="اسحب لتغيير ترتيب هذا الصف">⋮⋮</span>
   <span class="rname">{{ display_name }}</span>
   <span class="rcolon">:</span>
-  <span class="rval" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% endif %}>{{ result_value if result_value not in (none, '') else '' }}{% if unit and result_value not in (none, '') %} <span class="runit">{{ unit }}</span>{% endif %}</span>
-  <span class="rnorm">{{ normal_range }}</span>
+  <span class="rval">{% if result_value not in (none, '') %}<span class="rval-num" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% elif auto_color %}style="color:{{ auto_color }};"{% endif %}>{{ result_value }}</span>{% if show_result_flag is defined and show_result_flag and flag and flag != 'Normal' %}<span class="flag-badge" style="font-size:0.75em; font-weight:bold; margin-inline-start:4px;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ flag }}</span>{% endif %}{% if unit %} <span class="runit">{{ unit }}</span>{% endif %}{% endif %}</span>
+  <span class="rnorm">
+    {% if range_tiers|length > 1 %}
+      {% for tier in range_tiers %}<div class="exam-range-tier">{% if tier.label %}<b>{{ tier.label }}</b>: {% endif %}{{ tier.value }}</div>{% endfor %}
+    {% else %}
+      {{ normal_range }}
+    {% endif %}
+  </span>
   <span class="row-tools">
     <button type="button" class="row-style-btn" onclick="examOpenStylePopover(event, this)" title="لون / حجم / تسمية العرض">🎨</button>
     <button type="button" class="row-hide-btn" onclick="examToggleHidden(this)" title="إخفاء/إظهار هذا الصف بالتقرير">{{ '👁️' if is_hidden else '🗑️' }}</button>
@@ -390,7 +403,7 @@
       {% for name in names %}
         {% if name in params_by_name %}
           {% set _ = shown.append(name) %}
-          {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name)), param_notes.get(name, ''), order_test_id, param_overrides.get(name), name in hidden) }}
+          {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name)), param_notes.get(name, ''), order_test_id, param_overrides.get(name), name in hidden, (results_by_name.get(name)['flag'] if results_by_name.get(name) else none)) }}
         {% endif %}
       {% endfor %}
       {{ add_param_row(key, order_test_id, test_definition_id) }}
@@ -409,13 +422,14 @@
         <span class="title-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل عنوان القسم">✏️</span>
       </div>
       {% for name in leftover_names %}
-        {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name)), param_notes.get(name, ''), order_test_id, param_overrides.get(name), name in hidden) }}
+        {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name)), param_notes.get(name, ''), order_test_id, param_overrides.get(name), name in hidden, (results_by_name.get(name)['flag'] if results_by_name.get(name) else none)) }}
       {% endfor %}
       {{ add_param_row('_leftover', order_test_id, test_definition_id) }}
     </div>
   {% endif %}
 
-  <div class="bottom-note" style="display:none;"></div>
+  <!-- بلوك bottom-note (الملاحظة العامة أسفل التقرير) أُلغي نهائيًا
+       (المطلوب 1) — ما يظهر أبدًا بلا استثناء. -->
 
 </div>
 
@@ -753,9 +767,10 @@ function examAttachDnD() {
       var rect = s.getBoundingClientRect();
       return e.clientY < rect.top + rect.height / 2;
     });
-    var bottomNote = container.querySelector('.bottom-note');
+    // bottom-note أُلغي (المطلوب 1) — نضيف بآخر الحاوية مباشرة (appendChild)
+    // بدل الإدراج قبل مرجع بلوك ما عاد موجود.
     if (after) container.insertBefore(examDragEl, after);
-    else container.insertBefore(examDragEl, bottomNote);
+    else container.appendChild(examDragEl);
   });
   document.addEventListener('dragend', function () { examDragEl = null; });
 }
@@ -793,7 +808,7 @@ function examApplyStyle() {
   var color = document.getElementById('examStyleColor').value;
   var size = document.getElementById('examStyleSize').value;
   var nameEl = row.querySelector('.rname');
-  var valEl = row.querySelector('.rval');
+  var valEl = row.querySelector('.rval-num') || row.querySelector('.rval');
   if (label) { nameEl.textContent = label; row.dataset.label = label; }
   if (color) { valEl.style.color = color; row.dataset.color = color; }
   if (size) { row.style.fontSize = size + 'px'; row.dataset.fontSize = size; }
@@ -804,7 +819,7 @@ function examClearStyle() {
   var row = examStyleTargetRow;
   var nameEl = row.querySelector('.rname');
   nameEl.textContent = row.dataset.paramName;
-  var valEl = row.querySelector('.rval');
+  var valEl = row.querySelector('.rval-num') || row.querySelector('.rval');
   valEl.style.color = '';
   row.style.fontSize = '';
   delete row.dataset.label; delete row.dataset.color; delete row.dataset.fontSize;

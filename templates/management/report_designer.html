@@ -18,6 +18,18 @@
     <button class="btn small" type="submit">حفظ</button>
   </form>
 
+  <form method="POST" style="margin-bottom:18px;">
+    <input type="hidden" name="test_definition_id" value="{{ selected_test['id'] }}">
+    <input type="hidden" name="mode" value="done_by">
+    <div class="form-field">
+      <label>🖊️ سطر "Done by ..." اختياري بآخر تقرير هذا التحليل تحديداً</label>
+      <input type="text" name="done_by_note" value="{{ selected_test['done_by_note'] or '' }}"
+             placeholder="مثال: Done by Beckman 520 DX" style="width:100%;" dir="ltr">
+      <span class="muted" style="font-size:0.8em;">فاضي = لا يظهر أبداً بأي تقرير لهذا التحليل.</span>
+    </div>
+    <button class="btn small" type="submit">حفظ</button>
+  </form>
+
   {% if selected_test['code'] in ('CBC','BF','WBCDIFF','FLUIDEXAM') %}
     <p class="muted">هذا التحليل إله تصميم مدمج جاهز بالفعل ولا يحتاج تصميم إضافي.</p>
     <a class="btn" href="{{ url_for('preview_report_design', test_definition_id=selected_test['id']) }}">👁️ معاينة التصميم الآن</a>

@@ -11,6 +11,7 @@
      العادي بـ reports/base_report.html). الفراغ المتبقي أسفل الورقة (لو
      التحاليل قليلة) متروك عمدًا كما هو ولا علاقة له بهذا الفاصل.  */
   .cbc-group-gap td { border: none !important; padding: 0 !important; height: 22px; line-height: 0; }
+  .flag-badge { font-size: 0.7em; font-weight: bold; margin-inline-start: 5px; }
 </style>
 
 <table class="data-table" style="text-align:center; direction:ltr;">
@@ -22,9 +23,10 @@
     <tr class="cbc-group-gap"><td colspan="5"></td></tr>
     {% endif %}
     {% for row in group %}
+    {% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and row.flag) else none %}
     <tr{% if row.highlight %} style="background:#FFF59D;"{% endif %}>
       <td style="text-align:left; font-weight:bold;">{{ row.name }}</td>
-      <td>{{ row.result }}{% if show_prev_values and row.previous %}<br><span class="prev-inline">Prev: {{ row.previous }}</span>{% endif %}</td>
+      <td><span{% if auto_color %} style="color:{{ auto_color }};"{% endif %}>{{ row.result }}</span>{% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="flag-badge" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}{% if show_prev_values and row.previous %}<br><span class="prev-inline">Prev: {{ row.previous }}</span>{% endif %}</td>
       <td>{{ row.unit }}</td>
       <td>{{ row.low }}</td>
       <td>{{ row.high }}</td>

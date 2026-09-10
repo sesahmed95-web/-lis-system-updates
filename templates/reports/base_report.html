@@ -435,6 +435,12 @@
             {% if from_other_lab %}
             <div class="other-lab-note">The sample received from another Lab.</div>
             {% endif %}
+            {% set _dbn_list = done_by_notes if (done_by_notes is defined and done_by_notes) else ([done_by_note] if (done_by_note is defined and done_by_note) else []) %}
+            {% if _dbn_list %}
+            <div class="done-by-note" style="font-size:0.82em; color:#475569; margin-top:4px;">
+              {% for _note in _dbn_list %}<div>{{ _note }}</div>{% endfor %}
+            </div>
+            {% endif %}
             <div class="footer-address">
               <span class="addr-line"><span class="addr-label">العنوان</span> : كوت – شارع الأطباء/ شارع دائرة الكهرباء القديمة / خلف مصرف الرافدين // للاستفسار: <span class="phone">07827434531</span> &nbsp;|&nbsp; <span class="email-line">hematologist_lab@yahoo.com</span></span>
             </div>

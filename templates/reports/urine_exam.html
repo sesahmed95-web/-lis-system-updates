@@ -23,13 +23,4 @@
 {{ shared.render_report_body("General Urine Examination", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
 
 {{ shared.editor_script(order_test_id) }}
-<script>
-document.getElementById('report-comment').addEventListener('blur', function(){
-  fetch('/order-tests/{{ order_test_id }}/report-comment', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-    body: 'report_comment=' + encodeURIComponent(this.value)
-  });
-});
-</script>
 {% endblock %}

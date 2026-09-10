@@ -531,10 +531,16 @@ def migrate(conn):
         "order_tests": [
             ("doctor_id", "INTEGER"), ("collected_at", "TEXT"), ("accessioned_at", "TEXT"),
             ("price", "REAL"),
-            # report_comment: الملاحظة العامة أسفل تقرير الفحص (GUE/GSE/SFA
-            # وأي تقرير فحص مستقبلي بنمط exam_report_shared.html) — سطر حر
-            # لكل طلب تحليل، يُحفظ عبر /order-tests/<id>/report-comment.
+            # report_comment: الميزة أُلغيت نهائيًا — العمود يبقى موجودًا
+            # (بدون DROP) لعدم فقدان بيانات قديمة، لكن لا يُقرأ ولا يُكتب
+            # فيه بعد الآن من أي مكان بالبرنامج.
             ("report_comment", "TEXT"),
+            # analyzer: اسم الجهاز الحر اللي اشتغل عليه هذا التحليل تحديداً
+            # بهذي الزيارة (E411 / Pure / Beckman 520 DX...) — يُختار وقت
+            # إدخال النتيجة، لأن نفس التحليل ممكن يشتغل بجهاز مختلف بين
+            # زيارة وأخرى. فاضي = بدون تحديد جهاز (يرجع find_reference_range
+            # للنسبة العامة كالمعتاد). راجع find_reference_range بـ database.py.
+            ("analyzer", "TEXT"),
         ],
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
         "visits": [("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
@@ -578,8 +584,24 @@ def migrate(conn):
                                # بدون كتابة قالب HTML يدوي أصلاً) بدل مسار "مصمم
                                # التقارير" العام. راجع _print_report_impl بـ app.py
                                # وشرح كامل بأعلى reports/generic_exam.html.
-                               ("report_style", "TEXT")],
-        "reference_ranges": [("age_from_unit", "TEXT DEFAULT 'Years'"), ("age_to_unit", "TEXT DEFAULT 'Years'")],
+                               ("report_style", "TEXT"),
+                               # done_by_note: سطر "Done by ..." اختياري لهذا التحليل
+                               # تحديداً (مثلاً "Done by Beckman 520 DX")، يُدار من
+                               # مصمم التقارير أو صفحة النسب الطبيعية. فاضي = لا
+                               # يظهر أبداً. يُطبع بـ.footer-block (base_report.html)
+                               # بكل قوالب التقارير (custom/CBC/panel/exam). بديل
+                               # عن reference_ranges.source_note المتوقف عرضه.
+                               ("done_by_note", "TEXT")],
+        # patient_id: نسبة طبيعية خاصة بمريض واحد بالذات (حالات خاصة/علاج) —
+        # NULL يعني نسبة عامة تنطبق على كل المرضى كالمعتاد. تتفوّق على أي
+        # نسبة عامة لنفس الباراميتر لو موجودة (راجع find_reference_range).
+        # range_label: تسمية اختيارية توضّح سبب النسبة الخاصة (مثلاً "مرضى
+        # الكورتيزون") — عرض فقط، لا تدخل بمنطق المطابقة.
+        # analyzer: اسم الجهاز الحر (E411 / Pure / Beckman 520 DX...) —
+        # NULL يعني نسبة عامة بغض النظر عن الجهاز. أولوية المطابقة الكاملة:
+        # نسبة المريض الخاصة > نسبة نفس الجهاز > النسبة العامة.
+        "reference_ranges": [("age_from_unit", "TEXT DEFAULT 'Years'"), ("age_to_unit", "TEXT DEFAULT 'Years'"),
+                              ("patient_id", "INTEGER"), ("range_label", "TEXT"), ("analyzer", "TEXT")],
         # unit2 / unit2_factor: وحدة ثانية اختيارية تُعرض تلقائيًا جنب النتيجة
         # الأصلية وقت الطباعة (مثلاً mg/dL بالإضافة لـ mmol/L). القيمة الثانية
         # تُحسب دائمًا = القيمة الأصلية × unit2_factor، ولا تُخزَّن بجدول
@@ -1116,7 +1138,7 @@ def age_to_days(value, unit):
     return value * AGE_UNIT_DAYS.get(unit or "Years", 365)
 
 
-def find_reference_range(conn, test_parameter_id, gender, age, age_unit):
+def find_reference_range(conn, test_parameter_id, gender, age, age_unit, patient_id=None, analyzer=None):
     """Picks the ONE reference-range row that actually applies to this
     patient, out of every row defined for this parameter — matching both
     gender and age bracket (each row's age_from/age_to can each be in a
@@ -1129,12 +1151,49 @@ def find_reference_range(conn, test_parameter_id, gender, age, age_unit):
          range at all)
       4. among whatever's left, a row naming this patient's exact gender
          wins over a generic 'Both' row.
+
+    patient_id / analyzer (both optional, default None so every existing
+    call site keeps working untouched): before any of the age/gender logic
+    above, the candidate pool is narrowed by specificity —
+      1. rows pinned to this exact patient_id (a private range for a
+         special case/treatment) win over everything else for this
+         parameter, if any exist.
+      2. otherwise, rows pinned to this exact analyzer name (and not
+         pinned to any patient) win — e.g. Ferritin on 'E411' vs 'Pure'.
+      3. otherwise, the general rows (no patient_id, no analyzer) are used
+         — the original behaviour.
+    Only after narrowing to one of these pools does the existing age/gender
+    matching run, so a private/analyzer range still needs to match the
+    patient's age+gender like any other row.
     """
     rows = conn.execute(
         "SELECT * FROM reference_ranges WHERE test_parameter_id=?", (test_parameter_id,)
     ).fetchall()
     if not rows:
         return None
+
+    if patient_id:
+        patient_rows = [r for r in rows if r["patient_id"] == patient_id]
+    else:
+        patient_rows = []
+    if patient_rows:
+        rows = patient_rows
+    else:
+        if analyzer:
+            analyzer_rows = [
+                r for r in rows
+                if not r["patient_id"] and r["analyzer"] and r["analyzer"] == analyzer
+            ]
+        else:
+            analyzer_rows = []
+        if analyzer_rows:
+            rows = analyzer_rows
+        else:
+            general_rows = [r for r in rows if not r["patient_id"] and not r["analyzer"]]
+            # لو ما فيه ولا صف عام أصلاً لهذا الباراميتر (كل الصفوف مخصصة
+            # لمريض أو جهاز معيّن) — نرجع لأي صف غير مخصص لمريض ثاني، أفضل
+            # من إرجاع None بلا أي مدى طبيعي إطلاقاً.
+            rows = general_rows or [r for r in rows if not r["patient_id"]] or rows
 
     age_days = age_to_days(age, age_unit)
 
