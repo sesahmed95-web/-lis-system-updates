@@ -315,24 +315,32 @@ def parse_range_tiers(text):
 app.jinja_env.globals["parse_range_tiers"] = parse_range_tiers
 
 
-# ألوان تلوين رقم النتيجة تلقائيًا حسب flag (المطلوب 2) — ثابتة دائمًا (لا
-# تُضبط من الإعدادات)، فقط "هل التلوين التلقائي مفعّل أصلاً" قابل للتبديل
-# (auto_flag_color_enabled بالإعدادات). Normal لا يدخل هذا القاموس عمدًا —
-# يعني بدون تلوين، كالسابق.
-AUTO_FLAG_COLORS = {"High": "#D40000", "Critical": "#D40000", "Low": "#B58900"}
-app.jinja_env.globals["AUTO_FLAG_COLORS"] = AUTO_FLAG_COLORS
+# ألوان تلوين رقم النتيجة تلقائيًا حسب flag (المطلوب 2) — المستخدم صراحة
+# رفض أي قاعدة ألوان ثابتة بالكود وطلب يختار هو اللونين بنفسه من الإعدادات
+# (راجع flag_color_high/flag_color_low بصفحة settings.html)، فـ"تلوين
+# ثابت" مو صحيح هنا. أبقينا فقط فكرة "هل التلوين مفعّل أصلاً"
+# (auto_flag_color_enabled) من الشغل الجديد لأنها إضافة مفيدة ومستقلة.
+# Normal ما تدخل هذا القاموس عمدًا — يعني بدون تلوين، كالسابق.
+def build_flag_color_map(db):
+    high = get_setting(db, "flag_color_high", "#D40000")
+    low = get_setting(db, "flag_color_low", "#B58900")
+    return {"High": high, "Critical": high, "Low": low}
+
 
 def get_report_flag_settings(db):
-    """(auto_flag_color_enabled, show_result_flag) لطباعة أي تقرير — راجع
-    شرح كامل عند مفتاحي هذا الإعداد بصفحة settings.html (بطاقة "تلوين/أعلام
-    النتائج"). auto_flag_color_enabled افتراضيًا مفعّل (1) — أقرب لسلوك
-    الطلب الأصلي (تلوين تلقائي دائم)، مع إبقاء خيار إيقافه بالكامل لو احتاجه
-    المدير. show_result_flag افتراضيًا معطّل (0) كما بالطلب الأصلي.
+    """(auto_flag_color_enabled, show_result_flag, flag_color_map) لطباعة أي
+    تقرير — راجع شرح كامل عند مفتاحي هذا الإعداد بصفحة settings.html (بطاقة
+    "تلوين رقم النتيجة" و"إظهار كلمة High/Low/Critical"). auto_flag_color_enabled
+    افتراضيًا مفعّل (1)، مع إبقاء خيار إيقافه بالكامل لو احتاجه المدير.
+    show_result_flag افتراضيًا معطّل (0) كما بالطلب الأصلي. flag_color_map
+    يُبنى من لونين يختارهما المدير بنفسه (settings)، لا قاعدة ثابتة بالكود.
     """
     return (
         get_setting(db, "auto_flag_color_enabled", "1") == "1",
         get_setting(db, "show_result_flag", "0") == "1",
+        build_flag_color_map(db),
     )
+
 
 
 ROW_SPACING_PRESETS = {"tight": 4, "normal": 8, "loose": 14}
@@ -3728,7 +3736,7 @@ def print_combined_panel(visit_id):
     age_unit_abbr = {"Hours": "H", "Days": "D", "Weeks": "W", "Months": "M", "Years": "Y"}
     age_display = f"{visit['age']}{age_unit_abbr.get(visit['age_unit'] or 'Years', 'Y')}" if visit["age"] not in (None, "") else ""
 
-    auto_flag_color_enabled, show_result_flag = get_report_flag_settings(db)
+    auto_flag_color_enabled, show_result_flag, flag_color_map = get_report_flag_settings(db)
     # تباعد الصفوف باللوحة المجمّعة (المطلوب 8) — الصفحة تجمع أكثر من
     # تحليل قد يكون لكل واحد إعداد row_spacing مختلف، فنستخدم أول قيمة
     # مضبوطة فعليًا (غير فاضية) بترتيب ظهور التحاليل بالصفحة كقيمة موحّدة
@@ -3749,7 +3757,7 @@ def print_combined_panel(visit_id):
         patient_name=visit["patient_name"], patient_id=visit["registration_number"],
         referring_doctor_name=visit["referring_doctor_name"] or "",
         show_exam_signature=False,
-        auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag,
+        auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag, AUTO_FLAG_COLORS=flag_color_map,
         row_spacing_px=row_spacing_px(_panel_row_spacing_raw),
         done_by_notes=done_by_notes,
         # مكتبة الأختام/التواقيع + أي ختم مُلصق فعلاً فوق هذا التقرير الموحّد
@@ -4081,7 +4089,7 @@ def _print_report_impl(order_test_id):
     # تحليل — هذا الفرق هو سبب انهيار كل طباعة (CBC وGUE/GSE/SFA سوا).
     macro_params, micro_params = _build_exam_sections(ot["test_code"], parameters, report_layout)
 
-    auto_flag_color_enabled, show_result_flag = get_report_flag_settings(db)
+    auto_flag_color_enabled, show_result_flag, flag_color_map = get_report_flag_settings(db)
     return render_template(
         template_name,
         ot=ot, params=params, ranges=ranges, units=units, cbc_groups=cbc_groups,
@@ -4118,7 +4126,7 @@ def _print_report_impl(order_test_id):
         report_layout_has_patient_override=report_layout_has_patient_override,
         macro_params=macro_params,
         micro_params=micro_params,
-        auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag,
+        auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag, AUTO_FLAG_COLORS=flag_color_map,
         row_spacing_px=row_spacing_px_value,
         done_by_note=(ot["done_by_note"] or "") if "done_by_note" in ot.keys() else "",
         # params_list: نفس "parameters" (قائمة صفوف test_parameters الخام)
@@ -6042,6 +6050,12 @@ def app_settings():
         if request.form.get("flag_settings_form") is not None:
             set_setting(db, "auto_flag_color_enabled", "1" if request.form.get("auto_flag_color_enabled") else "0")
             set_setting(db, "show_result_flag", "1" if request.form.get("show_result_flag") else "0")
+            flag_high = request.form.get("flag_color_high", "").strip()
+            if flag_high and _HEX_COLOR_RE.match(flag_high):
+                set_setting(db, "flag_color_high", flag_high)
+            flag_low = request.form.get("flag_color_low", "").strip()
+            if flag_low and _HEX_COLOR_RE.match(flag_low):
+                set_setting(db, "flag_color_low", flag_low)
 
         db.commit()
         log_action("UpdateSettings", "settings", 0)
@@ -6069,6 +6083,8 @@ def app_settings():
         "results_entry_test_order": get_setting(db, "results_entry_test_order", ""),
         "auto_flag_color_enabled": get_setting(db, "auto_flag_color_enabled", "1"),
         "show_result_flag": get_setting(db, "show_result_flag", "0"),
+        "flag_color_high": get_setting(db, "flag_color_high", "#D40000"),
+        "flag_color_low": get_setting(db, "flag_color_low", "#B58900"),
     }
     marker_colors_by_char = get_conclusion_marker_colors(db)
     conclusion_markers = [
@@ -6756,7 +6772,7 @@ def _preview_report_design_impl(test_definition_id):
     report_layout, report_layout_has_patient_override = get_report_layout(db, test_definition_id, 0)
     macro_params, micro_params = _build_exam_sections(test["code"], parameters, report_layout)
 
-    auto_flag_color_enabled, show_result_flag = get_report_flag_settings(db)
+    auto_flag_color_enabled, show_result_flag, flag_color_map = get_report_flag_settings(db)
     return render_template(
         template_name,
         ot={"test_name": test["name"], "test_code": test["code"]}, params=params, ranges={}, units=units_by_name, cbc_groups=cbc_groups,
@@ -6777,7 +6793,7 @@ def _preview_report_design_impl(test_definition_id):
         test_definition_id=test_definition_id,
         sample_no="—", sample_time="—", number_of="—", patient_name_en="",
         order_test_id=0, results_by_name={}, param_notes={},
-        auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag,
+        auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag, AUTO_FLAG_COLORS=flag_color_map,
         row_spacing_px=row_spacing_px_value,
         done_by_note=(test["done_by_note"] or "") if "done_by_note" in test.keys() else "",
         report_layout=report_layout, report_layout_has_patient_override=report_layout_has_patient_override,

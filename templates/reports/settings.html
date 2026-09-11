@@ -94,35 +94,6 @@
 </div>
 
 <div class="card" style="max-width:640px;">
-  <h3>🎨 تلوين وأعلام النتائج بالتقرير المطبوع</h3>
-  <p class="muted">
-    التلوين التلقائي يلوّن رقم النتيجة فقط (مو اسم التحليل ولا الوحدة ولا
-    المدى الطبيعي) أحمر لو High/Critical، وأصفر غامق لو Low — حسب الـflag
-    المحسوب تلقائيًا وقت إدخال النتيجة، بدون أي تدخل يدوي إضافي. لو صف معيّن
-    له لون يدوي مضبوط مسبقًا (من مصمم التقارير أو لوحة الألوان 🎨 بشاشة
-    الفحوصات)، يبقى لهذا اللون اليدوي الأسبقية ولا يتلوّن تلقائيًا. كلمة
-    High/Low/Critical نفسها بجانب النتيجة منفصلة تمامًا عن التلوين — إعداد
-    خاص فيها لحاله تحت.
-  </p>
-  <form method="POST">
-    <input type="hidden" name="flag_settings_form" value="1">
-    <div class="form-field">
-      <label class="checkbox-item" style="display:flex; align-items:center; gap:8px;">
-        <input type="checkbox" name="auto_flag_color_enabled" value="1" {{ 'checked' if current.auto_flag_color_enabled == '1' }}>
-        تفعيل التلوين التلقائي لرقم النتيجة حسب الـflag
-      </label>
-    </div>
-    <div class="form-field">
-      <label class="checkbox-item" style="display:flex; align-items:center; gap:8px;">
-        <input type="checkbox" name="show_result_flag" value="1" {{ 'checked' if current.show_result_flag == '1' }}>
-        إظهار كلمة High/Low/Critical جنب النتيجة بالتقرير المطبوع (معطّل افتراضيًا)
-      </label>
-    </div>
-    <button class="btn" type="submit">{{ t('save_settings') }}</button>
-  </form>
-</div>
-
-<div class="card" style="max-width:640px;">
   <h3>🔤 تنسيق أسماء وشهادات الدكاترة بالترويسة</h3>
   <p class="muted">
     يتحكم هذا بحجم ونوع الخط لكل أسماء وألقاب وشهادات الدكاترة (والأشخاص
@@ -255,6 +226,41 @@
       <label>مسار مجلد الأرشفة</label>
       <input type="text" name="pdf_archive_dir" value="{{ current.pdf_archive_dir }}"
              placeholder="مثال: D:\LabArchive\Reports" style="width:100%;" dir="ltr">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🎨 تلوين رقم النتيجة (عالية / قليلة)</h3>
+  <p class="muted">
+    يلوّن هذا رقم النتيجة نفسه فقط (مو اسم الباراميتر ولا الوحدة ولا المدى)
+    بكل التقارير المطبوعة، بناءً على العلم (Flag) المحسوب أصلاً لكل نتيجة —
+    High/Critical يستخدمون نفس اللون تحت، وLow يستخدم اللون الثاني. النتائج
+    الطبيعية والنصية (Positive/Negative) ما تتلوّن أبدًا. الألوان تختارها
+    إنت هنا — لا توجد قاعدة تلوين ثابتة بالكود.
+  </p>
+  <form method="POST">
+    <input type="hidden" name="flag_settings_form" value="1">
+    <div class="form-field">
+      <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="checkbox" name="auto_flag_color_enabled" {{ 'checked' if current.auto_flag_color_enabled == '1' }}>
+        تفعيل تلوين رقم النتيجة تلقائيًا
+      </label>
+    </div>
+    <div class="form-field">
+      <label>لون النتيجة العالية (High / Critical)</label>
+      <input type="color" name="flag_color_high" value="{{ current.flag_color_high or '#D40000' }}">
+    </div>
+    <div class="form-field">
+      <label>لون النتيجة القليلة (Low)</label>
+      <input type="color" name="flag_color_low" value="{{ current.flag_color_low or '#B58900' }}">
+    </div>
+    <div class="form-field">
+      <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="checkbox" name="show_result_flag" {{ 'checked' if current.show_result_flag == '1' }}>
+        إظهار كلمة High / Low / Critical كنص جنب النتيجة أيضًا (معطّل افتراضيًا)
+      </label>
     </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
