@@ -394,6 +394,7 @@ def resolve_value_align(param_row):
 
 app.jinja_env.globals["resolve_label"] = resolve_label
 app.jinja_env.globals["resolve_value_align"] = resolve_value_align
+app.jinja_env.globals["VALUE_ALIGN_CSS"] = VALUE_ALIGN_CSS
 
 
 ALLOWED_DOCX_EXT = {"docx"}
@@ -4343,6 +4344,37 @@ def api_add_test_parameter():
     db.commit()
     log_action("AddTestParameter", "test_parameters", cur.lastrowid, name)
     return jsonify({"ok": True, "id": cur.lastrowid, "name": name})
+
+
+# ============== حذف باراميتر نهائيًا مباشرة من صفحة معاينة التقرير ==============
+# يستدعيه زر ❌ (examDeleteParam بـexam_report_shared.html) — حذف حقيقي من
+# test_parameters، مختلف تمامًا عن 🗑️/👁️ (إخفاء/إظهار فقط، ما يمس البيانات).
+# محمي عمداً: يرفض الحذف لو فيه أي نتيجة محفوظة سابقًا لهذا الباراميتر (أي
+# مريض/زيارة) — حتى ما نفقد تأريخ نتائج حقيقية بالغلط، ونقترح الإخفاء
+# كبديل آمن بهذي الحالة. لا يحتاج تنظيف report_layout يدويًا بعدها: exam_row
+# أصلاً ما يطبع إلا الأسماء الموجودة فعليًا بـtest_parameters (راجع
+# `{% if name in params_by_name %}` بـrender_report_body)، فبمجرد الحذف
+# يختفي الصف تلقائيًا من كل تقرير مستقبلي لهذا التحليل.
+@app.route("/api/test-parameters/<int:param_id>", methods=["DELETE"])
+@roles_required("admin")
+def api_delete_test_parameter(param_id):
+    db = get_db()
+    p = db.execute("SELECT * FROM test_parameters WHERE id=?", (param_id,)).fetchone()
+    if not p:
+        return jsonify({"error": "الباراميتر غير موجود"}), 404
+    used = db.execute(
+        "SELECT COUNT(*) as c FROM results WHERE test_parameter_id=?", (param_id,)
+    ).fetchone()["c"]
+    if used:
+        return jsonify({
+            "error": f"عنده {used} نتيجة محفوظة سابقًا (لمرضى/زيارات مختلفة) — "
+                     f"حذفه يفقد تأريخ هذي النتائج نهائيًا. استخدم زر 🗑️ (إخفاء) بدل الحذف.",
+        }), 400
+    db.execute("DELETE FROM reference_ranges WHERE test_parameter_id=?", (param_id,))
+    db.execute("DELETE FROM test_parameters WHERE id=?", (param_id,))
+    db.commit()
+    log_action("DeleteTestParameter", "test_parameters", param_id, p["name"])
+    return jsonify({"ok": True})
 
 
 def _whatsapp_flush_pdf_dir():

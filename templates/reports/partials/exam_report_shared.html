@@ -92,12 +92,15 @@
   @media print { .row-tools, .row-drag-handle, .section-drag-handle { display: none !important; } }
 
   .row-drag-handle, .section-drag-handle { display: none; cursor: grab; color: #94A3B8; font-size: 12px; user-select: none; }
-  /* row-style-btn (🎨) و row-hide-btn (🗑️/👁️): تشتغل فورًا بدون الحاجة
-     لتفعيل وضع التعديل الشامل أولاً (نفس سلوك rnote-btn 📝 أصلاً) —
-     تظهر بمجرد الاقتراب/الهوفر فوق الصف، بغض النظر عن exam-editing. */
-  .row-style-btn, .row-hide-btn { display: inline-flex; opacity: 0; }
-  .result-row:hover .row-style-btn, .result-row:hover .row-hide-btn { opacity: 0.55; }
+  /* row-style-btn (🎨) و row-hide-btn (🗑️/👁️) و row-delete-btn (❌): تشتغل
+     فورًا بدون الحاجة لتفعيل وضع التعديل الشامل أولاً (نفس سلوك rnote-btn
+     📝 أصلاً) — تظهر بمجرد الاقتراب/الهوفر فوق الصف، بغض النظر عن
+     exam-editing. row-delete-btn تحديداً حذف نهائي حقيقي (مختلف عن
+     row-hide-btn اللي يخفي بس) — راجع examDeleteParam أدناه. */
+  .row-style-btn, .row-hide-btn, .row-delete-btn { display: inline-flex; opacity: 0; }
+  .result-row:hover .row-style-btn, .result-row:hover .row-hide-btn, .result-row:hover .row-delete-btn { opacity: 0.55; }
   .row-style-btn:hover, .row-hide-btn:hover { opacity: 1; }
+  .row-delete-btn:hover { opacity: 1; filter: saturate(1.4); }
   .report-page.exam-editing .row-drag-handle,
   .report-page.exam-editing .section-drag-handle { display: inline-flex; opacity: 0.6; }
   .report-page.exam-editing .row-drag-handle:hover,
@@ -336,11 +339,12 @@
      {% if style.get('color') %}data-color="{{ style.get('color') }}"{% endif %}
      {% if style.get('font_size') %}data-font-size="{{ style.get('font_size') }}"{% endif %}
      {% if style.get('label') %}data-label="{{ style.get('label') }}"{% endif %}
+     {% if style.get('align') %}data-align="{{ style.get('align') }}"{% endif %}
      {% if style.get('font_size') %}style="font-size:{{ style.get('font_size') }}px;"{% endif %}>
   <span class="row-drag-handle" title="اسحب لتغيير ترتيب هذا الصف">⋮⋮</span>
   <span class="rname">{{ display_name }}</span>
   <span class="rcolon">:</span>
-  {% set _val_align = resolve_value_align(param) %}
+  {% set _val_align = VALUE_ALIGN_CSS.get(style.get('align')) or resolve_value_align(param) %}
   <span class="rval"{% if _val_align %} style="text-align:{{ _val_align }};"{% endif %}>{% if result_value not in (none, '') %}<span class="rval-num" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% elif auto_color %}style="color:{{ auto_color }};"{% endif %}>{{ result_value }}</span>{% if show_result_flag is defined and show_result_flag and flag and flag != 'Normal' %}<span class="flag-badge" style="font-size:0.75em; font-weight:bold; margin-inline-start:4px;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ flag }}</span>{% endif %}{% if unit %} <span class="runit">{{ unit }}</span>{% endif %}{% endif %}</span>
   <span class="rnorm">
     {% if range_tiers|length > 1 %}
@@ -353,6 +357,7 @@
     <button type="button" class="row-style-btn" onclick="examOpenStylePopover(event, this)" title="لون / حجم / تسمية العرض">🎨</button>
     <button type="button" class="row-hide-btn" onclick="examToggleHidden(this)" title="إخفاء/إظهار هذا الصف بالتقرير">{{ '👁️' if is_hidden else '🗑️' }}</button>
     <button type="button" class="rnote-btn" onclick="examToggleNote({{ param['id'] }}, {{ order_test_id }})" title="إضافة/تعديل ملاحظة أمام هذا الباراميتر">📝</button>
+    <button type="button" class="row-delete-btn" onclick="examDeleteParam({{ param['id'] }}, {{ param['name']|tojson }}, this)" title="حذف هذا الباراميتر نهائيًا من التحليل (مختلف عن الإخفاء)">❌</button>
   </span>
 </div>
 <div class="inline-note" id="exam-note-{{ param['id'] }}" style="{{ '' if note else 'display:none;' }}">{% if note %}💬 {{ note }}{% endif %}</div>
@@ -504,6 +509,14 @@
   </label>
   <label>حجم الخط (px)
     <input type="number" id="examStyleSize" min="8" max="40">
+  </label>
+  <label>موضع رقم النتيجة
+    <select id="examStyleAlign">
+      <option value="">افتراضي (كما هو مضبوط بمصمم التقارير)</option>
+      <option value="near_name">قريب من الاسم</option>
+      <option value="center">بالوسط</option>
+      <option value="near_unit">قريب من الوحدة</option>
+    </select>
   </label>
   <div class="exam-style-actions">
     <button type="button" class="apply" onclick="examApplyStyle()">تطبيق</button>
@@ -793,6 +806,22 @@ function examToggleHidden(btn) {
   btn.textContent = hidden ? '👁️' : '🗑️';
 }
 
+// ---- حذف باراميتر نهائيًا (مختلف عن الإخفاء) ----
+// يحذف صف test_parameters فعليًا من قاعدة البيانات — الخادم يرفض الحذف لو
+// فيه نتائج محفوظة سابقًا لهذا الباراميتر (أي مريض) ويرجّع رسالة واضحة
+// بدلها. لا حاجة لأي تنظيف يدوي بعدها؛ الصف يختفي تلقائيًا من كل تقرير
+// قادم بمجرد الحذف (راجع شرح كامل عند /api/test-parameters/<id> بـapp.py).
+function examDeleteParam(paramId, paramName, btn) {
+  if (!confirm('حذف "' + paramName + '" نهائيًا من هذا التحليل؟ هذا الإجراء لا يُلغى.\n\n(لو بس تريد تخفيه مؤقتًا بدون حذف، استخدم زر 🗑️/👁️ بدل هذا)')) return;
+  fetch('/api/test-parameters/' + paramId, { method: 'DELETE' })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (res.error) { alert('تعذّر الحذف: ' + res.error); return; }
+      location.reload();
+    })
+    .catch(function () { alert('تعذّر الاتصال — تأكد أن البرنامج شغّال.'); });
+}
+
 // ---- تخصيص لون/حجم/تسمية صف ----
 function examOpenStylePopover(event, btn) {
   event.stopPropagation();
@@ -802,6 +831,7 @@ function examOpenStylePopover(event, btn) {
   document.getElementById('examStyleLabel').value = row.dataset.label || '';
   document.getElementById('examStyleColor').value = row.dataset.color || '#1f3b7a';
   document.getElementById('examStyleSize').value = row.dataset.fontSize || '';
+  document.getElementById('examStyleAlign').value = row.dataset.align || '';
   var rect = btn.getBoundingClientRect();
   pop.style.top = (window.scrollY + rect.bottom + 4) + 'px';
   pop.style.left = (window.scrollX + rect.left - 150) + 'px';
@@ -817,11 +847,15 @@ function examApplyStyle() {
   var label = document.getElementById('examStyleLabel').value.trim();
   var color = document.getElementById('examStyleColor').value;
   var size = document.getElementById('examStyleSize').value;
+  var align = document.getElementById('examStyleAlign').value;
   var nameEl = row.querySelector('.rname');
   var valEl = row.querySelector('.rval-num') || row.querySelector('.rval');
+  var valBoxEl = row.querySelector('.rval');
   if (label) { nameEl.textContent = label; row.dataset.label = label; }
   if (color) { valEl.style.color = color; row.dataset.color = color; }
   if (size) { row.style.fontSize = size + 'px'; row.dataset.fontSize = size; }
+  if (align) { valBoxEl.style.textAlign = align === 'near_name' ? 'left' : (align === 'center' ? 'center' : 'right'); row.dataset.align = align; }
+  else { valBoxEl.style.textAlign = ''; delete row.dataset.align; }
   examCloseStylePopover();
 }
 function examClearStyle() {
@@ -830,9 +864,11 @@ function examClearStyle() {
   var nameEl = row.querySelector('.rname');
   nameEl.textContent = row.dataset.paramName;
   var valEl = row.querySelector('.rval-num') || row.querySelector('.rval');
+  var valBoxEl = row.querySelector('.rval');
   valEl.style.color = '';
+  valBoxEl.style.textAlign = '';
   row.style.fontSize = '';
-  delete row.dataset.label; delete row.dataset.color; delete row.dataset.fontSize;
+  delete row.dataset.label; delete row.dataset.color; delete row.dataset.fontSize; delete row.dataset.align;
   examCloseStylePopover();
 }
 
@@ -878,6 +914,7 @@ function examSerializeLayout() {
       if (r.dataset.color) ov.color = r.dataset.color;
       if (r.dataset.fontSize) ov.font_size = parseInt(r.dataset.fontSize, 10);
       if (r.dataset.label) ov.label = r.dataset.label;
+      if (r.dataset.align) ov.align = r.dataset.align;
       if (Object.keys(ov).length) param_overrides[r.dataset.paramName] = ov;
     });
   });
