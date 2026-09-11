@@ -197,6 +197,22 @@
 </div>
 
 <div class="card" style="max-width:640px;">
+  <h3>🔬 أجهزة التحليل (Analyzers)</h3>
+  <p class="muted">
+    اكتب هنا اسم كل جهاز تحليل عندك بالمختبر، سطر لكل جهاز (مثال: E411،
+    Pure، Beckman 520 DX) — تظهر كمقترحات بحقل "الجهاز" وقت إدخال النتيجة،
+    وتُستخدم أيضًا بصفحة "المدايات المرجعية" لربط نسبة طبيعية بجهاز معيّن.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>الأجهزة (سطر لكل جهاز)</label>
+      <textarea name="known_analyzers" rows="6" style="width:100%; direction:ltr;" placeholder="E411&#10;Pure&#10;Beckman 520 DX">{{ current.known_analyzers }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
   <h3>📱 إرسال النتائج عبر واتساب</h3>
   <p class="muted">
     كود الدولة يُستخدم لتحويل أرقام الهواتف المحلية (اللي تبدأ بصفر) لصيغة

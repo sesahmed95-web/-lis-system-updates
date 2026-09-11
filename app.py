@@ -308,6 +308,92 @@ def parse_range_tiers(text):
     return tiers
 
 
+def _fmt_range_num(n):
+    """يشيل .0 الزايدة من الأرقام الصحيحة بس يبقي الكسور كما هي (15 مو 15.0،
+    بس 4.8 تضل 4.8) — يُستخدم فقط لبناء نص range_text من قيم رقمية."""
+    if n is None:
+        return ""
+    try:
+        f = float(n)
+    except (TypeError, ValueError):
+        return str(n)
+    return str(int(f)) if f.is_integer() else str(f)
+
+
+def _parse_tier_numeric(value):
+    """يحاول يفك نص تيير مثل '11 - 33' أو '11-33' لرقمين (low, high).
+    يرجّع (None, None) لو النص مو بصيغة رقم-رقم صافية (مثلاً 'Negative') —
+    يبقى بهذي الحالة كنص حر (raw) بدل ما ينكسر."""
+    if not value:
+        return None, None
+    m = re.match(r"^\s*([\-+]?[\d.]+)\s*-\s*([\-+]?[\d.]+)\s*$", value.strip())
+    if not m:
+        return None, None
+    try:
+        return float(m.group(1)), float(m.group(2))
+    except ValueError:
+        return None, None
+
+
+def reference_range_tiers(row):
+    """يفكّك صف reference_ranges وحدة لقائمة 'تييرات' موحّدة (المطلوب: صفحة
+    Reference Ranges الجديدة — كل حالة/طور فسيولوجي بسطر مستقل قابل للتحرير
+    لحاله)، بغض النظر هل الصف مخزّن بـrange_text (أسطر Label: value متعددة،
+    نفس فكرة parse_range_tiers) أو بس بعمودي low/high العاديين (حالة الصف
+    البسيط بلا تسميات). كل عنصر: {label, low, high, raw} — raw يبقى النص
+    الأصلي إذا قيمة التيير مو 'رقم - رقم' صافية (مثلاً 'Negative')."""
+    if row["range_text"]:
+        out = []
+        for tier in parse_range_tiers(row["range_text"]):
+            lo, hi = _parse_tier_numeric(tier["value"])
+            out.append({"label": tier["label"], "low": lo, "high": hi,
+                        "raw": tier["value"] if lo is None else None})
+        return out
+    if row["low"] is not None or row["high"] is not None:
+        return [{"label": None, "low": row["low"], "high": row["high"], "raw": None}]
+    return []
+
+
+def serialize_range_tiers(tiers):
+    """عكس reference_range_tiers: يبني (range_text, low, high) الجاهزين
+    للحفظ بصف reference_ranges من قائمة تييرات. لو تيير واحد بس بدون تسمية،
+    يُخزَّن بعمودي low/high العاديين مباشرة (بدون range_text) — نفس الأسلوب
+    القديم البسيط، حتى لا نعقّد الحالة الشائعة (باراميتر بلا أطوار/حالات).
+    لو أكثر من تيير أو فيه تسمية، يُبنى range_text (سطر لكل تيير)، وlow/high
+    العاديين ياخذوهم من أول تيير بلا تسمية إن وُجد (تُستخدم بحساب الفلاك
+    التلقائي High/Low/Critical — التسميات الثانية بس عرض/طباعة، ما تُستخدم
+    بتمييز الفلاك تلقائيًا، نفس قيد النظام الحالي)."""
+    tiers = [t for t in tiers if t.get("label") or t.get("low") is not None
+             or t.get("high") is not None or t.get("raw")]
+    if not tiers:
+        return None, None, None
+    if len(tiers) == 1 and not tiers[0].get("label"):
+        t = tiers[0]
+        return None, t.get("low"), t.get("high")
+    lines = []
+    for t in tiers:
+        if t.get("raw"):
+            value = t["raw"]
+        elif t.get("low") is not None and t.get("high") is not None:
+            value = f"{_fmt_range_num(t['low'])} - {_fmt_range_num(t['high'])}"
+        elif t.get("low") is not None:
+            value = f"> {_fmt_range_num(t['low'])}"
+        elif t.get("high") is not None:
+            value = f"< {_fmt_range_num(t['high'])}"
+        else:
+            value = ""
+        lines.append(f"{t['label']}: {value}" if t.get("label") else value)
+    base = next((t for t in tiers if not t.get("label")), None)
+    return "\n".join(lines), (base["low"] if base else None), (base["high"] if base else None)
+
+
+def get_known_analyzers(db):
+    """قائمة أجهزة التحليل المحفوظة بالإعدادات (سطر لكل جهاز) — تُستخدم
+    كمقترحات (datalist) بحقل الجهاز وقت إدخال النتيجة وبصفحة النسب الطبيعية."""
+    raw = get_setting(db, "known_analyzers", "")
+    return [ln.strip() for ln in raw.splitlines() if ln.strip()]
+
+
 # متاح مباشرة كدالة Jinja (parse_range_tiers(text)) حتى تقدر القوالب اللي
 # تبني عرض المدى الطبيعي بنفسها (exam_row بـ exam_report_shared.html) تفكّ
 # range_text متعدد الأسطر بدون الحاجة لتمرير النسخة المفكوكة يدويًا من
@@ -331,12 +417,13 @@ def get_report_flag_settings(db):
     """(auto_flag_color_enabled, show_result_flag, flag_color_map) لطباعة أي
     تقرير — راجع شرح كامل عند مفتاحي هذا الإعداد بصفحة settings.html (بطاقة
     "تلوين رقم النتيجة" و"إظهار كلمة High/Low/Critical"). auto_flag_color_enabled
-    افتراضيًا مفعّل (1)، مع إبقاء خيار إيقافه بالكامل لو احتاجه المدير.
-    show_result_flag افتراضيًا معطّل (0) كما بالطلب الأصلي. flag_color_map
-    يُبنى من لونين يختارهما المدير بنفسه (settings)، لا قاعدة ثابتة بالكود.
+    افتراضيًا معطّل (0) — اختياري بالكامل، المدير لازم يفعّله يدويًا من
+    الإعدادات إذا يريده. show_result_flag افتراضيًا معطّل (0) بنفس الشكل.
+    flag_color_map يُبنى من لونين يختارهما المدير بنفسه (settings)، لا قاعدة
+    ثابتة بالكود.
     """
     return (
-        get_setting(db, "auto_flag_color_enabled", "1") == "1",
+        get_setting(db, "auto_flag_color_enabled", "0") == "1",
         get_setting(db, "show_result_flag", "0") == "1",
         build_flag_color_map(db),
     )
@@ -5311,10 +5398,126 @@ def reference_ranges():
         "ORDER BY td.name LIMIT 200"
     ).fetchall()
     parameters = db.execute(
-        "SELECT tp.id, tp.name, tp.highlight, td.name as test_name FROM test_parameters tp "
+        "SELECT tp.id, tp.name, tp.highlight, tp.unit, td.name as test_name FROM test_parameters tp "
         "JOIN test_definitions td ON td.id = tp.test_definition_id ORDER BY td.name"
     ).fetchall()
-    return render_template("master/reference_ranges.html", ranges=ranges, parameters=parameters)
+    # تجميع الصفوف حسب الباراميتر — كل باراميتر يطلع كارد لحاله، وكل تيير
+    # (حالة/طور فسيولوجي) داخل range_text يطلع صف عرض مستقل قابل للتحرير
+    # لحاله عبر tier-save، بدل جدول مسطّح وحدة لكل الفحوصات مع بعض.
+    param_meta = {p["id"]: p for p in parameters}
+    groups_by_param = {}
+    order = []
+    for r in ranges:
+        pid = r["test_parameter_id"]
+        if pid not in groups_by_param:
+            meta = param_meta.get(pid)
+            groups_by_param[pid] = {
+                "id": pid, "name": r["param_name"], "test_name": r["test_name"],
+                "unit": meta["unit"] if meta else "", "highlight": meta["highlight"] if meta else 0,
+                "rows": [],
+            }
+            order.append(pid)
+        for tier in reference_range_tiers(r):
+            groups_by_param[pid]["rows"].append({
+                "range_id": r["id"], "gender": r["gender"],
+                "age_from": r["age_from"], "age_from_unit": r["age_from_unit"],
+                "age_to": r["age_to"], "age_to_unit": r["age_to_unit"],
+                "label": tier["label"], "low": tier["low"], "high": tier["high"], "raw": tier["raw"],
+                "patient_id": r["patient_id"], "patient_name": r["patient_name"],
+                "range_label": r["range_label"], "analyzer": r["analyzer"],
+            })
+    parameter_groups = [groups_by_param[pid] for pid in order]
+    return render_template("master/reference_ranges.html", parameter_groups=parameter_groups,
+                            parameters=parameters, known_analyzers=get_known_analyzers(db))
+
+
+@app.route("/master/reference-ranges/tier-save", methods=["POST"])
+@roles_required("supervisor")
+def save_reference_range_tier():
+    """يحفظ حالة/طور واحد (تيير) من كارد باراميتر بصفحة Reference Ranges —
+    إمّا يعدّل تيير موجود (original_label يحدّد أيّه)، يضيف تيير جديد لصف
+    جنس/فئة عمرية موجود أصلاً بدل ما يسوي صف مكرر، أو يسوي صف جديد كليًا لو
+    ما فيه صف مطابق أصلاً."""
+    db = get_db()
+    range_id = request.form.get("range_id") or None
+    test_parameter_id = request.form.get("test_parameter_id")
+    original_label = request.form.get("original_label") or ""
+    gender = request.form.get("gender") or "Both"
+    age_from = request.form.get("age_from") or 0
+    age_from_unit = request.form.get("age_from_unit") or "Years"
+    age_to = request.form.get("age_to") or 120
+    age_to_unit = request.form.get("age_to_unit") or "Years"
+    label = (request.form.get("label") or "").strip() or None
+    low_raw = request.form.get("low")
+    high_raw = request.form.get("high")
+    low = float(low_raw) if low_raw not in (None, "") else None
+    high = float(high_raw) if high_raw not in (None, "") else None
+    raw_text = (request.form.get("raw_text") or "").strip() or None
+    if raw_text:
+        low = high = None
+    scope_type = request.form.get("scope_type") or "all"
+    patient_id = (request.form.get("patient_id") or None) if scope_type == "patient" else None
+    range_label = request.form.get("range_label") or None
+    analyzer = request.form.get("analyzer") or None
+
+    row = db.execute("SELECT * FROM reference_ranges WHERE id=?", (range_id,)).fetchone() if range_id else None
+    if not row:
+        row = db.execute(
+            "SELECT * FROM reference_ranges WHERE test_parameter_id=? AND gender=? AND age_from=? "
+            "AND age_from_unit=? AND age_to=? AND age_to_unit=? AND patient_id IS ?",
+            (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, patient_id),
+        ).fetchone()
+
+    tiers = reference_range_tiers(row) if row else []
+    new_tier = {"label": label, "low": low, "high": high, "raw": raw_text}
+    for i, tier in enumerate(tiers):
+        if (tier["label"] or "") == original_label:
+            tiers[i] = new_tier
+            break
+    else:
+        tiers.append(new_tier)
+
+    range_text, base_low, base_high = serialize_range_tiers(tiers)
+
+    if row:
+        db.execute(
+            "UPDATE reference_ranges SET gender=?, age_from=?, age_from_unit=?, age_to=?, age_to_unit=?, "
+            "low=?, high=?, range_text=?, patient_id=?, range_label=?, analyzer=? WHERE id=?",
+            (gender, age_from, age_from_unit, age_to, age_to_unit, base_low, base_high, range_text,
+             patient_id, range_label, analyzer, row["id"]),
+        )
+    else:
+        db.execute(
+            "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, "
+            "low, high, range_text, patient_id, range_label, analyzer) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, base_low, base_high,
+             range_text, patient_id, range_label, analyzer),
+        )
+    db.commit()
+    flash("تم حفظ النسبة الطبيعية.")
+    return redirect(url_for("reference_ranges"))
+
+
+@app.route("/master/reference-ranges/tier-delete", methods=["POST"])
+@roles_required("supervisor")
+def delete_reference_range_tier():
+    """يحذف حالة/طور واحد بس من صف — لو كان آخر تيير بالصف، يحذف الصف كله
+    (نفس /master/reference-ranges/<id>/delete القديم) بدل ما يخلّي صف فاضي."""
+    db = get_db()
+    range_id = request.form.get("range_id")
+    label = request.form.get("label") or ""
+    row = db.execute("SELECT * FROM reference_ranges WHERE id=?", (range_id,)).fetchone()
+    if row:
+        remaining = [t for t in reference_range_tiers(row) if (t["label"] or "") != label]
+        if not remaining:
+            db.execute("DELETE FROM reference_ranges WHERE id=?", (range_id,))
+        else:
+            range_text, base_low, base_high = serialize_range_tiers(remaining)
+            db.execute("UPDATE reference_ranges SET low=?, high=?, range_text=? WHERE id=?",
+                       (base_low, base_high, range_text, range_id))
+        db.commit()
+    flash("تم الحذف.")
+    return redirect(url_for("reference_ranges"))
 
 
 @app.route("/master/reference-ranges/<int:range_id>/edit", methods=["POST"])
@@ -5994,7 +6197,9 @@ def app_settings():
         results_order_raw = request.form.get("results_entry_test_order")
         if results_order_raw is not None:
             set_setting(db, "results_entry_test_order", results_order_raw.strip())
-
+        analyzers_raw = request.form.get("known_analyzers")
+        if analyzers_raw is not None:
+            set_setting(db, "known_analyzers", analyzers_raw.strip())
         # حجم خط اسم التحليل وحجم خط النتيجة بجدول/بطاقات النتائج بكل
         # التقارير المطبوعة — إعدادان عامان منفصلان عن بعض (وعن حجم خط
         # ترويسة الدكاترة letterhead_font_size أعلاه)، دفعة وحدة لكل
@@ -6081,7 +6286,8 @@ def app_settings():
         "logo_width": get_setting(db, "logo_width", "100"),
         "combined_panel_group_order": get_setting(db, "combined_panel_group_order", ""),
         "results_entry_test_order": get_setting(db, "results_entry_test_order", ""),
-        "auto_flag_color_enabled": get_setting(db, "auto_flag_color_enabled", "1"),
+        "known_analyzers": get_setting(db, "known_analyzers", ""),
+        "auto_flag_color_enabled": get_setting(db, "auto_flag_color_enabled", "0"),
         "show_result_flag": get_setting(db, "show_result_flag", "0"),
         "flag_color_high": get_setting(db, "flag_color_high", "#D40000"),
         "flag_color_low": get_setting(db, "flag_color_low", "#B58900"),
