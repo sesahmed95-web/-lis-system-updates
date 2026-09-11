@@ -35,13 +35,15 @@
 
 <table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;{% if row_spacing_px %} --row-pad-override:{{ row_spacing_px }}px;{% endif %}">
   <colgroup>
-    <col class="col-name"><col style="width:{{ '33%' if show_si else '66%' }}">
-    {% if show_si %}<col style="width:33%">{% endif %}
+    <col class="col-name"><col style="width:16%"><col style="width:14%"><col style="width:{{ '20%' if show_si else '36%' }}">
+    {% if show_si %}<col style="width:14%"><col style="width:16%">{% endif %}
   </colgroup>
   <tr>
     <th style="text-align:left;">Laboratory Test Results</th>
-    <th>Conventional Units</th>
-    {% if show_si %}<th>SI Units</th>{% endif %}
+    <th>{{ 'Conventional Result' if show_si else 'Result' }}</th>
+    <th>{{ 'Conventional Units' if show_si else 'Unit' }}</th>
+    <th>Normal Range</th>
+    {% if show_si %}<th>SI Result</th><th>SI Unit</th>{% endif %}
   </tr>
 
   {% for row in custom_rows %}
@@ -51,29 +53,32 @@
   <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
     <td style="text-align:{{ name_align }}; font-weight:bold;{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.label }}</td>
     <td{% if row.color or row.value_align %} style="{% if row.color %}color: {{ row.color }};{% endif %}{% if row.value_align %}text-align:{{ row.value_align }};{% endif %}"{% endif %}>
-      {% if row.result not in (None, '') %}<span style="font-weight:bold;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ row.result }}</span>{% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="flag-badge" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}{% if row.unit %} {{ row.unit }}{% endif %}{% endif %}
+      {% if row.result not in (None, '') %}<span style="font-weight:bold;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ row.result }}</span>{% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="flag-badge" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}{% endif %}
+    </td>
+    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>{{ row.unit or '' }}</td>
+    <td>
       {% if row.range_tiers %}
         {% if row.range_tiers|length == 1 and not row.range_tiers[0].label %}
-        <div class="lt-range-label">Normal Range : {{ row.range_tiers[0].value }}</div>
+        {{ row.range_tiers[0].value }}
         {% else %}
-        <div class="lt-range-label">Normal Range :</div>
         {% for tier in row.range_tiers %}
-        <div class="lt-range-row"><span class="lt-range-title">{{ tier.label }}</span><span>{{ tier.value }}</span></div>
+        <div class="lt-range-row">{% if tier.label %}<span class="lt-range-title">{{ tier.label }}</span>{% endif %}<span>{{ tier.value }}</span></div>
         {% endfor %}
         {% endif %}
       {% endif %}
     </td>
     {% if show_si %}
+    <td>{{ row.result2 or '' }}</td>
     <td>
-      {% if row.result2 %}<span style="font-weight:bold;">{{ row.result2 }}</span>{% if row.unit2 %} {{ row.unit2 }}{% endif %}{% endif %}
-      {% if row.normal_range2 %}<div class="lt-range-label">Normal Range : {{ row.normal_range2 }}{% if row.unit2 %} {{ row.unit2 }}{% endif %}</div>{% endif %}
+      {{ row.unit2 or '' }}
+      {% if row.normal_range2 %}<div class="lt-range-label">{{ row.normal_range2 }}</div>{% endif %}
     </td>
     {% endif %}
   </tr>
 
   {% if show_prev_values and row.previous %}
   <tr class="panel-previous-row">
-    <td colspan="{{ 3 if show_si else 2 }}">
+    <td colspan="{{ 6 if show_si else 4 }}">
       <span class="panel-previous-icon">↩</span> Previous Result{% if previous_visit_date %} ({{ previous_visit_date }}){% endif %} —
       {{ row.label }}: {{ row.previous }}{% if row.unit %} {{ row.unit }}{% endif %}
     </td>

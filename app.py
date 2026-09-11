@@ -3974,7 +3974,6 @@ def _print_report_impl(order_test_id):
     custom_heading = None
     custom_heading_align = "center"
     custom_rows_align = "right"
-    custom_unit_column = False
     if custom_template:
         units_by_name = {p["name"]: p["unit"] for p in parameters}
         unit2_by_name = {p["name"]: p["unit2"] for p in parameters}
@@ -3982,7 +3981,6 @@ def _print_report_impl(order_test_id):
         custom_heading = custom_template["heading"] or ot["test_name"]
         custom_heading_align = custom_template["heading_align"] or "center"
         custom_rows_align = custom_template["rows_align"] or "right"
-        custom_unit_column = bool(custom_template["unit_column"])
         row_defs = json.loads(custom_template["rows_json"] or "[]")
         custom_rows = []
         for rd in row_defs:
@@ -4089,7 +4087,6 @@ def _print_report_impl(order_test_id):
         ot=ot, params=params, ranges=ranges, units=units, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
-        custom_unit_column=custom_unit_column,
         show_prev_values=show_prev_values, previous_visit_date=previous_visit_date,
         previous_values=previous_values, repeat_header_on_print=repeat_header_on_print,
         logo_url=logo_url, from_other_lab=from_other_lab, font_size=font_size,
@@ -6571,13 +6568,14 @@ def report_designer():
         if not rows:
             flash("اختر باراميتر واحد على الأقل لتصميم التقرير.")
             return redirect(url_for("report_designer", test_definition_id=test_id))
-        # تخطيط أعمدة بديل لهذا التقرير كامل (وحدة بعمود مستقل بأقصى اليمين
-        # + نتيجة موسّطة بعمودها) بدل الوضع الافتراضي (الوحدة ملتصقة بنهاية
-        # النتيجة بنفس العمود) — يُضبط مرة وحدة لكل التقرير من نفس الفورم.
-        unit_column = 1 if request.form.get("unit_column") else 0
         rows_json = json.dumps(rows, ensure_ascii=False)
+        # unit_column ثابتة 1 دائمًا الآن (المطلوب: عمود نتيجة وعمود وحدة
+        # مستقلّين بكل تقرير، بلا استثناء) — عمود report_templates.unit_column
+        # نفسه يبقى بقاعدة البيانات (بدون DROP) لعدم فقدان بيانات قديمة، بس
+        # ما عاد يُقرأ من فورم ولا يُقرأ شرطيًا بالقوالب (custom.html صارت
+        # تطبع بهذا التخطيط دائمًا بغض النظر عن قيمته).
         save_report_template(db, test_id, heading, rows_json, None, session["user_id"],
-                              heading_align=heading_align, rows_align=rows_align, unit_column=unit_column)
+                              heading_align=heading_align, rows_align=rows_align, unit_column=1)
         log_action("SaveReportTemplate", "test_definition", int(test_id), "manual")
         flash("تم حفظ تصميم التقرير. الشعار سيُضاف تلقائيًا عند الطباعة.")
         return redirect(url_for("report_designer", test_definition_id=test_id))
@@ -6726,12 +6724,10 @@ def _preview_report_design_impl(test_definition_id):
     custom_heading = None
     custom_heading_align = "center"
     custom_rows_align = "right"
-    custom_unit_column = False
     if custom_template:
         custom_heading = custom_template["heading"] or test["name"]
         custom_heading_align = custom_template["heading_align"] or "center"
         custom_rows_align = custom_template["rows_align"] or "right"
-        custom_unit_column = bool(custom_template["unit_column"])
         row_defs = json.loads(custom_template["rows_json"] or "[]")
         custom_rows = [{
             "label": resolve_label(params_by_name_row.get(rd.get("param_name", "")), rd.get("label")),
@@ -6766,7 +6762,6 @@ def _preview_report_design_impl(test_definition_id):
         ot={"test_name": test["name"], "test_code": test["code"]}, params=params, ranges={}, units=units_by_name, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
-        custom_unit_column=custom_unit_column,
         show_prev_values=show_prev_values, previous_visit_date=None, previous_values={},
         repeat_header_on_print=department_shows_previous_values(test["department"]),
         logo_url=logo_url, from_other_lab=False, font_size=14 if test["code"] == "CBC" else 16,
