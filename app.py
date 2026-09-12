@@ -72,11 +72,12 @@ import secrets
 import faulthandler
 
 # ------------------------------------------------------------------------
-# شبكة أمان لتسجيل أي كراش — سواء خطأ بايثون عادي (unhandled exception، عبر
-# errorhandler أدناه) أو كراش أعمق (segfault/stack overflow نادر يقفل
-# العملية كاملة بدون أي traceback بالتيرمينال، عبر faulthandler). الاثنين
-# ينكتبون بملف crash_log.txt بمجلد البرنامج نفسه مع الوقت بالضبط، حتى لو
-# انسكر التيرمينال قبل ما تشوف الرسالة — راجعه أول شي لو تكررت المشكلة.
+# شبكة أمان لتسجيل كراش أعمق من خطأ بايثون العادي (segfault/stack overflow
+# نادر يقفل العملية كاملة بدون أي traceback بالتيرمينال) — عبر faulthandler
+# فقط، بدون أي errorhandler عام (جُرِّب سابقًا وسبب كسر كل الصفحات لأنه كان
+# يعترض حتى استثناءات فلاسك الطبيعية زي 404/403/الـredirects). يُكتب
+# بملف crash_log.txt بمجلد البرنامج نفسه — راجعه أول شي لو انغلق البرنامج
+# فجأة بدون أي رسالة بالتيرمينال.
 _CRASH_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crash_log.txt")
 try:
     _crash_log_file = open(_CRASH_LOG_PATH, "a", encoding="utf-8", buffering=1)
@@ -843,25 +844,6 @@ def inject_globals():
                 # المستخدمين العاديين (admin, reception...) ما عندهم هذا
                 # المفتاح بالسيشن أبداً، فالأيقونة ما تظهر عندهم إطلاقاً.
                 is_designer=bool(session.get("designer_id")))
-
-
-# أي خطأ بايثون عادي غير متوقع بأي route (حتى لو ما توقعناه هنا) يُسجَّل
-# بنفس crash_log.txt أعلاه مع الوقت، مسار الطلب، والـtraceback كامل، قبل ما
-# يرجع صفحة الخطأ العادية للمستخدم — حتى لو تسكّر نافذة التيرمينال بعدها
-# بثانية، الخطأ الحقيقي يضل محفوظ بالملف نجيه لاحقًا.
-@app.errorhandler(Exception)
-def _log_unhandled_exception(exc):
-    import traceback as _tb
-    from datetime import datetime as _dt
-    try:
-        with open(_CRASH_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(f"\n\n===== {_dt.now().isoformat(timespec='seconds')} — {request.method} {request.path} =====\n")
-            f.write(_tb.format_exc())
-    except Exception:
-        pass
-    # نرفع نفس الخطأ لصفحة معالجة Flask/Werkzeug الافتراضية (500) — هذا
-    # الـhandler يسجّل بس، ما يغيّر شكل استجابة الخطأ اللي كانت تطلع أصلاً.
-    raise exc
 
 
 def login_required(view):
