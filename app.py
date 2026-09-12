@@ -2984,6 +2984,45 @@ def print_visit_barcode(visit_id):
     return render_template("front_desk/print_visit_barcode.html", visit=visit, tests=tests, draw_time=draw_time)
 
 
+@app.route("/api/barcode/<code>")
+@login_required
+def api_barcode_lookup(code):
+    """يرجّع معلومات المريض كاملة + كل التحاليل المرتبطة بهذا الباركود —
+    سواء كان باركود أنبوب مشترك (tube_barcode، يغطي عدة تحاليل بنفس نوع
+    العينة) أو باركود تحليل فردي قديم (barcode). مصمَّم ليكون نقطة وصول
+    لأي جهاز/برنامج وسيط خارجي (Middleware) يقرأ الباركود من الأنبوب ويريد
+    يعرف شنو التحاليل المطلوبة ولمين، بدون الحاجة يفتح الواجهة."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT ot.id as order_test_id, ot.status, ot.barcode, ot.tube_barcode, "
+        "td.name as test_name, td.sample_type, td.department, "
+        "p.id as patient_id, p.full_name, p.full_name_en, p.age, p.age_unit, p.gender, "
+        "v.id as visit_id, v.registration_number "
+        "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "JOIN orders o ON o.id = ot.order_id JOIN visits v ON v.id = o.visit_id "
+        "JOIN patients p ON p.id = v.patient_id "
+        "WHERE ot.tube_barcode=? OR ot.barcode=?",
+        (code, code),
+    ).fetchall()
+    if not rows:
+        return jsonify({"ok": False, "error": "لا يوجد باركود مطابق"}), 404
+    first = rows[0]
+    return jsonify({
+        "ok": True,
+        "barcode": code,
+        "patient": {
+            "id": first["patient_id"], "name": first["full_name"], "name_en": first["full_name_en"],
+            "age": first["age"], "age_unit": first["age_unit"], "gender": first["gender"],
+        },
+        "visit": {"id": first["visit_id"], "registration_number": first["registration_number"]},
+        "tests": [
+            {"order_test_id": r["order_test_id"], "name": r["test_name"], "sample_type": r["sample_type"],
+             "department": r["department"], "status": r["status"]}
+            for r in rows
+        ],
+    })
+
+
 @app.route("/front-desk/visits/<int:visit_id>/print/samples")
 @login_required
 def print_sample_barcodes(visit_id):
@@ -2994,13 +3033,74 @@ def print_sample_barcodes(visit_id):
     ).fetchone()
     if not visit:
         return "Not found", 404
-    samples = db.execute(
-        "SELECT ot.barcode, td.name as test_name, td.sample_type FROM order_tests ot "
+    rows = db.execute(
+        "SELECT ot.id, ot.barcode, ot.tube_barcode, td.name as test_name, td.sample_type FROM order_tests ot "
         "JOIN test_definitions td ON td.id = ot.test_definition_id "
         "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
         (visit_id,),
     ).fetchall()
-    return render_template("front_desk/print_sample_barcodes.html", visit=visit, samples=samples)
+
+    # تجميع تحاليل هذي الزيارة حسب نوع العينة (sample_type) — كل التحاليل
+    # اللي تحتاج نفس الأنبوب (Serum مثلاً) تشترك بباركود وحد بدل باركود
+    # مستقل لكل تحليل، لأن فعليًا هي نفس الأنبوب المسحوب مرة وحدة. تحليل
+    # بدون sample_type محدد (فاضي) ياخذ باركوده الفردي القديم لحاله، لأننا
+    # ما نعرف أكيد أي أنبوب يشاركه.
+    groups = {}
+    ungrouped = []
+    for r in rows:
+        stype = (r["sample_type"] or "").strip()
+        if not stype:
+            ungrouped.append(r)
+            continue
+        groups.setdefault(stype, []).append(r)
+
+    reg_number = visit["registration_number"]
+    tube_samples = []
+    next_index = 1
+    for stype in sorted(groups.keys()):
+        group_rows = groups[stype]
+        existing = next((r["tube_barcode"] for r in group_rows if r["tube_barcode"]), None)
+        if existing:
+            tube_barcode = existing
+        else:
+            tube_barcode = f"{reg_number}T{next_index}"
+            next_index += 1
+            ids = [r["id"] for r in group_rows]
+            placeholders = ",".join("?" * len(ids))
+            db.execute(f"UPDATE order_tests SET tube_barcode=? WHERE id IN ({placeholders})",
+                       (tube_barcode, *ids))
+        tube_samples.append({
+            "sample_type": stype,
+            "barcode": tube_barcode,
+            "test_names": [r["test_name"] for r in group_rows],
+        })
+    if next_index > 1:
+        db.commit()
+
+    # تحاليل بلا sample_type محدد — ما نعرف أي أنبوب تشاركه بأمان، فتطلع
+    # كل وحدة بكارد مستقل لحالها (بباركودها الفردي الأصلي)، بدل ما تختفي
+    # كليًا من العرض الرئيسي.
+    for r in ungrouped:
+        tube_samples.append({
+            "sample_type": r["test_name"],  # ما فيه نوع عينة معروف، فنعرض اسم التحليل نفسه كتوضيح
+            "barcode": r["barcode"],
+            "test_names": [r["test_name"]],
+        })
+
+    # باركودات فردية لكل تحليل لحاله — تبقى متوفرة كخيار إضافي (زر منفصل
+    # بالقالب) لمن يحتاج يطبع باركود وحيد لتحليل معيّن بس (مثلاً لإرسال
+    # عينة لمختبر مُحيل لتحليل واحد فقط)، بدون ما يأثر على السلوك الافتراضي
+    # الجديد (باركود واحد لكل أنبوب).
+    individual_samples = [
+        {"barcode": r["barcode"], "test_name": r["test_name"], "sample_type": r["sample_type"]}
+        for r in rows
+    ]
+
+    return render_template(
+        "front_desk/print_sample_barcodes.html", visit=visit,
+        tube_samples=tube_samples, individual_samples=individual_samples,
+        samples=individual_samples,  # توافق مع أي نسخة قديمة من القالب لسا تستخدم "samples"
+    )
 
 
 @app.route("/front-desk/visits/<int:visit_id>/print/invoice")
@@ -5772,6 +5872,27 @@ def delete_reference_range(range_id):
     db.commit()
     flash(t(session.get("lang", "en"), "range_deleted"))
     return redirect(url_for("reference_ranges"))
+
+
+@app.route("/master/test-catalog/<int:test_id>/rename", methods=["POST"])
+@roles_required("supervisor")
+def rename_test_definition(test_id):
+    """يعيد تسمية تحليل موجود — يُستخدم بالقلم ✏️ الجديد جنب كل تحليل
+    بشاشة "زيارة جديدة" (تعديل سريع من نفس الصفحة، بدون فتح كتالوج
+    التحاليل). لا يغيّر أي بارامتر تابع لهذا التحليل، فقط اسم التحليل
+    نفسه (test_definitions.name)."""
+    db = get_db()
+    body = request.get_json(silent=True) or request.form
+    new_name = (body.get("name") or "").strip()
+    if not new_name:
+        return {"ok": False, "error": "الاسم لا يمكن أن يكون فارغًا"}, 400
+    row = db.execute("SELECT id FROM test_definitions WHERE id=?", (test_id,)).fetchone()
+    if not row:
+        return {"ok": False, "error": "التحليل غير موجود"}, 404
+    db.execute("UPDATE test_definitions SET name=? WHERE id=?", (new_name, test_id))
+    db.commit()
+    log_action("RenameTest", "test_definitions", test_id, new_name)
+    return {"ok": True, "name": new_name}
 
 
 @app.route("/master/test-catalog/<int:test_id>/price", methods=["POST"])

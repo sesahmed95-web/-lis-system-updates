@@ -274,6 +274,8 @@
          تماماً)، وإلا = بس معرّفات البارامترات المحددة. #}
       <button type="button" class="nv-param-arrow" title="اختيار بارامترات معيّنة بس من هذا التحليل"
               onclick="nvToggleParamPanel('{{ test['id'] }}')">▾</button>
+      <button type="button" class="nv-param-arrow" title="تعديل اسم هذا التحليل"
+              onclick="nvRenameTest('{{ test['id'] }}')">✏️</button>
       <input type="hidden" id="selected_params_{{ test['id'] }}" name="selected_params_{{ test['id'] }}" value="">
       <div class="nv-param-panel" id="paramPanel_{{ test['id'] }}" style="display:none;"></div>
       </span>
@@ -671,6 +673,30 @@
         if (cached) cached.price = price;
         input.outerHTML = '<span class="muted">' + Math.round(price) + '</span>';
         refreshPrices();
+      })
+      .catch(function () { alert('تعذّر الاتصال بالخادم'); });
+  };
+
+  window.nvRenameTest = function (testId) {
+    const label = document.getElementById('test_label_' + testId);
+    if (!label) return;
+    const current = label.textContent.trim();
+    const newName = prompt('اسم التحليل الجديد:', current);
+    if (newName === null) return; // إلغاء
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === current) return;
+    fetch('/master/test-catalog/' + testId + '/rename', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: trimmed})
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) {
+          label.textContent = data.name;
+        } else {
+          alert(data.error || 'تعذّر تعديل الاسم');
+        }
       })
       .catch(function () { alert('تعذّر الاتصال بالخادم'); });
   };

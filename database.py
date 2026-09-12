@@ -548,6 +548,19 @@ def migrate(conn):
             # مطلوبة (لا يتغير أي طلب قديم). راجع شاشة "زيارة جديدة" (سهم ▾
             # جنب كل تحليل) وحساب order_test_price بـ app.py.
             ("selected_param_ids", "TEXT"),
+            # tube_barcode: باركود العينة/الأنبوب المشترك — كل التحاليل
+            # بنفس الزيارة اللي تحتاج نفس نوع العينة (sample_type، مثل
+            # Serum أو EDTA أو Citrate) تاخذ نفس القيمة هنا، بدل باركود
+            # مستقل لكل تحليل لحاله. الهدف: أنبوب واحد فعلي = باركود واحد
+            # يغطّي كل التحاليل المسحوبة منه (كيمياء/هرمونات/فايروسات/
+            # فيتامينات/دلائل ورمية = Serum، كل تحاليل التخثر = Plasma/
+            # Citrate، وCBC وBlood film وHb Electrophoresis وH.preparation
+            # وSickling test وRetic count وBMA = EDTA). يُنشأ تلقائيًا أول
+            # مرة تُطبع فيها باركودات عينات هذي الزيارة (راجع
+            # print_sample_barcodes بـapp.py). عمود "barcode" الأصلي يبقى
+            # موجودًا وغير متأثر — لطباعة باركود إضافي لتحليل وحيد بس عند
+            # الحاجة.
+            ("tube_barcode", "TEXT"),
         ],
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
         "visits": [("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
