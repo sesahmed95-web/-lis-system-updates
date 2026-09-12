@@ -14,40 +14,46 @@
   <label>{{ t('age_from') }}</label>
   <input type="number" step="any" name="age_from" value="{{ row.get('age_from', 0) }}" min="0">
 </div>
+{#
+  المطلوب 6: كان فيه سابقًا حقلين منفصلين اسمهم "Unit" (age_from_unit،
+  age_to_unit) بلا أي تمييز بصري بينهم — يسبب لبس وكأنهم وحدة القياس
+  للتحليل نفسه. دمجناهم بحقل واحد ظاهر بعنوان واضح "Age Unit" يتحكم
+  بالاثنين سوا (age_from و age_to بنفس الوحدة دائمًا، وهذا المعتاد فعليًا
+  بأي نسبة طبيعية)، ويبقى age_to_unit مخزّن بحقل مخفي يتزامن تلقائيًا —
+  عمود قاعدة البيانات نفسه ما تغيّر (age_from_unit و age_to_unit لسا
+  منفصلين بالباك إند)، بس الواجهة صارت حقل وحد فقط. أضفنا خيار "Hours"
+  الناقص (Days كان موجود أصلاً).
+#}
 <div class="form-field">
-  <label>{{ t('age_unit') }}</label>
-  {% set fu = row.get('age_from_unit') or 'Years' %}
-  <select name="age_from_unit">
+  <label>🕐 Age</label>
+  {% set fu = row.get('age_from_unit') or row.get('age_to_unit') or 'Years' %}
+  <select name="age_from_unit" class="rr-age-unit-shared"
+          onchange="var f=this.closest('form'); var h=f.querySelector('input[name=age_to_unit]'); if(h) h.value=this.value;">
+    <option value="Hours" {{ 'selected' if fu=='Hours' }}>{{ t('unit_hours') }}</option>
     <option value="Days" {{ 'selected' if fu=='Days' }}>{{ t('unit_days') }}</option>
     <option value="Weeks" {{ 'selected' if fu=='Weeks' }}>{{ t('unit_weeks') }}</option>
     <option value="Months" {{ 'selected' if fu=='Months' }}>{{ t('unit_months') }}</option>
     <option value="Years" {{ 'selected' if fu=='Years' }}>{{ t('unit_years') }}</option>
   </select>
+  <input type="hidden" name="age_to_unit" value="{{ fu }}">
 </div>
 <div class="form-field">
   <label>{{ t('age_to') }}</label>
   <input type="number" step="any" name="age_to" value="{{ row.get('age_to', 120) }}" min="0">
 </div>
 <div class="form-field">
-  <label>{{ t('age_unit') }}</label>
-  {% set tu = row.get('age_to_unit') or 'Years' %}
-  <select name="age_to_unit">
-    <option value="Days" {{ 'selected' if tu=='Days' }}>{{ t('unit_days') }}</option>
-    <option value="Weeks" {{ 'selected' if tu=='Weeks' }}>{{ t('unit_weeks') }}</option>
-    <option value="Months" {{ 'selected' if tu=='Months' }}>{{ t('unit_months') }}</option>
-    <option value="Years" {{ 'selected' if tu=='Years' }}>{{ t('unit_years') }}</option>
-  </select>
-</div>
-<div class="form-field">
   <label>🏷️ الحالة / الملاحظة الطبية (اختياري — مثال: Ovulatory Phase)</label>
   <input type="text" name="label" value="{{ row.get('label') or '' }}" placeholder="فاضي = نسبة عامة بلا حالة خاصة">
 </div>
+<div class="form-field" style="grid-column: span 2;">
+  <label style="font-weight:700;">🎯 Normal Range (From - To)</label>
+</div>
 <div class="form-field">
-  <label>{{ t('low') }}</label>
+  <label>{{ t('low') }} (From)</label>
   <input type="number" step="any" name="low" value="{{ row.get('low') if row.get('low') is not none else '' }}">
 </div>
 <div class="form-field">
-  <label>{{ t('high') }}</label>
+  <label>{{ t('high') }} (To)</label>
   <input type="number" step="any" name="high" value="{{ row.get('high') if row.get('high') is not none else '' }}">
 </div>
 <div class="form-field">

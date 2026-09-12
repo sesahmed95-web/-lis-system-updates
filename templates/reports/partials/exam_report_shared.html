@@ -52,7 +52,11 @@
   /* ============== عنوان التحليل + عناوين الأقسام ============== */
   .report-title {
     text-align: center; font-size: 1.25em; font-weight: 700; font-style: italic;
-    text-decoration: underline; text-underline-offset: 4px; margin: 6px 0 18px 0;
+    text-decoration: underline; text-underline-offset: 4px;
+    /* نفس تصحيح base_report.html — يمنع تقطّع الخط تحت الحروف المائلة
+       (نقاط بمنتصف الكلمة) بمعاينة التصميم وبالتقرير المطبوع الفعلي. */
+    text-decoration-skip-ink: none;
+    margin: 6px 0 18px 0;
     color: #14213D;
   }
   .exam-section { position: relative; }
@@ -251,7 +255,13 @@
   }
   .report-title-wrap:hover .title-edit-btn,
   .editable-meta-row:hover .meta-edit-btn,
-  .section-title:hover .title-edit-btn { opacity: 0.55; }
+  .section-title:hover .title-edit-btn,
+  /* المطلوب 1 (تعميم القلم): نفس زر ✏️ يشتغل الآن أيضًا فوق عنوان أي
+     تقرير عادي (.report-heading — Coagulation/Lipid/CBC...الخ) وفوق أي
+     خانة اسم باراميتر (td.field-name) بكل تلك التقارير، دون الحاجة
+     لتعديل كل قالب تقرير على حدة (شوف examApplyGenericPencils أسفل). */
+  .report-heading:hover .title-edit-btn,
+  table.data-table td.field-name:hover .title-edit-btn { opacity: 0.55; }
   .title-edit-btn:hover, .meta-edit-btn:hover { opacity: 1; }
   [contenteditable="true"] {
     outline: 1px dashed #26529C; background: #EFF6FF; border-radius: 3px;
@@ -684,7 +694,60 @@ function examToggleNote(paramId, orderTestId) {
   });
 }
 
-// ============== وضع التعديل المباشر ==============
+// ============== المطلوب 1: قلم ✏️ عام لكل تقرير بدون استثناء ==============
+// المشكلة: قوالب التقارير "العادية" (Coagulation, Lipid, CBC, وغيرها) ما
+// عندها بنية .exam-section/.result-row أصلاً (تلك خاصة بقوالب الفحص
+// GUE/GSE/SFA فقط) — فبدل ما نضطر نعدّل كل قالب تقرير لحاله (عشرات
+// الملفات)، هذا الكود يفحص أي صفحة تقرير تلقائيًا ويضيف نفس أسلوب ✏️
+// لعنصرين موجودين بكل التقارير العادية بلا استثناء (نفس الكلاسات
+// المستخدمة فعليًا بكل قوالب التقارير حسب اتفاقية الكود الموحّدة):
+//   1) .report-heading  → عنوان التحليل (مثل "Coagulation Tests")
+//   2) table.data-table td.field-name → اسم كل باراميتر/سطر بجدول النتائج
+// يُخزَّن أي تعديل بنفس بنية report_layout.param_overrides الموجودة
+// أصلاً (المفتاح = النص الأصلي الحرفي للباراميتر بدل اسمه الداخلي، لأن
+// هذي القوالب ما عندها معرّف باراميتر بالـDOM) وبنفس report_layout.report_title
+// للعنوان — فيُحفَظ ويُسترجَع عبر نفس /api/reports/layout الموجود بدون
+// أي تعديل بالخادم. يشتغل تلقائيًا، فورًا، بدون شرط دخول "وضع تعديل
+// التصميم" (نفس سلوك بقية أزرار ✏️).
+var __examReportLayout = {{ (report_layout|default({}))|tojson }};
+
+function examEscapeHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function examApplyGenericPencils() {
+  var overrides = (__examReportLayout && __examReportLayout.param_overrides) || {};
+
+  // 1) عنوان التقرير العام (كل تقرير غير قوالب الفحص، اللي عندها أصلاً
+  //    .report-title-wrap ومعالجة خاصة بيها — نتفادى الازدواج بالتأكد إن
+  //    ما فيه .report-title-wrap بنفس الصفحة أصلاً).
+  if (!document.querySelector('.report-title-wrap')) {
+    var heading = document.querySelector('.report-heading');
+    if (heading && !heading.dataset.genericDone) {
+      heading.dataset.genericDone = '1';
+      var titleShown = (__examReportLayout && __examReportLayout.report_title) || heading.textContent.trim();
+      heading.innerHTML =
+        '<span data-editable="report_title">' + examEscapeHtml(titleShown) + '</span>' +
+        '<span class="title-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل عنوان التحليل">✏️</span>';
+    }
+  }
+
+  // 2) اسم كل باراميتر/سطر بجدول النتائج.
+  document.querySelectorAll('table.data-table td.field-name').forEach(function (td) {
+    if (td.dataset.genericDone) return;
+    td.dataset.genericDone = '1';
+    var original = td.textContent.trim();
+    if (!original) return;
+    var ov = overrides[original];
+    var shown = (ov && ov.label) ? ov.label : original;
+    td.innerHTML =
+      '<span data-editable="field_label" data-original-key="' + examEscapeHtml(original) + '">' + examEscapeHtml(shown) + '</span>' +
+      '<span class="title-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل اسم هذا الباراميتر بالطباعة (يطبَّق على كل تقارير هذا التحليل)">✏️</span>';
+  });
+}
+
 var examDndAttached = false;
 var examStyleTargetRow = null;
 
@@ -715,7 +778,7 @@ function examDiscardChanges() {
 function examEditInline(span) {
   if (!span || span.isContentEditable) return;
   if (!document.querySelector('.exam-toolbar')) {
-    alert('التعديل المباشر لعناصر الترويسة متوفر حاليًا بتقارير الفحص (GUE/GSE/SFA وما شابه) فقط — هذا التقرير ما عنده نظام حفظ تصميم بعد فالتعديل بيضيع لو حدّثت الصفحة.');
+    alert('التعديل المباشر غير متوفر بهذه الصفحة (نظام حفظ التصميم غير محمَّل) — التعديل بيضيع لو حدّثت الصفحة.');
     return;
   }
   span.contentEditable = 'true';
@@ -920,12 +983,30 @@ function examSerializeLayout() {
   });
   var fontAr = document.getElementById('examFontAr').value;
   var fontEn = document.getElementById('examFontEn').value;
+  // المطلوب 1: نلتقط هنا أيضًا تعديلات القلم العام (عنوان التقرير العادي
+  // + أسماء الباراميترات بجداول data-table) اللي زادها examApplyGenericPencils
+  // أعلاه — بنفس param_overrides/report_title، حتى تُحفَظ سوا بضغطة
+  // "حفظ" وحدة، بغض النظر هل التقرير من نمط الفحص أو تقرير عادي.
+  var genericTitle = document.querySelector('[data-editable="report_title"]');
+  var reportTitleOverride = genericTitle ? genericTitle.textContent.trim() : '';
+  document.querySelectorAll('[data-editable="field_label"]').forEach(function (span) {
+    var key = span.dataset.originalKey;
+    var newText = span.textContent.trim();
+    if (!key) return;
+    if (newText && newText !== key) {
+      param_overrides[key] = param_overrides[key] || {};
+      param_overrides[key].label = newText;
+    } else if (param_overrides[key]) {
+      delete param_overrides[key].label;
+    }
+  });
   var layout = { section_order: section_order, sections: sections, hidden_params: hidden_params,
                  param_overrides: param_overrides, section_labels: section_labels, page_offset_px: examPageOffset };
   if (fontAr) layout.font_family_ar = fontAr;
   if (fontEn) layout.font_family_en = fontEn;
   var titleEl = document.querySelector('.report-title[data-editable="report_title"]');
   if (titleEl) layout.report_title = titleEl.textContent.trim();
+  else if (reportTitleOverride) layout.report_title = reportTitleOverride;
   var pmo = {};
   document.querySelectorAll('.info-val[data-meta-key]').forEach(function (span) {
     pmo[span.dataset.metaKey] = span.textContent.trim();
@@ -959,5 +1040,9 @@ function examResetPatientLayout() {
     else alert('صار خطأ: ' + (res.error || ''));
   });
 }
+
+// يشتغل فورًا وقت تحميل هذا السكريبت (بعد جسم التقرير بالـHTML مباشرة)
+// حتى تظهر أقلام ✏️ العامة وتُطبَّق أي أسماء معدَّلة سابقًا بلا أي تأخير.
+examApplyGenericPencils();
 </script>
 {% endmacro %}

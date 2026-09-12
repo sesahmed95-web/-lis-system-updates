@@ -95,6 +95,10 @@
     text-align: center;
     font-weight: bold;
     text-decoration: underline;
+    /* text-decoration-skip-ink افتراضيًا "auto" بالمتصفح، فيخلي الخط يتقطّع
+       (يبين نقاط بمنتصف الكلمة) تحت الحروف المائلة (italic) خصوصًا بالطباعة.
+       "none" يجبر خط متصل كامل تحت كل الحروف دايمًا — بالمعاينة وبالطباعة. */
+    text-decoration-skip-ink: none;
     font-style: italic;
     margin: 16px 0 20px 0;
     font-size: 1.2em;

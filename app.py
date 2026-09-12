@@ -394,6 +394,17 @@ def get_known_analyzers(db):
     return [ln.strip() for ln in raw.splitlines() if ln.strip()]
 
 
+def get_known_units(db):
+    """قائمة كل الوحدات المستخدمة فعليًا حاليًا بأي باراميتر بالبرنامج
+    (مقترحات datalist بصفحة النسب الطبيعية — المطلوب 6: تعديل/اختيار وحدة
+    القياس لكل باراميتر مباشرة من نفس بطاقته، بدل الاضطرار للذهاب لصفحة
+    "تعديل الوحدات" المنفصلة كل مرة)."""
+    rows = db.execute(
+        "SELECT DISTINCT unit FROM test_parameters WHERE unit IS NOT NULL AND TRIM(unit) != '' ORDER BY unit"
+    ).fetchall()
+    return [r["unit"] for r in rows]
+
+
 # متاح مباشرة كدالة Jinja (parse_range_tiers(text)) حتى تقدر القوالب اللي
 # تبني عرض المدى الطبيعي بنفسها (exam_row بـ exam_report_shared.html) تفكّ
 # range_text متعدد الأسطر بدون الحاجة لتمرير النسخة المفكوكة يدويًا من
@@ -5398,7 +5409,8 @@ def reference_ranges():
         "ORDER BY td.name LIMIT 200"
     ).fetchall()
     parameters = db.execute(
-        "SELECT tp.id, tp.name, tp.highlight, tp.unit, td.name as test_name FROM test_parameters tp "
+        "SELECT tp.id, tp.name, tp.highlight, tp.unit, tp.unit2, tp.unit2_factor, td.name as test_name "
+        "FROM test_parameters tp "
         "JOIN test_definitions td ON td.id = tp.test_definition_id ORDER BY td.name"
     ).fetchall()
     # تجميع الصفوف حسب الباراميتر — كل باراميتر يطلع كارد لحاله، وكل تيير
@@ -5414,6 +5426,7 @@ def reference_ranges():
             groups_by_param[pid] = {
                 "id": pid, "name": r["param_name"], "test_name": r["test_name"],
                 "unit": meta["unit"] if meta else "", "highlight": meta["highlight"] if meta else 0,
+                "unit2": meta["unit2"] if meta else "", "unit2_factor": meta["unit2_factor"] if meta else "",
                 "rows": [],
             }
             order.append(pid)
@@ -5428,7 +5441,8 @@ def reference_ranges():
             })
     parameter_groups = [groups_by_param[pid] for pid in order]
     return render_template("master/reference_ranges.html", parameter_groups=parameter_groups,
-                            parameters=parameters, known_analyzers=get_known_analyzers(db))
+                            parameters=parameters, known_analyzers=get_known_analyzers(db),
+                            known_units=get_known_units(db))
 
 
 @app.route("/master/reference-ranges/tier-save", methods=["POST"])
@@ -5652,11 +5666,18 @@ def unit_converter_set_unit(param_id):
     db = get_db()
     param = db.execute("SELECT * FROM test_parameters WHERE id=?", (param_id,)).fetchone()
     if not param:
+        if request.form.get("ajax"):
+            return {"ok": False, "error": "المعيار غير موجود."}, 404
         flash("المعيار غير موجود.")
         return redirect(url_for("unit_converter"))
     new_unit = request.form.get("unit", "").strip()
     db.execute("UPDATE test_parameters SET unit=? WHERE id=?", (new_unit, param_id))
     db.commit()
+    # ajax=1: يُرسَل فقط من محرّر الوحدة المصغّر بصفحة النسب الطبيعية
+    # (reference_ranges.html) — يرجّع JSON بدل صفحة كاملة، بدون أي تأثير
+    # على استخدام صفحة "تعديل الوحدات" الأصلية (نموذج عادي، بلا ajax=1).
+    if request.form.get("ajax"):
+        return {"ok": True, "unit": new_unit}
     flash(f"تم تحديث وحدة {param['name']} إلى \"{new_unit}\"." if new_unit else f"تم إفراغ وحدة {param['name']}.")
     return redirect(url_for("unit_converter"))
 
@@ -5674,7 +5695,10 @@ def unit_converter_set_unit(param_id):
 def unit_converter_set_dual(param_id):
     db = get_db()
     param = db.execute("SELECT * FROM test_parameters WHERE id=?", (param_id,)).fetchone()
+    is_ajax = bool(request.form.get("ajax"))
     if not param:
+        if is_ajax:
+            return {"ok": False, "error": "المعيار غير موجود."}, 404
         flash("المعيار غير موجود.")
         return redirect(url_for("unit_converter"))
 
@@ -5683,6 +5707,8 @@ def unit_converter_set_dual(param_id):
         db.execute("UPDATE test_parameters SET unit2=NULL, unit2_factor=NULL WHERE id=?", (param_id,))
         db.commit()
         log_action("SetDualUnit", "test_parameter", param_id, "cleared")
+        if is_ajax:
+            return {"ok": True, "unit2": None, "unit2_factor": None}
         flash(f"تم إلغاء الوحدة الثانية لـ \"{param['name']}\".")
         return redirect(url_for("unit_converter"))
 
@@ -5692,12 +5718,16 @@ def unit_converter_set_dual(param_id):
         if factor <= 0:
             raise ValueError
     except ValueError:
+        if is_ajax:
+            return {"ok": False, "error": "معامل التحويل يجب أن يكون رقمًا أكبر من صفر."}, 400
         flash("معامل التحويل للوحدة الثانية يجب أن يكون رقمًا أكبر من صفر.")
         return redirect(url_for("unit_converter"))
 
     db.execute("UPDATE test_parameters SET unit2=?, unit2_factor=? WHERE id=?", (unit2, factor, param_id))
     db.commit()
     log_action("SetDualUnit", "test_parameter", param_id, f"{param['unit']} -> {unit2} (x{factor})")
+    if is_ajax:
+        return {"ok": True, "unit2": unit2, "unit2_factor": factor}
     flash(f"تم حفظ الوحدة الثانية لـ \"{param['name']}\": {unit2} (يُحسب تلقائيًا = القيمة × {factor}).")
     return redirect(url_for("unit_converter"))
 
