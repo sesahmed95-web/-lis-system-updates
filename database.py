@@ -541,6 +541,13 @@ def migrate(conn):
             # زيارة وأخرى. فاضي = بدون تحديد جهاز (يرجع find_reference_range
             # للنسبة العامة كالمعتاد). راجع find_reference_range بـ database.py.
             ("analyzer", "TEXT"),
+            # selected_param_ids: طلب بارامترات معيّنة بس من داخل تحليل متعدد
+            # الباراميترات (مثلاً PT وINR بس من Coagulation)، بدل التحليل
+            # كامل — نص "id,id,id" (معرّفات test_parameters). NULL/فاضي =
+            # السلوك الافتراضي القديم تمامًا: كل باراميترات هذا التحليل
+            # مطلوبة (لا يتغير أي طلب قديم). راجع شاشة "زيارة جديدة" (سهم ▾
+            # جنب كل تحليل) وحساب order_test_price بـ app.py.
+            ("selected_param_ids", "TEXT"),
         ],
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
         "visits": [("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
@@ -640,7 +647,16 @@ def migrate(conn):
                              # near_name / center / near_unit. NULL/فاضي = نفس
                              # السلوك الحالي القديم تمامًا (لا يتغير أي تقرير
                              # قديم). راجع resolve_value_align بـapp.py.
-                             ("value_align", "TEXT")],
+                             ("value_align", "TEXT"),
+                             # price: سعر هذا الباراميتر لحاله — يُستخدم فقط
+                             # لما يطلب الموظف بارامترات معيّنة من تحليل متعدد
+                             # الباراميترات بدل التحليل كامل (سهم ▾ بشاشة
+                             # "زيارة جديدة" — راجع order_tests.selected_param_ids
+                             # أعلاه). NULL = لسا ما تحدد سعره؛ الموظف يقدر
+                             # يكتبه أول مرة يختاره بشاشة الطلب نفسها وينحفظ
+                             # هنا تلقائيًا لكل الطلبات الجاية. لا علاقة له
+                             # بسعر التحليل الكامل (test_definitions.price).
+                             ("price", "REAL")],
         # is_trial: يميّز الترخيص التجريبي عن ترخيص العميل العادي (بالأيام)،
         # حتى يظهر شريط "متبقي كم يوم" فقط للتجريبي وليس لكل ترخيص له تاريخ انتهاء.
         # revoked_reason: سبب الإلغاء عن بُعد (يُعبّى تلقائياً لو المصمم ألغى

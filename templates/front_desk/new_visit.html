@@ -73,6 +73,24 @@
   html[dir="ltr"] .nv-switch input:checked + .nv-switch-slider::before { transform: translateX(18px); }
 
   #homeVisitFields { display:none; grid-column: span 2; }
+
+  /* سهم اختيار بارامترات معيّنة بس من داخل تحليل متعدد الباراميترات
+     (checkbox-item-wrap يصير position:relative حتى تترتب هذي العناصر
+     بداخله بشكل مضبوط). */
+  .nv-checkbox-grid .checkbox-item-wrap { position: relative; display: inline-flex; align-items: center; gap: 2px; }
+  .nv-param-arrow { border: none; background: transparent; cursor: pointer; color: #64748B;
+    font-size: 11px; padding: 0 2px; line-height: 1; }
+  .nv-param-arrow:hover { color: #1D4ED8; }
+  .nv-param-panel { position: absolute; z-index: 15; top: 100%; inset-inline-start: 0;
+    background: var(--card-bg, #fff); border: 1px solid #E2E8F0; border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.14); padding: 8px 10px; min-width: 240px; font-size: 12px; }
+  .nv-param-panel .nv-param-row { display: flex; align-items: center; gap: 6px; padding: 3px 0;
+    white-space: nowrap; }
+  .nv-param-panel .nv-param-row label { flex: 1; font-weight: normal; }
+  .nv-param-panel input[type="number"] { width: 64px; font-size: 11.5px; }
+  .nv-param-panel .nv-param-hint { color: #64748B; font-size: 11px; margin-bottom: 4px; }
+  .nv-partial-badge { font-size: 10.5px; color: #B45309; background: #FEF3C7; border-radius: 4px;
+    padding: 0 4px; margin-inline-start: 3px; }
 </style>
 <form method="POST" id="newVisitForm">
   <input type="hidden" name="existing_patient_id" id="existing_patient_id" value="">
@@ -249,6 +267,15 @@
                data-exam="{{ '1' if test['id'] in examining_test_ids else '0' }}">
         <span id="test_label_{{ test['id'] }}">{{ test['name'] }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
       </label>
+      {# سهم اختيار بارامترات معيّنة بس من هذا التحليل بدل طلبه كامل —
+         يفتح لائحة تشيك بوكسات (paramPanel_<id>) تتحمّل مرة وحدة عبر
+         /api/test-definitions/<id>/parameters. selected_params_<id> هو
+         الحقل الحقيقي اللي يوصل السيرفر: فاضي = كل التحليل (كالسابق
+         تماماً)، وإلا = بس معرّفات البارامترات المحددة. #}
+      <button type="button" class="nv-param-arrow" title="اختيار بارامترات معيّنة بس من هذا التحليل"
+              onclick="nvToggleParamPanel('{{ test['id'] }}')">▾</button>
+      <input type="hidden" id="selected_params_{{ test['id'] }}" name="selected_params_{{ test['id'] }}" value="">
+      <div class="nv-param-panel" id="paramPanel_{{ test['id'] }}" style="display:none;"></div>
       </span>
       {% endfor %}
     </div>
@@ -508,13 +535,162 @@
   });
   paidAmountInput.addEventListener('input', updateBilling);
 
+  // ==================================================================
+  // اختيار بارامترات معيّنة بس من داخل تحليل متعدد الباراميترات (سهم ▾)
+  // بدل طلب التحليل كامل — راجع شرح order_tests.selected_param_ids
+  // بـdatabase.py. الحقل الحقيقي اللي يوصل السيرفر هو
+  // selected_params_<testId> (hidden input): فاضي = التحليل كامل
+  // (السلوك الافتراضي القديم، ما يتغيّر شي)، وإلا = بس معرّفات
+  // البارامترات المفصولة بفاصلة.
+  // ==================================================================
+  const nvParamCache = {}; // testId -> [{id, name, price}]
+
+  function nvSelectedParamIds(testId) {
+    const hidden = document.getElementById('selected_params_' + testId);
+    if (!hidden || !hidden.value) return [];
+    return hidden.value.split(',').filter(Boolean);
+  }
+
+  function nvPartialPriceSum(testId, ids) {
+    const list = nvParamCache[testId] || [];
+    let sum = 0;
+    ids.forEach(function (idStr) {
+      const p = list.find(function (x) { return String(x.id) === idStr; });
+      if (p && p.price) sum += p.price;
+    });
+    return sum;
+  }
+
+  // نقرة حقيقية من المستخدم على الخانة الرئيسية لتحليل عليه اختيار جزئي
+  // تعني "أريد التحليل كامل" — نرجّع كل بارامتراته محدَّدة وننضف الاختيار
+  // الجزئي، بدل ما يبقى الاثنين متضاربين بصمت.
+  function nvMainCheckboxChanged() {
+    const cb = this;
+    const testId = cb.value;
+    if (cb.checked && nvSelectedParamIds(testId).length) {
+      const hidden = document.getElementById('selected_params_' + testId);
+      hidden.value = '';
+      const panel = document.getElementById('paramPanel_' + testId);
+      if (panel) panel.querySelectorAll('input[type=checkbox]').forEach(function (c) { c.checked = false; });
+      nvUpdatePartialBadge(testId);
+    }
+    refreshPrices();
+  }
+
+  function nvUpdatePartialBadge(testId) {
+    const label = document.getElementById('test_label_' + testId);
+    if (!label) return;
+    const existing = label.parentNode.querySelector('.nv-partial-badge');
+    if (existing) existing.remove();
+    const ids = nvSelectedParamIds(testId);
+    if (ids.length) {
+      const badge = document.createElement('span');
+      badge.className = 'nv-partial-badge';
+      badge.textContent = 'جزئي: ' + ids.length;
+      label.insertAdjacentElement('afterend', badge);
+    }
+  }
+
+  window.nvToggleParamPanel = function (testId) {
+    const panel = document.getElementById('paramPanel_' + testId);
+    if (!panel) return;
+    if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+    // إغلاق أي لوحة ثانية مفتوحة حتى ما تتراكم فوق بعضها.
+    document.querySelectorAll('.nv-param-panel').forEach(function (p) { p.style.display = 'none'; });
+    if (nvParamCache[testId]) {
+      panel.style.display = 'block';
+      return;
+    }
+    panel.innerHTML = '<div class="nv-param-hint">جارِ التحميل...</div>';
+    panel.style.display = 'block';
+    fetch('/api/test-definitions/' + testId + '/parameters')
+      .then(function (r) { return r.json(); })
+      .then(function (list) {
+        nvParamCache[testId] = list;
+        nvRenderParamPanel(testId, list);
+      })
+      .catch(function () {
+        panel.innerHTML = '<div class="nv-param-hint">تعذّر تحميل البارامترات.</div>';
+      });
+  };
+
+  function nvRenderParamPanel(testId, list) {
+    const panel = document.getElementById('paramPanel_' + testId);
+    if (!list.length) {
+      panel.innerHTML = '<div class="nv-param-hint">هذا التحليل ما عنده بارامترات مفصّلة.</div>';
+      return;
+    }
+    const selected = nvSelectedParamIds(testId);
+    let html = '<div class="nv-param-hint">اختر بارامترات معيّنة بس (أو اترك الخانة الرئيسية للتحليل كامل):</div>';
+    list.forEach(function (p) {
+      const checked = selected.indexOf(String(p.id)) !== -1;
+      const hasPrice = p.price !== null && p.price !== undefined && p.price !== '';
+      html += '<div class="nv-param-row">' +
+        '<input type="checkbox" data-param-id="' + p.id + '" ' + (checked ? 'checked' : '') +
+        ' onchange="nvOnParamCheck(\'' + testId + '\')">' +
+        '<label>' + p.name + '</label>' +
+        (hasPrice
+          ? '<span class="muted">' + Math.round(p.price) + '</span>'
+          : '<input type="number" min="0" step="any" placeholder="سعر" data-param-price-input="' + p.id + '" ' +
+            'onchange="nvSaveParamPrice(\'' + testId + '\', ' + p.id + ', this)">') +
+        '</div>';
+    });
+    panel.innerHTML = html;
+  }
+
+  window.nvOnParamCheck = function (testId) {
+    const panel = document.getElementById('paramPanel_' + testId);
+    const ids = [];
+    panel.querySelectorAll('input[type=checkbox]').forEach(function (c) {
+      if (c.checked) ids.push(c.getAttribute('data-param-id'));
+    });
+    document.getElementById('selected_params_' + testId).value = ids.join(',');
+    // اختيار أي بارامتر يعني ضمنيًا "أريد هذا التحليل" — تأشير الخانة
+    // الرئيسية تلقائيًا (بدون إطلاق change event، فما ينفّذ nvMainCheckboxChanged
+    // ويصفّر الاختيار اللي بس سوّيناه). وبالعكس: لو رجع المستخدم ألغى كل
+    // البارامترات من نفس اللوحة، نلغي تأشير الخانة الرئيسية بعدها —
+    // غير هيج ممكن تنطلب "التحليل كامل" بالغلط بمجرد ما تصير القائمة فاضية.
+    const mainCb = document.getElementById('test_' + testId);
+    mainCb.checked = ids.length > 0;
+    nvUpdatePartialBadge(testId);
+    refreshPrices();
+  };
+
+  window.nvSaveParamPrice = function (testId, paramId, input) {
+    const price = parseFloat(input.value);
+    if (isNaN(price) || price < 0) return;
+    fetch('/api/test-parameters/' + paramId + '/set-price', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({price: price})
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) { alert(data.error || 'تعذّر حفظ السعر'); return; }
+        const cached = (nvParamCache[testId] || []).find(function (x) { return x.id === paramId; });
+        if (cached) cached.price = price;
+        input.outerHTML = '<span class="muted">' + Math.round(price) + '</span>';
+        refreshPrices();
+      })
+      .catch(function () { alert('تعذّر الاتصال بالخادم'); });
+  };
+
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.checkbox-item-wrap')) {
+      document.querySelectorAll('.nv-param-panel').forEach(function (p) { p.style.display = 'none'; });
+    }
+  });
+
   function refreshPrices() {
     const doctorId = currentDoctorId();
     let total = 0;
     let anyExamCheckedTestChecked = false;
     document.querySelectorAll('.test-check').forEach(function (cb) {
       const testId = cb.value;
-      const price = priceFor(testId, doctorId);
+      // لو هذا التحليل عليه اختيار بارامترات معيّنة بس (سهم ▾)، السعر
+      // يصير مجموع أسعار البارامترات المختارة بدل سعر التحليل كامل.
+      const partialIds = nvSelectedParamIds(testId);
+      const price = partialIds.length ? nvPartialPriceSum(testId, partialIds) : priceFor(testId, doctorId);
       const label = document.getElementById('price_' + testId);
       const wrap = document.getElementById('pricewrap_' + testId);
       if (cb.checked) {
@@ -657,7 +833,7 @@
             '</label>';
           grid.appendChild(wrap);
           checkbox = wrap.querySelector('.test-check');
-          checkbox.addEventListener('change', refreshPrices);
+          checkbox.addEventListener('change', nvMainCheckboxChanged);
         }
         checkbox.checked = true;
         nameInput.value = '';
@@ -774,7 +950,7 @@
   document.getElementById('doctor_name').addEventListener('input', refreshPrices);
   document.getElementById('examining_doctor').addEventListener('change', refreshExamFeePreview);
   document.querySelectorAll('.test-check').forEach(function (cb) {
-    cb.addEventListener('change', refreshPrices);
+    cb.addEventListener('change', nvMainCheckboxChanged);
   });
   refreshPrices();
 
@@ -1024,7 +1200,7 @@
           '<span class="muted" id="pricewrap_' + data.id + '" style="display:none;">(<span id="price_' + data.id + '">0</span>)</span>' +
           '</label>';
         grid.appendChild(wrap);
-        wrap.querySelector('.test-check').addEventListener('change', refreshPrices);
+        wrap.querySelector('.test-check').addEventListener('change', nvMainCheckboxChanged);
         document.getElementById('tm_new_name').value = '';
         document.getElementById('tm_new_department').value = '';
         loadExistingTestsIntoModal();

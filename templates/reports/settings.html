@@ -159,6 +159,27 @@
 </div>
 
 <div class="card" style="max-width:640px;">
+  <h3>📏 تباعد صندوق معلومات المريض</h3>
+  <p class="muted">
+    يتحكم هذا بالمسافة بين ترويسة الدكاترة (أعلى الصفحة) وصندوق معلومات
+    المريض (Patient Name, Sample No...الخ)، وبمدى قرب قيمة كل حقل من
+    تسميته (مثلاً "Patient Name:" قريبة من الاسم بدل مسافة فاضية طويلة) —
+    بكل التقارير المطبوعة دفعة وحدة.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>المسافة فوق صندوق المعلومات (بكسل) — القيمة الافتراضية 4</label>
+      <input type="number" name="patient_info_top_gap" min="0" max="60" value="{{ current.patient_info_top_gap }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>عرض عمود تسمية الحقل (بكسل) — قلّله لتقريب القيمة من التسمية — القيمة الافتراضية 108</label>
+      <input type="number" name="patient_info_label_width" min="60" max="220" value="{{ current.patient_info_label_width }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
   <h3>🗂️ ترتيب أقسام اللوحة المجمّعة</h3>
   <p class="muted">
     لما تُطبع أكثر من تحليل سوا بورقة وحدة لنفس المريض، الأقسام (زي
@@ -191,22 +212,6 @@
     <div class="form-field">
       <label>ترتيب التحاليل (سطر لكل تحليل، بنفس الاسم بالضبط)</label>
       <textarea name="results_entry_test_order" rows="8" style="width:100%; direction:ltr;" placeholder="HbA1c (BioChemstry)&#10;Triglycerides (BioChemstry)&#10;Total PSA (Hormones)&#10;Vitamin D3 Total (Hormones)&#10;Erythrocyte Sedimentation Rate (ESR) (Hematology)">{{ current.results_entry_test_order }}</textarea>
-    </div>
-    <button class="btn" type="submit">{{ t('save_settings') }}</button>
-  </form>
-</div>
-
-<div class="card" style="max-width:640px;">
-  <h3>🔬 أجهزة التحليل (Analyzers)</h3>
-  <p class="muted">
-    اكتب هنا اسم كل جهاز تحليل عندك بالمختبر، سطر لكل جهاز (مثال: E411،
-    Pure، Beckman 520 DX) — تظهر كمقترحات بحقل "الجهاز" وقت إدخال النتيجة،
-    وتُستخدم أيضًا بصفحة "المدايات المرجعية" لربط نسبة طبيعية بجهاز معيّن.
-  </p>
-  <form method="POST">
-    <div class="form-field">
-      <label>الأجهزة (سطر لكل جهاز)</label>
-      <textarea name="known_analyzers" rows="6" style="width:100%; direction:ltr;" placeholder="E411&#10;Pure&#10;Beckman 520 DX">{{ current.known_analyzers }}</textarea>
     </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
@@ -248,35 +253,19 @@
 </div>
 
 <div class="card" style="max-width:640px;">
-  <h3>🎨 تلوين رقم النتيجة (عالية / قليلة)</h3>
+  <h3>🔤 تصحيحات ترجمة أسماء المرضى (عربي → إنكليزي)</h3>
   <p class="muted">
-    يلوّن هذا رقم النتيجة نفسه فقط (مو اسم الباراميتر ولا الوحدة ولا المدى)
-    بكل التقارير المطبوعة، بناءً على العلم (Flag) المحسوب أصلاً لكل نتيجة —
-    High/Critical يستخدمون نفس اللون تحت، وLow يستخدم اللون الثاني. النتائج
-    الطبيعية والنصية (Positive/Negative) ما تتلوّن أبدًا. الألوان تختارها
-    إنت هنا — لا توجد قاعدة تلوين ثابتة بالكود.
+    البرنامج يترجم الاسم العربي تلقائيًا (اقتراح أولي قابل للتعديل يدويًا
+    وقت التسجيل). العربي ما يكتب الحركات القصيرة (الفتحة/الضمة/الكسرة)،
+    فبعض الأسماء ممكن تطلع الترجمة التلقائية لها غير دقيقة رغم أن البرنامج
+    عنده قاموس جاهز لأشهر الأسماء. لو شفت اسم طلعت ترجمته غلط، أضيفه هنا
+    وراح تصير هي الترجمة الثابتة له من الحين — سطر لكل اسم بالضبط بصيغة
+    "الاسم بالعربي=الترجمة الصحيحة بالإنكليزي".
   </p>
   <form method="POST">
-    <input type="hidden" name="flag_settings_form" value="1">
     <div class="form-field">
-      <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
-        <input type="checkbox" name="auto_flag_color_enabled" {{ 'checked' if current.auto_flag_color_enabled == '1' }}>
-        تفعيل تلوين رقم النتيجة تلقائيًا
-      </label>
-    </div>
-    <div class="form-field">
-      <label>لون النتيجة العالية (High / Critical)</label>
-      <input type="color" name="flag_color_high" value="{{ current.flag_color_high or '#D40000' }}">
-    </div>
-    <div class="form-field">
-      <label>لون النتيجة القليلة (Low)</label>
-      <input type="color" name="flag_color_low" value="{{ current.flag_color_low or '#B58900' }}">
-    </div>
-    <div class="form-field">
-      <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
-        <input type="checkbox" name="show_result_flag" {{ 'checked' if current.show_result_flag == '1' }}>
-        إظهار كلمة High / Low / Critical كنص جنب النتيجة أيضًا (معطّل افتراضيًا)
-      </label>
+      <label>تصحيحات الأسماء (سطر لكل اسم)</label>
+      <textarea name="name_translit_overrides" rows="6" style="width:100%; direction:ltr;" placeholder="سمر=Samar&#10;نور=Noor&#10;زهراء=Zahraa">{{ current.name_translit_overrides }}</textarea>
     </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>

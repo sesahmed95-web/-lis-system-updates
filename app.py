@@ -40,28 +40,125 @@ ARABIC_NAME_TRANSLITERATION_MAP = [
     (" ", " "),
 ]
 
-def transliterate_arabic_name(name):
-    """يرجّع اقتراح إنكليزي أولي لاسم عربي (تحويل صوتي تقريبي) — اقتراح
-    فقط، قابل للتعديل يدويًا لاحقًا من الواجهة."""
-    if not name:
+
+# قاموس أسماء عربية/عراقية شائعة جاهزة بترجمتها الإنكليزية المعتمدة —
+# هذا هو الحل العملي الوحيد لمشكلة الحروف المتحركة القصيرة غير المكتوبة
+# بالعربي (مثال: "سمر" حروفها فقط س-م-ر، ما فيها أي حرف يدل على الفتحة بين
+# الحروف، فالخوارزمية الحرف-بحرف تطلعها "Smr" مهما حاولنا نحسّنها، لأنها
+# فعليًا ما "ترى" الحركة القصيرة). لأي اسم موجود هنا، تُستخدم هذي الترجمة
+# مباشرة بدل الخوارزمية. القائمة قابلة للتوسيع من الإعدادات (راجع
+# get_name_translit_overrides) بدون الحاجة لتعديل الكود لكل اسم جديد.
+COMMON_NAME_TRANSLITERATIONS = {
+    "سمر": "Samar", "عمر": "Omar", "بشرى": "Bushra", "بشار": "Bashar",
+    "زهراء": "Zahraa", "زهرة": "Zahra", "نور": "Noor", "نورا": "Noora",
+    "هدى": "Huda", "رنا": "Rana", "رشا": "Rasha", "دينا": "Dina", "هبة": "Hiba",
+    "سارة": "Sara", "سارا": "Sara", "مريم": "Mariam", "ليلى": "Layla",
+    "فاطمة": "Fatima", "زينب": "Zainab", "خديجة": "Khadija", "عائشة": "Aisha",
+    "آية": "Aya", "أمل": "Amal", "امل": "Amal", "أسماء": "Asmaa", "اسماء": "Asmaa",
+    "ياسمين": "Yasmin", "شيماء": "Shaimaa", "إيمان": "Eman", "ايمان": "Eman",
+    "منى": "Mona", "سلمى": "Salma", "لينا": "Lina", "رغد": "Raghad",
+    "تبارك": "Tabarak", "ملك": "Malak", "جنى": "Jana", "غدير": "Ghadeer",
+    "بتول": "Batool", "دعاء": "Duaa", "ابتسام": "Ibtisam", "وفاء": "Wafaa",
+    "أحمد": "Ahmed", "احمد": "Ahmed", "محمد": "Mohammed", "محمود": "Mahmoud",
+    "علي": "Ali", "حسين": "Hussein", "حسن": "Hassan", "كريم": "Karim",
+    "يوسف": "Yousif", "إبراهيم": "Ibrahim", "ابراهيم": "Ibrahim",
+    "عبدالله": "Abdullah", "عبد الله": "Abdullah", "خالد": "Khalid",
+    "سعد": "Saad", "سعيد": "Saeed", "طارق": "Tariq", "زياد": "Ziad",
+    "مصطفى": "Mustafa", "مهند": "Mohanad", "منتظر": "Muntadher",
+    "حيدر": "Haider", "قاسم": "Qasim", "جعفر": "Jafar", "ثامر": "Thamer",
+    "وليد": "Walid", "سامر": "Samer", "زيد": "Zaid", "فراس": "Firas",
+    "عدنان": "Adnan", "رياض": "Riyadh", "باسل": "Basil", "نبيل": "Nabil",
+    "أنور": "Anwar", "انور": "Anwar", "جاسم": "Jasim", "كاظم": "Kadhim",
+    "صادق": "Sadiq", "ناصر": "Nasser", "فؤاد": "Fouad", "غانم": "Ghanim",
+    "رعد": "Raad", "سيف": "Saif", "أمير": "Ameer", "امير": "Ameer",
+    "دانيال": "Daniel", "آدم": "Adam", "ادم": "Adam", "يحيى": "Yahya",
+    "عمار": "Ammar", "فادي": "Fadi", "رافد": "Rafid", "أنس": "Anas", "انس": "Anas",
+    "بلال": "Bilal", "سلام": "Salam", "حازم": "Hazim", "ماجد": "Majid",
+}
+
+
+def get_name_translit_overrides(db):
+    """تصحيحات ترجمة أسماء يضيفها المختبر بنفسه من الإعدادات (سطر لكل اسم
+    بصيغة "عربي=إنكليزي") — تأخذ أولوية حتى فوق القاموس الجاهز أعلاه،
+    فتسمح بتصحيح أي اسم يطلع غلط دون الحاجة لتعديل الكود."""
+    raw = get_setting(db, "name_translit_overrides", "")
+    overrides = {}
+    for line in raw.splitlines():
+        if "=" not in line:
+            continue
+        ar, _, en = line.partition("=")
+        ar, en = ar.strip(), en.strip()
+        if ar and en:
+            overrides[ar] = en
+    return overrides
+
+
+def _translit_word_fallback(word):
+    """الخوارزمية الاحتياطية حرف-بحرف — تُستخدم فقط للكلمات غير الموجودة
+    بالقاموس أعلاه ولا بتصحيحات الإعدادات. تحشر حرف "a" تخمينيًا بين حرفين
+    ساكنين متتاليين (زي "سمر" لو ما كانت بالقاموس: s+m+r → Samar) لتقريب
+    النطق، لكنها تبقى تخمينًا وليست مضمونة الدقة 100% — العربي المكتوب
+    عادة ما يحدد الحركات القصيرة أصلاً، فمافي خوارزمية تقدر "تخمّنها" دايمًا
+    صح؛ التغطية المضمونة الوحيدة هي عبر القاموس/تصحيحات الإعدادات أعلاه."""
+    if not word:
         return ""
-    remaining = name.strip()
-    out = []
-    i = 0
-    n = len(remaining)
+    chunks = []
+    i, n = 0, len(word)
     while i < n:
         matched = False
         for ar, en in ARABIC_NAME_TRANSLITERATION_MAP:
-            if remaining[i:i + len(ar)] == ar:
-                out.append(en)
+            if ar != " " and word[i:i + len(ar)] == ar:
+                chunks.append(en)
                 i += len(ar)
                 matched = True
                 break
         if not matched:
-            out.append(remaining[i])
+            chunks.append(word[i])
             i += 1
-    result = "".join(out)
-    return " ".join(w.capitalize() if w else w for w in result.split(" "))
+
+    def has_vowel(chunk):
+        return any(c in "aeiou" for c in chunk.lower())
+
+    out = []
+    for idx, chunk in enumerate(chunks):
+        if (
+            idx > 0 and chunk and out and out[-1]
+            and not has_vowel(chunk) and not has_vowel(out[-1])
+            and out[-1][-1].isalpha() and chunk[0].isalpha()
+        ):
+            out.append("a")
+        out.append(chunk)
+    return "".join(out)
+
+
+def transliterate_arabic_name(name, db=None):
+    """يرجّع اقتراح إنكليزي لاسم عربي — اقتراح قابل للتعديل يدويًا لاحقًا من
+    الواجهة. الأولوية: (1) تصحيحات الإعدادات الخاصة بهذا المختبر، (2) قاموس
+    الأسماء الشائعة الجاهز، (3) خوارزمية تقريبية حرف-بحرف لأي اسم غير معروف
+    (راجع _translit_word_fallback لسبب كونها تقريبية وليست مضمونة الدقة —
+    محدودية بالعربي نفسه، مو بالكود). تُطبَّق كلمة-كلمة حتى تشتغل مع الأسماء
+    المركّبة (اسم + اسم أب + اسم جد...الخ)."""
+    if not name:
+        return ""
+    if db is None:
+        try:
+            db = get_db()
+        except Exception:
+            db = None
+    overrides = get_name_translit_overrides(db) if db is not None else {}
+    words_out = []
+    for word in name.strip().split(" "):
+        if not word:
+            continue
+        if word in overrides:
+            words_out.append(overrides[word])
+        elif word in COMMON_NAME_TRANSLITERATIONS:
+            words_out.append(COMMON_NAME_TRANSLITERATIONS[word])
+        else:
+            words_out.append(_translit_word_fallback(word).capitalize())
+    return " ".join(words_out)
+
+
 
 from translations import t
 from barcode_gen import generate_code39, generate_code128, generate_qr
@@ -69,21 +166,6 @@ import astm_host
 import license_manager
 import auto_updater
 import secrets
-import faulthandler
-
-# ------------------------------------------------------------------------
-# شبكة أمان لتسجيل كراش أعمق من خطأ بايثون العادي (segfault/stack overflow
-# نادر يقفل العملية كاملة بدون أي traceback بالتيرمينال) — عبر faulthandler
-# فقط، بدون أي errorhandler عام (جُرِّب سابقًا وسبب كسر كل الصفحات لأنه كان
-# يعترض حتى استثناءات فلاسك الطبيعية زي 404/403/الـredirects). يُكتب
-# بملف crash_log.txt بمجلد البرنامج نفسه — راجعه أول شي لو انغلق البرنامج
-# فجأة بدون أي رسالة بالتيرمينال.
-_CRASH_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crash_log.txt")
-try:
-    _crash_log_file = open(_CRASH_LOG_PATH, "a", encoding="utf-8", buffering=1)
-    faulthandler.enable(file=_crash_log_file, all_threads=True)
-except Exception:
-    _crash_log_file = None
 
 app = Flask(__name__)
 # مفتاح جلسة عشوائي مختلف بكل مرة يُشغَّل فيها السيرفر فعليًا (وليس نفس
@@ -418,6 +500,18 @@ def get_known_units(db):
         "SELECT DISTINCT unit FROM test_parameters WHERE unit IS NOT NULL AND TRIM(unit) != '' ORDER BY unit"
     ).fetchall()
     return [r["unit"] for r in rows]
+
+
+AGE_UNIT_FULL_WORD = {"Hours": "Hour", "Days": "Day", "Weeks": "Week", "Months": "Month", "Years": "Year"}
+
+
+def format_age_display(age, age_unit):
+    """يبني نص عمر المريض المطبوع بالتقرير — كلمة كاملة ("Year") مو حرف
+    مختصر ("Y") بناءً على طلب المستخدم، مع مسافة بينه وبين الرقم."""
+    if age in (None, ""):
+        return ""
+    word = AGE_UNIT_FULL_WORD.get(age_unit or "Years", "Year")
+    return f"{age} {word}"
 
 
 # متاح مباشرة كدالة Jinja (parse_range_tiers(text)) حتى تقدر القوالب اللي
@@ -798,6 +892,12 @@ def inject_globals():
     # لأنها محقونة هنا بدل تمريرها يدويًا بكل route.
     report_row_pad = get_setting(db, "report_row_pad", "5")
     report_col_pad = get_setting(db, "report_col_pad", "12")
+    # المسافة بين ترويسة الدكاترة وصندوق معلومات المريض (patient-info-v2)،
+    # وعرض عمود تسمية الحقل بنفس الصندوق (يتحكم بمدى قرب القيمة من تسميتها
+    # زي "Patient Name:") — محقونان هنا بنفس أسلوب report_row_pad أعلاه
+    # فينطبقان على كل التقارير المطبوعة دفعة وحدة.
+    patient_info_top_gap = get_setting(db, "patient_info_top_gap", "4")
+    patient_info_label_width = get_setting(db, "patient_info_label_width", "108")
     # دكاترة الفحص المُفعَّل لهم "إظهار بترويسة التقرير" — تُحقن هنا تلقائيًا
     # حتى تنعرض بترويسة أي تقرير مطبوع (reports/*.html) بدون تمريرها يدويًا
     # من كل route. راجع Management → الإعدادات → إدارة قائمة الدكاترة.
@@ -830,6 +930,8 @@ def inject_globals():
                 dashboard_bg_url=dashboard_bg_url,
                 lab_address=lab_address, lab_phone=lab_phone,
                 report_row_pad=report_row_pad, report_col_pad=report_col_pad,
+                patient_info_top_gap=patient_info_top_gap,
+                patient_info_label_width=patient_info_label_width,
                 letterhead_doctors=letterhead_doctors,
                 letterhead_font_size=letterhead_font_size,
                 letterhead_font_family=letterhead_font_family,
@@ -1495,15 +1597,41 @@ def new_visit():
             test = db.execute("SELECT * FROM test_definitions WHERE id=?", (tid,)).fetchone()
             if not test:
                 continue
-            price = get_test_price(db, tid, referring_doctor_id)
+            # طلب بارامترات معيّنة بس من هذا التحليل (سهم ▾ بالواجهة) بدل
+            # التحليل كامل — selected_params_<tid> يوصل "id,id,id" لو
+            # استُخدم، وإلا فاضي (السلوك الافتراضي القديم: التحليل كامل).
+            # السعر يُحسب من قاعدة البيانات دائماً (مجموع أسعار البارامترات
+            # المختارة فعلاً)، ما نثق بأي مجموع جاي من الواجهة.
+            selected_params_raw = (request.form.get(f"selected_params_{tid}") or "").strip()
+            selected_param_ids = None
+            if selected_params_raw:
+                try:
+                    pid_list = [int(x) for x in selected_params_raw.split(",") if x.strip()]
+                except ValueError:
+                    pid_list = []
+                if pid_list:
+                    placeholders = ",".join("?" * len(pid_list))
+                    prows = db.execute(
+                        f"SELECT id, price FROM test_parameters WHERE id IN ({placeholders}) AND test_definition_id=?",
+                        (*pid_list, tid),
+                    ).fetchall()
+                    if prows:
+                        price = sum((r["price"] or 0) for r in prows)
+                        selected_param_ids = ",".join(str(r["id"]) for r in prows)
+                    else:
+                        price = get_test_price(db, tid, referring_doctor_id)
+                else:
+                    price = get_test_price(db, tid, referring_doctor_id)
+            else:
+                price = get_test_price(db, tid, referring_doctor_id)
             barcode = f"{reg_number}{tid.zfill(3)}"
             # الحالة تبدأ 'Collected' مباشرة (مو 'Accepted') لأن زر "تم سحب
             # العينة" الإلزامي فوق تأكد إنها انسحبت فعليًا هذي اللحظة —
             # فتتخطى طابور "سحب العينة" وتظهر مباشرة بطابور "استلام العينة".
             db.execute(
                 "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, "
-                "collected_at, created_at) VALUES (?, ?, 'Collected', ?, ?, ?, ?, ?)",
-                (order_id, tid, barcode, price, referring_doctor_id, now, now),
+                "collected_at, created_at, selected_param_ids) VALUES (?, ?, 'Collected', ?, ?, ?, ?, ?, ?)",
+                (order_id, tid, barcode, price, referring_doctor_id, now, now, selected_param_ids),
             )
             total += price or 0
 
@@ -3479,6 +3607,28 @@ def result_entry(order_test_id):
 # واحد يحفظ كل ما تمت تعبئته دفعة واحدة. فور الحفظ تصبح النتائج متاحة مباشرة
 # بريبورت كل تحليل (زر طباعة أمام كل بطاقة)، مع بقاء إمكانية التعديل والحفظ
 # مجددًا بنفس الصفحة قبل الطباعة الفعلية.
+def get_ordered_parameters(db, ot):
+    """يرجّع بارامترات order_test هذا — كلها إذا طُلب التحليل كامل
+    (السلوك الافتراضي)، أو بس البارامترات المحدَّدة فعليًا لو استُخدم سهم
+    "اختيار بارامترات معيّنة" بشاشة زيارة جديدة (راجع
+    order_tests.selected_param_ids بـdatabase.py). تُستخدم بشاشة إدخال
+    النتائج (عرض + حفظ) حتى ما تظهر/تُطلب قيم لبارامترات المريض ماطلبها
+    أصلاً."""
+    all_params = db.execute(
+        "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
+        (ot["test_definition_id"],),
+    ).fetchall()
+    selected_raw = ot["selected_param_ids"] if "selected_param_ids" in ot.keys() else None
+    if not selected_raw:
+        return all_params
+    try:
+        selected_ids = {int(x) for x in selected_raw.split(",") if x.strip()}
+    except ValueError:
+        return all_params
+    filtered = [p for p in all_params if p["id"] in selected_ids]
+    return filtered or all_params
+
+
 @app.route("/front-desk/visits/<int:visit_id>/results", methods=["GET", "POST"])
 @login_required
 def visit_results_entry(visit_id):
@@ -3538,9 +3688,7 @@ def visit_results_entry(visit_id):
             # بعد، وتبقى معتمَدة بعد الحفظ (ما تحتاج فتح/إلغاء اعتماد أولًا)
             # — كل تعديل يبقى مسجّل بجدول result_history (القيمة القديمة +
             # مين عدّلها ووقتها) بغض النظر عن حالة الاعتماد.
-            parameters = db.execute(
-                "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (ot["test_definition_id"],)
-            ).fetchall()
+            parameters = get_ordered_parameters(db, ot)
             touched = save_order_test_results(
                 db, ot, parameters, request.form, session["user_id"], field_prefix=f"ot{ot['id']}_",
                 patient_id=ot["patient_id"],
@@ -3561,9 +3709,7 @@ def visit_results_entry(visit_id):
 
     boxes = []
     for ot in order_tests:
-        parameters = db.execute(
-            "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (ot["test_definition_id"],)
-        ).fetchall()
+        parameters = get_ordered_parameters(db, ot)
         results = db.execute(
             "SELECT r.*, tp.name as param_name FROM results r "
             "JOIN test_parameters tp ON tp.id=r.test_parameter_id WHERE order_test_id=?",
@@ -3846,8 +3992,7 @@ def print_combined_panel(visit_id):
     except (TypeError, ValueError):
         visit_date = visit["created_at"] or ""
 
-    age_unit_abbr = {"Hours": "H", "Days": "D", "Weeks": "W", "Months": "M", "Years": "Y"}
-    age_display = f"{visit['age']}{age_unit_abbr.get(visit['age_unit'] or 'Years', 'Y')}" if visit["age"] not in (None, "") else ""
+    age_display = format_age_display(visit["age"], visit["age_unit"])
 
     auto_flag_color_enabled, show_result_flag, flag_color_map = get_report_flag_settings(db)
     # تباعد الصفوف باللوحة المجمّعة (المطلوب 8) — الصفحة تجمع أكثر من
@@ -4172,8 +4317,7 @@ def _print_report_impl(order_test_id):
                 "page_break_before": rd.get("page_break_before", False),
             })
 
-    age_unit_abbr = {"Hours": "H", "Days": "D", "Weeks": "W", "Months": "M", "Years": "Y"}
-    age_display = f"{ot['age']}{age_unit_abbr.get(ot['age_unit'] or 'Years', 'Y')}" if ot["age"] not in (None, "") else ""
+    age_display = format_age_display(ot["age"], ot["age_unit"])
 
     # ترويسة متكرّرة تلقائيًا بأعلى كل صفحة إضافية عند الطباعة (نفس الشعار،
     # أسماء الأطباء، الدكتور المرسل، اسم المريض، التاريخ...) — فقط لتقارير
@@ -4462,6 +4606,47 @@ def api_add_test_parameter():
     db.commit()
     log_action("AddTestParameter", "test_parameters", cur.lastrowid, name)
     return jsonify({"ok": True, "id": cur.lastrowid, "name": name})
+
+
+# ============== تحديد/تعديل سعر باراميتر مفرد ==============
+# يُستخدم فقط لما موظف الاستقبال يطلب بارامترات معيّنة بس من تحليل متعدد
+# الباراميترات (سهم ▾ بشاشة "زيارة جديدة" — راجع شرح كامل عند
+# order_tests.selected_param_ids بـdatabase.py). لو الباراميتر ما عنده
+# سعر بعد، الموظف يكتبه أول مرة من نفس شاشة الطلب وينحفظ هنا دائمًا
+# للطلبات الجاية. @login_required بدل admin عمداً — هذا إجراء تشغيلي
+# اعتيادي وقت استقبال المريض، مو إعداد إداري.
+@app.route("/api/test-parameters/<int:param_id>/set-price", methods=["POST"])
+@login_required
+def api_set_test_parameter_price(param_id):
+    db = get_db()
+    param = db.execute("SELECT * FROM test_parameters WHERE id=?", (param_id,)).fetchone()
+    if not param:
+        return jsonify({"ok": False, "error": "الباراميتر غير موجود"}), 404
+    body = request.get_json(silent=True) or request.form
+    try:
+        price = float(body.get("price"))
+        if price < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "السعر يجب أن يكون رقمًا صحيحًا"}), 400
+    db.execute("UPDATE test_parameters SET price=? WHERE id=?", (price, param_id))
+    db.commit()
+    log_action("SetParameterPrice", "test_parameters", param_id, str(price))
+    return jsonify({"ok": True, "price": price})
+
+
+@app.route("/api/test-definitions/<int:test_definition_id>/parameters")
+@login_required
+def api_test_definition_parameters(test_definition_id):
+    """يرجّع بارامترات تحليل معيّن (id/name/price) — يغذّي سهم ▾ بشاشة
+    "زيارة جديدة" لاختيار بارامترات معيّنة بس من داخل تحليل متعدد
+    الباراميترات بدل طلبه كامل (راجع order_tests.selected_param_ids)."""
+    db = get_db()
+    params = db.execute(
+        "SELECT id, name, price FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
+        (test_definition_id,),
+    ).fetchall()
+    return jsonify([dict(p) for p in params])
 
 
 # ============== حذف باراميتر نهائيًا مباشرة من صفحة معاينة التقرير ==============
@@ -5455,9 +5640,12 @@ def reference_ranges():
                 "range_label": r["range_label"], "analyzer": r["analyzer"],
             })
     parameter_groups = [groups_by_param[pid] for pid in order]
+    all_test_definitions = db.execute(
+        "SELECT id, name, department FROM test_definitions WHERE is_active=1 ORDER BY name"
+    ).fetchall()
     return render_template("master/reference_ranges.html", parameter_groups=parameter_groups,
                             parameters=parameters, known_analyzers=get_known_analyzers(db),
-                            known_units=get_known_units(db))
+                            known_units=get_known_units(db), all_test_definitions=all_test_definitions)
 
 
 @app.route("/master/reference-ranges/tier-save", methods=["POST"])
@@ -6197,6 +6385,21 @@ def app_settings():
             except ValueError:
                 pass
 
+        pi_gap_raw = request.form.get("patient_info_top_gap", "").strip()
+        if pi_gap_raw:
+            try:
+                pi_gap = max(0, min(60, int(pi_gap_raw)))
+                set_setting(db, "patient_info_top_gap", str(pi_gap))
+            except ValueError:
+                pass
+        pi_label_w_raw = request.form.get("patient_info_label_width", "").strip()
+        if pi_label_w_raw:
+            try:
+                pi_label_w = max(60, min(220, int(pi_label_w_raw)))
+                set_setting(db, "patient_info_label_width", str(pi_label_w))
+            except ValueError:
+                pass
+
         wa_code = request.form.get("whatsapp_country_code", "").strip()
         if wa_code:
             set_setting(db, "whatsapp_country_code", "".join(ch for ch in wa_code if ch.isdigit()))
@@ -6245,6 +6448,13 @@ def app_settings():
         analyzers_raw = request.form.get("known_analyzers")
         if analyzers_raw is not None:
             set_setting(db, "known_analyzers", analyzers_raw.strip())
+        # تصحيحات ترجمة الأسماء العربية للإنكليزي (المطلوب: ترجمة دقيقة —
+        # القاموس الجاهز بالكود يغطي أسماء شائعة، وهذا الحقل يخلي المختبر
+        # يصحّح أي اسم يطلع غلط بنفسه دون انتظار تحديث بالكود. سطر لكل
+        # اسم بصيغة "عربي=إنكليزي"، مثال: سمر=Samar
+        name_translit_raw = request.form.get("name_translit_overrides")
+        if name_translit_raw is not None:
+            set_setting(db, "name_translit_overrides", name_translit_raw.strip())
         # حجم خط اسم التحليل وحجم خط النتيجة بجدول/بطاقات النتائج بكل
         # التقارير المطبوعة — إعدادان عامان منفصلان عن بعض (وعن حجم خط
         # ترويسة الدكاترة letterhead_font_size أعلاه)، دفعة وحدة لكل
@@ -6320,6 +6530,8 @@ def app_settings():
         "logo_path": get_setting(db, "logo_path", ""),
         "dashboard_bg_path": get_setting(db, "dashboard_bg_path", ""),
         "report_row_pad": get_setting(db, "report_row_pad", "5"),
+        "patient_info_top_gap": get_setting(db, "patient_info_top_gap", "4"),
+        "patient_info_label_width": get_setting(db, "patient_info_label_width", "108"),
         "report_col_pad": get_setting(db, "report_col_pad", "12"),
         "whatsapp_country_code": get_setting(db, "whatsapp_country_code", "964"),
         "pdf_archive_dir": get_setting(db, "pdf_archive_dir", ""),
@@ -6330,6 +6542,7 @@ def app_settings():
         "logo_position": get_setting(db, "logo_position", "right"),
         "logo_width": get_setting(db, "logo_width", "100"),
         "combined_panel_group_order": get_setting(db, "combined_panel_group_order", ""),
+        "name_translit_overrides": get_setting(db, "name_translit_overrides", ""),
         "results_entry_test_order": get_setting(db, "results_entry_test_order", ""),
         "known_analyzers": get_setting(db, "known_analyzers", ""),
         "auto_flag_color_enabled": get_setting(db, "auto_flag_color_enabled", "0"),

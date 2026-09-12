@@ -346,7 +346,7 @@
 </div>
 
 <div class="report-scope">
-  <div class="sheet" data-test-definition-id="{{ test_definition_id or '' }}" data-order-test-id="{{ order_test_id or 0 }}">
+  <div class="sheet" data-test-definition-id="{{ test_definition_id|default('') }}" data-order-test-id="{{ order_test_id|default(0) }}">
     <table class="page-repeat-table">
       {% if repeat_header_on_print %}<thead>{% else %}<tbody>{% endif %}
         <tr><td>
@@ -415,7 +415,7 @@
           {{ shared.edit_toolbar() }}
           {{ shared.style_popover() }}
           {{ shared.scope_modal() }}
-          {{ shared.editor_script(order_test_id or 0) }}
+          {{ shared.editor_script(order_test_id|default(0)) }}
           {% endif %}
 
           {% if show_exam_signature %}

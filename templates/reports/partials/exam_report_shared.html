@@ -36,11 +36,11 @@
   /* ============== ترويسة بيانات المريض/العينة (patient_meta_v2) ============== */
   .patient-info-v2 {
     display: flex; justify-content: space-between; gap: 36px;
-    margin: 4px 0 14px 0; direction: ltr;
+    margin: {{ patient_info_top_gap|default(4) }}px 0 14px 0; direction: ltr;
     font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 13.5px;
   }
   .info-col { flex: 1; }
-  .info-row { display: grid; grid-template-columns: 108px 12px 1fr; padding: 3px 0; align-items: baseline; }
+  .info-row { display: grid; grid-template-columns: {{ patient_info_label_width|default(108) }}px 12px 1fr; padding: 3px 0; align-items: baseline; }
   .info-label { font-weight: 700; color: #111; }
   .info-colon { color: #111; }
   .info-val { color: #1E3A8A; font-weight: 600; }

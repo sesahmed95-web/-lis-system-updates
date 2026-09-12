@@ -14,6 +14,35 @@
 </datalist>
 
 <div class="card">
+  <h3>🆕 إضافة باراميتر جديد (اسم غير موجود إطلاقاً بالبرنامج) تحت أي عنوان تحليل</h3>
+  <p class="muted">
+    لإضافة باراميتر ما موجود أصلاً بأي تحليل — اختر تحت أي "عنوان" (تحليل)
+    يظهر، اكتب اسمه، واحفظ. يظهر فورًا بالقائمة تحت لإضافة نسبته الطبيعية،
+    وبصفحة "زيارة جديدة" وشاشة إدخال النتائج تلقائيًا ضمن نفس التحليل الذي
+    اخترته (يمكن اختيار أكثر من باراميتر تحت نفس العنوان بنفس الطريقة،
+    وحدة بوحدة).
+  </p>
+  <div class="form-grid">
+    <div class="form-field">
+      <label>تحت أي عنوان (تحليل)؟</label>
+      <select id="newParamTestDefId">
+        {% for td in all_test_definitions %}
+        <option value="{{ td['id'] }}">{{ td['name'] }}{% if td['department'] %} — {{ td['department'] }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label>اسم الباراميتر الجديد</label>
+      <input type="text" id="newParamName" placeholder="مثال: Vitamin B12" onkeydown="if(event.key==='Enter'){rrAddNewParam();}">
+    </div>
+    <div class="form-field" style="align-self:end;">
+      <button type="button" class="btn" onclick="rrAddNewParam()">إضافة</button>
+      <span id="newParamStatus" class="muted" style="margin-inline-start:8px;"></span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
   <h3>➕ إضافة نسبة لباراميتر جديد (ما عنده أي نسبة بعد)</h3>
   <form method="POST" action="{{ url_for('save_reference_range_tier') }}" class="form-grid rr-form">
     <input type="hidden" name="range_id" value="">
@@ -152,6 +181,34 @@
   // المطلوب 6: حفظ وحدة القياس مباشرة من بطاقة الباراميتر (فوق)، بدون
   // فتح صفحة "تعديل الوحدات" المنفصلة — يعيد استخدام نفس مسار الحفظ
   // الموجود أصلاً هناك (set-unit) مع ajax=1 حتى يرجّع JSON بدل صفحة كاملة.
+  function rrAddNewParam() {
+    var testDefId = document.getElementById('newParamTestDefId').value;
+    var nameInput = document.getElementById('newParamName');
+    var status = document.getElementById('newParamStatus');
+    var name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+    status.style.color = '#475569'; status.textContent = 'جارِ الإضافة...';
+    fetch('/api/test-parameters', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({test_definition_id: testDefId, name: name})
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) {
+          status.style.color = '#2e7d32';
+          status.textContent = '✓ تمت الإضافة — يُحدَّث الآن...';
+          setTimeout(function () { location.reload(); }, 600);
+        } else {
+          status.style.color = '#c62828';
+          status.textContent = '✕ ' + (data.error || 'صار خطأ');
+        }
+      })
+      .catch(function () {
+        status.style.color = '#c62828'; status.textContent = '✕ تعذّر الاتصال بالخادم';
+      });
+  }
+
   function rrSaveDualUnit(btn) {
     var box = btn.closest('.dual-unit-box');
     var unitInput = box.querySelector('.dual-unit-input');
