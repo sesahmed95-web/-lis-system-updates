@@ -3034,6 +3034,43 @@ def api_barcode_lookup(code):
     })
 
 
+@app.route("/public/results-board")
+def public_results_board():
+    """شاشة عرض عامة (بدون تسجيل دخول) — تُفتح على شاشة/تلفزيون خارجي
+    بصالة الانتظار، تعرض التحاليل المكتملة اليوم بشكل مباشر، وتتحدث
+    تلقائيًا كل دقيقة. لا تحتاج صلاحية عمداً لأنها مصممة للعرض العام
+    بمواجهة المراجعين، مو للموظفين."""
+    return render_template("public/results_board.html")
+
+
+@app.route("/api/public/completed-today")
+def api_public_completed_today():
+    """يرجّع آخر التحاليل المكتملة اليوم (اسم المريض + اسم التحليل + وقت
+    الإنجاز) — يغذّي شاشة العرض العامة أعلاه. يعتمد وقت آخر نتيجة أُدخلت
+    فعليًا (results.entered_at) كـ"وقت الإنجاز"، مو وقت تسجيل الزيارة."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT ot.id as order_test_id, p.full_name, td.name as test_name, "
+        "MAX(r.entered_at) as completed_at "
+        "FROM order_tests ot "
+        "JOIN orders o ON o.id = ot.order_id "
+        "JOIN visits v ON v.id = o.visit_id "
+        "JOIN patients p ON p.id = v.patient_id "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "JOIN results r ON r.order_test_id = ot.id "
+        "WHERE ot.status IN ('Completed', 'Verified') "
+        "AND date(r.entered_at) = date('now', 'localtime') "
+        "GROUP BY ot.id "
+        "ORDER BY completed_at DESC "
+        "LIMIT 30"
+    ).fetchall()
+    return jsonify([
+        {"order_test_id": r["order_test_id"], "patient_name": r["full_name"],
+         "test_name": r["test_name"], "completed_at": r["completed_at"]}
+        for r in rows
+    ])
+
+
 @app.route("/front-desk/print-barcode")
 @login_required
 def print_barcode_finder():
