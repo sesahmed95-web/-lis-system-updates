@@ -40,7 +40,7 @@
     font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 13.5px;
   }
   .info-col { flex: 1; }
-  .info-row { display: grid; grid-template-columns: {{ patient_info_label_width|default(108) }}px 12px 1fr; padding: 3px 0; align-items: baseline; }
+  .info-row { display: grid; grid-template-columns: {{ patient_info_label_width|default(108) }}px 12px 1fr; padding: {{ patient_info_row_gap|default(3) }}px 0; align-items: baseline; }
   .info-label { font-weight: 700; color: #111; }
   .info-colon { color: #111; }
   .info-val { color: #1E3A8A; font-weight: 600; }
@@ -52,7 +52,12 @@
   /* ============== عنوان التحليل + عناوين الأقسام ============== */
   .report-title {
     text-align: center; font-size: 1.25em; font-weight: 700; font-style: italic;
+    {% if report_underline_style|default('solid') == 'none' %}
+    text-decoration: none;
+    {% else %}
     text-decoration: underline; text-underline-offset: 4px;
+    text-decoration-style: {{ 'dashed' if report_underline_style|default('solid') == 'dashed' else 'solid' }};
+    {% endif %}
     /* نفس تصحيح base_report.html — يمنع تقطّع الخط تحت الحروف المائلة
        (نقاط بمنتصف الكلمة) بمعاينة التصميم وبالتقرير المطبوع الفعلي. */
     text-decoration-skip-ink: none;
@@ -82,6 +87,12 @@
        جدًا يتمدد بصريًا فوق العمود المجاور بدل ما ينكسر سطرين أو يُقتطع.
     */
     white-space: nowrap;
+    /* تأكيد صريح إنه بدون إمالة (رغم تأكدنا من DevTools إنه ماكو أي قاعدة
+       text-decoration مطبّقة) + مسافة حروف بسيطة جدًا — تحصين ضد تراكب
+       بصري بين حرفين متلاصقين بخط Times New Roman بحجوم معيّنة (زي D
+       متبوعة بـL بكلمات HDL/LDL/VLDL) واللي يبين وكأنه خط يقطع الكلمة. */
+    font-style: normal;
+    letter-spacing: 0.3px;
   }
   .result-row .rcolon { color: #1a1a1a; }
   .result-row .rval { color: #1F3B7A; font-weight: 600; }
@@ -261,7 +272,9 @@
      خانة اسم باراميتر (td.field-name) بكل تلك التقارير، دون الحاجة
      لتعديل كل قالب تقرير على حدة (شوف examApplyGenericPencils أسفل). */
   .report-heading:hover .title-edit-btn,
-  table.data-table td.field-name:hover .title-edit-btn { opacity: 0.55; }
+  table.data-table td.field-name:hover .title-edit-btn,
+  table.data-table td.unit-val:hover .title-edit-btn,
+  table.data-table th:hover .title-edit-btn { opacity: 0.55; }
   .title-edit-btn:hover, .meta-edit-btn:hover { opacity: 1; }
   [contenteditable="true"] {
     outline: 1px dashed #26529C; background: #EFF6FF; border-radius: 3px;
@@ -720,6 +733,22 @@ function examEscapeHtml(s) {
 function examApplyGenericPencils() {
   var overrides = (__examReportLayout && __examReportLayout.param_overrides) || {};
 
+  // دالة عامة: تحوّل أي خلية/عنصر نصي ثابت لعنصر قابل للتعديل بقلم ✏️ —
+  // تُستخدم لكل أنواع المحتوى الثابت بالتقرير (عنوان، اسم باراميتر،
+  // وحدة، عنوان عمود بالجدول...الخ) بنفس الآلية، حتى تغطي "كل محتويات
+  // التقرير بدون استثناء" بدل تعداد كل نوع لحاله بكود منفصل.
+  function makeEditable(el, hint) {
+    if (!el || el.dataset.genericDone) return;
+    el.dataset.genericDone = '1';
+    var original = el.textContent.trim();
+    if (!original) return;
+    var ov = overrides[original];
+    var shown = (ov && ov.label) ? ov.label : original;
+    el.innerHTML =
+      '<span data-editable="field_label" data-original-key="' + examEscapeHtml(original) + '">' + examEscapeHtml(shown) + '</span>' +
+      '<span class="title-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="' + examEscapeHtml(hint) + '">✏️</span>';
+  }
+
   // 1) عنوان التقرير العام (كل تقرير غير قوالب الفحص، اللي عندها أصلاً
   //    .report-title-wrap ومعالجة خاصة بيها — نتفادى الازدواج بالتأكد إن
   //    ما فيه .report-title-wrap بنفس الصفحة أصلاً).
@@ -736,15 +765,17 @@ function examApplyGenericPencils() {
 
   // 2) اسم كل باراميتر/سطر بجدول النتائج.
   document.querySelectorAll('table.data-table td.field-name').forEach(function (td) {
-    if (td.dataset.genericDone) return;
-    td.dataset.genericDone = '1';
-    var original = td.textContent.trim();
-    if (!original) return;
-    var ov = overrides[original];
-    var shown = (ov && ov.label) ? ov.label : original;
-    td.innerHTML =
-      '<span data-editable="field_label" data-original-key="' + examEscapeHtml(original) + '">' + examEscapeHtml(shown) + '</span>' +
-      '<span class="title-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل اسم هذا الباراميتر بالطباعة (يطبَّق على كل تقارير هذا التحليل)">✏️</span>';
+    makeEditable(td, 'تعديل اسم هذا الباراميتر بالطباعة (يطبَّق على كل تقارير هذا التحليل)');
+  });
+
+  // 3) وحدة كل باراميتر (المطلوب: القلم يغطي حتى الوحدات، مو بس الاسم).
+  document.querySelectorAll('table.data-table td.unit-val').forEach(function (td) {
+    makeEditable(td, 'تعديل نص هذه الوحدة بالطباعة');
+  });
+
+  // 4) عناوين أعمدة الجدول (Test / Result / Control / Unit / Reference range...).
+  document.querySelectorAll('table.data-table th').forEach(function (th) {
+    makeEditable(th, 'تعديل نص هذا العمود بالطباعة');
   });
 }
 

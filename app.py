@@ -898,6 +898,15 @@ def inject_globals():
     # فينطبقان على كل التقارير المطبوعة دفعة وحدة.
     patient_info_top_gap = get_setting(db, "patient_info_top_gap", "4")
     patient_info_label_width = get_setting(db, "patient_info_label_width", "108")
+    # المسافة العمودية بين كل سطر وسطر بصندوق معلومات المريض نفسه (بين
+    # "Patient Name" و"Age" مثلاً) — منفصلة عن المسافة فوق الصندوق كله.
+    patient_info_row_gap = get_setting(db, "patient_info_row_gap", "3")
+    # نمط الخط تحت عناوين التقارير (.report-heading/.report-title) —
+    # المستخدم يعاني تكرارًا من مشاكل عرض بصرية بهذا الخط تختلف باختلاف
+    # المتصفح/الطابعة، فبدل ملاحقة كل شكوى شكل جديدة، صار قابل للتحكم
+    # الكامل من الإعدادات: solid (افتراضي، متصل)، dashed (متقطع بنمط
+    # واضح ومقصود)، أو none (بدون خط إطلاقًا).
+    report_underline_style = get_setting(db, "report_underline_style", "solid")
     # دكاترة الفحص المُفعَّل لهم "إظهار بترويسة التقرير" — تُحقن هنا تلقائيًا
     # حتى تنعرض بترويسة أي تقرير مطبوع (reports/*.html) بدون تمريرها يدويًا
     # من كل route. راجع Management → الإعدادات → إدارة قائمة الدكاترة.
@@ -932,6 +941,8 @@ def inject_globals():
                 report_row_pad=report_row_pad, report_col_pad=report_col_pad,
                 patient_info_top_gap=patient_info_top_gap,
                 patient_info_label_width=patient_info_label_width,
+                patient_info_row_gap=patient_info_row_gap,
+                report_underline_style=report_underline_style,
                 letterhead_doctors=letterhead_doctors,
                 letterhead_font_size=letterhead_font_size,
                 letterhead_font_family=letterhead_font_family,
@@ -3023,6 +3034,42 @@ def api_barcode_lookup(code):
     })
 
 
+@app.route("/front-desk/print-barcode")
+@login_required
+def print_barcode_finder():
+    """صفحة بحث سريعة: اكتب اسم المريض، تطلعلك آخر زياراته والتحاليل
+    المطلوبة بيها، وتضغط زر لتطبع باركوداتها — مفيدة لو تلف باركود أصلي
+    وتحتاج تعيد طباعته بسرعة بدون الرجوع لسجل الزيارة الكامل."""
+    return render_template("front_desk/print_barcode_finder.html")
+
+
+@app.route("/api/patients/<int:patient_id>/recent-visits")
+@login_required
+def api_patient_recent_visits(patient_id):
+    """يرجّع آخر بضع زيارات لمريض معيّن مع أسماء تحاليل كل زيارة — تغذّي
+    صفحة "طباعة باركود" السريعة (البحث بالاسم)."""
+    db = get_db()
+    visits = db.execute(
+        "SELECT id, registration_number, created_at FROM visits "
+        "WHERE patient_id=? ORDER BY created_at DESC LIMIT 10",
+        (patient_id,),
+    ).fetchall()
+    out = []
+    for v in visits:
+        tests = [t["name"] for t in db.execute(
+            "SELECT DISTINCT td.name FROM order_tests ot "
+            "JOIN orders o ON o.id = ot.order_id "
+            "JOIN test_definitions td ON td.id = ot.test_definition_id "
+            "WHERE o.visit_id=?",
+            (v["id"],),
+        ).fetchall()]
+        out.append({
+            "visit_id": v["id"], "registration_number": v["registration_number"],
+            "created_at": v["created_at"], "tests": tests,
+        })
+    return jsonify(out)
+
+
 @app.route("/front-desk/visits/<int:visit_id>/print/samples")
 @login_required
 def print_sample_barcodes(visit_id):
@@ -4733,6 +4780,26 @@ def api_set_test_parameter_price(param_id):
     db.commit()
     log_action("SetParameterPrice", "test_parameters", param_id, str(price))
     return jsonify({"ok": True, "price": price})
+
+
+@app.route("/api/test-parameters/<int:param_id>/rename", methods=["POST"])
+@login_required
+def api_rename_test_parameter(param_id):
+    """يعيد تسمية باراميتر تابع لتحليل — يُستخدم بالقلم ✏️ الجديد بلوحة
+    اختيار البارامترات بشاشة "زيارة جديدة" (سهم ▾)، للسرعة بدون فتح صفحة
+    Reference Range. @login_required بدل admin عمداً لنفس سبب set-price."""
+    db = get_db()
+    param = db.execute("SELECT * FROM test_parameters WHERE id=?", (param_id,)).fetchone()
+    if not param:
+        return {"ok": False, "error": "الباراميتر غير موجود"}, 404
+    body = request.get_json(silent=True) or request.form
+    new_name = (body.get("name") or "").strip()
+    if not new_name:
+        return {"ok": False, "error": "الاسم لا يمكن أن يكون فارغًا"}, 400
+    db.execute("UPDATE test_parameters SET name=? WHERE id=?", (new_name, param_id))
+    db.commit()
+    log_action("RenameParameter", "test_parameters", param_id, new_name)
+    return {"ok": True, "name": new_name}
 
 
 @app.route("/api/test-definitions/<int:test_definition_id>/parameters")
@@ -6520,6 +6587,16 @@ def app_settings():
                 set_setting(db, "patient_info_label_width", str(pi_label_w))
             except ValueError:
                 pass
+        pi_row_gap_raw = request.form.get("patient_info_row_gap", "").strip()
+        if pi_row_gap_raw:
+            try:
+                pi_row_gap = max(0, min(30, int(pi_row_gap_raw)))
+                set_setting(db, "patient_info_row_gap", str(pi_row_gap))
+            except ValueError:
+                pass
+        underline_style_raw = request.form.get("report_underline_style")
+        if underline_style_raw in ("solid", "dashed", "none"):
+            set_setting(db, "report_underline_style", underline_style_raw)
 
         wa_code = request.form.get("whatsapp_country_code", "").strip()
         if wa_code:
@@ -6653,6 +6730,8 @@ def app_settings():
         "report_row_pad": get_setting(db, "report_row_pad", "5"),
         "patient_info_top_gap": get_setting(db, "patient_info_top_gap", "4"),
         "patient_info_label_width": get_setting(db, "patient_info_label_width", "108"),
+        "patient_info_row_gap": get_setting(db, "patient_info_row_gap", "3"),
+        "report_underline_style": get_setting(db, "report_underline_style", "solid"),
         "report_col_pad": get_setting(db, "report_col_pad", "12"),
         "whatsapp_country_code": get_setting(db, "whatsapp_country_code", "964"),
         "pdf_archive_dir": get_setting(db, "pdf_archive_dir", ""),

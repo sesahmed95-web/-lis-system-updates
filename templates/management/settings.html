@@ -159,6 +159,52 @@
 </div>
 
 <div class="card" style="max-width:640px;">
+  <h3>📏 تباعد صندوق معلومات المريض</h3>
+  <p class="muted">
+    يتحكم هذا بالمسافة بين ترويسة الدكاترة (أعلى الصفحة) وصندوق معلومات
+    المريض (Patient Name, Sample No...الخ)، وبمدى قرب قيمة كل حقل من
+    تسميته (مثلاً "Patient Name:" قريبة من الاسم بدل مسافة فاضية طويلة) —
+    بكل التقارير المطبوعة دفعة وحدة.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>المسافة فوق صندوق المعلومات (بكسل) — القيمة الافتراضية 4</label>
+      <input type="number" name="patient_info_top_gap" min="0" max="60" value="{{ current.patient_info_top_gap }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>عرض عمود تسمية الحقل (بكسل) — قلّله لتقريب القيمة من التسمية — القيمة الافتراضية 108</label>
+      <input type="number" name="patient_info_label_width" min="60" max="220" value="{{ current.patient_info_label_width }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>المسافة بين كل سطر وسطر بصندوق المعلومات نفسه (بكسل) — القيمة الافتراضية 3</label>
+      <input type="number" name="patient_info_row_gap" min="0" max="30" value="{{ current.patient_info_row_gap }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>➖ نمط الخط تحت عناوين التقارير</h3>
+  <p class="muted">
+    يتحكم بشكل الخط تحت عنوان كل تقرير (Coagulation Tests, Lipid Profile...الخ)
+    بكل التقارير المطبوعة دفعة وحدة. لو استمرت مشاكل عرض بصرية بالخط
+    (تقطّع، نقاط بمنتصف الكلمة...) رغم كل التصحيحات، جرّب "بدون خط" هنا
+    كحل مباشر بدل انتظار تصحيح لكل حالة على حدة.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>نمط الخط</label>
+      <select name="report_underline_style">
+        <option value="solid" {{ 'selected' if current.report_underline_style == 'solid' }}>متصل (افتراضي)</option>
+        <option value="dashed" {{ 'selected' if current.report_underline_style == 'dashed' }}>متقطّع (Dashed)</option>
+        <option value="none" {{ 'selected' if current.report_underline_style == 'none' }}>بدون خط إطلاقًا</option>
+      </select>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
   <h3>🗂️ ترتيب أقسام اللوحة المجمّعة</h3>
   <p class="muted">
     لما تُطبع أكثر من تحليل سوا بورقة وحدة لنفس المريض، الأقسام (زي
@@ -226,6 +272,25 @@
       <label>مسار مجلد الأرشفة</label>
       <input type="text" name="pdf_archive_dir" value="{{ current.pdf_archive_dir }}"
              placeholder="مثال: D:\LabArchive\Reports" style="width:100%;" dir="ltr">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🔤 تصحيحات ترجمة أسماء المرضى (عربي → إنكليزي)</h3>
+  <p class="muted">
+    البرنامج يترجم الاسم العربي تلقائيًا (اقتراح أولي قابل للتعديل يدويًا
+    وقت التسجيل). العربي ما يكتب الحركات القصيرة (الفتحة/الضمة/الكسرة)،
+    فبعض الأسماء ممكن تطلع الترجمة التلقائية لها غير دقيقة رغم أن البرنامج
+    عنده قاموس جاهز لأشهر الأسماء. لو شفت اسم طلعت ترجمته غلط، أضيفه هنا
+    وراح تصير هي الترجمة الثابتة له من الحين — سطر لكل اسم بالضبط بصيغة
+    "الاسم بالعربي=الترجمة الصحيحة بالإنكليزي".
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>تصحيحات الأسماء (سطر لكل اسم)</label>
+      <textarea name="name_translit_overrides" rows="6" style="width:100%; direction:ltr;" placeholder="سمر=Samar&#10;نور=Noor&#10;زهراء=Zahraa">{{ current.name_translit_overrides }}</textarea>
     </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>

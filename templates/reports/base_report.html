@@ -94,7 +94,12 @@
   .report-heading {
     text-align: center;
     font-weight: bold;
+    {% if report_underline_style|default('solid') == 'none' %}
+    text-decoration: none;
+    {% else %}
     text-decoration: underline;
+    text-decoration-style: {{ 'dashed' if report_underline_style|default('solid') == 'dashed' else 'solid' }};
+    {% endif %}
     /* text-decoration-skip-ink افتراضيًا "auto" بالمتصفح، فيخلي الخط يتقطّع
        (يبين نقاط بمنتصف الكلمة) تحت الحروف المائلة (italic) خصوصًا بالطباعة.
        "none" يجبر خط متصل كامل تحت كل الحروف دايمًا — بالمعاينة وبالطباعة. */

@@ -618,12 +618,10 @@
 
   function nvRenderParamPanel(testId, list) {
     const panel = document.getElementById('paramPanel_' + testId);
-    if (!list.length) {
-      panel.innerHTML = '<div class="nv-param-hint">هذا التحليل ما عنده بارامترات مفصّلة.</div>';
-      return;
-    }
     const selected = nvSelectedParamIds(testId);
-    let html = '<div class="nv-param-hint">اختر بارامترات معيّنة بس (أو اترك الخانة الرئيسية للتحليل كامل):</div>';
+    let html = list.length
+      ? '<div class="nv-param-hint">اختر بارامترات معيّنة بس (أو اترك الخانة الرئيسية للتحليل كامل):</div>'
+      : '<div class="nv-param-hint">هذا التحليل ما عنده بارامترات مفصّلة بعد — أضف أول وحدة أسفل.</div>';
     list.forEach(function (p) {
       const checked = selected.indexOf(String(p.id)) !== -1;
       const hasPrice = p.price !== null && p.price !== undefined && p.price !== '';
@@ -631,14 +629,67 @@
         '<input type="checkbox" data-param-id="' + p.id + '" ' + (checked ? 'checked' : '') +
         ' onchange="nvOnParamCheck(\'' + testId + '\')">' +
         '<label>' + p.name + '</label>' +
+        '<button type="button" class="nv-param-arrow" title="تعديل اسم هذا الباراميتر" ' +
+        'onclick="nvRenameParam(\'' + testId + '\', ' + p.id + ', this)">✏️</button>' +
         (hasPrice
           ? '<span class="muted">' + Math.round(p.price) + '</span>'
           : '<input type="number" min="0" step="any" placeholder="سعر" data-param-price-input="' + p.id + '" ' +
             'onchange="nvSaveParamPrice(\'' + testId + '\', ' + p.id + ', this)">') +
         '</div>';
     });
+    // إضافة باراميتر جديد لهذا التحليل مباشرة من نفس اللوحة — بدون فتح
+    // صفحة Reference Range، للسرعة (نفس المسار الخلفي /api/test-parameters).
+    html += '<div class="nv-param-row" style="border-top:1px dashed #E2E8F0; margin-top:4px; padding-top:6px;">' +
+      '<input type="text" placeholder="اسم باراميتر جديد..." style="flex:1;" ' +
+      'onkeydown="if(event.key===\'Enter\'){nvAddParamInline(\'' + testId + '\', this);}">' +
+      '<button type="button" onclick="nvAddParamInline(\'' + testId + '\', this.previousElementSibling)">إضافة</button>' +
+      '</div>';
     panel.innerHTML = html;
   }
+
+  window.nvAddParamInline = function (testId, input) {
+    const name = input.value.trim();
+    if (!name) { input.focus(); return; }
+    fetch('/api/test-parameters', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({test_definition_id: testId, name: name})
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) { alert(data.error || 'تعذّر إضافة الباراميتر'); return; }
+        delete nvParamCache[testId];
+        fetch('/api/test-definitions/' + testId + '/parameters')
+          .then(function (r) { return r.json(); })
+          .then(function (list) {
+            nvParamCache[testId] = list;
+            nvRenderParamPanel(testId, list);
+          });
+      })
+      .catch(function () { alert('تعذّر الاتصال بالخادم'); });
+  };
+
+  window.nvRenameParam = function (testId, paramId, btn) {
+    const label = btn.previousElementSibling;
+    const current = label.textContent.trim();
+    const newName = prompt('اسم الباراميتر الجديد:', current);
+    if (newName === null) return;
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === current) return;
+    fetch('/api/test-parameters/' + paramId + '/rename', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: trimmed})
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) { alert(data.error || 'تعذّر تعديل الاسم'); return; }
+        label.textContent = data.name;
+        const cached = (nvParamCache[testId] || []).find(function (x) { return x.id === paramId; });
+        if (cached) cached.name = data.name;
+      })
+      .catch(function () { alert('تعذّر الاتصال بالخادم'); });
+  };
 
   window.nvOnParamCheck = function (testId) {
     const panel = document.getElementById('paramPanel_' + testId);

@@ -5,39 +5,127 @@
 <title>Sample Labels #{{ visit['registration_number'] }}</title>
 <style>
   body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; padding: 20px; }
+  h2.section-heading { font-size: 14px; margin: 22px 0 10px 0; color: #334155; }
   .grid { display: flex; flex-wrap: wrap; gap: 12px; }
-  .label { border: 1px dashed #999; border-radius: 6px; padding: 10px 14px; text-align: center; width: 220px; }
+  .label { border: 1px dashed #999; border-radius: 6px; padding: 10px 14px; text-align: center; width: 220px; position: relative; }
   .lab-name { font-size: 11px; font-weight: 700; }
   .patient { font-size: 13px; font-weight: 700; margin: 4px 0; }
+  /* المطلوب: العنوان الرئيسي بكارد الأنبوب هو نوع العينة (Serum/Citrate/EDTA...)
+     — هذا اللي يهم فنيّ المختبر فعليًا وقت التعامل مع الأنبوب، مو اسم
+     تحليل واحد بعينه. أسماء التحاليل المتضمّنة تطلع تحته بخط أصغر كمرجع
+     اختياري بس (حسب طلب المستخدم: "مو شرط يذكر نوع التحليل"). */
+  .sample-type { font-size: 14px; font-weight: 700; color: #1D4ED8; margin: 2px 0; }
+  .test-list { font-size: 10.5px; color: #64748B; margin: 3px 0 6px 0; line-height: 1.35; }
   .test { font-size: 12px; color: #333; }
-  .sample-type { font-size: 11px; color: #777; }
   img { image-rendering: pixelated; max-width: 100%; }
-  @media print { .no-print { display: none; } }
+  .picker-label { display: flex; align-items: center; gap: 6px; text-align: start; width: auto;
+    padding: 6px 10px; }
+  .picker-label input { margin: 0; }
+  .picker-label .cl-name { font-size: 12.5px; font-weight: 600; }
+  .picker-label .cl-sample { font-size: 11px; color: #64748B; }
+  .toggle-btn { background: none; border: 1px solid #CBD5E1; border-radius: 6px; padding: 6px 12px;
+    cursor: pointer; font-size: 13px; color: #334155; }
+  .picker-box { display: none; margin-top: 10px; }
+  .picker-box.open { display: block; }
+  .individual-actions { margin-top: 10px; display: flex; gap: 10px; align-items: center; justify-content: center; }
+  .individual-print-grid { display: none; }
+  @media print {
+    .no-print { display: none !important; }
+    body.printing-individual .tube-grid { display: none !important; }
+    body.printing-individual .individual-print-grid { display: flex !important; }
+    body:not(.printing-individual) .individual-print-grid { display: none !important; }
+  }
 </style>
 <script>
   (function () {
     var savedTitle = null;
     window.addEventListener("beforeprint", function () { savedTitle = document.title; document.title = ""; });
-    window.addEventListener("afterprint", function () { if (savedTitle !== null) document.title = savedTitle; });
+    window.addEventListener("afterprint", function () {
+      if (savedTitle !== null) document.title = savedTitle;
+      document.body.classList.remove('printing-individual');
+      document.querySelectorAll('.individual-card').forEach(function (card) { card.style.display = ''; });
+    });
   })();
+
+  function toggleIndividualPicker() {
+    document.getElementById('individualPicker').classList.toggle('open');
+  }
+
+  function printSelectedIndividual() {
+    var checked = document.querySelectorAll('.ind-check:checked');
+    if (!checked.length) { alert('اختر تحليل وحد على الأقل قبل الطباعة.'); return; }
+    var checkedBarcodes = Array.prototype.map.call(checked, function (c) { return c.getAttribute('data-barcode'); });
+    document.querySelectorAll('.individual-card').forEach(function (card) {
+      card.style.display = checkedBarcodes.indexOf(card.getAttribute('data-barcode')) !== -1 ? '' : 'none';
+    });
+    document.body.classList.add('printing-individual');
+    window.print();
+  }
 </script>
 </head>
 <body onload="window.print()">
-  <div class="grid">
-    {% for s in samples %}
+
+  <h2 class="section-heading no-print">🧪 باركودات الأنابيب (حسب نوع العينة) — تُطبع تلقائيًا</h2>
+  <div class="grid tube-grid">
+    {% for s in tube_samples %}
     <div class="label">
       <div class="lab-name">{{ brand_name }}</div>
       <div class="patient">{{ visit['full_name'] }} — #{{ visit['registration_number'] }}</div>
-      <div class="test">{{ s['test_name'] }}</div>
       <div class="sample-type">{{ s['sample_type'] }}</div>
+      {% if s['test_names']|length > 1 %}
+      <div class="test-list">{{ s['test_names']|join('، ') }}</div>
+      {% endif %}
       <img src="{{ url_for('barcode_image', code=s['barcode']) }}" alt="barcode">
     </div>
     {% endfor %}
   </div>
-  <div class="no-print" style="margin-top:20px; display:flex; gap:10px; justify-content:center;">
-    <button onclick="window.print()">🖨 Print</button>
-    <a href="{{ url_for('visits_list') }}" style="text-decoration:none;">🔙 الرجوع للزيارات</a>
+
+  <div class="no-print" style="margin-top:20px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+    <button onclick="window.print()">🖨 طباعة باركودات الأنابيب</button>
+    <a href="{{ url_for('visits_list') }}" style="text-decoration:none;"><button type="button">🔙 الرجوع للزيارات</button></a>
     <button onclick="window.close()">❌ إغلاق النافذة</button>
   </div>
+
+  {# المطلوب: إمكانية طباعة باركود إضافي لتحليل وحيد بس — مثلاً نفس
+     التحليل موجود بجهازين بتقنيتين مختلفتين وتريد تشغّله بجهاز معيّن بس،
+     فتحتاج باركود مستقل عليه هذا التحليل فقط يقرأه ذاك الجهاز بالذات،
+     مع بقاء باقي التحاليل شغالة بباركود الأنبوب العام. #}
+  <div class="no-print" style="margin-top:26px; text-align:center;">
+    <button type="button" class="toggle-btn" onclick="toggleIndividualPicker()">
+      🔖 طباعة باركود إضافي لتحليل وحيد بس (لجهاز مختلف مثلاً)
+    </button>
+  </div>
+  <div class="no-print picker-box" id="individualPicker">
+    <div class="grid" style="justify-content:center;">
+      {% for s in individual_samples %}
+      <label class="label picker-label">
+        <input type="checkbox" class="ind-check" data-barcode="{{ s['barcode'] }}">
+        <span>
+          <span class="cl-name">{{ s['test_name'] }}</span><br>
+          <span class="cl-sample">{{ s['sample_type'] or '' }} — {{ s['barcode'] }}</span>
+        </span>
+      </label>
+      {% endfor %}
+    </div>
+    <div class="individual-actions">
+      <button type="button" onclick="printSelectedIndividual()">🖨 طباعة الباركود المحدد</button>
+    </div>
+  </div>
+
+  {# البطاقات الفعلية اللي تُطبع لتحليل مفرد — مخفية دائمًا عن الشاشة،
+     تظهر فقط أثناء الطباعة الفردية (printing-individual)، وحتى وقتها
+     بس البطاقات المحدَّدة فعليًا (باقيها display:none من printSelectedIndividual). #}
+  <div class="grid individual-print-grid">
+    {% for s in individual_samples %}
+    <div class="label individual-card" data-barcode="{{ s['barcode'] }}">
+      <div class="lab-name">{{ brand_name }}</div>
+      <div class="patient">{{ visit['full_name'] }} — #{{ visit['registration_number'] }}</div>
+      <div class="test">{{ s['test_name'] }}</div>
+      <div class="sample-type">{{ s['sample_type'] or '' }}</div>
+      <img src="{{ url_for('barcode_image', code=s['barcode']) }}" alt="barcode">
+    </div>
+    {% endfor %}
+  </div>
+
 </body>
 </html>
