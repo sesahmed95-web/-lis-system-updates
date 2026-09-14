@@ -57,12 +57,6 @@
     margin-bottom: 6px; position: relative;
   }
   .patient-name-ar-standalone .meta-edit-btn { opacity: 0; font-size: 0.6em; margin-inline-start: 6px; cursor: pointer; }
-  /* قلم etext() العام — نفس الشكل اللي كان محليًا بـblood_film.html، صار
-     مشترك هنا حتى يقدر يستخدمه أي قالب (زي تذييل العنوان بـbase_report.html). */
-  .edit-pencil { cursor: pointer; font-size: 0.75em; margin-inline-start: 3px; opacity: 0.6; }
-  .edit-pencil:hover { opacity: 1; }
-  .edit-inline[contenteditable="true"] { outline: 1px dashed #94A3B8; padding: 0 2px; }
-  @media print { .edit-pencil { display: none !important; } }
   .patient-name-ar-standalone:hover .meta-edit-btn { opacity: 0.55; }
   .patient-name-ar-standalone .meta-edit-btn:hover { opacity: 1; }
   @media print { .patient-name-ar-standalone .meta-edit-btn { display: none !important; } }
@@ -308,13 +302,6 @@
    مطبوع بديل ضمن report_layout.patient_meta_overrides (بنفس نطاق حفظ
    بقية التصميم: هذا المريض فقط أو كل مرضى هذا التحليل)، ولا يغيّر أي
    بيانات حقيقية بجداول patients/visits — تصحيح عرض بالتقرير فقط. #}
-{# نص قابل للتعديل المباشر (✏️) بأي مكان بأي تقرير — اسم باراميتر، وحدة،
-   تسمية صندوق، عنوان تذييل...الخ. يُحفظ بـreport_layout.text_overrides
-   (يُجمَع بـexamSerializeLayout عبر [data-edit-key], راجع الشرح هناك).
-   key لازم يكون فريد بكل القالب اللي يُستخدم فيه. default هو النص
-   الأصلي (يُقارَن بيه وقت الحفظ لمعرفة هل تغيّر فعلاً أو رجع لأصله). #}
-{% macro etext(key, default) %}<span class="edit-inline" data-edit-key="{{ key }}" data-edit-default="{{ default }}">{{ (report_layout.text_overrides or {}).get(key, default) }}</span><span class="edit-pencil no-print" onclick="examEditInline(this.previousElementSibling)" title="تعديل">✏️</span>{% endmacro %}
-
 {% macro meta_field(key, label, real_value, pmo, extra_class='') %}
 {% set val = pmo.get(key, real_value) %}
 <div class="info-row editable-meta-row">
@@ -815,6 +802,61 @@ function examApplyGenericPencils() {
   document.querySelectorAll('.box-field b').forEach(function (b) {
     makeEditable(b, 'تعديل تسمية هذا الحقل بالطباعة');
   });
+
+  // 5.1) علامة محايدة بدون أي تنسيق بصري خاص بيها (.editable-label) —
+  //      تُستخدم بقوالب معيّنة (مثل عمود اسم التحليل بـCBC) لخلايا مو
+  //      عليها class="field-name" أصلاً (لتفادي فرض تنسيق field-name
+  //      البصري — إمالة/لون/حجم مختلف — على مكان ما يحتاجه)، بس نحتاج
+  //      قلم ✏️ عليها. أضف class="editable-label" لأي خلية جديدة تحتاجها
+  //      بأي قالب دون التأثير على شكلها.
+  document.querySelectorAll('.editable-label').forEach(function (el) {
+    makeEditable(el, 'تعديل هذا النص بالطباعة');
+  });
+
+  // 5.2) ⚠️ حرج: وحدة كل باراميتر بتقارير الفحص (GUE/GSE/SFA/Blood Film
+  //      وأي تقرير مبني على exam_row) — .runit مختلفة جذريًا عن
+  //      .field-name/.unit-val: نصّها مو مكتوب بالقالب، يجيها من عمود
+  //      test_parameters.unit بقاعدة البيانات مباشرة (نفس القيمة اللي
+  //      يعدّلها زر "Unit" بصفحة Reference Range). فتعديلها من هنا **لازم**
+  //      يحفظ بنفس المكان مباشرة (مسار /set-unit) مو بنظام param_overrides/
+  //      text_overrides — غير هيك التعديل ينعرض مؤقتًا بس يرجع لقيمته
+  //      الأصلية أول ما تنفتح الصفحة من جديد (سبب مشكلة رجوع وحدة NRBC
+  //      اللي انصلحت سابقًا — لا تشيل هذا الجزء عند أي دمج مستقبلي لهذا
+  //      الملف، حتى لو صار نظام تعديل نصوص عام جديد لاحقًا).
+  document.querySelectorAll('.result-row .runit').forEach(function (span) {
+    if (span.dataset.genericDone) return;
+    span.dataset.genericDone = '1';
+    var row = span.closest('.result-row');
+    var paramId = row ? row.dataset.paramId : null;
+    if (!paramId) return;
+    var original = span.textContent.trim();
+    span.innerHTML =
+      '<span data-unit-text>' + examEscapeHtml(original) + '</span>' +
+      '<span class="title-edit-btn" onclick="examEditUnit(' + paramId + ', this)" title="تعديل وحدة هذا الباراميتر (يُحفظ فورًا، نفس زر Unit بصفحة Reference Range)">✏️</span>';
+  });
+}
+
+// تعديل مباشر لوحدة باراميتر من داخل التقرير نفسه — يحفظ فورًا بقاعدة
+// البيانات (test_parameters.unit) عبر نفس مسار صفحة Reference Range، بدل
+// أي نظام تفضيلات محفوظة بالتقرير (راجع الشرح الحرج بالأعلى).
+function examEditUnit(paramId, btn) {
+  var span = btn.previousElementSibling;
+  var current = span.textContent.trim();
+  var newUnit = prompt('الوحدة الجديدة لهذا الباراميتر:', current);
+  if (newUnit === null) return;
+  var trimmed = newUnit.trim();
+  if (trimmed === current) return;
+  fetch('/master/unit-converter/' + paramId + '/set-unit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'unit=' + encodeURIComponent(trimmed) + '&ajax=1'
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.ok) span.textContent = trimmed;
+      else alert(data.error || 'تعذّر حفظ الوحدة');
+    })
+    .catch(function () { alert('تعذّر الاتصال بالخادم'); });
 }
 
 var examDndAttached = false;

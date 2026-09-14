@@ -39,10 +39,82 @@
   .panel-range-row { display: flex; justify-content: space-between; gap: 8px; text-align: left; font-size: 0.85em; }
   .panel-range-row .panel-range-title { font-weight: 600; color: #475569; margin-inline-start: 0; }
   .flag-badge { font-size: 0.7em; font-weight: bold; margin-inline-start: 5px; }
+
+  /* ============== تصميم الجدول الجديد (Conventional/SI Units) ==============
+     نفس تصميم reports/custom_v2.html بالضبط، بس بأسماء حقول group.rows
+     الخاصة باللوحة المجمّعة (value2/range2_display/previous_display بدل
+     result2/normal_range2/previous بـcustom_rows) — يُفعَّل تلقائيًا فقط
+     لأقسام الكيمياء/الهرمونات/الفيتامينات/الفايروسات/الدلائل الورمية
+     (uses_order_style_report على اسم القسم)، وباقي الأقسام (CBC، التخثر
+     لو انضافت يومًا...) تبقى بالجدول الكلاسيكي القديم بدون أي تغيير. #}
+  .ov2-table-head {
+    display: grid; grid-template-columns: 1fr 130px 130px; gap: 8px;
+    border-bottom: 1.5px solid #26529C; padding-bottom: 4px; margin-bottom: 4px;
+    font-weight: 700; font-size: 0.92em; text-align: start;
+  }
+  .ov2-table-head .ov2-col-si { text-align: center; }
+  .ov2-block { border-bottom: 1px dashed #CBD5E1; padding: 8px 0; }
+  .ov2-block:last-child { border-bottom: none; }
+  .ov2-name-row { display: grid; grid-template-columns: 1fr 130px 130px; gap: 8px; align-items: baseline; }
+  .ov2-name { font-weight: 700; }
+  .ov2-conv, .ov2-si { text-align: center; white-space: nowrap; }
+  .ov2-conv .ov2-result, .ov2-si .ov2-result { font-weight: 700; }
+  .ov2-conv .ov2-unit, .ov2-si .ov2-unit { color: #475569; font-size: 0.85em; margin-inline-start: 4px; }
+  .ov2-normal { margin-top: 3px; margin-inline-start: 4px; font-size: 0.88em; color: #334155; }
+  .ov2-normal-label { font-weight: 700; color: #475569; }
+  .ov2-tier { display: flex; gap: 10px; padding: 1px 0 1px 14px; }
+  .ov2-tier .ov2-tier-label { min-width: 140px; }
+  .ov2-prev { margin-top: 4px; margin-inline-start: 4px; font-size: 0.82em; color: #1D4ED8; background: #EFF6FF; padding: 3px 8px; border-radius: 4px; display: inline-block; }
 </style>
 
 {% for group in panel_groups %}
 <div class="panel-dept-heading">{{ group.department }}</div>
+
+{% if uses_order_style_report(group.department) %}
+<div class="ov2-table-head">
+  <div>{{ group.name_header }}</div>
+  <div class="ov2-col-si">Conventional Units</div>
+  <div class="ov2-col-si">SI Units</div>
+</div>
+{% for row in group.rows %}
+{% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and not row.color) else none %}
+{% if row.result is not none %}
+<div class="ov2-block"{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
+  <div class="ov2-name-row">
+    <div class="ov2-name" style="{% if row.color %}color:{{ row.color }};{% endif %}">{{ row.name }}</div>
+    <div class="ov2-conv">
+      <span class="ov2-result" style="{% if row.color %}color:{{ row.color }};{% elif auto_color %}color:{{ auto_color }};{% endif %}">{{ row.result }}</span>
+      {% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="flag-badge" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}
+      {% if row.unit %}<span class="ov2-unit">{{ row.unit }}</span>{% endif %}
+    </div>
+    <div class="ov2-si">
+      {% if row.value2 is not none %}<span class="ov2-result">{{ row.value2 }}</span>{% endif %}
+      {% if row.unit2 %}<span class="ov2-unit">{{ row.unit2 }}</span>{% endif %}
+    </div>
+  </div>
+  <div class="ov2-normal">
+    {% if row.range_tiers %}
+      {% if row.range_tiers|length == 1 and not row.range_tiers[0].label %}
+      <span class="ov2-normal-label">Normal Range</span> <span>{{ row.range_tiers[0].value }}</span>
+      {% else %}
+      <div class="ov2-normal-label">Normal Range</div>
+      {% for tier in row.range_tiers %}
+      <div class="ov2-tier">{% if tier.label %}<span class="ov2-tier-label">{{ tier.label }}</span>{% endif %}<span>{{ tier.value }}</span></div>
+      {% endfor %}
+      {% endif %}
+    {% else %}
+      <span class="ov2-normal-label">Normal Range</span> <span>{{ row.range_display }}</span>
+    {% endif %}
+    {% if row.range2_display %}<div>{{ row.range2_display }}</div>{% endif %}
+  </div>
+  {% if row.previous_display %}
+  <div class="ov2-prev">↩ Previous — {{ row.previous_display }}</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endfor %}
+
+{% else %}
 <table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;{% if row_spacing_px %} --row-pad-override:{{ row_spacing_px }}px;{% endif %}">
   <colgroup>
     <col class="col-name"><col class="col-result"><col class="col-unit"><col class="col-range">
@@ -93,6 +165,7 @@
   {% endif %}
   {% endfor %}
 </table>
+{% endif %}
 {% else %}
 <p class="muted" style="text-align:center;">لا توجد نتائج مكتملة بعد لأي تحليل ضمن هذي اللوحة.</p>
 {% endfor %}
