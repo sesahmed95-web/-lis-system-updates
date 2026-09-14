@@ -451,7 +451,14 @@
             </div>
             {% endif %}
             <div class="footer-address">
-              <span class="addr-line"><span class="addr-label">العنوان</span> : كوت – شارع الأطباء/ شارع دائرة الكهرباء القديمة / خلف مصرف الرافدين // للاستفسار: <span class="phone">07827434531</span> &nbsp;|&nbsp; <span class="email-line">hematologist_lab@yahoo.com</span></span>
+              {% set _addr_ov = (report_layout.text_overrides or {}).get('footer_address') %}
+              <span class="addr-line" data-edit-key="footer_address" data-edit-default="العنوان : كوت – شارع الأطباء/ شارع دائرة الكهرباء القديمة / خلف مصرف الرافدين // للاستفسار: 07827434531  |  hematologist_lab@yahoo.com">
+                {%- if _addr_ov -%}
+                  {{ _addr_ov }}
+                {%- else -%}
+                  <span class="addr-label">العنوان</span> : كوت – شارع الأطباء/ شارع دائرة الكهرباء القديمة / خلف مصرف الرافدين // للاستفسار: <span class="phone">07827434531</span> &nbsp;|&nbsp; <span class="email-line">hematologist_lab@yahoo.com</span>
+                {%- endif -%}
+              </span><span class="edit-pencil no-print" onclick="examEditInline(this.previousElementSibling)" title="تعديل">✏️</span>
             </div>
           </div>
         </td></tr>
