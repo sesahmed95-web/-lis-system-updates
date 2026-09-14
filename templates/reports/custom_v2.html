@@ -1,0 +1,88 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+{#
+  reports/custom_v2.html
+  =============================================================================
+  تصميم بديل لجدول النتائج (Conventional Units / SI Units لكل تحليل، مع
+  Normal Range تحت كل واحد) بناءً على طلب المستخدم لتقارير الكيمياء/
+  الفيتامينات/الفايروسات/الدلائل الورمية تحديدًا — يُفعَّل تلقائيًا حسب
+  اسم "Department" لهذا التحليل (راجع uses_order_style_report بـapp.py)،
+  أو يدويًا عبر /master/test-catalog/<id>/report-header-style.
+
+  لا يغيّر ترويسة معلومات المريض إطلاقًا (Sample No. وباقي الحقول تبقى
+  كما هي تمامًا عبر patient_meta_v2 الافتراضي من base_report.html) —
+  فقط شكل جدول النتائج نفسه. يستخدم بالضبط نفس متغيرات custom.html
+  (custom_rows, custom_heading...الخ) فما يحتاج أي تغيير بجهة تحضير
+  البيانات بـapp.py، فرق العرض فقط بين الملفين.
+#}
+<style>
+  .ov2-table-head {
+    display: grid; grid-template-columns: 1fr 130px 130px; gap: 8px;
+    border-bottom: 1.5px solid #26529C; padding-bottom: 4px; margin-bottom: 4px;
+    font-weight: 700; font-size: 0.92em; text-align: start;
+  }
+  .ov2-table-head .ov2-col-si { text-align: center; }
+  .ov2-block { border-bottom: 1px dashed #CBD5E1; padding: 8px 0; }
+  .ov2-block:last-child { border-bottom: none; }
+  .ov2-name-row { display: grid; grid-template-columns: 1fr 130px 130px; gap: 8px; align-items: baseline; }
+  .ov2-name { font-weight: 700; }
+  .ov2-conv, .ov2-si { text-align: center; white-space: nowrap; }
+  .ov2-conv .ov2-result, .ov2-si .ov2-result { font-weight: 700; }
+  .ov2-conv .ov2-unit, .ov2-si .ov2-unit { color: #475569; font-size: 0.85em; margin-inline-start: 4px; }
+  .ov2-normal { margin-top: 3px; margin-inline-start: 4px; font-size: 0.88em; color: #334155; }
+  .ov2-normal-label { font-weight: 700; color: #475569; }
+  .ov2-tier { display: flex; gap: 10px; padding: 1px 0 1px 14px; }
+  .ov2-tier .ov2-tier-label { min-width: 140px; }
+  .ov2-prev { margin-top: 4px; margin-inline-start: 4px; font-size: 0.82em; color: #1D4ED8; background: #EFF6FF; padding: 3px 8px; border-radius: 4px; display: inline-block; }
+  .ov2-flag { font-size: 0.7em; font-weight: bold; margin-inline-start: 5px; }
+</style>
+
+<div class="report-heading" style="text-align: {{ custom_heading_align|default('center') }};">{{ custom_heading }}</div>
+
+<div class="ov2-table-head">
+  <div>Test Name</div>
+  <div class="ov2-col-si">Conventional Units</div>
+  <div class="ov2-col-si">SI Units</div>
+</div>
+
+{% for row in custom_rows %}
+{% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and not row.color and row.flag) else none %}
+<div class="ov2-block"{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
+  <div class="ov2-name-row">
+    <div class="ov2-name" style="{% if row.color %}color:{{ row.color }};{% elif auto_color %}color:{{ auto_color }};{% endif %}">{{ row.label }}</div>
+    <div class="ov2-conv">
+      {% if row.result not in (None, '') %}
+      <span class="ov2-result" style="{% if row.color %}color:{{ row.color }};{% elif auto_color %}color:{{ auto_color }};{% endif %}">{{ row.result }}</span>
+      {% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="ov2-flag" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}
+      {% endif %}
+      {% if row.unit %}<span class="ov2-unit">{{ row.unit }}</span>{% endif %}
+    </div>
+    <div class="ov2-si">
+      {% if row.result2 %}<span class="ov2-result">{{ row.result2 }}</span>{% endif %}
+      {% if row.unit2 %}<span class="ov2-unit">{{ row.unit2 }}</span>{% endif %}
+    </div>
+  </div>
+
+  {% if row.range_tiers %}
+  <div class="ov2-normal">
+    {% if row.range_tiers|length == 1 and not row.range_tiers[0].label %}
+    <span class="ov2-normal-label">Normal Range</span>
+    <span>{{ row.range_tiers[0].value }}</span>
+    {% else %}
+    <div class="ov2-normal-label">Normal Range</div>
+    {% for tier in row.range_tiers %}
+    <div class="ov2-tier">{% if tier.label %}<span class="ov2-tier-label">{{ tier.label }}</span>{% endif %}<span>{{ tier.value }}</span></div>
+    {% endfor %}
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if row.normal_range2 %}
+  <div class="ov2-normal" style="margin-inline-start: 0; text-align:end;">{{ row.normal_range2 }}</div>
+  {% endif %}
+
+  {% if show_prev_values and row.previous %}
+  <div class="ov2-prev">↩ Previous Result{% if previous_visit_date %} ({{ previous_visit_date }}){% endif %} — {{ row.previous }}{% if row.unit %} {{ row.unit }}{% endif %}</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

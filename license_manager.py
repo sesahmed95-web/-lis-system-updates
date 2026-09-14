@@ -49,20 +49,30 @@ def _raw_machine_fingerprint():
     parts = []
     try:
         if system == "Windows":
-            out = subprocess.check_output(
-                "wmic csproduct get uuid", shell=True,
-                stderr=subprocess.DEVNULL, timeout=5,
-            ).decode(errors="ignore")
-            lines = [ln.strip() for ln in out.splitlines() if ln.strip() and "UUID" not in ln.upper()]
-            if lines:
-                parts.append(lines[0])
-            out2 = subprocess.check_output(
-                "wmic diskdrive get serialnumber", shell=True,
-                stderr=subprocess.DEVNULL, timeout=5,
-            ).decode(errors="ignore")
-            lines2 = [ln.strip() for ln in out2.splitlines() if ln.strip() and "SERIAL" not in ln.upper()]
-            if lines2:
-                parts.append(lines2[0])
+            # ⚠️ تصحيح مهم: كان يعتمد سابقاً على أمر "wmic" (متوقف رسمياً
+            # من مايكروسوفت ومحذوف من تحديثات ويندوز 11 الحديثة) لجلب UUID
+            # اللوحة الأم + الرقم التسلسلي لأول قرص. لما "wmic" يفشل (بعد
+            # أي تحديث ويندوز يشيله)، كان الكود يسكت الخطأ ويرجع فقط لـ
+            # uuid.getnode() الاحتياطي — وهذا غير مضمون الثبات إطلاقاً
+            # (بايثون توثّق انه يرجّع رقم عشوائي جديد كل تشغيل لو ما قدر
+            # يجيب عنوان الشبكة الحقيقي)، وحتى لو "wmic" اشتغل، ترتيب
+            # الأقراص بالـWMI نفسه غير مضمون الثبات بين إعادة تشغيل وأخرى.
+            # الحل: قراءة "MachineGuid" مباشرة من ريجستري ويندوز — رقم
+            # يتولّد مرة وحدة بس عند تنصيب ويندوز، وما يتغيّر إلا بفورمات
+            # كامل. هذا المصدر الوحيد المعتمد الآن لبصمة ويندوز (بدون
+            # الاعتماد على wmic إطلاقاً)، فيبقى المعرّف ثابت دائماً.
+            try:
+                import winreg
+                key = winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography",
+                    0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+                )
+                guid, _ = winreg.QueryValueEx(key, "MachineGuid")
+                winreg.CloseKey(key)
+                if guid:
+                    parts.append(str(guid).strip())
+            except Exception:
+                pass
         elif system == "Linux":
             for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
                 if os.path.exists(p):
