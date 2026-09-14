@@ -35,7 +35,7 @@
 
   /* ============== ترويسة بيانات المريض/العينة (patient_meta_v2) ============== */
   .patient-info-v2 {
-    display: flex; justify-content: space-between; gap: 36px;
+    display: flex; justify-content: space-between; gap: {{ patient_info_col_gap|default(36) }}px;
     margin: {{ patient_info_top_gap|default(4) }}px 0 14px 0; direction: ltr;
     font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 13.5px;
   }
@@ -48,6 +48,24 @@
     color: #7A1F1F; direction: rtl; unicode-bidi: isolate; text-align: right;
     font-family: var(--exam-font-ar);
   }
+  /* اسم المريض بالعربي: سطر مستقل بالوسط فوق صندوق معلومات المريض، مو
+     بصف "Patient Name:" العادي — هذا السطر خاص بالإنكليزي بس (طلب
+     المستخدم). القلم يشتغل بنفس آلية meta_field الاعتيادية. */
+  .patient-name-ar-standalone {
+    text-align: center; font-size: 1.15em; font-weight: 700; color: #7A1F1F;
+    direction: rtl; unicode-bidi: isolate; font-family: var(--exam-font-ar);
+    margin-bottom: 6px; position: relative;
+  }
+  .patient-name-ar-standalone .meta-edit-btn { opacity: 0; font-size: 0.6em; margin-inline-start: 6px; cursor: pointer; }
+  /* قلم etext() العام — نفس الشكل اللي كان محليًا بـblood_film.html، صار
+     مشترك هنا حتى يقدر يستخدمه أي قالب (زي تذييل العنوان بـbase_report.html). */
+  .edit-pencil { cursor: pointer; font-size: 0.75em; margin-inline-start: 3px; opacity: 0.6; }
+  .edit-pencil:hover { opacity: 1; }
+  .edit-inline[contenteditable="true"] { outline: 1px dashed #94A3B8; padding: 0 2px; }
+  @media print { .edit-pencil { display: none !important; } }
+  .patient-name-ar-standalone:hover .meta-edit-btn { opacity: 0.55; }
+  .patient-name-ar-standalone .meta-edit-btn:hover { opacity: 1; }
+  @media print { .patient-name-ar-standalone .meta-edit-btn { display: none !important; } }
 
   /* ============== عنوان التحليل + عناوين الأقسام ============== */
   .report-title {
@@ -290,6 +308,13 @@
    مطبوع بديل ضمن report_layout.patient_meta_overrides (بنفس نطاق حفظ
    بقية التصميم: هذا المريض فقط أو كل مرضى هذا التحليل)، ولا يغيّر أي
    بيانات حقيقية بجداول patients/visits — تصحيح عرض بالتقرير فقط. #}
+{# نص قابل للتعديل المباشر (✏️) بأي مكان بأي تقرير — اسم باراميتر، وحدة،
+   تسمية صندوق، عنوان تذييل...الخ. يُحفظ بـreport_layout.text_overrides
+   (يُجمَع بـexamSerializeLayout عبر [data-edit-key], راجع الشرح هناك).
+   key لازم يكون فريد بكل القالب اللي يُستخدم فيه. default هو النص
+   الأصلي (يُقارَن بيه وقت الحفظ لمعرفة هل تغيّر فعلاً أو رجع لأصله). #}
+{% macro etext(key, default) %}<span class="edit-inline" data-edit-key="{{ key }}" data-edit-default="{{ default }}">{{ (report_layout.text_overrides or {}).get(key, default) }}</span><span class="edit-pencil no-print" onclick="examEditInline(this.previousElementSibling)" title="تعديل">✏️</span>{% endmacro %}
+
 {% macro meta_field(key, label, real_value, pmo, extra_class='') %}
 {% set val = pmo.get(key, real_value) %}
 <div class="info-row editable-meta-row">
@@ -302,9 +327,15 @@
 {% macro patient_meta_v2() %}
 {% set rl = report_layout|default({}) %}
 {% set pmo = rl.get('patient_meta_overrides', {}) %}
+{# اسم المريض بالعربي: سطر مستقل بالوسط، منفصل عن صف "Patient Name:"
+   العادي (طلب المستخدم) — بس بنفس مفتاح الحفظ name_ar وبنفس آلية القلم،
+   حتى يبقى التعديل يُحفظ بنفس مكانه القديم بدون كسر أي تعديل سابق. #}
+<div class="patient-name-ar-standalone editable-meta-row">
+  <span class="info-val ar-name" data-meta-key="name_ar">{{ pmo.get('name_ar', patient_name|default('')) }}</span>
+  <span class="meta-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل">✏️</span>
+</div>
 <div class="patient-info-v2">
   <div class="info-col">
-    {{ meta_field('name_ar', 'Patient Name', patient_name|default(''), pmo, 'ar-name') }}
     {% if patient_name_en|default('') or pmo.get('name_en') %}
     {{ meta_field('name_en', 'Patient Name', patient_name_en|default(''), pmo) }}
     {% endif %}
@@ -777,6 +808,13 @@ function examApplyGenericPencils() {
   document.querySelectorAll('table.data-table th').forEach(function (th) {
     makeEditable(th, 'تعديل نص هذا العمود بالطباعة');
   });
+
+  // 5) تسمية الصناديق تحت الجدول (RBC:/WBC:/Platelets:/Conclusion:...
+  //    بـblood_film.html ومشابهاتها) — العنصر <b> نفسه بس (تسميته)، أبداً
+  //    مو القيمة/الوصف جنبه، حتى ما نلمس بيانات المريض الفعلية بالغلط.
+  document.querySelectorAll('.box-field b').forEach(function (b) {
+    makeEditable(b, 'تعديل تسمية هذا الحقل بالطباعة');
+  });
 }
 
 var examDndAttached = false;
@@ -1043,6 +1081,21 @@ function examSerializeLayout() {
     pmo[span.dataset.metaKey] = span.textContent.trim();
   });
   if (Object.keys(pmo).length) layout.patient_meta_overrides = pmo;
+  // نص قابل للتعديل بأي مكان (نظام etext() بـblood_film.html وأمثاله —
+  // عنوان، تسمية صندوق، وحدة...) — مفتاح ثابت data-edit-key بدل الاعتماد
+  // على النص الأصلي نفسه كمفتاح، فيبقى التعديل صحيح حتى لو تغيّر النص
+  // الافتراضي لاحقًا. يُحفظ بـreport_layout.text_overrides.
+  var text_overrides = {};
+  document.querySelectorAll('[data-edit-key]').forEach(function (span) {
+    var key = span.dataset.editKey;
+    var def = span.dataset.editDefault;
+    var newText = span.textContent.trim();
+    if (!key) return;
+    if (newText && newText !== def) {
+      text_overrides[key] = newText;
+    }
+  });
+  if (Object.keys(text_overrides).length) layout.text_overrides = text_overrides;
   return layout;
 }
 function examConfirmSave(scope) {
