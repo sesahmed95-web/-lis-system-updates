@@ -314,18 +314,15 @@
 {% macro patient_meta_v2() %}
 {% set rl = report_layout|default({}) %}
 {% set pmo = rl.get('patient_meta_overrides', {}) %}
-{# اسم المريض بالعربي: سطر مستقل بالوسط، منفصل عن صف "Patient Name:"
-   العادي (طلب المستخدم) — بس بنفس مفتاح الحفظ name_ar وبنفس آلية القلم،
-   حتى يبقى التعديل يُحفظ بنفس مكانه القديم بدون كسر أي تعديل سابق. #}
-<div class="patient-name-ar-standalone editable-meta-row">
-  <span class="info-val ar-name" data-meta-key="name_ar">{{ pmo.get('name_ar', patient_name|default('')) }}</span>
-  <span class="meta-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل">✏️</span>
-</div>
 <div class="patient-info-v2">
   <div class="info-col">
-    {% if patient_name_en|default('') or pmo.get('name_en') %}
+    {# صفّا اسم المريض (عربي ثم إنكليزي) — صفوف عادية بتسمية "Patient Name"
+       فوق العمر مباشرة بكل التقارير. الإنكليزي يظهر دائمًا (حتى لو فاضي)
+       حتى يبقى ترتيب الترويسة ثابت ولا تختفي التسمية بالمعاينة أو بمريض
+       ما انسجل اسمه الإنكليزي بعد. نفس مفاتيح الحفظ القديمة (name_ar /
+       name_en) فما ينكسر أي تعديل سابق محفوظ. #}
+    {{ meta_field('name_ar', 'Patient Name', patient_name|default(''), pmo, 'ar-name') }}
     {{ meta_field('name_en', 'Patient Name', patient_name_en|default(''), pmo) }}
-    {% endif %}
     {{ meta_field('age', 'Age', age|default(''), pmo) }}
     {{ meta_field('sex', 'Sex', sex|default(''), pmo) }}
     {{ meta_field('consultant', 'Consultant', referring_doctor_name|default(''), pmo) }}
