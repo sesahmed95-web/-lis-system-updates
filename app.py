@@ -553,6 +553,36 @@ def get_report_flag_settings(db):
 ROW_SPACING_PRESETS = {"tight": 4, "normal": 8, "loose": 14}
 
 
+# تحاليل الكيمياء/الفيتامينات/الفايروسات/الدلائل الورمية تطبع بتصميم جدول
+# مختلف (Test Name / Conventional Units / SI Units، مع Normal Range تحت كل
+# تحليل) بناءً على طلب المستخدم — يُكتشف تلقائيًا من اسم "Department" لهذا
+# التحليل بكتالوج التحاليل، فما يحتاج أي إعداد يدوي إضافي لكل تحليل. لو
+# تحليل معيّن ما انطبق عليه رغم إنه فعلاً كيمياء/فيتامينات/فايروسات/دلائل
+# ورمية، عدّل حقل "Department" له بكتالوج التحاليل ليتضمن إحدى الكلمات
+# بالقائمة تحت (عربي أو إنكليزي)، أو أضف كلمة جديدة للقائمة.
+ORDER_STYLE_DEPT_KEYWORDS = [
+    "chem", "كيمياء", "بايوكيمستري", "biochem",
+    "vitamin", "فيتامين",
+    "virus", "virolog", "فايروس", "فيروس", "serolog",
+    "tumor", "marker", "ورمي", "دلائل",
+]
+
+
+def uses_order_style_report(department, report_style=None):
+    """True لو هذا التحليل يطبع بالتصميم الجديد (جدول Conventional/SI Units).
+    report_style='custom_v2' يفرضها يدويًا بغض النظر عن القسم (لأي تحليل
+    مستقبلي تريد تفعيلها له تحديدًا)؛ report_style='classic' يلغيها يدويًا
+    حتى لو القسم مطابق. غير هيك، الاعتماد على الكشف التلقائي من القسم."""
+    if report_style == "custom_v2":
+        return True
+    if report_style == "classic":
+        return False
+    if not department:
+        return False
+    d = department.lower()
+    return any(kw.lower() in d for kw in ORDER_STYLE_DEPT_KEYWORDS)
+
+
 def row_spacing_px(raw_value):
     """يحوّل test_definitions.row_spacing (المطلوب 8) لبكسل فعلي — يقبل
     درجة جاهزة (tight/normal/loose) أو رقم بكسل حر مكتوب كنص. يرجع None
@@ -608,6 +638,7 @@ def resolve_value_align(param_row):
 
 
 app.jinja_env.globals["resolve_label"] = resolve_label
+app.jinja_env.globals["uses_order_style_report"] = uses_order_style_report
 app.jinja_env.globals["resolve_value_align"] = resolve_value_align
 app.jinja_env.globals["VALUE_ALIGN_CSS"] = VALUE_ALIGN_CSS
 
@@ -901,6 +932,10 @@ def inject_globals():
     # المسافة العمودية بين كل سطر وسطر بصندوق معلومات المريض نفسه (بين
     # "Patient Name" و"Age" مثلاً) — منفصلة عن المسافة فوق الصندوق كله.
     patient_info_row_gap = get_setting(db, "patient_info_row_gap", "3")
+    # المسافة الأفقية بين عمود بيانات المريض الأيمن والأيسر (Patient
+    # Name/Age/Sex... مقابل Sample No./Patient No....) — كانت ثابتة 36px
+    # بالكود، صارت الحين قابلة للتحكم بنفس أسلوب بقية إعدادات التباعد.
+    patient_info_col_gap = get_setting(db, "patient_info_col_gap", "36")
     # نمط الخط تحت عناوين التقارير (.report-heading/.report-title) —
     # المستخدم يعاني تكرارًا من مشاكل عرض بصرية بهذا الخط تختلف باختلاف
     # المتصفح/الطابعة، فبدل ملاحقة كل شكوى شكل جديدة، صار قابل للتحكم
@@ -942,6 +977,7 @@ def inject_globals():
                 patient_info_top_gap=patient_info_top_gap,
                 patient_info_label_width=patient_info_label_width,
                 patient_info_row_gap=patient_info_row_gap,
+                patient_info_col_gap=patient_info_col_gap,
                 report_underline_style=report_underline_style,
                 letterhead_doctors=letterhead_doctors,
                 letterhead_font_size=letterhead_font_size,
@@ -4300,7 +4336,13 @@ def _print_report_impl(order_test_id):
                 return redirect(url_for("report_designer", test_definition_id=ot["test_definition_id"]))
             flash("No printable report layout is defined for this test yet.")
             return redirect(url_for("orders_list"))
-        template_name = "reports/custom.html"
+        _ot_dept_row = db.execute(
+            "SELECT department, report_style FROM test_definitions WHERE id=?", (ot["test_definition_id"],)
+        ).fetchone()
+        if _ot_dept_row and uses_order_style_report(_ot_dept_row["department"], _ot_dept_row["report_style"]):
+            template_name = "reports/custom_v2.html"
+        else:
+            template_name = "reports/custom.html"
 
     # When Blood Film and Retic Count are both ordered for this visit, pull
     # parameters/results from BOTH order_tests so the one combined report
@@ -6631,6 +6673,13 @@ def app_settings():
                 set_setting(db, "patient_info_row_gap", str(pi_row_gap))
             except ValueError:
                 pass
+        pi_col_gap_raw = request.form.get("patient_info_col_gap", "").strip()
+        if pi_col_gap_raw:
+            try:
+                pi_col_gap = max(0, min(150, int(pi_col_gap_raw)))
+                set_setting(db, "patient_info_col_gap", str(pi_col_gap))
+            except ValueError:
+                pass
         underline_style_raw = request.form.get("report_underline_style")
         if underline_style_raw in ("solid", "dashed", "none"):
             set_setting(db, "report_underline_style", underline_style_raw)
@@ -6768,6 +6817,7 @@ def app_settings():
         "patient_info_top_gap": get_setting(db, "patient_info_top_gap", "4"),
         "patient_info_label_width": get_setting(db, "patient_info_label_width", "108"),
         "patient_info_row_gap": get_setting(db, "patient_info_row_gap", "3"),
+        "patient_info_col_gap": get_setting(db, "patient_info_col_gap", "36"),
         "report_underline_style": get_setting(db, "report_underline_style", "solid"),
         "report_col_pad": get_setting(db, "report_col_pad", "12"),
         "whatsapp_country_code": get_setting(db, "whatsapp_country_code", "964"),
@@ -7406,7 +7456,10 @@ def _preview_report_design_impl(test_definition_id):
         if not custom_template:
             flash("لا يوجد تصميم لهذا التحليل بعد لتتم معاينته. صممه أولاً بالأسفل.")
             return redirect(url_for("report_designer", test_definition_id=test_definition_id))
-        template_name = "reports/custom.html"
+        if uses_order_style_report(test["department"], test["report_style"]):
+            template_name = "reports/custom_v2.html"
+        else:
+            template_name = "reports/custom.html"
 
     parameters = db.execute(
         "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (test_definition_id,)
@@ -7530,6 +7583,27 @@ def start_generic_exam_report(test_definition_id):
         "وتسحب الباراميترات بينها وتلوّنها من زر ✏️ تعديل التصميم بأعلى المعاينة."
     )
     return redirect(url_for("report_designer", test_definition_id=test_definition_id))
+
+
+@app.route("/master/test-catalog/<int:test_id>/report-header-style", methods=["POST"])
+@roles_required("supervisor")
+def set_test_report_header_style(test_id):
+    """يفرض/يلغي التصميم الجديد (جدول Conventional/SI Units) لتحليل معيّن
+    يدويًا، بغض النظر عن اسم قسمه (Department) — يُستخدم فقط لو الكشف
+    التلقائي (uses_order_style_report أعلى الملف) ما انطبق صح على تحليل
+    معيّن. value يوصل 'custom_v2' (فرض التفعيل) أو 'classic' (فرض
+    الإلغاء) أو فاضي (رجوع للكشف التلقائي حسب القسم)."""
+    db = get_db()
+    test = db.execute("SELECT id, name FROM test_definitions WHERE id=?", (test_id,)).fetchone()
+    if not test:
+        return {"ok": False, "error": "التحليل غير موجود"}, 404
+    value = (request.form.get("value") or "").strip()
+    if value not in ("custom_v2", "classic", ""):
+        return {"ok": False, "error": "قيمة غير صالحة"}, 400
+    db.execute("UPDATE test_definitions SET report_style=? WHERE id=?", (value or None, test_id))
+    db.commit()
+    log_action("SetReportHeaderStyle", "test_definition", test_id, value or "auto")
+    return {"ok": True, "value": value}
 
 
 if __name__ == "__main__":

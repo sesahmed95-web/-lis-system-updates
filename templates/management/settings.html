@@ -179,6 +179,10 @@
       <label>المسافة بين كل سطر وسطر بصندوق المعلومات نفسه (بكسل) — القيمة الافتراضية 3</label>
       <input type="number" name="patient_info_row_gap" min="0" max="30" value="{{ current.patient_info_row_gap }}" style="width:120px;">
     </div>
+    <div class="form-field">
+      <label>المسافة بين الجانب الأيمن والأيسر لصندوق المعلومات (بكسل) — القيمة الافتراضية 36</label>
+      <input type="number" name="patient_info_col_gap" min="0" max="150" value="{{ current.patient_info_col_gap }}" style="width:120px;">
+    </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
 </div>
