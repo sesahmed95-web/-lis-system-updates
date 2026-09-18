@@ -561,6 +561,23 @@ def migrate(conn):
             # موجودًا وغير متأثر — لطباعة باركود إضافي لتحليل وحيد بس عند
             # الحاجة.
             ("tube_barcode", "TEXT"),
+            # fee_waived: علامة "تحليل مجاني" -- الدكتور الفاحص لا يتقاضى أجرًا
+            # عن هذا التحليل بالذات لهذه الزيارة (يبقى التحليل يُطبع ويُحفظ
+            # بالتقرير كالمعتاد -- فقط يُستثنى من حساب أجر دكتور المختبر
+            # الفاحص visits.examining_doctor_fee). يُبدَّل من زر محمي بكلمة
+            # مرور خاصة (راجع fee_waiver_password_hash بجدول settings وشاشة
+            # الإعدادات). 0 افتراضيًا لكل التحاليل القديمة والجديدة.
+            ("fee_waived", "INTEGER DEFAULT 0"),
+            # hidden_from_log: يُبدَّل مع fee_waived نفسه (سؤال إضافي وقت
+            # الضغط على زر "🆓 تحليل مجاني": "يدخل ضمن سجل المرضى اليومي؟").
+            # ملاحظة: استثناء السعر من الحسابات (يومي/شهري/نصف سنوي/سنوي)
+            # يعتمد على fee_waived لحاله (أي تحليل مجاني يُستثنى ماديًا
+            # بكل الأحوال، ظاهر أو مخفي). hidden_from_log يتحكم فقط هل
+            # اسم التحليل يظهر بعمود "التحاليل" بصفحة daily_report أم
+            # يختفي منها كليًا -- بالحالتين نتيجته تبقى محفوظة بجدول
+            # results عادي وتقدر تطبعها/تبحث عنها بأي وقت. لا علاقة له
+            # بفاتورة المريض نفسها (خارج نطاق هذا الحقل).
+            ("hidden_from_log", "INTEGER DEFAULT 0"),
         ],
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
         "visits": [("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
@@ -1827,6 +1844,31 @@ def compute_examining_doctor_fee(db, doctor_name, test_ids):
         if row is not None:
             total += row["rate"] or 0
     return total
+
+
+def recompute_examining_doctor_fee(db, visit_id):
+    """يعيد حساب أجر دكتور المختبر الفاحص لكل زيارة من الفحوصات الحالية
+    غير الملغى أجرها فقط (fee_waived=0) ويحدّث visits.examining_doctor_fee
+    مباشرة. يُستدعى بعد أي تبديل لعلامة "تحليل مجاني" (راجع
+    toggle_order_test_fee_waiver بـapp.py) وأيضًا من شاشة تعديل الزيارة
+    بدل الحساب اليدوي القديم، حتى يبقى المصدر الوحيد لهذا الحساب مكانًا
+    واحدًا. لا يستدعي commit بنفسه -- الطرف المستدعي يتحكم بذلك."""
+    visit = db.execute("SELECT examining_doctor FROM visits WHERE id=?", (visit_id,)).fetchone()
+    if not visit:
+        return 0.0
+    order = db.execute("SELECT id FROM orders WHERE visit_id=?", (visit_id,)).fetchone()
+    test_ids = []
+    if order:
+        test_ids = [
+            r["test_definition_id"] for r in db.execute(
+                "SELECT test_definition_id FROM order_tests WHERE order_id=? "
+                "AND (fee_waived IS NULL OR fee_waived=0)",
+                (order["id"],),
+            ).fetchall()
+        ]
+    fee = compute_examining_doctor_fee(db, visit["examining_doctor"], test_ids)
+    db.execute("UPDATE visits SET examining_doctor_fee=? WHERE id=?", (fee, visit_id))
+    return fee
 
 
 # ------------------------------------------------------------------------

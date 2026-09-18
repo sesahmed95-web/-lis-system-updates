@@ -197,7 +197,11 @@
       <tbody>
         {% for ot in order_tests %}
         <tr>
-          <td>{{ ot['name'] }}</td>
+          <td>
+            {{ ot['name'] }}
+            {% if ot['fee_waived'] %}<span class="badge" style="background:#eee;color:#555;" title="لا يُحتسب أجر للفاحص عن هذا التحليل">🆓 مجاني للفاحص</span>{% endif %}
+            {% if ot['hidden_from_log'] %}<span class="badge" style="background:#fdf1f1;color:#a33;" title="لا يظهر بصفحات الحسابات ولا يُحتسب سعره بأي تقرير">🚫 خارج السجل/الحسابات</span>{% endif %}
+          </td>
           <td>
             {% if not locked %}
             <div style="display:flex;align-items:center;gap:6px">
@@ -210,7 +214,13 @@
             {% endif %}
           </td>
           <td><span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span></td>
-          <td>
+          <td style="white-space:nowrap;">
+            {% if ot['is_examining_test'] %}
+            <button type="button" class="btn small secondary" title="{{ 'إلغاء المجانية' if ot['fee_waived'] else 'جعله مجاني (بدون أجر فاحص)' }}"
+                    onclick="toggleFeeWaiver({{ ot['id'] }}, {{ (not ot['fee_waived'])|tojson }})">
+              {{ '↩️' if ot['fee_waived'] else '🆓' }}
+            </button>
+            {% endif %}
             {% if not locked %}
             <button type="submit" formaction="{{ url_for('visit_remove_test', visit_id=visit['id'], order_test_id=ot['id']) }}" class="btn small danger" title="حذف الفحص من الزيارة"
                     onclick="return confirm('حذف «{{ ot['name'] }}» من الزيارة؟ (يمكن التراجع بعدها من هذه الصفحة)')">✕</button>
@@ -354,6 +364,42 @@
   });
   refreshAddTestPrice();
   refreshExaminingDoctorVisibility();
+
+  // ------------------------------------------------------------------
+  // زر "🆓 جعله مجاني" -- يستثني تحليل واحد بالذات من سعره ومن أجر دكتور
+  // المختبر الفاحص بكل صفحات الحسابات (يومي/شهري/نصف سنوي/سنوي). يسأل
+  // أيضًا هل يظهر التحليل بعمود "التحاليل" بالسجل اليومي أم يختفي منه
+  // كليًا -- بالحالتين النتيجة تبقى محفوظة بقاعدة البيانات وتُطبع عاديًا.
+  // محمي بكلمة مرور خاصة تُضبط من صفحة الإعدادات (بطاقة "تحليل مجاني").
+  // ------------------------------------------------------------------
+  const FEE_WAIVER_CONFIGURED = {{ fee_waiver_configured|tojson }};
+  function toggleFeeWaiver(orderTestId, willWaive) {
+    if (!FEE_WAIVER_CONFIGURED) {
+      alert('لم تُضبط كلمة مرور ميزة "تحليل مجاني" بعد -- اطلب من المسؤول ضبطها أولاً من صفحة الإعدادات.');
+      return;
+    }
+    const password = prompt(willWaive
+      ? 'أدخل كلمة مرور تفعيل "تحليل مجاني" للمتابعة:'
+      : 'أدخل كلمة مرور "تحليل مجاني" لإلغاء المجانية عن هذا التحليل:');
+    if (password === null) return;
+    let hideFromLog = 0;
+    if (willWaive) {
+      hideFromLog = confirm('هل يدخل هذا التحليل ضمن سجل المرضى اليومي؟\n\nاضغط "موافق" = نعم، يدخل بالسجل (بس بدون أجر للفاحص).\nاضغط "إلغاء" = لا، ما يدخل بالسجل إطلاقًا، وسعره ما يُحتسب بأي حساب يومي/شهري (بس النتيجة تبقى محفوظة بقاعدة البيانات).') ? 0 : 1;
+    }
+    const personName = prompt('اسمك (يُسجَّل فقط للمراجعة):') || '';
+    const body = new URLSearchParams({ password: password, person_name: personName, hide_from_log: String(hideFromLog) });
+    fetch('/workbench/orders/' + orderTestId + '/toggle-fee-waiver', { method: 'POST', body: body })
+      .then(function (r) { return r.json().then(function (data) { return { status: r.status, data: data }; }); })
+      .then(function (res) {
+        if (res.data.ok) {
+          location.reload();
+        } else {
+          alert(res.data.error || 'تعذّر تنفيذ العملية.');
+        }
+      })
+      .catch(function () { alert('تعذّر الاتصال بالسيرفر.'); });
+  }
+  window.toggleFeeWaiver = toggleFeeWaiver;
 
   // ------------------------------------------------------------------
   // "Home Visit" — إظهار حقلي العنوان والأجرة الإضافية فقط عند اختيار "نعم"

@@ -23,16 +23,54 @@
 
 <div class="card">
   <table>
-    <thead><tr><th>{{ t('test') }}</th><th>{{ t('parameter') }}</th><th>{{ t('content') }}</th></tr></thead>
+    <thead><tr><th>{{ t('test') }}</th><th>{{ t('parameter') }}</th><th>{{ t('content') }}</th><th></th></tr></thead>
     <tbody>
       {% for r in rows %}
-      <tr>
+      <tr id="sugg-view-{{ r['id'] }}">
         <td>{{ r['test_name'] }}</td>
         <td>{{ r['param_name'] }}</td>
         <td>{{ r['content'] }}</td>
+        <td style="white-space:nowrap;">
+          <button type="button" class="btn small secondary" onclick="suggToggleEdit({{ r['id'] }})">✏️ تعديل</button>
+          <form method="POST" action="{{ url_for('delete_suggestion', suggestion_id=r['id']) }}" style="display:inline"
+                onsubmit="return confirm('حذف هذا الاقتراح؟');">
+            <button class="btn small danger" type="submit">حذف</button>
+          </form>
+        </td>
+      </tr>
+      <tr id="sugg-edit-{{ r['id'] }}" style="display:none">
+        <td colspan="4">
+          <form method="POST" action="{{ url_for('update_suggestion', suggestion_id=r['id']) }}" class="form-grid" style="align-items:end;">
+            <div class="form-field">
+              <label>{{ t('parameter') }}</label>
+              <select name="test_parameter_id" required>
+                {% for p in parameters %}
+                <option value="{{ p['id'] }}" {{ 'selected' if p['id'] == r['test_parameter_id'] }}>{{ p['test_name'] }} — {{ p['name'] }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-field">
+              <label>{{ t('content') }}</label>
+              <input type="text" name="content" required value="{{ r['content'] }}">
+            </div>
+            <div class="form-field">
+              <button class="btn small success" type="submit">{{ t('save') }}</button>
+              <button type="button" class="btn small secondary" onclick="suggToggleEdit({{ r['id'] }})">إلغاء</button>
+            </div>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+<script>
+  function suggToggleEdit(id) {
+    var view = document.getElementById('sugg-view-' + id);
+    var edit = document.getElementById('sugg-edit-' + id);
+    var showing = edit.style.display !== 'none';
+    edit.style.display = showing ? 'none' : 'table-row';
+    view.style.display = showing ? 'table-row' : 'none';
+  }
+</script>
 {% endblock %}

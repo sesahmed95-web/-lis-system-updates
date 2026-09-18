@@ -9,6 +9,10 @@ import json
 import re
 import subprocess
 import webbrowser
+import shutil
+import sqlite3
+import tempfile
+import zipfile
 
 from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_test_price, find_or_create_doctor, find_or_create_referral_center,
@@ -19,6 +23,7 @@ from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_letterhead_doctors,
                        get_examining_tests, get_examining_rates_map,
                        set_examining_doctor_rate, compute_examining_doctor_fee,
+                       recompute_examining_doctor_fee,
                        find_reference_range,
                        save_saved_report, get_saved_report, search_saved_reports,
                        get_digital_stamps, get_digital_stamp, add_digital_stamp,
@@ -913,6 +918,15 @@ def inject_globals():
     # محقونة هنا عالمياً حتى تتوفر بـ dashboard.html دون تمريرها يدويًا من route.
     dashboard_bg_path = get_setting(db, "dashboard_bg_path", "")
     dashboard_bg_url = url_for("static", filename=dashboard_bg_path) if dashboard_bg_path else None
+    # تعتيم/ضبابية طبقة الخلفية فوق الصورة أو التدرّج بشاشة الترحيب —
+    # قابلة للتحكم من الإعدادات (بطاقة خلفية شاشة الترحيب)، القيم
+    # الافتراضية (62%، 2px) هي بالضبط القيم اللي كانت ثابتة بالكود سابقاً.
+    dashboard_bg_overlay_opacity = get_setting(db, "dashboard_bg_overlay_opacity", "62")
+    dashboard_bg_blur = get_setting(db, "dashboard_bg_blur", "2")
+    # موضع الصورة (أي جزء منها يبقى بمنتصف الشاشة عند القص) -- إضافة سابقة
+    # لم تُحذف، بس مو موجودة بآخر نسخة رفعها المستخدم؛ أعدتها هنا لحد ما
+    # يتأكد إذا يريدها يبقى أو يشيلها نهائيًا (سألته صراحة قبل الحذف).
+    dashboard_bg_position = get_setting(db, "dashboard_bg_position", "center")
     # عنوان وهاتف المختبر — اختياريان، يُضبطان مرة وحدة من الإعدادات (بطاقة
     # العلامة التجارية) ويظهران تلقائيًا بأي قالب يحتاجهم (خصوصًا فاتورة
     # A5 — نقطة #10) بدون تمريرهما يدويًا من كل route.
@@ -972,6 +986,9 @@ def inject_globals():
                 current_user=session.get("full_name"), current_role=session.get("role"),
                 brand_name=brand_name, logo_url=logo_url,
                 dashboard_bg_url=dashboard_bg_url,
+                dashboard_bg_overlay_opacity=dashboard_bg_overlay_opacity,
+                dashboard_bg_blur=dashboard_bg_blur,
+                dashboard_bg_position=dashboard_bg_position,
                 lab_address=lab_address, lab_phone=lab_phone,
                 report_row_pad=report_row_pad, report_col_pad=report_col_pad,
                 patient_info_top_gap=patient_info_top_gap,
@@ -2747,12 +2764,9 @@ def visit_edit(visit_id):
 
         # نعيد حساب أجر دكتور المختبر الفاحص حسب كل الفحوصات الحالية بالزيارة
         # (بعد أي حذف/إضافة) واسم الدكتور الفاحص المختار حاليًا.
-        current_test_ids = [
-            row["test_definition_id"]
-            for row in db.execute("SELECT test_definition_id FROM order_tests WHERE order_id=?", (order["id"],)).fetchall()
-        ]
-        examining_doctor_fee = compute_examining_doctor_fee(db, examining_doctor, current_test_ids)
-        db.execute("UPDATE visits SET examining_doctor_fee=? WHERE id=?", (examining_doctor_fee, visit_id))
+        # (تحاليل "مجانية" fee_waived=1 تُستثنى تلقائيًا من هذا الحساب --
+        # راجع recompute_examining_doctor_fee بـdatabase.py.)
+        recompute_examining_doctor_fee(db, visit_id)
 
         # إذا انتغيّر الطبيب المُحيل، نعيد تسعير كل التحاليل الموجودة أصلاً
         # بالزيارة حسب جدول أسعار الطبيب الجديد (أو السعر الافتراضي إذا ماكو
@@ -2786,7 +2800,8 @@ def visit_edit(visit_id):
         return redirect(url_for("visits_list"))
 
     order_tests = db.execute(
-        "SELECT ot.id, ot.status, ot.test_definition_id, td.name, COALESCE(ot.price, td.price) as price "
+        "SELECT ot.id, ot.status, ot.test_definition_id, ot.fee_waived, ot.hidden_from_log, td.name, td.is_examining_test, "
+        "COALESCE(ot.price, td.price) as price "
         "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id WHERE ot.order_id=?",
         (order["id"] if order else 0,),
     ).fetchall()
@@ -2820,7 +2835,8 @@ def visit_edit(visit_id):
                             current_referral_lab_name=current_referral_lab_name,
                             test_default_prices=test_default_prices,
                             last_removed=last_removed, examining_test_ids=examining_test_ids,
-                            examining_rates=get_examining_rates_map(db), referral_labs=referral_labs)
+                            examining_rates=get_examining_rates_map(db), referral_labs=referral_labs,
+                            fee_waiver_configured=bool(get_setting(db, "fee_waiver_password_hash", "")))
 
 
 @app.route("/front-desk/visits/<int:visit_id>/order-tests/<int:order_test_id>/price", methods=["POST"])
@@ -3490,33 +3506,50 @@ def period_breakdown(db, group_len, base_where, base_params):
     """يجمع الزيارات حسب فترة زمنية (يوم أو شهر) — يرجع صفوف فيها الدخل
     والصرفيات والصافي لكل فترة فرعية، بالإضافة إلى إجمالي الفترة كاملة.
     group_len: طول substr(created_at) المستخدم للتجميع (10=يوم، 7=شهر).
-    base_where/base_params: شرط SQL لتحديد الفترة الكبيرة (مثلاً شهر معين أو سنة معينة)."""
+    base_where/base_params: شرط SQL لتحديد الفترة الكبيرة (مثلاً شهر معين أو سنة معينة).
+
+    أي تحليل معلَّم "مجاني" (fee_waived=1) يُستثنى بالكامل من "revenue" هنا
+    -- سواء كان معلَّم "يظهر بالسجل" أو "مخفي عنه" (hidden_from_log لا
+    علاقة له بالمبلغ إطلاقًا، فقط يتحكم هل اسم التحليل يظهر بعمود
+    التحاليل بصفحة daily_report أم لا -- راجع daily_report أدناه).
+
+    expenses هنا يبقى بالمعنى القديم تمامًا (صرفيات + أجور الفاحصين مجموعة
+    سوا) — أي قالب موجود يعرضه مباشرة ما ينكسر ولا تتغيّر قيمته. أضفنا
+    examining_fees كحقل جديد إضافي بس، يعرض أجور الأطباء الفاحصين لحالها
+    (المطلوب: "تُذكر بصفحات الحسابات").
+    """
     revenue_rows = db.execute(
         f"SELECT substr(v.created_at,1,{group_len}) as period, "
         f"COALESCE(SUM(COALESCE(ot.price, td.price)),0) as revenue, COUNT(DISTINCT v.id) as visits_count "
         f"FROM visits v JOIN orders o ON o.visit_id=v.id JOIN order_tests ot ON ot.order_id=o.id "
         f"JOIN test_definitions td ON td.id=ot.test_definition_id "
-        f"WHERE {base_where} GROUP BY period", base_params,
+        f"WHERE (ot.fee_waived IS NULL OR ot.fee_waived=0) AND {base_where} GROUP BY period", base_params,
     ).fetchall()
     expense_rows = db.execute(
         f"SELECT substr(v.created_at,1,{group_len}) as period, "
-        f"COALESCE(SUM(v.expenses + COALESCE(v.examining_doctor_fee,0)),0) as expenses "
+        f"COALESCE(SUM(v.expenses),0) as other_expenses, "
+        f"COALESCE(SUM(v.examining_doctor_fee),0) as examining_fees "
         f"FROM visits v WHERE {base_where} GROUP BY period", base_params,
     ).fetchall()
     data = {}
     for r in revenue_rows:
         data[r["period"]] = {"period": r["period"], "revenue": r["revenue"],
-                              "visits_count": r["visits_count"], "expenses": 0.0}
+                              "visits_count": r["visits_count"], "expenses": 0.0, "examining_fees": 0.0}
     for r in expense_rows:
         data.setdefault(r["period"], {"period": r["period"], "revenue": 0.0,
-                                       "visits_count": 0, "expenses": 0.0})
-        data[r["period"]]["expenses"] = r["expenses"]
+                                       "visits_count": 0, "expenses": 0.0, "examining_fees": 0.0})
+        # "expenses" يبقى بالضبط بنفس معناه القديم (المجموع الكلي) حتى ما
+        # ينكسر أي قالب موجود يعرضه مباشرة — examining_fees إضافة جديدة
+        # جنبه بس، مو بديلة عنه.
+        data[r["period"]]["expenses"] = r["other_expenses"] + r["examining_fees"]
+        data[r["period"]]["examining_fees"] = r["examining_fees"]
     rows = sorted(data.values(), key=lambda x: x["period"])
     for r in rows:
         r["net"] = r["revenue"] - r["expenses"]
     totals = {
         "revenue": sum(r["revenue"] for r in rows),
         "expenses": sum(r["expenses"] for r in rows),
+        "examining_fees": sum(r["examining_fees"] for r in rows),
         "visits_count": sum(r["visits_count"] for r in rows),
     }
     totals["net"] = totals["revenue"] - totals["expenses"]
@@ -3539,20 +3572,33 @@ def daily_report():
     rows = []
     grand_total = 0
     grand_expenses = 0
+    grand_examining_fees = 0
     for v in visits:
+        # نجيب كل التحاليل بدون أي فلترة أول (نحتاج fee_waived و
+        # hidden_from_log لحالهم لنفصل بين "المبلغ" و"العرض بالعمود"):
+        # - fee_waived=1: يُستثنى سعره من "total" (الدخل) بكل الأحوال،
+        #   سواء ظاهر أو مخفي بالسجل.
+        # - hidden_from_log=1: يُستثنى اسمه من عمود "التحاليل" (ما يظهر
+        #   إطلاقًا بهذا التقرير)، مع بقاء نتيجته محفوظة بقاعدة البيانات.
         items = db.execute(
-            "SELECT td.name, COALESCE(ot.price, td.price) as price, ot.doctor_id FROM order_tests ot "
+            "SELECT td.name, COALESCE(ot.price, td.price) as price, ot.doctor_id, "
+            "ot.fee_waived, ot.hidden_from_log FROM order_tests ot "
             "JOIN test_definitions td ON td.id = ot.test_definition_id "
             "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
             (v["id"],),
         ).fetchall()
-        test_names = ", ".join(i["name"] for i in items)
-        total = sum((i["price"] or 0) for i in items)
+        visible_items = [i for i in items if not i["hidden_from_log"]]
+        test_names = ", ".join(
+            i["name"] + (" (مجاني)" if i["fee_waived"] else "") for i in visible_items
+        )
+        total = sum((i["price"] or 0) for i in items if not i["fee_waived"])
         grand_total += total
-        row_expenses = (v["expenses"] or 0) + (v["examining_doctor_fee"] or 0)
+        row_expenses = v["expenses"] or 0
+        row_examining_fee = v["examining_doctor_fee"] or 0
         grand_expenses += row_expenses
+        grand_examining_fees += row_examining_fee
         doctor_names = set()
-        for i in items:
+        for i in visible_items:
             if i["doctor_id"]:
                 d = db.execute("SELECT full_name FROM doctors WHERE id=?", (i["doctor_id"],)).fetchone()
                 if d:
@@ -3562,13 +3608,17 @@ def daily_report():
             "gender": v["gender"] or "-", "age": v["age"] if v["age"] is not None else "-",
             "tests": test_names, "total": total, "doctors": ", ".join(doctor_names),
             "examining_doctor": v["examining_doctor"] or "-",
-            "expenses": row_expenses,
+            "expenses": row_expenses + row_examining_fee,  # توافق قديم: أي قالب لسا يستخدم "expenses" وحده يشتغل متل قبل تمامًا
+            "expenses_only": row_expenses,
+            "examining_fee": row_examining_fee,
             "notes": v["notes"] or "",
         })
 
+    grand_total_expenses = grand_expenses + grand_examining_fees
     return render_template("front_desk/daily_report.html", rows=rows, report_date=report_date,
-                            grand_total=grand_total, grand_expenses=grand_expenses,
-                            grand_net=grand_total - grand_expenses)
+                            grand_total=grand_total, grand_expenses=grand_total_expenses,
+                            grand_expenses_only=grand_expenses, grand_examining_fees=grand_examining_fees,
+                            grand_net=grand_total - grand_total_expenses)
 
 
 @app.route("/reports/monthly")
@@ -3663,9 +3713,18 @@ def accept_sample(order_test_id):
 def orders_list():
     db = get_db()
     status = request.args.get("status", "")
+    # فلتر التاريخ: يبقى ثابت بين الزيارات المتكررة للصفحة (محفوظ بالجلسة)
+    # لحد ما المستخدم نفسه يغيّره صراحة — ما يرجع لـ"اليوم" تلقائيًا، لأن
+    # بعض التحاليل تتأخر عدة أيام وتحتاج تبقى ظاهرة بالقائمة. فاضي (زر
+    # "الكل") = بدون أي فلتر تاريخ إطلاقًا.
+    if "date" in request.args:
+        order_date = request.args.get("date", "").strip()
+        session["orders_date_filter"] = order_date
+    else:
+        order_date = session.get("orders_date_filter", "")
     query = (
-        "SELECT ot.id, ot.barcode, ot.status, ot.created_at, "
-        "td.name as test_name, td.code as test_code, td.department, td.sample_type, "
+        "SELECT ot.id, ot.barcode, ot.status, ot.created_at, ot.fee_waived, ot.hidden_from_log, "
+        "td.name as test_name, td.code as test_code, td.department, td.sample_type, td.is_examining_test, "
         "p.full_name as patient_name, v.registration_number "
         "FROM order_tests ot "
         "JOIN test_definitions td ON td.id = ot.test_definition_id "
@@ -3673,13 +3732,84 @@ def orders_list():
         "JOIN visits v ON v.id = o.visit_id "
         "JOIN patients p ON p.id = v.patient_id "
     )
+    conditions = []
     params = []
     if status:
-        query += "WHERE ot.status = ? "
+        conditions.append("ot.status = ?")
         params.append(status)
+    if order_date:
+        conditions.append("substr(ot.created_at,1,10) = ?")
+        params.append(order_date)
+    if conditions:
+        query += "WHERE " + " AND ".join(conditions) + " "
     query += "ORDER BY ot.id DESC LIMIT 150"
     order_tests = db.execute(query, params).fetchall()
-    return render_template("workbench/orders.html", order_tests=order_tests, status=status)
+    fee_waiver_configured = bool(get_setting(db, "fee_waiver_password_hash", ""))
+    return render_template("workbench/orders.html", order_tests=order_tests, status=status, order_date=order_date,
+                            fee_waiver_configured=fee_waiver_configured)
+
+
+@app.route("/workbench/orders/<int:order_test_id>/delete", methods=["POST"])
+@roles_required("supervisor")
+def delete_order_test(order_test_id):
+    """يمسح تحليل مطلوب لحاله (سطر وحد من قائمة Orders) — لا يمسح الزيارة
+    ولا التحاليل الثانية المرتبطة فيها، فقط هذا التحليل بالذات (مثلاً طلب
+    خطأ بالغلط). يمسح أي نتائج مدخلة له مسبقًا أيضًا حتى لا تبقى نتائج
+    يتيمة بقاعدة البيانات."""
+    db = get_db()
+    ot = db.execute("SELECT id FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    if not ot:
+        flash("هذا الطلب غير موجود أصلاً.")
+        return redirect(url_for("orders_list"))
+    db.execute("DELETE FROM results WHERE order_test_id=?", (order_test_id,))
+    db.execute("DELETE FROM order_tests WHERE id=?", (order_test_id,))
+    db.commit()
+    log_action("DeleteOrderTest", "order_tests", order_test_id, "")
+    flash("تم حذف هذا الطلب.")
+    return redirect(url_for("orders_list"))
+
+
+@app.route("/workbench/orders/<int:order_test_id>/toggle-fee-waiver", methods=["POST"])
+@login_required
+def toggle_order_test_fee_waiver(order_test_id):
+    """تبديل علامة "تحليل مجاني" (بدون أجر لدكتور المختبر الفاحص، وبدون
+    احتساب سعر التحليل نفسه ضمن أي حساب يومي/شهري/نصف سنوي/سنوي) لتحليل
+    واحد بالذات -- محمي بكلمة مرور خاصة تُضبط من صفحة الإعدادات
+    (fee_waiver_password_hash)، حتى لا يقدر أي شخص بالمختبر يلعب فيها.
+    عند التفعيل يُسأل أيضًا (hide_from_log) هل يظهر اسم هذا التحليل بعمود
+    "التحاليل" بالسجل اليومي أم يختفي منه كليًا -- بالحالتين تبقى نتيجته
+    محفوظة بقاعدة البيانات وتُطبع عاديًا بتقرير المريض. الاسم المُدخَل
+    (person_name) يُسجَّل بسجل التدقيق فقط للمراجعة -- لا يوجد تحقق من
+    قائمة أسماء مغلقة."""
+    db = get_db()
+    ot = db.execute(
+        "SELECT ot.id, ot.fee_waived, o.visit_id FROM order_tests ot "
+        "JOIN orders o ON o.id = ot.order_id WHERE ot.id=?",
+        (order_test_id,),
+    ).fetchone()
+    if not ot:
+        return {"ok": False, "error": "هذا الطلب غير موجود"}, 404
+
+    stored_hash = get_setting(db, "fee_waiver_password_hash", "")
+    if not stored_hash:
+        return {"ok": False, "error": "لم تُضبط كلمة مرور هذه الميزة بعد -- اضبطها من صفحة الإعدادات أولاً."}, 400
+
+    entered_password = request.form.get("password", "")
+    if hash_password(entered_password) != stored_hash:
+        return {"ok": False, "error": "كلمة المرور غير صحيحة."}, 403
+
+    entered_name = (request.form.get("person_name") or "").strip()
+    new_val = 0 if ot["fee_waived"] else 1
+    hide_from_log = 1 if (new_val == 1 and request.form.get("hide_from_log") == "1") else 0
+    db.execute(
+        "UPDATE order_tests SET fee_waived=?, hidden_from_log=? WHERE id=?",
+        (new_val, hide_from_log, order_test_id),
+    )
+    recompute_examining_doctor_fee(db, ot["visit_id"])
+    db.commit()
+    log_action("ToggleFeeWaiver", "order_tests", order_test_id,
+               f"waived={new_val} hidden_from_log={hide_from_log} by={entered_name}")
+    return {"ok": True, "fee_waived": new_val, "hidden_from_log": hide_from_log}
 
 
 def save_order_test_results(db, ot, parameters, form, user_id, field_prefix="", patient_id=None):
@@ -5506,6 +5636,38 @@ def unverify_result(order_test_id):
 def rates():
     db = get_db()
     if request.method == "POST":
+        if request.form.get("add_test_form") is not None:
+            # فورم إضافة تحليل جديد لسريع من نفس صفحة Rates (زر إضافة/حذف
+            # المطلوب هنا) -- بديل مختصر عن الذهاب لصفحة Test Catalog، يضيف
+            # code/name/department/price فقط بدون باراميترات (تُضاف لاحقًا
+            # من Test Catalog لو احتاج التحليل نتائج مفصّلة).
+            code = request.form.get("new_code", "").strip()
+            name = request.form.get("new_name", "").strip()
+            department = request.form.get("new_department", "").strip()
+            price = float(request.form.get("new_price") or 0)
+            if not code or not name:
+                flash("الكود والاسم مطلوبان لإضافة تحليل جديد.")
+            else:
+                try:
+                    db.execute(
+                        "INSERT INTO test_definitions (code, name, department, price) VALUES (?, ?, ?, ?)",
+                        (code, name, department, price),
+                    )
+                    db.commit()
+                    log_action("AddTest", "test_definitions", 0, f"{code}:{name}")
+                    flash(f'تمت إضافة "{name}" لكتالوج الأسعار.')
+                except Exception:
+                    flash("تعذّر الإضافة -- على الأغلب هذا الكود مستخدم أصلاً لتحليل آخر.")
+            return redirect(url_for("rates"))
+
+        if request.form.get("update_department_form") is not None:
+            test_id = request.form.get("test_id")
+            department = request.form.get("department", "").strip()
+            db.execute("UPDATE test_definitions SET department=? WHERE id=?", (department, test_id))
+            db.commit()
+            flash("Department updated.")
+            return redirect(url_for("rates"))
+
         test_id = request.form.get("test_id")
         price = float(request.form.get("price") or 0)
         db.execute("UPDATE test_definitions SET price=? WHERE id=?", (price, test_id))
@@ -5514,6 +5676,34 @@ def rates():
         return redirect(url_for("rates"))
     tests = db.execute("SELECT * FROM test_definitions ORDER BY department, name").fetchall()
     return render_template("billing/rates.html", tests=tests)
+
+
+@app.route("/billing/rates/<int:test_id>/delete", methods=["POST"])
+@roles_required("admin")
+def delete_rate_test(test_id):
+    """يمسح تحليل كامل من الكتالوج (زر حذف بصفحة Rates) — بس لو ما فيه أي
+    طلب سابق (order_tests) مرتبط فيه، حتى ما ننكسر تقارير/فواتير قديمة.
+    لو مستخدم فعلاً بزيارة قديمة، نعطّله بدل مسحه (is_active=0) ونوضح
+    السبب بدل رفض صامت."""
+    db = get_db()
+    test = db.execute("SELECT id, name FROM test_definitions WHERE id=?", (test_id,)).fetchone()
+    if not test:
+        flash("هذا التحليل غير موجود أصلاً.")
+        return redirect(url_for("rates"))
+    used = db.execute("SELECT COUNT(*) as c FROM order_tests WHERE test_definition_id=?", (test_id,)).fetchone()["c"]
+    if used:
+        db.execute("UPDATE test_definitions SET is_active=0 WHERE id=?", (test_id,))
+        db.commit()
+        flash(f"\"{test['name']}\" مستخدم بـ{used} طلب سابق فما يُمسح نهائيًا — تم تعطيله بدل ذلك (ما يظهر بقوائم الطلب الجديدة).")
+    else:
+        db.execute("DELETE FROM test_parameters WHERE test_definition_id=?", (test_id,))
+        db.execute("DELETE FROM reference_ranges WHERE test_parameter_id IN "
+                   "(SELECT id FROM test_parameters WHERE test_definition_id=?)", (test_id,))
+        db.execute("DELETE FROM test_definitions WHERE id=?", (test_id,))
+        db.commit()
+        flash(f"تم حذف \"{test['name']}\" نهائيًا.")
+    log_action("DeleteOrDeactivateTest", "test_definitions", test_id, "")
+    return redirect(url_for("rates"))
 
 
 @app.route("/billing/invoices")
@@ -5636,7 +5826,7 @@ def suggestions_list():
         return redirect(url_for("suggestions_list"))
 
     rows = db.execute(
-        "SELECT s.id, s.content, tp.name as param_name, td.name as test_name FROM suggestions s "
+        "SELECT s.id, s.content, s.test_parameter_id, tp.name as param_name, td.name as test_name FROM suggestions s "
         "JOIN test_parameters tp ON tp.id = s.test_parameter_id "
         "JOIN test_definitions td ON td.id = tp.test_definition_id ORDER BY td.name LIMIT 200"
     ).fetchall()
@@ -5645,6 +5835,40 @@ def suggestions_list():
         "JOIN test_definitions td ON td.id = tp.test_definition_id ORDER BY td.name"
     ).fetchall()
     return render_template("master/suggestions.html", rows=rows, parameters=parameters)
+
+
+@app.route("/master/suggestions/<int:suggestion_id>/update", methods=["POST"])
+@roles_required("supervisor")
+def update_suggestion(suggestion_id):
+    """يعدّل اقتراح موجود — الباراميتر المرتبط فيه و/أو نصّه — من نفس
+    صفحة Suggestions (زر ✏️ لكل صف)."""
+    db = get_db()
+    row = db.execute("SELECT id FROM suggestions WHERE id=?", (suggestion_id,)).fetchone()
+    if not row:
+        flash("هذا الاقتراح غير موجود.")
+        return redirect(url_for("suggestions_list"))
+    param_id = request.form.get("test_parameter_id")
+    content = request.form.get("content", "").strip()
+    if not content:
+        flash("نص الاقتراح لا يمكن أن يكون فارغًا.")
+        return redirect(url_for("suggestions_list"))
+    db.execute(
+        "UPDATE suggestions SET test_parameter_id=?, content=? WHERE id=?",
+        (param_id, content, suggestion_id),
+    )
+    db.commit()
+    flash("تم تعديل الاقتراح.")
+    return redirect(url_for("suggestions_list"))
+
+
+@app.route("/master/suggestions/<int:suggestion_id>/delete", methods=["POST"])
+@roles_required("supervisor")
+def delete_suggestion(suggestion_id):
+    db = get_db()
+    db.execute("DELETE FROM suggestions WHERE id=?", (suggestion_id,))
+    db.commit()
+    flash("تم حذف الاقتراح.")
+    return redirect(url_for("suggestions_list"))
 
 
 
@@ -6081,6 +6305,33 @@ def update_test_report_group(test_id):
     db.execute("UPDATE test_definitions SET report_group=? WHERE id=?", (value, test_id))
     db.commit()
     return {"ok": True, "report_group": value}
+
+
+@app.route("/master/test-catalog/<int:test_id>/field", methods=["POST"])
+@roles_required("supervisor")
+def update_test_field(test_id):
+    """تعديل مباشر لعمود code/name/department/sample_type من نفس صفحة
+    كتالوج التحاليل — قائمة بيضاء صارمة بالأعمدة المسموحة (allowed_fields)
+    حتى ما يقدر أي طلب يعدّل عمود ثاني غير مقصود بهذا المسار."""
+    db = get_db()
+    field = (request.form.get("field") or "").strip()
+    value = (request.form.get("value") or "").strip()
+    allowed_fields = {"code", "name", "department", "sample_type"}
+    if field not in allowed_fields:
+        return {"ok": False, "error": "حقل غير مسموح بتعديله من هنا"}, 400
+    row = db.execute("SELECT id FROM test_definitions WHERE id=?", (test_id,)).fetchone()
+    if not row:
+        return {"ok": False, "error": "التحليل غير موجود"}, 404
+    if field in ("code", "name") and not value:
+        return {"ok": False, "error": "هذا الحقل لا يمكن أن يكون فارغًا"}, 400
+    try:
+        db.execute(f"UPDATE test_definitions SET {field}=? WHERE id=?", (value, test_id))
+        db.commit()
+    except Exception as e:
+        # الأرجح تعارض قيد UNIQUE على code (كود مستخدم أصلاً لتحليل آخر).
+        return {"ok": False, "error": "تعذّر الحفظ — على الأغلب هذا الكود مستخدم أصلاً لتحليل آخر"}, 400
+    log_action("UpdateTestField", "test_definitions", test_id, f"{field}={value}")
+    return {"ok": True, "field": field, "value": value}
 
 
 @app.route("/master/test-parameters/<int:param_id>/toggle-highlight", methods=["POST"])
@@ -6631,6 +6882,31 @@ def app_settings():
                 else:
                     flash("صيغة صورة غير مدعومة لخلفية شاشة الترحيب. استخدم PNG أو JPG أو WEBP.")
 
+        # خصائص خلفية شاشة الترحيب (تعتيم/ضبابية الطبقة فوق الصورة أو
+        # التدرّج) — قابلة للتحكم الكامل من هنا بدل قيمتين ثابتتين
+        # بالكود (كانت .62 وblur(2px))، بنفس أسلوب report_row_pad
+        # وبقية إعدادات التخصيص أعلاه. تُحقن عالمياً بـinject_globals
+        # وتُستخدم مباشرة بـdashboard.html.
+        bg_opacity = request.form.get("dashboard_bg_overlay_opacity", "").strip()
+        if bg_opacity:
+            try:
+                bg_opacity_val = max(0, min(100, int(bg_opacity)))
+                set_setting(db, "dashboard_bg_overlay_opacity", str(bg_opacity_val))
+            except ValueError:
+                pass
+        bg_blur = request.form.get("dashboard_bg_blur", "").strip()
+        if bg_blur:
+            try:
+                bg_blur_val = max(0, min(20, int(bg_blur)))
+                set_setting(db, "dashboard_bg_blur", str(bg_blur_val))
+            except ValueError:
+                pass
+        # موضع الصورة (top/center/bottom) -- أعدتها هنا (كانت موجودة قبل)
+        # لحد ما يتأكد المستخدم إذا يريدها يبقى أو يشيلها نهائيًا.
+        bg_position_raw = request.form.get("dashboard_bg_position", "").strip()
+        if bg_position_raw in ("top", "center", "bottom"):
+            set_setting(db, "dashboard_bg_position", bg_position_raw)
+
         # ملاحظة: إدارة أسماء وشهادات دكاترة الفحص انتقلت لشاشة مستقلة
         # (management/examining_doctors.html عبر الرابط بهذي الصفحة) — ما عاد
         # فيها فورم هنا.
@@ -6801,6 +7077,53 @@ def app_settings():
             if flag_low and _HEX_COLOR_RE.match(flag_low):
                 set_setting(db, "flag_color_low", flag_low)
 
+        # ------------------------------------------------------------
+        # بطاقة "تحليل مجاني" — محمية بيوزر/باسوورد تعديل مخصص ومنفصل عن
+        # كل نظام يوزرات البرنامج العادي. أول مرة (ما فيه يوزر/باسوورد
+        # تعديل محفوظ بعد) نقبل أي يوزر/باسوورد جديدين يُكتبان بحقلي
+        # "يوزر جديد/باسوورد جديد" كبذرة أولى؛ بعدها أي تعديل (حتى تغيير
+        # اليوزر/الباسوورد نفسه) يحتاج تأكيد اليوزر/الباسوورد الحاليين أولاً.
+        # ------------------------------------------------------------
+        if request.form.get("fee_waiver_form") is not None:
+            gate_user_input = request.form.get("gate_username", "").strip()
+            gate_pass_input = request.form.get("gate_password", "")
+            stored_gate_user = get_setting(db, "fee_waiver_gate_username", "")
+            stored_gate_hash = get_setting(db, "fee_waiver_gate_password_hash", "")
+
+            gate_ok = False
+            if not stored_gate_user and not stored_gate_hash:
+                new_gate_user_first = request.form.get("new_gate_username", "").strip()
+                new_gate_pass_first = request.form.get("new_gate_password", "")
+                if new_gate_user_first and new_gate_pass_first:
+                    set_setting(db, "fee_waiver_gate_username", new_gate_user_first)
+                    set_setting(db, "fee_waiver_gate_password_hash", hash_password(new_gate_pass_first))
+                    gate_ok = True
+                    flash("تم إنشاء يوزر/باسوورد التعديل الخاص بميزة \"تحليل مجاني\" لأول مرة.")
+                else:
+                    flash("لأول ضبط لهذه الميزة: اكتب يوزر وباسوورد جديدين بحقلي \"تغيير يوزر/باسوورد هذا التعديل\" بالأسفل.")
+            elif gate_user_input and gate_user_input == stored_gate_user and hash_password(gate_pass_input) == stored_gate_hash:
+                gate_ok = True
+            else:
+                flash("يوزر أو باسوورد التعديل غير صحيح — لم يتم حفظ أي تغيير على بطاقة \"تحليل مجاني\".")
+
+            if gate_ok:
+                waiver_name = request.form.get("waiver_authorized_name", "").strip()
+                if waiver_name:
+                    set_setting(db, "fee_waiver_authorized_name", waiver_name)
+                waiver_pass = request.form.get("waiver_password", "")
+                if waiver_pass:
+                    set_setting(db, "fee_waiver_password_hash", hash_password(waiver_pass))
+                new_gate_user = request.form.get("new_gate_username", "").strip()
+                new_gate_pass = request.form.get("new_gate_password", "")
+                if new_gate_user and new_gate_pass and (stored_gate_user or stored_gate_hash):
+                    set_setting(db, "fee_waiver_gate_username", new_gate_user)
+                    set_setting(db, "fee_waiver_gate_password_hash", hash_password(new_gate_pass))
+                    flash("تم تغيير يوزر/باسوورد التعديل الخاص بميزة \"تحليل مجاني\".")
+                db.commit()
+                log_action("UpdateFeeWaiverSettings", "settings", 0)
+                flash("تم حفظ إعدادات \"تحليل مجاني\".")
+            return redirect(url_for("app_settings"))
+
         db.commit()
         log_action("UpdateSettings", "settings", 0)
         flash("Settings saved.")
@@ -6813,6 +7136,9 @@ def app_settings():
         "lab_phone": get_setting(db, "lab_phone", ""),
         "logo_path": get_setting(db, "logo_path", ""),
         "dashboard_bg_path": get_setting(db, "dashboard_bg_path", ""),
+        "dashboard_bg_overlay_opacity": get_setting(db, "dashboard_bg_overlay_opacity", "62"),
+        "dashboard_bg_blur": get_setting(db, "dashboard_bg_blur", "2"),
+        "dashboard_bg_position": get_setting(db, "dashboard_bg_position", "center"),
         "report_row_pad": get_setting(db, "report_row_pad", "5"),
         "patient_info_top_gap": get_setting(db, "patient_info_top_gap", "4"),
         "patient_info_label_width": get_setting(db, "patient_info_label_width", "108"),
@@ -6836,6 +7162,7 @@ def app_settings():
         "show_result_flag": get_setting(db, "show_result_flag", "0"),
         "flag_color_high": get_setting(db, "flag_color_high", "#D40000"),
         "flag_color_low": get_setting(db, "flag_color_low", "#B58900"),
+        "fee_waiver_authorized_name": get_setting(db, "fee_waiver_authorized_name", ""),
     }
     marker_colors_by_char = get_conclusion_marker_colors(db)
     conclusion_markers = [
@@ -6853,7 +7180,309 @@ def app_settings():
 # الإعدادات، فتفعيل/تعطيل أي وحدة منهم ينعكس على الثاني وعلى auto_updater
 # نفسه فورًا. يرجّع المستخدم لنفس الصفحة اللي كان فيها (request.referrer).
 # ------------------------------------------------------------------------
-@app.route("/settings/auto-update/toggle", methods=["POST"])
+# ============================================================================
+# نظام النسخ الاحتياطي / الاستعادة (Backup / Restore) على USB أو CD
+# ============================================================================
+# فكرة العمل: قاعدة بيانات البرنامج بالكامل عبارة عن ملف واحد (lis.db).
+# "تصدير نسخة احتياطية" ينسخ هذا الملف بأمان (عبر sqlite backup API، حتى
+# لو فيه استخدام لحظي) ويحزمه مع صفحة بحث بسيطة تعمل بدون تنصيب البرنامج
+# (search_offline.html) داخل ملف ZIP واحد يُنزَّل من المتصفح -- والمستخدم
+# نفسه يحفظه بعدها بمكان تخزينه (USB / قرص) ويقدر يحرقه على CD إذا يريد.
+# "استيراد نسخة احتياطية" يرفع نفس ملف الـZIP ويستبدل قاعدة البيانات
+# الحالية بعد أخذ نسخة احتياطية تلقائية من القديمة أولاً (تحسّبًا لأي خطأ).
+#
+# 🔒 حماية إضافية مطلوبة صراحة: العملية بالكامل (تصدير أو استيراد) لازم
+# تمر عبر يوزر/باسوورد خاصين بهذا الغرض فقط (backup_gate_username /
+# backup_gate_password_hash) -- منفصلين تمامًا عن يوزر دخولك العادي وعن
+# يوزر ميزة "تحليل مجاني" -- بنفس أسلوب "أول مرة تُترك فاضية تُنشأ تلقائيًا،
+# وبعدها أي تغيير يحتاج تأكيد اليوزر/الباسوورد الحاليين" المتّبع بكل أنظمة
+# الحماية الحساسة بهذا البرنامج.
+# ============================================================================
+
+def _check_backup_gate(db, username, password):
+    """يتحقق من يوزر/باسوورد النسخ الاحتياطي الخاصين. يرجّع (ok: bool,
+    first_time: bool) -- لو ما فيه يوزر/باسوورد محفوظ بعد (أول استخدام)،
+    يعتبرها "غير جاهزة" (ok=False) لكن يعلّم first_time=True حتى تظهر
+    رسالة توجّه المستخدم لصفحة الإعدادات يضبطها أول مرة."""
+    stored_user = get_setting(db, "backup_gate_username", "")
+    stored_hash = get_setting(db, "backup_gate_password_hash", "")
+    if not stored_user and not stored_hash:
+        return False, True
+    ok = bool(username) and username == stored_user and hash_password(password or "") == stored_hash
+    return ok, False
+
+
+@app.route("/management/backup", methods=["GET"])
+@roles_required("admin")
+def backup_center():
+    db = get_db()
+    gate_ready = bool(get_setting(db, "backup_gate_username", ""))
+    return render_template(
+        "management/backup.html",
+        gate_ready=gate_ready,
+        hardware_id=license_manager.get_hardware_id(),
+        last_backup_at=get_setting(db, "last_backup_at", ""),
+    )
+
+
+@app.route("/management/backup/set-gate", methods=["POST"])
+@roles_required("admin")
+def backup_set_gate():
+    # نفس منطق بطاقة "تحليل مجاني" بالإعدادات: أول مرة تُترك الحقول فاضية
+    # (ما فيه يوزر/باسوورد محفوظ) يُقبل أي يوزر/باسوورد جديدين كبذرة أولى؛
+    # بعدها أي تغيير يحتاج تأكيد اليوزر/الباسوورد الحاليين أولاً.
+    db = get_db()
+    stored_user = get_setting(db, "backup_gate_username", "")
+    stored_hash = get_setting(db, "backup_gate_password_hash", "")
+    current_user_input = request.form.get("current_username", "").strip()
+    current_pass_input = request.form.get("current_password", "")
+    new_user = request.form.get("new_username", "").strip()
+    new_pass = request.form.get("new_password", "")
+
+    if not stored_user and not stored_hash:
+        if new_user and new_pass:
+            set_setting(db, "backup_gate_username", new_user)
+            set_setting(db, "backup_gate_password_hash", hash_password(new_pass))
+            db.commit()
+            log_action("SetBackupGate", "settings", 0)
+            flash("تم إنشاء يوزر/باسوورد النسخ الاحتياطي لأول مرة.")
+        else:
+            flash("اكتب يوزر وباسوورد جديدين لإنشاء صلاحية النسخ الاحتياطي أول مرة.")
+    elif current_user_input == stored_user and hash_password(current_pass_input) == stored_hash:
+        if new_user and new_pass:
+            set_setting(db, "backup_gate_username", new_user)
+            set_setting(db, "backup_gate_password_hash", hash_password(new_pass))
+            db.commit()
+            log_action("ChangeBackupGate", "settings", 0)
+            flash("تم تغيير يوزر/باسوورد النسخ الاحتياطي.")
+        else:
+            flash("اكتب يوزر وباسوورد جديدين بحقلي \"يوزر/باسوورد جديد\" لتغييرهما.")
+    else:
+        flash("يوزر أو باسوورد النسخ الاحتياطي الحالي غير صحيح -- لم يتم أي تغيير.")
+    return redirect(url_for("backup_center"))
+
+
+def _build_offline_export(db):
+    """يبني كل مكونات البحث والتفاصيل الكاملة بدون تنصيب أو ترخيص:
+    1) صفحة فهرس (search_offline.html) للبحث باسم المريض/رقم التسجيل/التاريخ.
+    2) ملف HTML مستقل لكل زيارة فيها تحليل مكتمل واحد على الأقل، بنفس
+       التصميم الحقيقي حرفيًا لتقرير المريض (نفس الدالة المستخدمة أصلاً
+       لتوليد ملف PDF الموحّد للأرشفة/واتساب: _build_combined_designed_reports_html) —
+       فتحه من نفس الـUSB أو الـCD بأي متصفح يعرض كل الأرقام والقيم
+       المرجعية بالضبط متل لو طُبع من داخل البرنامج، بدون أي اتصال أو
+       تنصيب. الزيارات اللي ما فيها أي تحليل مكتمل بعد تظهر بالفهرس بس
+       بدون رابط تقرير (لأنه ما فيه نتيجة جاهزة أصلاً تُطبع).
+    يرجّع (index_html: str, report_files: dict[اسم الملف -> محتوى HTML])."""
+    rows = db.execute(
+        "SELECT v.id, v.registration_number, p.full_name, v.gender, v.age, v.age_unit, "
+        "v.created_at, d.full_name as doctor_name, v.examining_doctor "
+        "FROM visits v "
+        "JOIN patients p ON p.id = v.patient_id "
+        "LEFT JOIN doctors d ON d.id = v.doctor_id "
+        "ORDER BY v.created_at DESC"
+    ).fetchall()
+    records = []
+    report_files = {}
+    for v in rows:
+        tests = db.execute(
+            "SELECT td.name, ot.status, ot.fee_waived FROM order_tests ot "
+            "JOIN test_definitions td ON td.id = ot.test_definition_id "
+            "JOIN orders o ON o.id = ot.order_id "
+            "WHERE o.visit_id=? AND (ot.hidden_from_log IS NULL OR ot.hidden_from_log=0)",
+            (v["id"],),
+        ).fetchall()
+        report_file = None
+        try:
+            combined_html = _build_combined_designed_reports_html(v["id"])
+        except Exception:
+            # ما نوقّف التصدير كامل بسبب تقرير وحيد فشل توليده -- نتجاهله
+            # ونكمّل الباقي (نفس أسلوب _build_combined_designed_reports_html
+            # نفسها مع كل تحليل).
+            combined_html = None
+        if combined_html:
+            safe_name = secure_filename(str(v["registration_number"] or v["id"])) or f"visit_{v['id']}"
+            filename = f"{safe_name}.html"
+            if filename in report_files:
+                filename = f"{safe_name}_{v['id']}.html"
+            report_files[filename] = combined_html
+            report_file = f"reports/{filename}"
+        records.append({
+            "reg": v["registration_number"],
+            "name": v["full_name"],
+            "gender": v["gender"],
+            "age": f"{v['age'] or ''} {v['age_unit'] or ''}".strip(),
+            "date": v["created_at"],
+            "referring_doctor": v["doctor_name"] or "",
+            "examining_doctor": v["examining_doctor"] or "",
+            "tests": [
+                {"name": t["name"], "status": t["status"], "free": bool(t["fee_waived"])}
+                for t in tests
+            ],
+            "report_file": report_file,
+        })
+    data_json = json.dumps(records, ensure_ascii=False)
+    html = """<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="UTF-8">
+<title>بحث نسخة احتياطية -- سجل المرضى</title>
+<style>
+body{font-family:Tahoma,Arial,sans-serif;background:#f3f6f8;margin:0;padding:20px;}
+h1{color:#205072;font-size:18px;}
+input{padding:8px;width:100%;max-width:420px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;}
+table{width:100%;border-collapse:collapse;background:#fff;margin-top:14px;}
+th,td{border:1px solid #e2e8f0;padding:6px 10px;font-size:13px;text-align:right;}
+th{background:#205072;color:#fff;}
+.muted{color:#64748b;font-size:12px;}
+.free{color:#0f766e;font-weight:bold;}
+a.report-link{background:#205072;color:#fff;text-decoration:none;padding:4px 10px;border-radius:5px;font-size:12px;white-space:nowrap;}
+span.no-report{color:#94a3b8;font-size:12px;}
+</style></head><body>
+<h1>🔎 بحث كامل بالنسخة الاحتياطية (بدون تنصيب أو ترخيص)</h1>
+<p class="muted">اضغط "عرض التقرير الكامل" لأي مريض عنده نتيجة جاهزة لعرض كل الأرقام والقيم المرجعية بنفس تصميم التقرير المطبوع بالضبط -- كل هذا يفتح من نفس الملفات المحلية بدون أي اتصال انترنت.</p>
+<input id="q" type="text" placeholder="اكتب اسم المريض أو رقم التسجيل أو التاريخ...">
+<table id="tbl"><thead><tr><th>رقم التسجيل</th><th>الاسم</th><th>الجنس</th><th>العمر</th><th>التاريخ</th><th>التحاليل</th><th>التقرير</th></tr></thead>
+<tbody></tbody></table>
+<script>
+const DATA = __DATA_JSON__;
+const tbody = document.querySelector('#tbl tbody');
+function render(list) {
+  tbody.innerHTML = '';
+  list.slice(0, 300).forEach(function(r) {
+    const testsStr = r.tests.map(function(t){ return t.name + (t.free ? ' (مجاني)' : ''); }).join('، ');
+    const reportCell = r.report_file
+      ? '<a class="report-link" target="_blank" href="' + r.report_file + '">📄 عرض التقرير الكامل</a>'
+      : '<span class="no-report">لا توجد نتيجة جاهزة بعد</span>';
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + r.reg + '</td><td>' + r.name + '</td><td>' + r.gender + '</td><td>' + r.age +
+      '</td><td>' + r.date + '</td><td>' + testsStr + '</td><td>' + reportCell + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+document.getElementById('q').addEventListener('input', function(e) {
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) { render(DATA); return; }
+  render(DATA.filter(function(r) {
+    return (r.reg + ' ' + r.name + ' ' + r.date).toLowerCase().indexOf(q) !== -1;
+  }));
+});
+render(DATA);
+</script>
+</body></html>"""
+    return html.replace("__DATA_JSON__", data_json), report_files
+
+
+@app.route("/management/backup/export", methods=["POST"])
+@roles_required("admin")
+def backup_export():
+    db = get_db()
+    ok, first_time = _check_backup_gate(db, request.form.get("username", "").strip(), request.form.get("password", ""))
+    if first_time:
+        flash("لازم تضبط يوزر/باسوورد النسخ الاحتياطي أولاً من نفس هذه الصفحة.")
+        return redirect(url_for("backup_center"))
+    if not ok:
+        flash("يوزر أو باسوورد النسخ الاحتياطي غير صحيح -- لم يتم تصدير أي شيء.")
+        return redirect(url_for("backup_center"))
+
+    from database import DB_PATH
+    # نسخ آمن لملف قاعدة البيانات عبر sqlite backup API (يتعامل صح حتى لو
+    # فيه اتصال ثاني يستخدم الملف بنفس اللحظة، بعكس نسخ الملف مباشرة).
+    tmp_dir = tempfile.mkdtemp(prefix="lis_backup_")
+    db_copy_path = os.path.join(tmp_dir, "lis.db")
+    src_conn = sqlite3.connect(DB_PATH)
+    dst_conn = sqlite3.connect(db_copy_path)
+    with dst_conn:
+        src_conn.backup(dst_conn)
+    src_conn.close()
+    dst_conn.close()
+
+    offline_html, report_files = _build_offline_export(db)
+    manifest = {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "hardware_id": license_manager.get_hardware_id(),
+        "app": get_setting(db, "app_name", "LIS"),
+        "reports_included": len(report_files),
+    }
+
+    zip_buf = BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(db_copy_path, "lis.db")
+        zf.writestr("search_offline.html", offline_html)
+        zf.writestr("backup_info.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        # كل زيارة عندها نتيجة مكتملة تحصل على ملف تقرير كامل مستقل بنفس
+        # التصميم الحقيقي بالضبط -- راجع _build_offline_export أعلاه.
+        for filename, content in report_files.items():
+            zf.writestr(f"reports/{filename}", content)
+    zip_buf.seek(0)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    set_setting(db, "last_backup_at", manifest["created_at"])
+    db.commit()
+    log_action("ExportBackup", "settings", 0, f"by={request.form.get('username','').strip()}")
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return send_file(zip_buf, mimetype="application/zip", as_attachment=True,
+                      download_name=f"lis_backup_{stamp}.zip")
+
+
+@app.route("/management/backup/import", methods=["POST"])
+@roles_required("admin")
+def backup_import():
+    db = get_db()
+    ok, first_time = _check_backup_gate(db, request.form.get("username", "").strip(), request.form.get("password", ""))
+    if first_time:
+        flash("لازم تضبط يوزر/باسوورد النسخ الاحتياطي أولاً من نفس هذه الصفحة.")
+        return redirect(url_for("backup_center"))
+    if not ok:
+        flash("يوزر أو باسوورد النسخ الاحتياطي غير صحيح -- لم يتم استيراد أي شيء.")
+        return redirect(url_for("backup_center"))
+
+    uploaded = request.files.get("backup_file")
+    if not uploaded or not uploaded.filename:
+        flash("اختر ملف النسخة الاحتياطية (ZIP) أولاً.")
+        return redirect(url_for("backup_center"))
+
+    from database import DB_PATH
+    tmp_dir = tempfile.mkdtemp(prefix="lis_restore_")
+    zip_path = os.path.join(tmp_dir, "upload.zip")
+    uploaded.save(zip_path)
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            if "lis.db" not in zf.namelist():
+                flash("هذا الملف ليس نسخة احتياطية صالحة (ما فيه lis.db بداخله).")
+                return redirect(url_for("backup_center"))
+            zf.extract("lis.db", tmp_dir)
+    except zipfile.BadZipFile:
+        flash("تعذّر فتح الملف -- تأكد إنه ملف ZIP صالح من نفس البرنامج.")
+        return redirect(url_for("backup_center"))
+
+    extracted_db = os.path.join(tmp_dir, "lis.db")
+    # تحقق سلامة قبل الاستبدال -- ما نستبدل قاعدة بيانات تالفة أو ملف مو حتى sqlite
+    try:
+        check_conn = sqlite3.connect(extracted_db)
+        result = check_conn.execute("PRAGMA integrity_check").fetchone()
+        check_conn.close()
+        if not result or result[0] != "ok":
+            flash("ملف قاعدة البيانات بالنسخة الاحتياطية غير سليم -- تم إلغاء الاستيراد.")
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return redirect(url_for("backup_center"))
+    except Exception:
+        flash("تعذّر التحقق من ملف قاعدة البيانات -- تم إلغاء الاستيراد.")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return redirect(url_for("backup_center"))
+
+    # نسخة احتياطية تلقائية من القاعدة الحالية قبل الاستبدال -- تحسبًا لأي غلط
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safety_copy = os.path.join(os.path.dirname(DB_PATH), f"lis_before_restore_{stamp}.db")
+    shutil.copy2(DB_PATH, safety_copy)
+
+    shutil.copy2(extracted_db, DB_PATH)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    log_action("ImportBackup", "settings", 0, f"by={request.form.get('username','').strip()}")
+    flash("تم استيراد النسخة الاحتياطية بنجاح. أعد تشغيل البرنامج الآن حتى تظهر البيانات المستوردة بشكل صحيح "
+          f"(نسخة القاعدة القديمة محفوظة احتياطًا باسم lis_before_restore_{stamp}.db بجانب البرنامج).")
+    return redirect(url_for("backup_center"))
+
+
+
 @roles_required("admin")
 def toggle_auto_update():
     db = get_db()

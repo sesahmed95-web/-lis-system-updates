@@ -2,18 +2,57 @@
 {% block page_title %}{{ t('rates') }}{% endblock %}
 {% block content %}
 <div class="card">
+  <h3>{{ t('add_test') }}</h3>
+  <form method="POST" class="form-grid">
+    <input type="hidden" name="add_test_form" value="1">
+    <div class="form-field">
+      <label>{{ t('code') }}</label>
+      <input type="text" name="new_code" required dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>{{ t('name') }}</label>
+      <input type="text" name="new_name" required>
+    </div>
+    <div class="form-field">
+      <label>{{ t('department') }}</label>
+      <input type="text" name="new_department">
+    </div>
+    <div class="form-field">
+      <label>{{ t('price') }}</label>
+      <input type="number" step="0.01" name="new_price" lang="en" dir="ltr">
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">{{ t('create') }}</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
   <table>
     <thead><tr><th>{{ t('test') }}</th><th>{{ t('department') }}</th><th>{{ t('price') }}</th><th></th></tr></thead>
     <tbody>
       {% for test in tests %}
       <tr>
         <td>{{ test['name'] }}</td>
-        <td>{{ test['department'] }}</td>
+        <td>
+          <form method="POST" style="display:flex; gap:6px;">
+            <input type="hidden" name="update_department_form" value="1">
+            <input type="hidden" name="test_id" value="{{ test['id'] }}">
+            <input type="text" name="department" value="{{ test['department'] or '' }}" style="width:130px">
+            <button class="btn small" type="submit">{{ t('save') }}</button>
+          </form>
+        </td>
         <td>
           <form method="POST" style="display:flex; gap:6px;">
             <input type="hidden" name="test_id" value="{{ test['id'] }}">
-            <input type="number" step="0.01" name="price" value="{{ test['price'] }}" style="width:110px">
+            <input type="number" step="0.01" name="price" value="{{ test['price'] }}" style="width:110px" lang="en" dir="ltr">
             <button class="btn small" type="submit">{{ t('update_price') }}</button>
+          </form>
+        </td>
+        <td>
+          <form method="POST" action="{{ url_for('delete_rate_test', test_id=test['id']) }}" style="display:inline"
+                onsubmit="return confirm('حذف \'' + {{ test['name']|tojson }} + '\' من الكتالوج؟ (لو مستخدم بطلبات سابقة رح يتعطّل بدل ما يُمسح نهائيًا)');">
+            <button class="btn small danger" type="submit">حذف</button>
           </form>
         </td>
       </tr>

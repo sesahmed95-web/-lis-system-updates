@@ -66,9 +66,27 @@
     <tbody>
       {% for test in tests %}
       <tr>
-        <td class="mono">{{ test['code'] }}</td>
-        <td>{{ test['name'] }}</td>
-        <td>{{ test['department'] }}</td>
+        <td class="mono">
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="text" class="field-edit-input" data-test-id="{{ test['id'] }}" data-field="code"
+                   value="{{ test['code'] }}" style="width:90px">
+            <span class="field-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+          </div>
+        </td>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="text" class="field-edit-input" data-test-id="{{ test['id'] }}" data-field="name"
+                   value="{{ test['name'] }}" style="width:180px">
+            <span class="field-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+          </div>
+        </td>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="text" class="field-edit-input" data-test-id="{{ test['id'] }}" data-field="department"
+                   value="{{ test['department'] or '' }}" style="width:130px">
+            <span class="field-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+          </div>
+        </td>
         <td>
           <div class="rg-edit-wrap" style="display:flex;align-items:center;gap:6px">
             <input type="text" class="report-group-input" data-test-id="{{ test['id'] }}"
@@ -77,12 +95,18 @@
             <span class="rg-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
           </div>
         </td>
-        <td>{{ test['sample_type'] }}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="text" class="field-edit-input" data-test-id="{{ test['id'] }}" data-field="sample_type"
+                   value="{{ test['sample_type'] or '' }}" style="width:110px">
+            <span class="field-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+          </div>
+        </td>
         <td>
           <div class="price-edit-wrap" style="display:flex;align-items:center;gap:6px">
             <input type="number" class="price-input" data-test-id="{{ test['id'] }}"
                    value="{{ test['price']|int }}" step="500" min="0"
-                   style="width:100px">
+                   style="width:100px" lang="en">
             <span class="price-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
           </div>
         </td>
@@ -97,6 +121,36 @@
     </tbody>
   </table>
 </div>
+<script>
+document.querySelectorAll('.field-edit-input').forEach(function (input) {
+  let timer = null;
+  function save() {
+    const testId = input.getAttribute('data-test-id');
+    const field = input.getAttribute('data-field');
+    const status = input.closest('div').querySelector('.field-save-status');
+    const body = new URLSearchParams({ field: field, value: input.value });
+    fetch('/master/test-catalog/' + testId + '/field', { method: 'POST', body: body })
+      .then((r) => r.json())
+      .then((data) => {
+        status.style.visibility = 'visible';
+        status.style.color = data.ok ? '#2e7d32' : '#c62828';
+        status.textContent = data.ok ? '✓' : '✕';
+        if (!data.ok && data.error) alert(data.error);
+        setTimeout(() => { status.style.visibility = 'hidden'; }, 1500);
+      })
+      .catch(() => {
+        status.style.visibility = 'visible';
+        status.style.color = '#c62828';
+        status.textContent = '✕';
+      });
+  }
+  input.addEventListener('change', save);
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(save, 600);
+  });
+});
+</script>
 <script>
 document.querySelectorAll('.exam-toggle').forEach(function (cb) {
   cb.addEventListener('change', function () {

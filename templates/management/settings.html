@@ -69,6 +69,25 @@
       {% endif %}
       <input type="file" name="dashboard_bg" accept=".png,.jpg,.jpeg,.webp" style="margin-top:8px;">
       <span class="muted">PNG / JPG / WEBP</span>
+      <hr style="margin:14px 0;">
+      <div class="form-field">
+        <label>تعتيم الطبقة فوق الخلفية (%) — كلما زادت زاد التعتيم، الافتراضي 62</label>
+        <input type="number" name="dashboard_bg_overlay_opacity" min="0" max="100"
+               value="{{ current.dashboard_bg_overlay_opacity }}" style="width:120px;">
+      </div>
+      <div class="form-field">
+        <label>ضبابية الخلفية (px) — 0 = بدون ضبابية إطلاقاً، الافتراضي 2</label>
+        <input type="number" name="dashboard_bg_blur" min="0" max="20"
+               value="{{ current.dashboard_bg_blur }}" style="width:120px;">
+      </div>
+      <div class="form-field">
+        <label>موضع الصورة (أي جزء منها يبقى بمنتصف الشاشة عند القص)</label>
+        <select name="dashboard_bg_position">
+          <option value="top" {{ 'selected' if current.dashboard_bg_position == 'top' }}>الأعلى</option>
+          <option value="center" {{ 'selected' if current.dashboard_bg_position == 'center' }}>الوسط (الافتراضي)</option>
+          <option value="bottom" {{ 'selected' if current.dashboard_bg_position == 'bottom' }}>الأسفل</option>
+        </select>
+      </div>
     </div>
 
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
@@ -295,6 +314,53 @@
     <div class="form-field">
       <label>تصحيحات الأسماء (سطر لكل اسم)</label>
       <textarea name="name_translit_overrides" rows="6" style="width:100%; direction:ltr;" placeholder="سمر=Samar&#10;نور=Noor&#10;زهراء=Zahraa">{{ current.name_translit_overrides }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🆓 تحليل مجاني (بدون أجر لدكتور المختبر الفاحص)</h3>
+  <p class="muted">
+    هذه كلمة المرور اللي يطلبها زر "🆓 جعله مجاني" بصفحة Orders — يستخدمها
+    فقط الأشخاص المخوّلين بالدخول للمختبر. التحليل نفسه يبقى يُطبع ويُحفظ
+    بالتقرير كالمعتاد، بس ما يُحتسب ضمن أجر الفاحص بصفحات الحسابات.
+  </p>
+  <p class="muted" style="color:#c62828;">
+    ⚠️ حماية إضافية: أي تعديل بهذه البطاقة (كلمة المرور أعلاه، أو الاسم
+    المسموح، أو تغيير يوزر/باسوورد هذا التعديل نفسه) يحتاج أولاً يوزر
+    وباسوورد خاصين بهذا التعديل بالذات (مختلفين عن يوزر دخولك العادي
+    للبرنامج). أول مرة تُترك فاضية، اكتب يوزر وباسوورد جديدين بالأسفل
+    وينحفظون تلقائيًا كصلاحية التعديل من الآن فصاعدًا.
+  </p>
+  <form method="POST">
+    <input type="hidden" name="fee_waiver_form" value="1">
+    <div class="form-field">
+      <label>يوزر التعديل الحالي</label>
+      <input type="text" name="gate_username" placeholder="يوزر التعديل" dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>باسوورد التعديل الحالي</label>
+      <input type="password" name="gate_password" placeholder="باسوورد التعديل" dir="ltr">
+    </div>
+    <hr>
+    <div class="form-field">
+      <label>الاسم المسموح له باستخدام الزر (عرض فقط)</label>
+      <input type="text" name="waiver_authorized_name" value="{{ current.fee_waiver_authorized_name }}" placeholder="مثلاً: د. فلان الفلاني">
+    </div>
+    <div class="form-field">
+      <label>كلمة مرور زر "تحليل مجاني" (اتركه فاضي لعدم التغيير)</label>
+      <input type="password" name="waiver_password" placeholder="كلمة مرور جديدة" dir="ltr">
+    </div>
+    <hr>
+    <p class="muted">لتغيير يوزر/باسوورد هذا التعديل نفسه لاحقًا (اختياري):</p>
+    <div class="form-field">
+      <label>يوزر جديد لهذا التعديل</label>
+      <input type="text" name="new_gate_username" placeholder="اتركه فاضي لعدم التغيير" dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>باسوورد جديد لهذا التعديل</label>
+      <input type="password" name="new_gate_password" placeholder="اتركه فاضي لعدم التغيير" dir="ltr">
     </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
