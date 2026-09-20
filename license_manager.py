@@ -87,9 +87,17 @@ def _raw_machine_fingerprint():
             parts.append(out.strip())
     except Exception:
         pass
-    # يبقى موجود دائماً كخيار احتياطي حتى لو فشلت كل الطرق أعلاه
-    import uuid as _uuid
-    parts.append(str(_uuid.getnode()))
+    # uuid.getnode() احتياطي فقط لو فشلت كل الطرق أعلاه (Linux/Mac بدون
+    # الملفات المتوقعة، أو ويندوز فشل قراءة MachineGuid). ⚠️ لازم يكون
+    # فقط عند الفشل، مو مضاف دائماً — لأنه (موثّق ببايثون نفسها) ممكن
+    # يرجّع قيمة مبنية على عنوان MAC تتغيّر بين تشغيل وآخر (فصل/وصل VPN،
+    # تغيّر كارت شبكة، Sleep/Wake...). لو تضاف دائماً فوق MachineGuid
+    # الثابت، البصمة النهائية (التjميع الكامل) تتغيّر برضه حتى لو
+    # MachineGuid نفسه ثابت — وهذا بالضبط سبب مشكلة "يطلب إدخال الـID
+    # من جديد بعد يوم بدون تشغيل" اللي أبلغ عنها المستخدم.
+    if not parts:
+        import uuid as _uuid
+        parts.append(str(_uuid.getnode()))
     return "|".join(parts)
 
 
