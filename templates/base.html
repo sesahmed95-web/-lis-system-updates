@@ -7,6 +7,32 @@
 <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='icon/lab-icon.ico') }}">
 <link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='icon/lab-icon.ico') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>
+  /* ألوان الواجهة العامة (المطلوب: تغيير ألوان الخلفية بكل صفحات
+     البرنامج -- الشريط الجانبي، صفحة زيارة جديدة، وبقية الصفحات -- من
+     صفحة الإعدادات). هذا يعرّف متغيرين على مستوى الصفحة كلها؛ أي عنصر
+     بملف static/css/style.css أو بأي قالب يستخدم أصلاً var(--primary)
+     أو var(--page-bg) يتغيّر تلقائيًا. لون hex مكتوب مباشرة (ثابت) داخل
+     قالب معيّن بدل ما يستخدم أحد هذين المتغيرين ما يتأثر -- يحتاج
+     تحويله لمتغير لحاله أول (راجعني بالملف المحدد لو تحتاج هذا). */
+  :root {
+    --primary: {{ theme_primary_color|default('#205072') }};
+    --page-bg: {{ theme_page_bg_color|default('#F3F6F8') }};
+  }
+</style>
+<style>
+  /* القوائم المنسدلة بالشريط الجانبي (Front Desk, Workbench, Billing
+     Center, Master Definitions, Management) -- كل عنوان قائمة رئيسية
+     صار قابل للطي/الفتح بضغطة، مع سهم صغير يتقلّب حسب الحالة. مكان
+     السهم والقائمة نفسها يتبع اتجاه الصفحة تلقائيًا (يمين لو عربي بحكم
+     dir="rtl" على <html>، يسار لو انكليزي) بدون أي CSS إضافي مطلوب هنا
+     لأن dir موروث أصلاً من صفحة الـbody بالكامل. */
+  .nav-group-toggle { display:flex; align-items:center; justify-content:space-between;
+    cursor:pointer; user-select:none; }
+  .nav-group-arrow { display:inline-block; transition: transform .15s ease; font-size:11px; opacity:.7; }
+  .nav-group.collapsed .nav-group-arrow { transform: rotate(-90deg); }
+  .nav-group.collapsed .nav-group-links { display:none; }
+</style>
 <script>
   // "⬅️ رجوع" بشريط العنوان العلوي (كل الصفحات ما عدا الرئيسية): يرجع
   // لنفس الصفحة/القسم اللي جاي منه المستخدم (history.back())، وإذا ما
@@ -68,10 +94,18 @@
       <div class="nav-group">
         <a class="nav-link {{ 'active' if request.path == '/' else '' }}" href="{{ url_for('dashboard') }}">📊 {{ t('dashboard') }}</a>
       </div>
+      {# المطلوب 3: Front Desk تظهر لو الواجهة استقبال أو "الاثنين معًا"
+         (أو ما اختار المستخدم واجهة بعد -- حسابات قديمة قبل هذي الميزة
+         تبقى تشتغل بدون أي تغيير). #}
+      {% if session.get('interface') in (None, 'reception', 'both') %}
       <div class="nav-group">
-        <div class="nav-group-title">{{ t('front_desk') }}</div>
+        <div class="nav-group-title nav-group-toggle" data-group="front_desk" onclick="lisToggleNavGroup(this)">
+          <span>{{ t('front_desk') }}</span><span class="nav-group-arrow">▾</span>
+        </div>
+        <div class="nav-group-links">
         <a class="nav-link {{ 'active' if request.path == url_for('new_visit') else '' }}" href="{{ url_for('new_visit') }}">➕ {{ t('new_visit') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('visits_list') else '' }}" href="{{ url_for('visits_list') }}">📋 {{ t('visits') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('visits_list') else '' }}" href="{{ url_for('visits_list') }}">🕒 {{ 'آخر الزيارات' if lang=='ar' else 'Recent Visits' }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('patients_list') else '' }}" href="{{ url_for('patients_list') }}">🧑‍🤝‍🧑 {{ t('patients') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('results_list') else '' }}" href="{{ url_for('results_list') }}">📄 {{ t('results') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('pdf_archive') else '' }}" href="{{ url_for('pdf_archive') }}">🗄️ أرشيف PDF</a>
@@ -79,15 +113,27 @@
         {% if current_role in ['supervisor', 'admin'] %}
         <a class="nav-link {{ 'active' if request.path == url_for('whatsapp_queue') else '' }}" href="{{ url_for('whatsapp_queue') }}">📱 طابور واتساب</a>
         {% endif %}
+        </div>
       </div>
+      {% endif %}
+      {% if session.get('interface') in (None, 'lab', 'both') %}
       <div class="nav-group">
-        <div class="nav-group-title">{{ t('workbench') }}</div>
+        <div class="nav-group-title nav-group-toggle" data-group="workbench" onclick="lisToggleNavGroup(this)">
+          <span>{{ t('workbench') }}</span><span class="nav-group-arrow">▾</span>
+        </div>
+        <div class="nav-group-links">
         <a class="nav-link {{ 'active' if request.path == url_for('orders_list') else '' }}" href="{{ url_for('orders_list') }}">🧬 {{ t('orders') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('samples_collection') else '' }}" href="{{ url_for('samples_collection') }}">🩸 {{ t('samples_collection') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('samples_accession') else '' }}" href="{{ url_for('samples_accession') }}">📥 {{ t('samples_accession') }}</a>
+        </div>
       </div>
+      {% endif %}
+      {% if session.get('interface') in (None, 'reception', 'both') %}
       <div class="nav-group">
-        <div class="nav-group-title">{{ t('billing_center') }}</div>
+        <div class="nav-group-title nav-group-toggle" data-group="billing_center" onclick="lisToggleNavGroup(this)">
+          <span>{{ t('billing_center') }}</span><span class="nav-group-arrow">▾</span>
+        </div>
+        <div class="nav-group-links">
         <a class="nav-link {{ 'active' if request.path == url_for('registers') else '' }}" href="{{ url_for('registers') }}">💳 {{ t('registers') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('invoices_list') else '' }}" href="{{ url_for('invoices_list') }}">🧮 {{ t('invoices') }}</a>
         {% if current_role in ['admin', 'accountant', 'supervisor'] %}
@@ -99,10 +145,15 @@
         {% if current_role in ['admin', 'accountant'] %}
         <a class="nav-link {{ 'active' if request.path == url_for('rates') else '' }}" href="{{ url_for('rates') }}">💲 {{ t('rates') }}</a>
         {% endif %}
+        </div>
       </div>
+      {% endif %}
       {% if current_role in ['admin', 'supervisor'] %}
       <div class="nav-group">
-        <div class="nav-group-title">{{ t('master_definitions') }}</div>
+        <div class="nav-group-title nav-group-toggle" data-group="master_definitions" onclick="lisToggleNavGroup(this)">
+          <span>{{ t('master_definitions') }}</span><span class="nav-group-arrow">▾</span>
+        </div>
+        <div class="nav-group-links">
         <a class="nav-link {{ 'active' if request.path == url_for('reference_ranges') else '' }}" href="{{ url_for('reference_ranges') }}">📐 {{ t('reference_ranges') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('packages_list') else '' }}" href="{{ url_for('packages_list') }}">📦 {{ t('packages') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('mapcodes_list') else '' }}" href="{{ url_for('mapcodes_list') }}">🔗 {{ t('mapcodes') }}</a>
@@ -111,16 +162,21 @@
         <a class="nav-link {{ 'active' if request.path == url_for('test_catalog') else '' }}" href="{{ url_for('test_catalog') }}">🧾 {{ t('test_catalog') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('parameter_order') else '' }}" href="{{ url_for('parameter_order') }}">🔢 ترتيب الباراميترات</a>
         <a class="nav-link {{ 'active' if request.path == url_for('unit_converter') else '' }}" href="{{ url_for('unit_converter') }}">📏 تعديل الوحدات</a>
+        </div>
       </div>
       {% endif %}
       {% if current_role == 'admin' %}
       <div class="nav-group">
-        <div class="nav-group-title">{{ t('management') }}</div>
+        <div class="nav-group-title nav-group-toggle" data-group="management" onclick="lisToggleNavGroup(this)">
+          <span>{{ t('management') }}</span><span class="nav-group-arrow">▾</span>
+        </div>
+        <div class="nav-group-links">
         <a class="nav-link {{ 'active' if request.path == url_for('doctors_list') else '' }}" href="{{ url_for('doctors_list') }}">🩺 {{ t('doctors') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('examining_doctor_rates_list') else '' }}" href="{{ url_for('examining_doctor_rates_list') }}">💰 أجور دكتور المختبر الفاحص</a>
         <a class="nav-link {{ 'active' if request.path == url_for('referral_labs_list') else '' }}" href="{{ url_for('referral_labs_list') }}">🧪 المختبرات المُرسِلة</a>
         <a class="nav-link {{ 'active' if request.path == url_for('report_designer') else '' }}" href="{{ url_for('report_designer') }}">🖨️ مصمم التقارير</a>
         <a class="nav-link {{ 'active' if request.path == url_for('app_settings') else '' }}" href="{{ url_for('app_settings') }}">⚙️ {{ t('settings') }}</a>
+        </div>
       </div>
       {% endif %}
     </nav>
@@ -146,6 +202,7 @@
         <button class="pill-btn {{ 'active' if lang=='ar' }}" onclick="location.href='{{ url_for('set_lang', lang='ar') }}'">AR</button>
         <button class="pill-btn" onclick="toggleTheme()">🌓</button>
         <span class="user-chip">{{ current_user }}</span>
+        <a class="pill-btn" href="{{ url_for('interface_choose') }}" title="تبديل الواجهة (استقبال/مختبر/الاثنين معًا)">🔀</a>
         <a class="pill-btn" href="{{ url_for('logout') }}">{{ t('logout') }}</a>
       </div>
     </div>
@@ -159,6 +216,36 @@
     </div>
   </div>
 </div>
+<script>
+  // ------------------------------------------------------------------
+  // طي/فتح القوائم الرئيسية بالشريط الجانبي — حالة كل قائمة (مطوية أو
+  // لا) تُحفظ بـlocalStorage فتبقى كما تركها المستخدم بين الصفحات. أول
+  // مرة (ما فيه حالة محفوظة بعد) تُفتح تلقائيًا القائمة اللي فيها
+  // الصفحة الحالية (class="active")، والباقي تُطوى افتراضيًا.
+  // ------------------------------------------------------------------
+  function lisToggleNavGroup(titleEl) {
+    var group = titleEl.closest('.nav-group');
+    if (!group) return;
+    group.classList.toggle('collapsed');
+    var key = 'lis-nav-collapsed-' + titleEl.dataset.group;
+    localStorage.setItem(key, group.classList.contains('collapsed') ? '1' : '0');
+  }
+  document.querySelectorAll('.nav-group').forEach(function (group) {
+    var toggle = group.querySelector('.nav-group-toggle');
+    if (!toggle) return; // مجموعة "لوحة التحكم" المفردة بدون عنوان قابل للطي
+    var key = 'lis-nav-collapsed-' + toggle.dataset.group;
+    var saved = localStorage.getItem(key);
+    if (saved === null) {
+      var hasActive = group.querySelector('.nav-link.active') !== null;
+      group.classList.toggle('collapsed', !hasActive);
+    } else {
+      group.classList.toggle('collapsed', saved === '1');
+    }
+  });
+</script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<a href="{{ url_for('designer_login') }}" title="⚙"
+   style="position:fixed; bottom:10px; inset-inline-end:10px; opacity:.25; font-size:18px;
+          text-decoration:none; z-index:999; color: var(--text, #333);">⚙</a>
 </body>
 </html>
