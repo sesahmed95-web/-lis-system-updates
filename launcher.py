@@ -76,7 +76,7 @@ def _start_flask_server():
     # جوّا ملف exe واحد بدون الحاجة لعملية Python ثانية منفصلة.
     import app as flask_app_module  # يفترض وجود app.py بنفس المجلد
     flask_app_module.init_db()
-    flask_app_module.app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
+    flask_app_module.app.run(host="0.0.0.0", port=PORT, debug=True, use_reloader=False)
 
 
 def _open_app_window():
