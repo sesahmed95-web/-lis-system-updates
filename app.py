@@ -171,6 +171,20 @@ import astm_host
 import license_manager
 import auto_updater
 import secrets
+import faulthandler
+
+# ------------------------------------------------------------------------
+# شبكة أمان لتسجيل كراش أعمق من خطأ بايثون العادي (segfault/stack overflow
+# نادر يقفل العملية كاملة بدون أي traceback بالتيرمينال) — faulthandler
+# فقط، بدون أي errorhandler عام (كان سبب كسر كل الصفحات بمحاولة سابقة).
+# يُكتب بملف crash_log.txt بمجلد البرنامج نفسه — راجعه أول شي لو انغلق
+# البرنامج فجأة بدون أي رسالة حمراء بالتيرمينال.
+_CRASH_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crash_log.txt")
+try:
+    _crash_log_file = open(_CRASH_LOG_PATH, "a", encoding="utf-8", buffering=1)
+    faulthandler.enable(file=_crash_log_file, all_threads=True)
+except Exception:
+    _crash_log_file = None
 
 app = Flask(__name__)
 # مفتاح جلسة عشوائي مختلف بكل مرة يُشغَّل فيها السيرفر فعليًا (وليس نفس
@@ -574,18 +588,15 @@ ORDER_STYLE_DEPT_KEYWORDS = [
 
 
 def uses_order_style_report(department, report_style=None):
-    """True لو هذا التحليل يطبع بالتصميم الجديد (جدول Conventional/SI Units).
-    report_style='custom_v2' يفرضها يدويًا بغض النظر عن القسم (لأي تحليل
-    مستقبلي تريد تفعيلها له تحديدًا)؛ report_style='classic' يلغيها يدويًا
-    حتى لو القسم مطابق. غير هيك، الاعتماد على الكشف التلقائي من القسم."""
-    if report_style == "custom_v2":
-        return True
+    """True لو هذا التحليل يطبع بالتصميم الجديد (جدول Conventional/SI Units
+    المُصلَّح -- custom_v2.html). التصميم القديم (custom.html) فيه خلل تراكب
+    بصري بالمدى الطبيعي (نقطة 7/8) فصار custom_v2 هو الافتراضي لكل التحاليل
+    الآن -- مو بس تحاليل الكيمياء/الفيتامينات كما كان سابقًا. report_style
+    يقدر يلغيه يدويًا فقط: 'classic' يرجّع تحليل معيّن للتصميم القديم لو
+    احتجته لسبب ما."""
     if report_style == "classic":
         return False
-    if not department:
-        return False
-    d = department.lower()
-    return any(kw.lower() in d for kw in ORDER_STYLE_DEPT_KEYWORDS)
+    return True
 
 
 def row_spacing_px(raw_value):
@@ -820,7 +831,24 @@ def department_priority_rank(department):
     return len(DEPARTMENT_PRIORITY_KEYWORDS)  # قسم غير معروف/غير مذكور أعلاه — يظهر بالأخير
 
 
-def get_visit_hct(db, visit_id):
+def _check_completed_result_gate(db, form):
+    """المطلوب 2: تعديل نتيجة مكتملة (order_tests.status == 'Completed')
+    محمي بكلمة مرور خاصة (نفس مبدأ ميزة "تحليل مجاني" -- إعداد منفصل
+    fee_waiver_gate_password_hash من صفحة الإعدادات). الواجهة الأمامية
+    (result_entry.html) أصلاً تسأل عنها وترسلها بحقل gate_password، لكن
+    السيرفر ما كان يتحقق منها فعليًا قبل هذا التعديل -- أي شخص يقدر يتجاوز
+    الفحص بس بتعطيل الجافاسكربت أو بإرسال الطلب مباشرة. يرجع (ok, error).
+    """
+    stored_hash = get_setting(db, "fee_waiver_gate_password_hash", "")
+    if not stored_hash:
+        return False, "لم تُضبط كلمة مرور حماية تعديل النتائج المكتملة بعد -- اضبطها من صفحة الإعدادات أولاً."
+    entered = form.get("gate_password", "")
+    if hash_password(entered) != stored_hash:
+        return False, "كلمة مرور الحماية غير صحيحة -- التعديل مرفوض."
+    return True, None
+
+
+
     """يجيب آخر قيمة HCT مُدخلة ضمن تحليل CBC لنفس الزيارة (إن وجدت)، تُستخدم
     لحساب Corrected Retic count تلقائيًا من Reticulocyte count. يرجع None إذا
     ما كان فيه CBC بعد أو ما دخلت قيمة HCT."""
@@ -974,6 +1002,16 @@ def inject_globals():
     # حالة "التحديث التلقائي" الحالية — تُحقن هنا حتى يظهر زر التبديل بشريط
     # الأعلى (base.html، بجانب اسم المستخدم) بأي صفحة بدون تمريرها يدويًا.
     auto_update_enabled = get_setting(db, "auto_update_enabled", "1") == "1"
+    # لون/خلفية الواجهة العامة (المطلوب: تغيير ألوان الخلفية بكل صفحات
+    # البرنامج -- الشريط الجانبي، صفحة زيارة جديدة، وبقية الصفحات -- مو
+    # بس شاشة الترحيب). محقونة هنا بنفس أسلوب باقي إعدادات التخصيص، وتُحقن
+    # كمتغيرات CSS بـ:root من base.html فتنطبق تلقائيًا على أي عنصر
+    # بالصفحات يستخدم أصلاً var(--primary) أو var(--page-bg) بملف
+    # static/css/style.css. أي لون hex ثابت مكتوب مباشرة داخل قالب معيّن
+    # (بدل ما يستخدم متغير CSS) ما يتأثر تلقائيًا -- يحتاج تحويله لمتغير
+    # لحاله أول.
+    theme_primary_color = get_setting(db, "theme_primary_color", "#205072")
+    theme_page_bg_color = get_setting(db, "theme_page_bg_color", "#F3F6F8")
     license_banner = None
     if "user_id" in session:
         lic = license_manager.check_license(db)
@@ -1004,6 +1042,8 @@ def inject_globals():
                 logo_position=logo_position,
                 logo_width=logo_width,
                 auto_update_enabled=auto_update_enabled,
+                theme_primary_color=theme_primary_color,
+                theme_page_bg_color=theme_page_bg_color,
                 license_banner=license_banner,
                 # أيقونة المصمم العائمة: تظهر فقط لمن سجّل دخوله فعلاً من
                 # /designer/login بنفس المتصفح (session['designer_id']).
@@ -1013,22 +1053,33 @@ def inject_globals():
 
 
 def login_required(view):
+    """بعد استبدال نظام تسجيل الدخول الشخصي (نقطة 3 الموسّعة): "تسجيل
+    الدخول" صار يعني ببساطة "دخل من إحدى بطاقات الشاشة الرئيسية" --
+    session["interface"] هو المرجع الحقيقي الآن، مو session["user_id"]
+    (اللي يبقى موجود لأغراض ثانية فقط -- حساب الواجهة "الظل"، راجع
+    ensure_interface_accounts بـdatabase.py)."""
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if "user_id" not in session:
-            return redirect(url_for("login"))
+        if "interface" not in session:
+            return redirect(url_for("landing"))
         return view(*args, **kwargs)
     return wrapped
 
 
 def roles_required(*roles):
+    """كل الصفحات اللي كانت محمية بأدوار admin/supervisor/accountant
+    القديمة صارت -- بقرار صريح من العميل -- مسموحة لواجهتي "مختبر"
+    و"الاثنين معًا" بس (بدون تمييز فني/مسؤول حاليًا)، وممنوعة عن
+    "استقبال". الأسماء الممرَّرة (roles) ما عادت تُستخدم فعليًا، أبقيتها
+    بالتوقيع فقط حتى ما نضطر نلمس الـ85 مكان اللي يستخدمون هذا الديكوريتر
+    بكل أنحاء الملف -- التغيير صار بمكان واحد هنا بس."""
     def decorator(view):
         @wraps(view)
         def wrapped(*args, **kwargs):
-            if "user_id" not in session:
-                return redirect(url_for("login"))
-            if session.get("role") not in roles and session.get("role") != "admin":
-                flash("You do not have permission to access this page.")
+            if "interface" not in session:
+                return redirect(url_for("landing"))
+            if session.get("interface") not in ("lab", "both"):
+                flash("هذي الصفحة متاحة فقط لواجهة المختبر أو الاثنين معًا.")
                 return redirect(url_for("dashboard"))
             return view(*args, **kwargs)
         return wrapped
@@ -1076,7 +1127,27 @@ def enforce_license():
     db.close()
     if lic["status"] in ("expired", "hardware_mismatch", "pending", "revoked"):
         session.pop("user_id", None)
+        session.pop("interface", None)
         return redirect(url_for("license_locked"))
+
+
+@app.before_request
+def enforce_interface_scope():
+    """فصل واجهة "استقبال" عن واجهة "مختبر" (بدون لمس أي من الـ69 صفحة
+    المحمية بـ@login_required فقط) -- استخدام بادئة الرابط بدل تعديل كل
+    صفحة براسها: /front-desk/* خاص بالاستقبال، /workbench/* خاص
+    بالمختبر. "الاثنين معًا" والمصمم ما عندهم أي قيد. مسجّل بعد
+    enforce_license فوق حتى فحص الترخيص يشتغل أول شي دائمًا."""
+    interface = session.get("interface")
+    if not interface or interface == "both":
+        return
+    path = request.path
+    if interface == "reception" and path.startswith("/workbench"):
+        flash("هذي الصفحة خاصة بواجهة المختبر فقط.")
+        return redirect(url_for("dashboard"))
+    if interface == "lab" and path.startswith("/front-desk"):
+        flash("هذي الصفحة خاصة بواجهة الاستقبال فقط.")
+        return redirect(url_for("dashboard"))
 
 
 def log_action(action, entity, entity_id, details=""):
@@ -1123,6 +1194,77 @@ def set_lang(lang):
     return redirect(request.referrer or url_for("dashboard"))
 
 
+@app.route("/")
+def landing():
+    """الشاشة الرئيسية (المطلوب: شاشة تفتح بعد تشغيل البرنامج، فيها ثلاث
+    خيارات كبطاقات مصوّرة -- استقبال/مختبر/الاثنين معًا -- بدل ما يوصل
+    المستخدم لصفحة تسجيل الدخول العادية مباشرة). عامة بدون تسجيل دخول
+    (نفس مبدأ /login) -- لو المستخدم مسجّل دخول أصلاً بجلسة سابقة (تذكرني)
+    نوديه للوحة التحكم فورًا بدون ما نعرض له هذي الشاشة من جديد.
+    """
+    if "user_id" in session:
+        return redirect(url_for("dashboard"))
+    db = get_db()
+    ctx = {
+        "landing_title": get_setting(db, "landing_title", "نظام الإدارة المتكامل"),
+        "landing_gradient_color1": get_setting(db, "landing_gradient_color1", "#0f172a"),
+        "landing_gradient_color2": get_setting(db, "landing_gradient_color2", "#205072"),
+        "reception_needs_password": bool(get_setting(db, "interface_reception_password_hash", "")),
+        "lab_needs_password": bool(get_setting(db, "interface_lab_password_hash", "")),
+    }
+    for key in ("reception", "lab", "together"):
+        img_path = get_setting(db, f"landing_{key}_image_path", "")
+        ctx[f"landing_{key}_image"] = url_for("static", filename=img_path) if img_path else None
+    return render_template("landing.html", **ctx)
+
+
+@app.route("/enter/<interface>", methods=["POST"])
+def landing_enter(interface):
+    """الضغط على إحدى بطاقات الشاشة الرئيسية -- بعد استبدال نظام تسجيل
+    الدخول الشخصي بالكامل (نقطة 3 الموسّعة): كلمة مرور الواجهة (لو
+    مضبوطة بالإعدادات) هي التحقق الوحيد الآن، وتدخل الواجهة مباشرة --
+    بدون أي شاشة تسجيل دخول شخصي بعدها. الاسم الحر (operator_name)
+    اختياري، يُحفظ بالجلسة فقط لغرض "مين سوى شنو" بسجلات التدقيق (يُدمج
+    مع حساب الواجهة "الظل" -- راجع ensure_interface_accounts)."""
+    if interface not in ("reception", "lab", "both"):
+        return redirect(url_for("landing"))
+    db = get_db()
+    if interface != "both":
+        stored_hash = get_setting(db, f"interface_{interface}_password_hash", "")
+        if stored_hash:
+            entered = request.form.get("password", "")
+            if hash_password(entered) != stored_hash:
+                flash("كلمة مرور هذي الواجهة غير صحيحة.")
+                return redirect(url_for("landing"))
+    shadow_username = f"__interface_{interface}__"
+    shadow_user = db.execute("SELECT * FROM users WHERE username=?", (shadow_username,)).fetchone()
+    if not shadow_user:
+        # طبقة أمان إضافية -- ensure_interface_accounts أصلاً تسوي هذا
+        # أول إقلاع، لكن لو لأي سبب ما انسوّت (قاعدة بيانات قديمة جدًا
+        # قبل هذا التحديث)، ننشئها هسه بدل ما نطيح بخطأ.
+        db.execute(
+            "INSERT INTO users (username, password_hash, full_name, role, is_active, created_at) "
+            "VALUES (?, ?, ?, 'admin', 1, ?)",
+            (shadow_username, hash_password(os.urandom(16).hex()),
+             {"reception": "حساب واجهة الاستقبال", "lab": "حساب واجهة المختبر",
+              "both": "حساب واجهة الاستقبال والمختبر معًا"}[interface],
+             datetime.now().isoformat(timespec="seconds")),
+        )
+        db.commit()
+        shadow_user = db.execute("SELECT * FROM users WHERE username=?", (shadow_username,)).fetchone()
+
+    operator_name = (request.form.get("operator_name") or "").strip()
+    session["user_id"] = shadow_user["id"]
+    session["role"] = "admin"
+    session["branch_id"] = shadow_user["branch_id"]
+    session["interface"] = interface
+    session["full_name"] = operator_name or shadow_user["full_name"]
+    session["operator_name"] = operator_name
+    session.permanent = True
+    log_action("EnterInterface", "user", shadow_user["id"], f"interface={interface} operator={operator_name}")
+    return redirect(url_for("dashboard"))
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
@@ -1138,9 +1280,66 @@ def login():
             session["branch_id"] = user["branch_id"]
             session.permanent = bool(request.form.get("remember"))
             log_action("Login", "user", user["id"])
-            return redirect(url_for("dashboard"))
+            # لو المستخدم اختار واحد من بطاقات الشاشة الرئيسية (استقبال/
+            # مختبر/الاثنين معًا) قبل لا يوصل لصفحة الدخول هذي، نطبّق
+            # اختياره فورًا ونروح مباشرة للوحة التحكم بدون ما نسأله مرة
+            # ثانية بصفحة interface_choose. الدخول المباشر بـ/login (بدون
+            # المرور بالشاشة الرئيسية أول) يبقى يشتغل متل ما كان -- يودّيه
+            # لصفحة الاختيار بعد الدخول كالمعتاد.
+            pending_interface = session.pop("pending_interface", None)
+            if pending_interface in ("reception", "lab", "both"):
+                session["interface"] = pending_interface
+                return redirect(url_for("dashboard"))
+            return redirect(url_for("interface_choose"))
         error = t(current_lang(), "invalid_login")
     return render_template("login.html", error=error)
+
+
+@app.route("/interface/choose")
+@login_required
+def interface_choose():
+    """شاشة اختيار صفة الدخول (المطلوب 3): استقبال/مختبر/الاثنين معًا.
+    فلترة عرض فقط لأقسام القائمة الجانبية -- ما تغيّر صلاحيات اليوزر
+    الفعلية (role) إطلاقًا. تبديل الواجهة لاحقًا (من نفس هذي الصفحة عبر
+    زر "تبديل الواجهة" بأسفل القائمة) يحتاج كلمة مرور خاصة بتلك الواجهة
+    (تُضبط من صفحة الإعدادات) -- اختيار "الاثنين معًا" ما يحتاج كلمة مرور
+    لأنه أوسع خيار (كل الأقسام)، فمافيه شي يُقيَّد عنه."""
+    db = get_db()
+    reception_configured = bool(get_setting(db, "interface_reception_password_hash", ""))
+    lab_configured = bool(get_setting(db, "interface_lab_password_hash", ""))
+    return render_template("interface_choose.html", current_interface=session.get("interface"),
+                            reception_configured=reception_configured, lab_configured=lab_configured)
+
+
+@app.route("/interface/set", methods=["POST"])
+@login_required
+def interface_set():
+    choice = request.form.get("interface")
+    if choice not in ("reception", "lab", "both"):
+        flash("اختيار غير صحيح.")
+        return redirect(url_for("interface_choose"))
+    db = get_db()
+    if choice != "both":
+        setting_key = f"interface_{choice}_password_hash"
+        stored_hash = get_setting(db, setting_key, "")
+        if stored_hash:
+            entered = request.form.get("password", "")
+            if hash_password(entered) != stored_hash:
+                flash("كلمة مرور هذي الواجهة غير صحيحة.")
+                return redirect(url_for("interface_choose"))
+        # لو ما فيه كلمة مرور مضبوطة لهذي الواجهة بعد، تُقبل بدون كلمة مرور
+        # (بدل ما تصير الميزة كلها معطّلة لين الأدمن يضبطها من الإعدادات).
+    # تبديل حساب الجلسة "الظل" لنفس واجهة الاختيار الجديد -- حتى entered_by
+    # وaudit_logs يبقون متوافقين مع الواجهة الفعلية بعد التبديل (نفس مبدأ
+    # landing_enter بالضبط).
+    shadow_username = f"__interface_{choice}__"
+    shadow_user = db.execute("SELECT * FROM users WHERE username=?", (shadow_username,)).fetchone()
+    if shadow_user:
+        session["user_id"] = shadow_user["id"]
+        session["full_name"] = session.get("operator_name") or shadow_user["full_name"]
+    session["interface"] = choice
+    log_action("SetInterface", "user", session["user_id"], choice)
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/logout")
@@ -1148,7 +1347,7 @@ def logout():
     if "user_id" in session:
         log_action("Logout", "user", session["user_id"])
     session.clear()
-    return redirect(url_for("login"))
+    return redirect(url_for("landing"))
 
 
 # ---------------------------------------------------- license (client side) --
@@ -1514,7 +1713,7 @@ def designer_change_password():
 
 
 # ---------------------------------------------------------- dashboard ------
-@app.route("/")
+@app.route("/dashboard")
 @login_required
 def dashboard():
     db = get_db()
@@ -1853,7 +2052,7 @@ def patient_new():
         db.commit()
         flash("Patient added.")
         return redirect(url_for("patients_list"))
-    return render_template("front_desk/patient_form.html", patient=None)
+    return render_template("front_desk/patient_form.html", patient=None, requires_gate=False)
 
 
 @app.route("/front-desk/patients/<int:patient_id>/edit", methods=["GET", "POST"])
@@ -1863,7 +2062,24 @@ def patient_edit(patient_id):
     patient = db.execute("SELECT * FROM patients WHERE id=?", (patient_id,)).fetchone()
     if not patient:
         return "Not found", 404
+    # المطلوب 2: تعديل بيانات مريض كل نتائجه مكتملة (ومطبوعة) محمي بنفس
+    # كلمة مرور حماية النتائج المكتملة أعلاه -- إذا هذا المريض عنده تحليل
+    # واحد ع الأقل وكلها Completed/Verified، لازم كلمة المرور. مريض جديد
+    # أو عنده تحليل لسا Pending يبقى تعديله حر بدون أي قيد زيادة عن
+    # المعتاد. نحسبها هنا مرة وحدة، تُستخدم بالـGET (لتظهر حقل الباسورد
+    # بالفورم أصلاً) وبالـPOST (للتحقق الفعلي).
+    all_tests = db.execute(
+        "SELECT ot.status FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+        "JOIN visits v ON v.id=o.visit_id WHERE v.patient_id=?",
+        (patient_id,),
+    ).fetchall()
+    requires_gate = bool(all_tests) and all(t["status"] in ("Completed", "Verified") for t in all_tests)
     if request.method == "POST":
+        if requires_gate:
+            ok, err = _check_completed_result_gate(db, request.form)
+            if not ok:
+                flash(err)
+                return redirect(url_for("patient_edit", patient_id=patient_id))
         _pe_name = request.form.get("full_name", "").strip()
         _pe_name_en = (request.form.get("full_name_en") or "").strip() or transliterate_arabic_name(_pe_name)
         db.execute(
@@ -1882,7 +2098,7 @@ def patient_edit(patient_id):
         log_action("Update", "patient", patient_id)
         flash("Patient updated.")
         return redirect(url_for("patients_list"))
-    return render_template("front_desk/patient_form.html", patient=patient)
+    return render_template("front_desk/patient_form.html", patient=patient, requires_gate=requires_gate)
 
 
 @app.route("/front-desk/patients/<int:patient_id>/delete", methods=["POST"])
@@ -1949,18 +2165,48 @@ def patient_history(patient_id):
             reg = latest_visit["registration_number"]
             tid = old_result["test_definition_id"]
             new_barcode = f"{reg}{str(tid).zfill(3)}-old"
-            cur = db.execute(
-                "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, notes, created_at) "
-                "VALUES (?, ?, 'Completed', ?, ?, ?)",
-                (latest_visit["order_id"], tid, new_barcode, "نتيجة منسوخة من زيارة سابقة", now),
-            )
-            new_order_test_id = cur.lastrowid
-            db.execute(
-                "INSERT INTO results (order_test_id, test_parameter_id, value_numeric, value_text, flag, "
-                "entered_by, entered_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (new_order_test_id, old_result["test_parameter_id"], old_result["value_numeric"],
-                 old_result["value_text"], old_result["flag"], session["user_id"], now),
-            )
+
+            # نفس هذا التحليل قد يكون انتسخ مسبقًا (نفس المريض، نفس الزيارة
+            # الحالية) -- إما بضغطة سابقة لنفس الزر، أو لأن التحليل نفسه فيه
+            # أكثر من parameter وكل واحد يُنسخ بضغطة منفصلة. بدون هذا الفحص،
+            # كل ضغطة كانت تنشئ صف order_tests جديد بنفس الـbarcode، فيطلع
+            # نفس التحليل مكرر بعدة جداول منفصلة بصفحة سجل الزيارات (الخلل
+            # المُبلَّغ عنه). نعيد استخدام صف order_tests الموجود أصلاً لهذا
+            # الـbarcode بهذي الزيارة إذا كان موجود، بدل إنشاء صف جديد كل مرة.
+            existing_ot = db.execute(
+                "SELECT id FROM order_tests WHERE order_id=? AND barcode=?",
+                (latest_visit["order_id"], new_barcode),
+            ).fetchone()
+            if existing_ot:
+                new_order_test_id = existing_ot["id"]
+            else:
+                cur = db.execute(
+                    "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, notes, created_at) "
+                    "VALUES (?, ?, 'Completed', ?, ?, ?)",
+                    (latest_visit["order_id"], tid, new_barcode, "نتيجة منسوخة من زيارة سابقة", now),
+                )
+                new_order_test_id = cur.lastrowid
+
+            # وبنفس المنطق -- نفس الـparameter لنفس صف order_tests هذا قد
+            # يكون انتسخ مسبقًا هو نفسه؛ نحدّثه بدل تكراره كصف results جديد.
+            existing_result = db.execute(
+                "SELECT id FROM results WHERE order_test_id=? AND test_parameter_id=?",
+                (new_order_test_id, old_result["test_parameter_id"]),
+            ).fetchone()
+            if existing_result:
+                db.execute(
+                    "UPDATE results SET value_numeric=?, value_text=?, flag=?, entered_by=?, entered_at=? "
+                    "WHERE id=?",
+                    (old_result["value_numeric"], old_result["value_text"], old_result["flag"],
+                     session["user_id"], now, existing_result["id"]),
+                )
+            else:
+                db.execute(
+                    "INSERT INTO results (order_test_id, test_parameter_id, value_numeric, value_text, flag, "
+                    "entered_by, entered_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (new_order_test_id, old_result["test_parameter_id"], old_result["value_numeric"],
+                     old_result["value_text"], old_result["flag"], session["user_id"], now),
+                )
             copied += 1
         db.commit()
         log_action("CopyOldResults", "visit", latest_visit["id"], f"{copied} نتيجة من زيارات سابقة")
@@ -2884,6 +3130,13 @@ def visit_remove_test(visit_id, order_test_id):
     ot_row = db.execute("SELECT * FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
     if not ot_row:
         return redirect(url_for("visit_edit", visit_id=visit_id))
+    # المطلوب 2: حذف تحليل مكتمل (نتيجته جاهزة ومحفوظة) محمي بنفس كلمة
+    # مرور حماية النتائج المكتملة أعلاه.
+    if ot_row["status"] in ("Completed", "Verified"):
+        ok, err = _check_completed_result_gate(db, request.form)
+        if not ok:
+            flash(err)
+            return redirect(url_for("visit_edit", visit_id=visit_id))
     result_rows = db.execute("SELECT * FROM results WHERE order_test_id=?", (order_test_id,)).fetchall()
     snapshot = {
         "order_test": dict(ot_row),
@@ -3531,6 +3784,17 @@ def period_breakdown(db, group_len, base_where, base_params):
         f"COALESCE(SUM(v.examining_doctor_fee),0) as examining_fees "
         f"FROM visits v WHERE {base_where} GROUP BY period", base_params,
     ).fetchall()
+    # forwarded_rows (المطلوب 3): كلفة أي تحليل انسحبت عينته بمختبرك لكن
+    # أُرسلت فعليًا لمختبر آخر لإجرائها (راجع order_tests.forwarded_cost
+    # بـdatabase.py) -- تُجمع هنا حسب نفس الفترة وتُضاف لـ"other_expenses"
+    # تلقائيًا، بدون أي حاجة لإدخالها يدويًا بحقل visits.expenses.
+    forwarded_rows = db.execute(
+        f"SELECT substr(v.created_at,1,{group_len}) as period, "
+        f"COALESCE(SUM(ot.forwarded_cost),0) as forwarded_cost "
+        f"FROM visits v JOIN orders o ON o.visit_id=v.id JOIN order_tests ot ON ot.order_id=o.id "
+        f"WHERE {base_where} GROUP BY period", base_params,
+    ).fetchall()
+    forwarded_by_period = {r["period"]: (r["forwarded_cost"] or 0) for r in forwarded_rows}
     data = {}
     for r in revenue_rows:
         data[r["period"]] = {"period": r["period"], "revenue": r["revenue"],
@@ -3540,8 +3804,10 @@ def period_breakdown(db, group_len, base_where, base_params):
                                        "visits_count": 0, "expenses": 0.0, "examining_fees": 0.0})
         # "expenses" يبقى بالضبط بنفس معناه القديم (المجموع الكلي) حتى ما
         # ينكسر أي قالب موجود يعرضه مباشرة — examining_fees إضافة جديدة
-        # جنبه بس، مو بديلة عنه.
-        data[r["period"]]["expenses"] = r["other_expenses"] + r["examining_fees"]
+        # جنبه بس، مو بديلة عنه. forwarded تُضاف هنا أيضًا لنفس "expenses"
+        # الإجمالي (نفس منطق examining_fees تمامًا).
+        forwarded_here = forwarded_by_period.get(r["period"], 0)
+        data[r["period"]]["expenses"] = r["other_expenses"] + r["examining_fees"] + forwarded_here
         data[r["period"]]["examining_fees"] = r["examining_fees"]
     rows = sorted(data.values(), key=lambda x: x["period"])
     for r in rows:
@@ -3573,6 +3839,7 @@ def daily_report():
     grand_total = 0
     grand_expenses = 0
     grand_examining_fees = 0
+    grand_remaining = 0
     for v in visits:
         # نجيب كل التحاليل بدون أي فلترة أول (نحتاج fee_waived و
         # hidden_from_log لحالهم لنفصل بين "المبلغ" و"العرض بالعمود"):
@@ -3581,8 +3848,9 @@ def daily_report():
         # - hidden_from_log=1: يُستثنى اسمه من عمود "التحاليل" (ما يظهر
         #   إطلاقًا بهذا التقرير)، مع بقاء نتيجته محفوظة بقاعدة البيانات.
         items = db.execute(
-            "SELECT td.name, COALESCE(ot.price, td.price) as price, ot.doctor_id, "
-            "ot.fee_waived, ot.hidden_from_log FROM order_tests ot "
+            "SELECT td.name, td.code as test_code, td.is_examining_test, "
+            "COALESCE(ot.price, td.price) as price, ot.doctor_id, "
+            "ot.fee_waived, ot.hidden_from_log, ot.forwarded_cost FROM order_tests ot "
             "JOIN test_definitions td ON td.id = ot.test_definition_id "
             "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
             (v["id"],),
@@ -3593,7 +3861,12 @@ def daily_report():
         )
         total = sum((i["price"] or 0) for i in items if not i["fee_waived"])
         grand_total += total
-        row_expenses = v["expenses"] or 0
+        # forwarded_cost لكل تحليل بهذي الزيارة أُرسل فعليًا لمختبر آخر
+        # (المطلوب 3) -- يُضاف لصرفيات هذي الزيارة بالتقرير اليومي، بنفس
+        # طريقة period_breakdown() أعلاه المستخدمة بالتقارير الشهرية/نصف
+        # السنوية/السنوية (كانت ناقصة هون فقط بالتقرير اليومي).
+        forwarded_total = sum((i["forwarded_cost"] or 0) for i in items)
+        row_expenses = (v["expenses"] or 0) + forwarded_total
         row_examining_fee = v["examining_doctor_fee"] or 0
         grand_expenses += row_expenses
         grand_examining_fees += row_examining_fee
@@ -3603,14 +3876,43 @@ def daily_report():
                 d = db.execute("SELECT full_name FROM doctors WHERE id=?", (i["doctor_id"],)).fetchone()
                 if d:
                     doctor_names.add(d["full_name"])
+        # دكتور المختبر الفاحص + نوع التحليل بين قوسين بنفس الحقل (المطلوب 2)
+        # -- نفس المعيار الكانوني المستخدم أصلاً بـshow_exam_signature أعلاه
+        # (test_code ضمن EXAM_SIGNATURE_TEST_CODES أو is_examining_test=1)
+        # حتى تبقى "أي تحليل يحتاج توقيع دكتور فاحص" معرَّفة بمكان واحد
+        # بمنطق واحد بكل التطبيق، بدل معيارين مختلفين لنفس الفكرة.
+        exam_names = [
+            i["name"] for i in visible_items
+            if i["test_code"] in EXAM_SIGNATURE_TEST_CODES or bool(i["is_examining_test"])
+        ]
+        examining_doctor_display = v["examining_doctor"] or "-"
+        if v["examining_doctor"] and exam_names:
+            examining_doctor_display = f"{v['examining_doctor']} ({', '.join(exam_names)})"
+
+        # عمود "الباقي": المبلغ المتبقي فعليًا بعد خصم أي دفعة/خصم مسجّلة
+        # على فاتورة هذي الزيارة -- بنفس معادلة "المتبقي" بالفاتورة المفردة
+        # (total_amount - discount_amount - paid_amount). لو ما فيه فاتورة
+        # مسجَّلة أصلاً لهذي الزيارة (حالة نادرة)، الباقي = سعر التحاليل
+        # الكلي (total) بما إنه ما انسجّل أي دفع/خصم بعد.
+        invoice = db.execute(
+            "SELECT total_amount, discount_amount, paid_amount FROM invoices WHERE visit_id=?",
+            (v["id"],),
+        ).fetchone()
+        if invoice:
+            remaining = (invoice["total_amount"] or 0) - (invoice["discount_amount"] or 0) - (invoice["paid_amount"] or 0)
+        else:
+            remaining = total
+        grand_remaining += remaining
+
         rows.append({
             "reg": v["registration_number"], "name": v["full_name"],
             "gender": v["gender"] or "-", "age": v["age"] if v["age"] is not None else "-",
             "tests": test_names, "total": total, "doctors": ", ".join(doctor_names),
-            "examining_doctor": v["examining_doctor"] or "-",
+            "examining_doctor": examining_doctor_display,
             "expenses": row_expenses + row_examining_fee,  # توافق قديم: أي قالب لسا يستخدم "expenses" وحده يشتغل متل قبل تمامًا
             "expenses_only": row_expenses,
             "examining_fee": row_examining_fee,
+            "remaining": remaining,
             "notes": v["notes"] or "",
         })
 
@@ -3618,7 +3920,7 @@ def daily_report():
     return render_template("front_desk/daily_report.html", rows=rows, report_date=report_date,
                             grand_total=grand_total, grand_expenses=grand_total_expenses,
                             grand_expenses_only=grand_expenses, grand_examining_fees=grand_examining_fees,
-                            grand_net=grand_total - grand_total_expenses)
+                            grand_net=grand_total - grand_total_expenses, grand_remaining=grand_remaining)
 
 
 @app.route("/reports/monthly")
@@ -3679,6 +3981,49 @@ def collect_sample(order_test_id):
     log_action("Collect", "order_test", order_test_id)
     flash("Sample marked as collected.")
     return redirect(url_for("samples_collection"))
+
+
+@app.route("/workbench/order-tests/<int:order_test_id>/forward", methods=["GET", "POST"])
+@login_required
+def order_test_forward(order_test_id):
+    """صفحة "إرسال هذا التحليل لمختبر آخر" (المطلوب 3): تحليل مثل
+    البرولاكتين اللي عيّنته تُرسل فعليًا لمختبر القمة لإجرائه هناك --
+    تُسجَّل هنا اسم المختبر المُرسَل إليه وكلفته، فتُحسب تلقائيًا ضمن
+    صرفيات الزيارة بكل التقارير (اليومي/الشهري/نصف السنوي/السنوي) بدون
+    أي إدخال يدوي إضافي بحقل الصرفيات العام. التقرير المطبوع للمريض نفسه
+    لا يتأثر إطلاقًا -- يبقى يُطبع بقالب مختبرك (نفس الشعار والدكاترة)
+    بغض النظر عن مكان الإرسال الفعلي، لأن forwarded_lab_name/forwarded_cost
+    عمودين خاصّين بـorder_tests فقط ولا يُستخدَمان بأي قالب تقرير مريض.
+    """
+    db = get_db()
+    ot = db.execute(
+        "SELECT ot.*, td.name as test_name, p.full_name as patient_name, v.registration_number "
+        "FROM order_tests ot JOIN test_definitions td ON td.id=ot.test_definition_id "
+        "JOIN orders o ON o.id=ot.order_id JOIN visits v ON v.id=o.visit_id "
+        "JOIN patients p ON p.id=v.patient_id WHERE ot.id=?",
+        (order_test_id,),
+    ).fetchone()
+    if not ot:
+        return "Not found", 404
+
+    if request.method == "POST":
+        lab_name = (request.form.get("forwarded_lab_name") or "").strip() or None
+        cost_raw = (request.form.get("forwarded_cost") or "").strip()
+        try:
+            cost = float(cost_raw) if cost_raw else 0
+        except ValueError:
+            cost = 0
+        db.execute(
+            "UPDATE order_tests SET forwarded_lab_name=?, forwarded_cost=? WHERE id=?",
+            (lab_name, cost, order_test_id),
+        )
+        db.commit()
+        log_action("ForwardTest", "order_tests", order_test_id,
+                    f"lab={lab_name} cost={cost}" if lab_name else "cleared")
+        flash("تم حفظ بيانات الإرسال." if lab_name else "تم إلغاء الإرسال لمختبر آخر لهذا التحليل.")
+        return redirect(url_for("order_test_forward", order_test_id=order_test_id))
+
+    return render_template("workbench/order_test_forward.html", ot=ot)
 
 
 @app.route("/workbench/samples-accession")
@@ -3886,7 +4231,110 @@ def save_order_test_results(db, ot, parameters, form, user_id, field_prefix="", 
                 "flag, entered_by, entered_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (ot["id"], param["id"], value_numeric, value_text, flag, user_id, now),
             )
+
+    # RETIC ("Retic Count" المفرد فقط): يحتسب Corrected Retic count تلقائيًا
+    # من Reticulocyte count وHCT (راجع ensure_retic_parameters بـdatabase.py
+    # وتعليق _apply_retic_correction أدناه للتفاصيل الكاملة).
+    if "test_code" in ot.keys() and ot["test_code"] == "RETIC":
+        _apply_retic_correction(db, ot, parameters, form, field_prefix, user_id, now, patient_id)
+
     return touched
+
+
+def _apply_retic_correction(db, ot, parameters, form, field_prefix, user_id, now, patient_id):
+    """يحسب Corrected Retic count تلقائيًا لتحليل Retic Count (RETIC):
+
+        Corrected Retic % = Reticulocyte count % × (HCT الفعلي ÷ HCT الطبيعي
+                                                      حسب عمر/جنس المريض)
+
+    "HCT الطبيعي" يُسحب من نفس جداول Reference Ranges العمرية الجاهزة
+    (find_reference_range على باراميتر HCT نفسه بهذا التحليل) — منتصف
+    المدى (low+high)/2، أو أي طرف موجود لو الثاني فاضي.
+
+    لا يُطبَّق شي إذا:
+      - Reticulocyte count أو HCT غير مُدخلين (لا بهذا الإرسال ولا سابقًا).
+      - المستخدم كتب هو نفسه قيمة بحقل "Corrected Retic count" بهذا
+        الإرسال -- قيمته اليدوية تبقى كما هي (already handled by the
+        main loop above)، ما تُستبدَل بالمحسوبة.
+
+    لو الناتج المحسوب أقل من Reticulocyte count الأصلي، تُخزَّن ملاحظة
+    قصيرة بعمود results.note لصف Corrected Retic count -- تظهر بالتقرير
+    كنص عادي قابل للحذف من معاينة الطباعة (editable-label) بدون أي زر
+    جديد. لو الشرط ما انطبق (تصحيح لاحق رفع الناتج)، تُمحى الملاحظة
+    القديمة تلقائيًا حتى لا تبقى ملاحظة قديمة غير صحيحة.
+    """
+    by_name = {p["name"]: p for p in parameters}
+    retic_param = by_name.get("Reticulocyte count")
+    hct_param = by_name.get("HCT")
+    corrected_param = by_name.get("Corrected Retic count")
+    if not (retic_param and hct_param and corrected_param):
+        return  # قاعدة بيانات قديمة ما انزرعت لها هذي الحقول بعد
+
+    corrected_field = f"{field_prefix}param_{corrected_param['id']}"
+    if (form.get(corrected_field, "") or "").strip() != "":
+        return  # المستخدم كتب قيمة يدوية بنفسه -- لا نستبدلها بالمحسوبة
+
+    def _current_numeric(param):
+        field = f"{field_prefix}param_{param['id']}"
+        submitted = (form.get(field, "") or "").strip()
+        if submitted != "":
+            try:
+                return float(submitted)
+            except ValueError:
+                return None
+        existing = db.execute(
+            "SELECT value_numeric FROM results WHERE order_test_id=? AND test_parameter_id=?",
+            (ot["id"], param["id"]),
+        ).fetchone()
+        return existing["value_numeric"] if existing else None
+
+    retic_value = _current_numeric(retic_param)
+    hct_value = _current_numeric(hct_param)
+    if retic_value is None or hct_value is None:
+        return
+
+    normal_range = find_reference_range(db, hct_param["id"], ot["gender"], ot["age"], ot["age_unit"],
+                                         patient_id=patient_id)
+    normal_hct = None
+    if normal_range:
+        low, high = normal_range["low"], normal_range["high"]
+        if low is not None and high is not None:
+            normal_hct = (low + high) / 2
+        elif low is not None:
+            normal_hct = low
+        elif high is not None:
+            normal_hct = high
+    if not normal_hct:
+        return  # ماكو مدى طبيعي لـHCT محدد بعمر هذا المريض -- ما نقدر نحسب
+
+    corrected_value = round(retic_value * (hct_value / normal_hct), 1)
+    note = ("ملاحظة: النتيجة المصححة (Corrected Retic count) أقل من العدّ الأصلي "
+            "(Reticulocyte count) — راجع القيم المُدخلة.") if corrected_value < retic_value else None
+
+    existing = db.execute(
+        "SELECT id, value_numeric, value_text, flag FROM results WHERE order_test_id=? AND test_parameter_id=?",
+        (ot["id"], corrected_param["id"]),
+    ).fetchone()
+    if existing:
+        if existing["value_numeric"] != corrected_value:
+            db.execute(
+                "INSERT INTO result_history (result_id, order_test_id, test_parameter_id, "
+                "prev_value_numeric, prev_value_text, prev_flag, changed_by, changed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (existing["id"], ot["id"], corrected_param["id"], existing["value_numeric"],
+                 existing["value_text"], existing["flag"], user_id, now),
+            )
+        db.execute(
+            "UPDATE results SET value_numeric=?, value_text=NULL, flag='Normal', note=?, "
+            "entered_by=?, entered_at=? WHERE id=?",
+            (corrected_value, note, user_id, now, existing["id"]),
+        )
+    else:
+        db.execute(
+            "INSERT INTO results (order_test_id, test_parameter_id, value_numeric, value_text, "
+            "flag, note, entered_by, entered_at) VALUES (?, ?, ?, NULL, 'Normal', ?, ?, ?)",
+            (ot["id"], corrected_param["id"], corrected_value, note, user_id, now),
+        )
 
 
 @app.route("/workbench/result/<int:order_test_id>", methods=["GET", "POST"])
@@ -3910,6 +4358,12 @@ def result_entry(order_test_id):
     ).fetchall()
 
     if request.method == "POST":
+        if ot["status"] in ("Completed", "Verified"):
+            ok, err = _check_completed_result_gate(db, request.form)
+            if not ok:
+                flash(err)
+                return redirect(url_for("result_entry", order_test_id=order_test_id))
+        gate_person = (request.form.get("gate_person_name") or "").strip()
         save_order_test_results(db, ot, parameters, request.form, session["user_id"], patient_id=ot["patient_id"])
         # التحليل المعتمد (Verified) يبقى معتمَد بعد التعديل — الحقول صارت
         # قابلة للتعديل دائمًا حتى بعد الاعتماد (بطلب المستخدم)، وكل تعديل
@@ -3920,7 +4374,7 @@ def result_entry(order_test_id):
         db.commit()
         _maybe_auto_whatsapp_send(db, ot["visit_id"])
         _maybe_archive_visit_pdf(db, ot["visit_id"])
-        log_action("EnterResult", "order_test", order_test_id)
+        log_action("EnterResult", "order_test", order_test_id, f"gate_person={gate_person}" if gate_person else None)
         flash("Results saved.")
         return redirect(url_for("orders_list"))
 
@@ -4032,6 +4486,16 @@ def visit_results_entry(visit_id):
         )
 
     if request.method == "POST":
+        # نفس حماية النتيجة المكتملة (المطلوب 2)، لكن هنا مرة وحدة لكل
+        # الطلب بدل كل تحليل لحاله -- إذا أي تحليل بهذي الزيارة مكتمل أصلاً،
+        # نطلب كلمة المرور مرة وحدة قبل ما نحفظ أي شي من الدفعة كاملة
+        # (all-or-nothing، أبسط وأأمن من فحص جزئي لكل بطاقة على حدة).
+        if any(ot["status"] in ("Completed", "Verified") for ot in order_tests):
+            ok, err = _check_completed_result_gate(db, request.form)
+            if not ok:
+                flash(err)
+                return redirect(url_for("visit_results_entry", visit_id=visit_id))
+        gate_person = (request.form.get("gate_person_name") or "").strip()
         any_saved = False
         for ot in order_tests:
             # التحاليل المعتمدة (Verified) صارت قابلة للتعديل دائمًا هيه
@@ -4051,7 +4515,7 @@ def visit_results_entry(visit_id):
         if any_saved:
             _maybe_auto_whatsapp_send(db, visit_id)
             _maybe_archive_visit_pdf(db, visit_id)
-            log_action("EnterResultsBulk", "visit", visit_id)
+            log_action("EnterResultsBulk", "visit", visit_id, f"gate_person={gate_person}" if gate_person else None)
             flash("تم حفظ النتائج.")
         else:
             flash("لم تُدخل أي قيمة جديدة.")
@@ -4520,6 +4984,13 @@ def _print_report_impl(order_test_id):
 
     params = {}
     ranges = {}
+    # notes: ملاحظة نصية اختيارية محفوظة على صف النتيجة نفسها (عمود
+    # results.note) -- تُستخدم حاليًا فقط لملاحظة "النتيجة المصححة أقل من
+    # العدّ الأصلي" بتحليل Retic Count (راجع _apply_retic_correction)، لكنها
+    # عامة لأي باراميتر مستقبلاً. القالب يعرضها كنص عادي بـeditable-label
+    # حتى يقدر المستخدم يحذفها من معاينة الطباعة بنفس طريقة تعديل أي نص آخر
+    # بالتقرير، بدون أي زر/ميزة جديدة.
+    notes = {}
     for p in parameters:
         r = results_by_name.get(p["name"])
         if r is not None:
@@ -4527,6 +4998,7 @@ def _print_report_impl(order_test_id):
         else:
             value = None
         params[p["name"]] = "" if value is None else value
+        notes[p["name"]] = (r["note"] if (r is not None and "note" in r.keys()) else None) or ""
         ranges[p["name"]] = find_reference_range(db, p["id"], ot["gender"], ot["age"], ot["age_unit"],
                                                   patient_id=ot["patient_id"],
                                                   analyzer=ot["analyzer"] if "analyzer" in ot.keys() else None)
@@ -4705,7 +5177,7 @@ def _print_report_impl(order_test_id):
     auto_flag_color_enabled, show_result_flag, flag_color_map = get_report_flag_settings(db)
     return render_template(
         template_name,
-        ot=ot, params=params, ranges=ranges, units=units, cbc_groups=cbc_groups,
+        ot=ot, params=params, ranges=ranges, units=units, notes=notes, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         show_prev_values=show_prev_values, previous_visit_date=previous_visit_date,
@@ -5812,6 +6284,55 @@ def packages_list():
     return render_template("master/packages.html", packages=packages, pkg_tests=pkg_tests, all_tests=all_tests)
 
 
+@app.route("/master/parameters/<int:param_id>/rename", methods=["POST"])
+@roles_required("supervisor")
+def rename_test_parameter(param_id):
+    """يعدّل اسم الـParameter نفسه بكتالوج التحاليل (وليس فقط أي اقتراح
+    مرتبط فيه) -- من نفس صفحة Suggestions (المطلوب 5/9). تنبيه: لو هذا
+    الباراميتر يُستخدم داخل قالب تقرير جاهز (مثل CBC أو Retic Count) بالاسم
+    القديم صراحةً (params.get('الاسم القديم') بملف الـtemplate)، تغيير
+    الاسم هنا بيخلّي هذا السطر يختفي من ذاك التقرير لحد ما يتحدّث القالب
+    بالاسم الجديد يدويًا -- آمن تمامًا فقط للباراميترات العامة (قسم
+    Other Results) اللي ما مربوطة بقالب مخصّص."""
+    db = get_db()
+    new_name = (request.form.get("new_name") or "").strip()
+    if not new_name:
+        flash("اسم الـParameter لا يمكن أن يكون فارغًا.")
+        return redirect(url_for("suggestions_list"))
+    row = db.execute("SELECT id FROM test_parameters WHERE id=?", (param_id,)).fetchone()
+    if not row:
+        flash("هذا الـParameter غير موجود.")
+        return redirect(url_for("suggestions_list"))
+    db.execute("UPDATE test_parameters SET name=? WHERE id=?", (new_name, param_id))
+    db.commit()
+    log_action("RenameParameter", "test_parameters", param_id, new_name)
+    flash("تم تعديل اسم الـParameter.")
+    return redirect(url_for("suggestions_list"))
+
+
+@app.route("/master/tests/<int:test_definition_id>/rename", methods=["POST"])
+@roles_required("supervisor")
+def rename_test_definition_name(test_definition_id):
+    """يعدّل اسم التحليل (Test) نفسه بكتالوج التحاليل -- من نفس صفحة
+    Suggestions (المطلوب 5/9). يغيّر الاسم بكل مكان يستخدمه (شاشات الإدخال،
+    الفواتير، التقارير...) لأنه نفس صف test_definitions.name المستخدم
+    بكل الاستعلامات، وليس نسخة منفصلة خاصة بهذي الصفحة."""
+    db = get_db()
+    new_name = (request.form.get("new_name") or "").strip()
+    if not new_name:
+        flash("اسم التحليل لا يمكن أن يكون فارغًا.")
+        return redirect(url_for("suggestions_list"))
+    row = db.execute("SELECT id FROM test_definitions WHERE id=?", (test_definition_id,)).fetchone()
+    if not row:
+        flash("هذا التحليل غير موجود.")
+        return redirect(url_for("suggestions_list"))
+    db.execute("UPDATE test_definitions SET name=? WHERE id=?", (new_name, test_definition_id))
+    db.commit()
+    log_action("RenameTest", "test_definitions", test_definition_id, new_name)
+    flash("تم تعديل اسم التحليل.")
+    return redirect(url_for("suggestions_list"))
+
+
 @app.route("/master/suggestions", methods=["GET", "POST"])
 @roles_required("supervisor")
 def suggestions_list():
@@ -5826,12 +6347,13 @@ def suggestions_list():
         return redirect(url_for("suggestions_list"))
 
     rows = db.execute(
-        "SELECT s.id, s.content, s.test_parameter_id, tp.name as param_name, td.name as test_name FROM suggestions s "
+        "SELECT s.id, s.content, s.test_parameter_id, tp.name as param_name, td.name as test_name, "
+        "td.id as test_definition_id FROM suggestions s "
         "JOIN test_parameters tp ON tp.id = s.test_parameter_id "
         "JOIN test_definitions td ON td.id = tp.test_definition_id ORDER BY td.name LIMIT 200"
     ).fetchall()
     parameters = db.execute(
-        "SELECT tp.id, tp.name, td.name as test_name FROM test_parameters tp "
+        "SELECT tp.id, tp.name, td.name as test_name, td.id as test_definition_id FROM test_parameters tp "
         "JOIN test_definitions td ON td.id = tp.test_definition_id ORDER BY td.name"
     ).fetchall()
     return render_template("master/suggestions.html", rows=rows, parameters=parameters)
@@ -6907,6 +7429,16 @@ def app_settings():
         if bg_position_raw in ("top", "center", "bottom"):
             set_setting(db, "dashboard_bg_position", bg_position_raw)
 
+        # ألوان الواجهة العامة (المطلوب: تغيير ألوان الخلفية بكل صفحات
+        # البرنامج، مو بس شاشة الترحيب) -- نفس أسلوب باقي إعدادات
+        # التخصيص، فحص بسيط على صيغة hex صحيحة (#RRGGBB) قبل الحفظ.
+        primary_color_raw = request.form.get("theme_primary_color", "").strip()
+        if primary_color_raw and _HEX_COLOR_RE.match(primary_color_raw):
+            set_setting(db, "theme_primary_color", primary_color_raw)
+        page_bg_raw = request.form.get("theme_page_bg_color", "").strip()
+        if page_bg_raw and _HEX_COLOR_RE.match(page_bg_raw):
+            set_setting(db, "theme_page_bg_color", page_bg_raw)
+
         # ملاحظة: إدارة أسماء وشهادات دكاترة الفحص انتقلت لشاشة مستقلة
         # (management/examining_doctors.html عبر الرابط بهذي الصفحة) — ما عاد
         # فيها فورم هنا.
@@ -7124,6 +7656,66 @@ def app_settings():
                 flash("تم حفظ إعدادات \"تحليل مجاني\".")
             return redirect(url_for("app_settings"))
 
+        # ------------------------------------------------------------
+        # كلمات مرور واجهتي "استقبال" و"مختبر" (المطلوب 3) -- كل وحدة
+        # مستقلة، تُسأل بس وقت الدخول/تبديل الواجهة لتلك القيمة تحديدًا.
+        # ترك الحقل فاضي = ما يغيّر كلمة المرور الحالية (يبقى نفس الشي
+        # -- خله فاضي كل مرة إذا ما تريد تغييرها).
+        # ------------------------------------------------------------
+        if request.form.get("interface_passwords_form") is not None:
+            recep_pass = request.form.get("interface_reception_password", "")
+            if recep_pass:
+                set_setting(db, "interface_reception_password_hash", hash_password(recep_pass))
+            lab_pass = request.form.get("interface_lab_password", "")
+            if lab_pass:
+                set_setting(db, "interface_lab_password_hash", hash_password(lab_pass))
+            db.commit()
+            log_action("UpdateInterfacePasswords", "settings", 0)
+            flash("تم حفظ كلمات مرور الواجهات.")
+            return redirect(url_for("app_settings"))
+
+        # ------------------------------------------------------------
+        # الشاشة الرئيسية (المطلوب: العنوان + صور الخيارات الثلاث + لوني
+        # التدرّج). نفس أسلوب رفع صورة خلفية شاشة الترحيب أعلاه بالضبط،
+        # لكن لكل صورة من الثلاث خزّانها الخاص (landing_<key>_image_path)
+        # حتى ما تتداخل ببعضها. حقل فاضي = يبقى نفس الشي الحالي.
+        # ------------------------------------------------------------
+        if request.form.get("landing_page_form") is not None:
+            landing_title_raw = request.form.get("landing_title", "").strip()
+            if landing_title_raw:
+                set_setting(db, "landing_title", landing_title_raw)
+            for gkey in ("landing_gradient_color1", "landing_gradient_color2"):
+                gval = request.form.get(gkey, "").strip()
+                if gval and _HEX_COLOR_RE.match(gval):
+                    set_setting(db, gkey, gval)
+            for img_key in ("reception", "lab", "together"):
+                setting_key = f"landing_{img_key}_image_path"
+                if request.form.get(f"remove_landing_{img_key}_image") == "1":
+                    old_path = get_setting(db, setting_key, "")
+                    if old_path:
+                        old_full = os.path.join(UPLOAD_DIR, os.path.basename(old_path))
+                        if os.path.exists(old_full):
+                            os.remove(old_full)
+                    set_setting(db, setting_key, "")
+                    continue
+                img_file = request.files.get(f"landing_{img_key}_image")
+                if img_file and img_file.filename:
+                    img_ext = img_file.filename.rsplit(".", 1)[-1].lower() if "." in img_file.filename else ""
+                    if img_ext in ALLOWED_DASHBOARD_BG_EXT:
+                        img_filename = secure_filename(f"landing-{img_key}.{img_ext}")
+                        for old_ext in ALLOWED_DASHBOARD_BG_EXT:
+                            old_img = os.path.join(UPLOAD_DIR, f"landing-{img_key}.{old_ext}")
+                            if os.path.exists(old_img):
+                                os.remove(old_img)
+                        img_file.save(os.path.join(UPLOAD_DIR, img_filename))
+                        set_setting(db, setting_key, f"uploads/{img_filename}")
+                    else:
+                        flash(f"صيغة صورة غير مدعومة لبطاقة {img_key}. استخدم PNG أو JPG أو WEBP.")
+            db.commit()
+            log_action("UpdateLandingPage", "settings", 0)
+            flash("تم حفظ إعدادات الشاشة الرئيسية.")
+            return redirect(url_for("app_settings"))
+
         db.commit()
         log_action("UpdateSettings", "settings", 0)
         flash("Settings saved.")
@@ -7137,6 +7729,14 @@ def app_settings():
         "logo_path": get_setting(db, "logo_path", ""),
         "dashboard_bg_path": get_setting(db, "dashboard_bg_path", ""),
         "dashboard_bg_overlay_opacity": get_setting(db, "dashboard_bg_overlay_opacity", "62"),
+        "theme_primary_color": get_setting(db, "theme_primary_color", "#205072"),
+        "theme_page_bg_color": get_setting(db, "theme_page_bg_color", "#F3F6F8"),
+        "landing_title": get_setting(db, "landing_title", "نظام الإدارة المتكامل"),
+        "landing_gradient_color1": get_setting(db, "landing_gradient_color1", "#0f172a"),
+        "landing_gradient_color2": get_setting(db, "landing_gradient_color2", "#205072"),
+        "landing_reception_image_path": get_setting(db, "landing_reception_image_path", ""),
+        "landing_lab_image_path": get_setting(db, "landing_lab_image_path", ""),
+        "landing_together_image_path": get_setting(db, "landing_together_image_path", ""),
         "dashboard_bg_blur": get_setting(db, "dashboard_bg_blur", "2"),
         "dashboard_bg_position": get_setting(db, "dashboard_bg_position", "center"),
         "report_row_pad": get_setting(db, "report_row_pad", "5"),
@@ -8253,4 +8853,4 @@ if __name__ == "__main__":
     # (settings.auto_update_enabled = 1). راجع auto_updater.py.
     threading.Thread(target=auto_updater.background_loop, args=(get_db,), daemon=True).start()
 
-    app.run(host="0.0.0.0", port=9090, debug=False)
+    app.run(host="0.0.0.0", port=9090, debug=False, threaded=True)
