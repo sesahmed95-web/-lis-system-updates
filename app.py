@@ -8853,4 +8853,4 @@ if __name__ == "__main__":
     # (settings.auto_update_enabled = 1). راجع auto_updater.py.
     threading.Thread(target=auto_updater.background_loop, args=(get_db,), daemon=True).start()
 
-    app.run(host="0.0.0.0", port=9090, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=9090, debug=True, threaded=True)
