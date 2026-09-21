@@ -568,4 +568,38 @@
   }
 })();
 </script>
+
+<script>
+  // المطلوب 2: حماية تعديل نتيجة مكتملة/معتمدة بكلمة مرور -- نفس فكرة
+  // handleResultSaveSubmit بصفحة النتيجة المفردة (result_entry.html)، لكن
+  // هنا لأي زر "💾 حفظ" بأي بطاقة ضمن هذي الصفحة المجمّعة، لأنها كلها
+  // نفس الفورم الواحد (#visitResultsForm). نستخدم useCapture=true حتى
+  // يشتغل هذا المستمع قبل مستمع فحص WBC differential الموجود أعلاه، ونستخدم
+  // requestSubmit() (لا submit() العادية) عند إعادة الإرسال حتى يبقى حدث
+  // submit يشتغل من جديد ويوصل لفحص الـWBC diff بعده بشكل طبيعي.
+  (function () {
+    var form = document.getElementById('visitResultsForm');
+    if (!form) return;
+    var gateHandled = false;
+    form.addEventListener('submit', function (e) {
+      if (gateHandled) return;
+      var hasProtected = form.querySelectorAll('.badge-Completed, .badge-Verified').length > 0;
+      if (!hasProtected) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!confirm('توجد نتيجة مكتملة أو معتمدة ضمن هذي الزيارة -- تعديلها محمي بكلمة مرور خاصة حتى لو كنت أدمن. متابعة؟')) return;
+      var password = prompt('أدخل كلمة مرور الحماية (نفس كلمة مرور "تحليل مجاني") لتأكيد التعديل:');
+      if (password === null) return;
+      var personName = prompt('اسمك (يُسجَّل فقط للمراجعة):') || '';
+      var pInput = document.createElement('input');
+      pInput.type = 'hidden'; pInput.name = 'gate_password'; pInput.value = password;
+      form.appendChild(pInput);
+      var nInput = document.createElement('input');
+      nInput.type = 'hidden'; nInput.name = 'gate_person_name'; nInput.value = personName;
+      form.appendChild(nInput);
+      gateHandled = true;
+      if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
+    }, true);
+  })();
+</script>
 {% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block page_title %}اختيار صفة الدخول{% endblock %}
+{% block content %}
+<div class="card" style="max-width:520px; margin:40px auto;">
+  <h3 style="text-align:center; margin-bottom:6px;">تريد الدخول كـ...</h3>
+  <p class="muted" style="text-align:center; margin-bottom:20px;">
+    هذا يحدد الأقسام الظاهرة بالقائمة الجانبية فقط، وما يغيّر صلاحياتك
+    كموظف. تقدر تبدّلها بأي وقت من هذي الصفحة.
+  </p>
+
+  <div style="display:flex; flex-direction:column; gap:12px;">
+    <button type="button" class="btn" style="padding:14px;" onclick="chooseInterface('reception', {{ reception_configured|tojson }})">
+      🖥️ استقبال {% if current_interface == 'reception' %}(الحالية){% endif %}
+    </button>
+    <button type="button" class="btn" style="padding:14px;" onclick="chooseInterface('lab', {{ lab_configured|tojson }})">
+      🧪 مختبر {% if current_interface == 'lab' %}(الحالية){% endif %}
+    </button>
+    <button type="button" class="btn secondary" style="padding:14px;" onclick="chooseInterface('both', false)">
+      🔀 الاثنين معًا {% if current_interface == 'both' %}(الحالية){% endif %}
+    </button>
+  </div>
+
+  <form id="interfaceForm" method="POST" action="{{ url_for('interface_set') }}" style="display:none;">
+    <input type="hidden" name="interface" id="interfaceChoiceInput">
+    <input type="hidden" name="password" id="interfacePasswordInput">
+  </form>
+</div>
+
+<script>
+  function chooseInterface(choice, needsPassword) {
+    var pwd = '';
+    if (needsPassword) {
+      pwd = prompt('أدخل كلمة مرور واجهة "' + (choice === 'reception' ? 'الاستقبال' : 'المختبر') + '":');
+      if (pwd === null) return;
+    }
+    document.getElementById('interfaceChoiceInput').value = choice;
+    document.getElementById('interfacePasswordInput').value = pwd;
+    document.getElementById('interfaceForm').submit();
+  }
+</script>
+{% endblock %}

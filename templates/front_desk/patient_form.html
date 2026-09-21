@@ -76,6 +76,19 @@
       </div>
     </div>
   </div>
+  {% if requires_gate %}
+  <div class="card" style="border:1.5px solid #c62828;">
+    <p class="muted" style="color:#c62828;">
+      ⚠️ كل نتائج هذا المريض مكتملة (ومطبوعة على الأغلب) — تعديل بياناته
+      محمي بكلمة مرور حماية النتائج المكتملة (نفس كلمة مرور تعديل النتيجة
+      المكتملة، تُضبط من صفحة الإعدادات).
+    </p>
+    <div class="form-field">
+      <label>كلمة مرور الحماية</label>
+      <input type="password" name="gate_password" placeholder="كلمة مرور الحماية" dir="ltr" required>
+    </div>
+  </div>
+  {% endif %}
   <button class="btn" type="submit">{{ t('save') }}</button>
   <a class="btn secondary" href="{{ url_for('patients_list') }}">{{ t('back') }}</a>
 </form>

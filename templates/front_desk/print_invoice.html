@@ -73,7 +73,7 @@
     <tbody>
       {% for item in items %}
       <tr>
-        <td>{{ item['name_ar'] or item['name'] }}</td>
+        <td>{{ item['name'] }}</td>
         <td>{{ "%.0f"|format(item['price'] or 0) }}</td>
       </tr>
       {% endfor %}

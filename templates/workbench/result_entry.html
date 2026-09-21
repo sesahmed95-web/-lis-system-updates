@@ -20,7 +20,7 @@
     {% endif %}
   {% endif %}
 
-  <form method="POST">
+  <form method="POST" onsubmit="return handleResultSaveSubmit(event, this, {{ (ot['status'] in ('Completed', 'Verified'))|tojson }});">
     <div class="form-field" style="max-width:260px; margin-bottom:10px;">
       <label style="font-size:0.85em;">الجهاز (Analyzer) — اختياري</label>
       <input type="text" name="analyzer" value="{{ ot['analyzer'] if 'analyzer' in ot.keys() and ot['analyzer'] else '' }}"
@@ -138,6 +138,31 @@
   </form>
   {% endif %}
 </div>
+<script>
+  // ------------------------------------------------------------------
+  // تعديل نتيجة وصلت أصلاً لحالة "مكتملة" (Completed) -- يعني طُبعت
+  // وانحفظت -- محمي بنفس كلمة مرور ميزة "تحليل مجاني"، حتى من حساب
+  // الأدمن نفسه، بدون استثناء. أول إدخال (النتيجة لسا مو مكتملة) يبقى
+  // عادي بدون كلمة مرور. حالة "معتمدة" (Verified) أصلاً ما فيها زر حفظ
+  // إطلاقًا بهذي الصفحة (لازم فتحها للتعديل أولاً من المشرف/الأدمن).
+  // ------------------------------------------------------------------
+  function handleResultSaveSubmit(e, form, isCompleted) {
+    if (!isCompleted) return true;
+    if (!confirm('هذه النتيجة مكتملة فعلاً -- تعديلها محمي بكلمة مرور خاصة حتى لو كنت أدمن. متابعة؟')) {
+      return false;
+    }
+    const password = prompt('أدخل كلمة مرور الحماية (نفس كلمة مرور "تحليل مجاني") لتأكيد التعديل:');
+    if (password === null) return false;
+    const personName = prompt('اسمك (يُسجَّل فقط للمراجعة):') || '';
+    const pInput = document.createElement('input');
+    pInput.type = 'hidden'; pInput.name = 'gate_password'; pInput.value = password;
+    form.appendChild(pInput);
+    const nInput = document.createElement('input');
+    nInput.type = 'hidden'; nInput.name = 'gate_person_name'; nInput.value = personName;
+    form.appendChild(nInput);
+    return true;
+  }
+</script>
 <script>
   window.LIS_PATIENT_HCT = {{ 'null' if patient_hct is none else patient_hct }};
   window.LIS_PATIENT_GENDER = {{ ot['gender']|tojson }};

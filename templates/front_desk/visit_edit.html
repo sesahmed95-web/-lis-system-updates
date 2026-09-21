@@ -222,8 +222,8 @@
             </button>
             {% endif %}
             {% if not locked %}
-            <button type="submit" formaction="{{ url_for('visit_remove_test', visit_id=visit['id'], order_test_id=ot['id']) }}" class="btn small danger" title="حذف الفحص من الزيارة"
-                    onclick="return confirm('حذف «{{ ot['name'] }}» من الزيارة؟ (يمكن التراجع بعدها من هذه الصفحة)')">✕</button>
+            <button type="button" class="btn small danger" title="حذف الفحص من الزيارة"
+                    onclick="removeOrderTest({{ visit['id'] }}, {{ ot['id'] }}, {{ ot['name']|tojson }}, {{ ot['status']|tojson }})">✕</button>
             {% endif %}
           </td>
         </tr>
@@ -400,6 +400,30 @@
       .catch(function () { alert('تعذّر الاتصال بالسيرفر.'); });
   }
   window.toggleFeeWaiver = toggleFeeWaiver;
+
+  // ------------------------------------------------------------------
+  // حذف تحليل من الزيارة (المطلوب 2): لو نتيجته مكتملة/معتمدة أصلاً،
+  // يسأل كلمة مرور الحماية (نفس كلمة مرور تعديل النتائج المكتملة، تُضبط
+  // من صفحة الإعدادات) قبل الحذف الفعلي -- بدون ما يغيّر شي بشكل الزر
+  // لباقي التحاليل غير المكتملة (يبقى حذفها حر متل ما كان).
+  // ------------------------------------------------------------------
+  function removeOrderTest(visitId, orderTestId, testName, status) {
+    if (!confirm('حذف «' + testName + '» من الزيارة؟ (يمكن التراجع بعدها من هذه الصفحة)')) return;
+    var gatePassword = '';
+    if (status === 'Completed' || status === 'Verified') {
+      gatePassword = prompt('هذا الفحص مكتمل -- أدخل كلمة مرور حماية تعديل النتائج المكتملة لحذفه:');
+      if (gatePassword === null) return;
+    }
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/front-desk/visits/' + visitId + '/remove-test/' + orderTestId;
+    var inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = 'gate_password'; inp.value = gatePassword;
+    form.appendChild(inp);
+    document.body.appendChild(form);
+    form.submit();
+  }
+  window.removeOrderTest = removeOrderTest;
 
   // ------------------------------------------------------------------
   // "Home Visit" — إظهار حقلي العنوان والأجرة الإضافية فقط عند اختيار "نعم"

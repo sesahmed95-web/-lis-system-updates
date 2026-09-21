@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ landing_title }}</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='icon/lab-icon.ico') }}">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    background: linear-gradient(135deg, {{ landing_gradient_color1 }} 0%, {{ landing_gradient_color2 }} 100%);
+    color: #f8fafc; padding: 24px;
+  }
+  .landing-wrap { width: 100%; max-width: 960px; text-align: center; }
+  .landing-title { font-size: clamp(24px, 4vw, 36px); font-weight: 700; margin-bottom: 42px; letter-spacing: .5px; }
+  .landing-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  @media (max-width: 720px) { .landing-cards { grid-template-columns: 1fr; } }
+  .landing-card {
+    background: rgba(255,255,255,.06); border: 1.5px solid rgba(255,255,255,.15);
+    border-radius: 16px; padding: 28px 18px; cursor: pointer;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease;
+  }
+  .landing-card:hover { transform: translateY(-4px); background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.35); }
+  .landing-card-img { width: 84px; height: 84px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; }
+  .landing-card-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .landing-card-img .fallback-icon { font-size: 52px; }
+  .landing-card-label { font-size: 17px; font-weight: 600; }
+  .landing-designer-link {
+    position: fixed; bottom: 14px; inset-inline-end: 14px; opacity: .35; font-size: 20px;
+    text-decoration: none; color: #fff; transition: opacity .15s ease;
+  }
+  .landing-designer-link:hover { opacity: .9; }
+</style>
+</head>
+<body>
+  <a class="landing-designer-link" href="{{ url_for('designer_login') }}" title="⚙">⚙</a>
+  <div class="landing-wrap">
+    <div class="landing-title">{{ landing_title }}</div>
+    <div class="landing-cards">
+      <div class="landing-card" onclick="enterInterface('reception', {{ reception_needs_password|default(false)|tojson }})">
+        <div class="landing-card-img">
+          {% if landing_reception_image %}<img src="{{ landing_reception_image }}" alt="Reception">{% else %}<span class="fallback-icon">🖥️</span>{% endif %}
+        </div>
+        <div class="landing-card-label">Reception</div>
+      </div>
+      <div class="landing-card" onclick="enterInterface('lab', {{ lab_needs_password|default(false)|tojson }})">
+        <div class="landing-card-img">
+          {% if landing_lab_image %}<img src="{{ landing_lab_image }}" alt="Laboratory">{% else %}<span class="fallback-icon">🧪</span>{% endif %}
+        </div>
+        <div class="landing-card-label">Laboratory</div>
+      </div>
+      <div class="landing-card" onclick="enterInterface('both', false)">
+        <div class="landing-card-img">
+          {% if landing_together_image %}<img src="{{ landing_together_image }}" alt="Together">{% else %}<span class="fallback-icon">🔀</span>{% endif %}
+        </div>
+        <div class="landing-card-label">To-Gather</div>
+      </div>
+    </div>
+  </div>
+
+  <form id="enterForm" method="POST" style="display:none;">
+    <input type="hidden" name="password" id="enterPasswordInput">
+    <input type="hidden" name="operator_name" id="enterNameInput">
+  </form>
+
+  <script>
+    function enterInterface(choice, needsPassword) {
+      var pwd = '';
+      if (needsPassword) {
+        pwd = prompt('أدخل كلمة مرور واجهة "' + (choice === 'reception' ? 'الاستقبال' : 'المختبر') + '":');
+        if (pwd === null) return;
+      }
+      var name = prompt('اسمك (اختياري -- يُسجَّل فقط لمعرفة مين سوى شنو):') || '';
+      var form = document.getElementById('enterForm');
+      form.action = '/enter/' + choice;
+      document.getElementById('enterPasswordInput').value = pwd;
+      document.getElementById('enterNameInput').value = name;
+      form.submit();
+    }
+  </script>
+</body>
+</html>

@@ -22,13 +22,40 @@
 </div>
 
 <div class="card">
+  <p class="muted">
+    ⚠️ تنبيه: تغيير اسم Test أو Parameter هنا يغيّر اسمه بكل مكان بالنظام.
+    إذا هذا الباراميتر مستخدم داخل قالب تقرير جاهز (مثل CBC أو Retic Count)
+    بالاسم القديم، تغيير الاسم هنا بيخلّي نتيجته تختفي من ذاك التقرير المحدّد
+    لحد ما يتحدّث القالب يدويًا بالاسم الجديد — استخدم هذا بحذر لهذا النوع
+    من التحاليل.
+  </p>
   <table>
     <thead><tr><th>{{ t('test') }}</th><th>{{ t('parameter') }}</th><th>{{ t('content') }}</th><th></th></tr></thead>
     <tbody>
       {% for r in rows %}
       <tr id="sugg-view-{{ r['id'] }}">
-        <td>{{ r['test_name'] }}</td>
-        <td>{{ r['param_name'] }}</td>
+        <td>
+          <span id="test-name-{{ r['id'] }}">{{ r['test_name'] }}</span>
+          <button type="button" class="btn small secondary" title="تعديل اسم التحليل"
+                  onclick="renameToggle('test-{{ r['id'] }}')">✏️</button>
+          <form id="test-rename-{{ r['id'] }}" method="POST"
+                action="{{ url_for('rename_test_definition_name', test_definition_id=r['test_definition_id']) }}"
+                style="display:none; margin-top:4px;">
+            <input type="text" name="new_name" value="{{ r['test_name'] }}" required>
+            <button class="btn small success" type="submit">{{ t('save') }}</button>
+          </form>
+        </td>
+        <td>
+          <span id="param-name-{{ r['id'] }}">{{ r['param_name'] }}</span>
+          <button type="button" class="btn small secondary" title="تعديل اسم الـParameter"
+                  onclick="renameToggle('param-{{ r['id'] }}')">✏️</button>
+          <form id="param-rename-{{ r['id'] }}" method="POST"
+                action="{{ url_for('rename_test_parameter', param_id=r['test_parameter_id']) }}"
+                style="display:none; margin-top:4px;">
+            <input type="text" name="new_name" value="{{ r['param_name'] }}" required>
+            <button class="btn small success" type="submit">{{ t('save') }}</button>
+          </form>
+        </td>
         <td>{{ r['content'] }}</td>
         <td style="white-space:nowrap;">
           <button type="button" class="btn small secondary" onclick="suggToggleEdit({{ r['id'] }})">✏️ تعديل</button>
@@ -71,6 +98,13 @@
     var showing = edit.style.display !== 'none';
     edit.style.display = showing ? 'none' : 'table-row';
     view.style.display = showing ? 'table-row' : 'none';
+  }
+  function renameToggle(key) {
+    // key بالشكل "test-<id>" أو "param-<id>"
+    var parts = key.split('-');
+    var kind = parts[0], id = parts[1];
+    var form = document.getElementById(kind + '-rename-' + id);
+    form.style.display = (form.style.display === 'none') ? 'block' : 'none';
   }
 </script>
 {% endblock %}

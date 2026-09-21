@@ -186,7 +186,24 @@ try:
 except Exception:
     _crash_log_file = None
 
+# ------------------------------------------------------------------------
+# شبكة أمان ثانية -- لأخطاء بايثون العادية (Exception عادي بصفحة معيّنة،
+# مثل خطأ "Create Visit")، وليس الكراشات العميقة اللي يمسكها faulthandler
+# فوق. بدل ما نعترض الأخطاء بأنفسنا (errorhandler عام كسر الصفحات بمحاولة
+# سابقة)، نضيف بس "وجهة ملف" لنظام التسجيل الداخلي بفلاسك نفسه (logging)
+# -- فلاسك أصلاً يسجّل كل خطأ غير متوقع داخليًا بدون ما نلمس أي سلوك أو
+# نغيّر شكل صفحة الخطأ المعروضة إطلاقًا؛ هذا فقط يضيف له وجهة ملف إضافية.
+# النتيجة: error_log.txt (بجذر البرنامج، جنب crash_log.txt) يحتوي كل
+# Traceback كامل لأي صفحة تطيح، بدون أي خطر تغيير سلوك الموقع.
+import logging as _logging
+_error_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "error_log.txt")
+_error_file_handler = _logging.FileHandler(_error_log_path, encoding="utf-8")
+_error_file_handler.setLevel(_logging.ERROR)
+_error_file_handler.setFormatter(_logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+
 app = Flask(__name__)
+app.logger.addHandler(_error_file_handler)
+app.logger.setLevel(_logging.ERROR)
 # مفتاح جلسة عشوائي مختلف بكل مرة يُشغَّل فيها السيرفر فعليًا (وليس نفس
 # نص ثابت دائمًا) — بهذا الشكل أي كوكي دخول قديم صار غير صالح تلقائيًا بعد
 # أي إعادة تشغيل حقيقية للبرنامج (إعادة تشغيل الجهاز، إيقاف ثم تشغيل من
@@ -1202,7 +1219,7 @@ def landing():
     (نفس مبدأ /login) -- لو المستخدم مسجّل دخول أصلاً بجلسة سابقة (تذكرني)
     نوديه للوحة التحكم فورًا بدون ما نعرض له هذي الشاشة من جديد.
     """
-    if "user_id" in session:
+    if "interface" in session:
         return redirect(url_for("dashboard"))
     db = get_db()
     ctx = {
@@ -1367,8 +1384,8 @@ def license_activate():
     ok, err = license_manager.apply_activation(db, username, code)
     db.close()
     if ok:
-        flash("تم تفعيل الترخيص بنجاح، يمكنك تسجيل الدخول الآن")
-        return redirect(url_for("login"))
+        flash("تم تفعيل الترخيص بنجاح")
+        return redirect(url_for("landing"))
     flash(err or "فشل التفعيل")
     return redirect(url_for("license_locked"))
 

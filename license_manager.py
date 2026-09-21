@@ -87,17 +87,19 @@ def _raw_machine_fingerprint():
             parts.append(out.strip())
     except Exception:
         pass
-    # uuid.getnode() احتياطي فقط لو فشلت كل الطرق أعلاه (Linux/Mac بدون
-    # الملفات المتوقعة، أو ويندوز فشل قراءة MachineGuid). ⚠️ لازم يكون
-    # فقط عند الفشل، مو مضاف دائماً — لأنه (موثّق ببايثون نفسها) ممكن
-    # يرجّع قيمة مبنية على عنوان MAC تتغيّر بين تشغيل وآخر (فصل/وصل VPN،
-    # تغيّر كارت شبكة، Sleep/Wake...). لو تضاف دائماً فوق MachineGuid
-    # الثابت، البصمة النهائية (التjميع الكامل) تتغيّر برضه حتى لو
-    # MachineGuid نفسه ثابت — وهذا بالضبط سبب مشكلة "يطلب إدخال الـID
-    # من جديد بعد يوم بدون تشغيل" اللي أبلغ عنها المستخدم.
-    if not parts:
-        import uuid as _uuid
-        parts.append(str(_uuid.getnode()))
+    # ⚠️ الخلل الفعلي وراء تكرار طلب إعادة التفعيل (حتى بعد تصحيح MachineGuid
+    # أعلاه): هذا السطر كان يضيف uuid.getnode() دائمًا بغض النظر هل نجحنا
+    # نجيب MachineGuid (أو machine-id/IOPlatformUUID) أو لا -- ودمج القيمتين
+    # سوا بنفس الهاش يعني أي تذبذب بـuuid.getnode() (شي متوقّع ومو نادر:
+    # يتغيّر أحيانًا بعد سبات الجهاز، تبديل شبكة Wi-Fi، تفعيل/تعطيل كرت
+    # شبكة...الخ) يغيّر بصمة الجهاز كاملة حتى لو MachineGuid الثابت ما
+    # تغيّر إطلاقًا. الحل: uuid.getnode() يُستخدم فقط لو باقي المصادر
+    # الأثبت كلها فشلت (parts لسا فاضية) -- إذا حصلنا MachineGuid (أو
+    # مكافئه بلينكس/ماك) بنجاح، نعتمد عليه لحاله بدون أي إضافة متذبذبة.
+    if parts:
+        return "|".join(parts)
+    import uuid as _uuid
+    parts.append(str(_uuid.getnode()))
     return "|".join(parts)
 
 

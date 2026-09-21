@@ -16,9 +16,11 @@
         <td>{{ ot['sample_type'] }}</td>
         <td class="mono">{{ ot['barcode'] }}</td>
         <td>
-          <form method="POST" action="{{ url_for('collect_sample', order_test_id=ot['id']) }}">
+          <form method="POST" action="{{ url_for('collect_sample', order_test_id=ot['id']) }}" style="display:inline">
             <button class="btn small success" type="submit">{{ t('collect') }}</button>
           </form>
+          <a class="btn small secondary" href="{{ url_for('order_test_forward', order_test_id=ot['id']) }}"
+             title="إرسال هذا التحليل لمختبر آخر لإجرائه">🚚</a>
         </td>
       </tr>
       {% endfor %}

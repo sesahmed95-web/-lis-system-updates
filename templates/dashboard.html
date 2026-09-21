@@ -130,18 +130,6 @@
     border: none; outline: none; background: transparent; font-size: 14.5px;
     font-weight: 600; width: 100%; color: inherit; font-family: inherit;
   }
-
-  .dash-recent {
-    background: var(--card-bg, #fff);
-    border-radius: 14px;
-    padding: 16px 18px;
-    box-shadow: 0 1px 4px rgba(0,0,0,.08);
-  }
-  html.dark .dash-recent { background: #1e293b; color: #f1f5f9; }
-  .dash-recent h3 { margin: 0 0 12px; font-size: 15px; }
-  .dash-recent table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  .dash-recent th { text-align: {{ 'right' if lang == 'ar' else 'left' }}; opacity: .6; font-weight: 600; padding: 6px 8px; }
-  .dash-recent td { padding: 8px; border-top: 1px solid rgba(127,127,127,.15); }
 </style>
 
 <!-- شاشة الترحيب: الترحيب، بعده التاريخ، وبالأخير الساعة -->
@@ -210,33 +198,6 @@
            box-shadow:0 8px 22px rgba(0,0,0,.15);"></div>
     </div>
   </div>
-</div>
-
-<!-- آخر الزيارات -->
-<div class="dash-recent">
-  <h3>{{ 'آخر الزيارات' if lang=='ar' else 'Recent Visits' }}</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>{{ 'رقم التسجيل' if lang=='ar' else 'Reg. No' }}</th>
-        <th>{{ 'المريض' if lang=='ar' else 'Patient' }}</th>
-        <th>{{ 'الحالة' if lang=='ar' else 'Status' }}</th>
-        <th>{{ 'التاريخ' if lang=='ar' else 'Date' }}</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for v in recent_visits %}
-      <tr>
-        <td>{{ v.registration_number }}</td>
-        <td><a href="{{ url_for('patient_history', patient_id=v.patient_id) }}" style="color:inherit; text-decoration:underline; text-decoration-style:dotted;">{{ v.full_name }}</a></td>
-        <td>{{ v.status }}</td>
-        <td>{{ v.created_at }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="4" style="text-align:center; opacity:.6;">{{ 'لا توجد زيارات' if lang=='ar' else 'No visits yet' }}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
 </div>
 
 <script>

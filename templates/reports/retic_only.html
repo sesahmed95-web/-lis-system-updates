@@ -3,6 +3,7 @@
 <div class="report-heading">Reticulocyte Count</div>
 
 {% set corrected_retic = params.get('Corrected Retic count', '') %}
+{% set corrected_retic_note = notes.get('Corrected Retic count', '') if notes else '' %}
 <table style="width:100%; margin-top:10px; direction:ltr; text-align:left;">
   <tr>
     <td style="width:{{ '50%' if corrected_retic else '100%' }};"><b class="editable-label">Reticulocyte count:</b> {{ params.get('Reticulocyte count', '') }} {{ units.get('Reticulocyte count') or '%' }}</td>
@@ -11,4 +12,10 @@
     {% endif %}
   </tr>
 </table>
+{% if corrected_retic and corrected_retic_note %}
+{# ملاحظة تلقائية: النتيجة المصححة أقل من العدّ الأصلي. نص عادي قابل
+   للتعديل/الحذف من معاينة الطباعة (editable-label) بدون أي زر جديد --
+   إذا المستخدم يريد يشيلها من التقرير، يمسح نصها من هناك مباشرة. #}
+<div class="editable-label" style="font-size:12px; margin-top:6px;">{{ corrected_retic_note }}</div>
+{% endif %}
 {% endblock %}

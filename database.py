@@ -15,6 +15,13 @@ def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # المطلوب 4 (مزامنة حية بين جهاز الاستقبال وجهاز المختبر على نفس
+    # الشبكة): بدون هذا، أي جهازين يحفظون بنفس اللحظة تقريبًا معرضين
+    # لخطأ "database is locked". WAL يخلي القراءة والكتابة تصير بنفس
+    # الوقت من أكثر من اتصال، وbusy_timeout يخلي أي اتصال ينتظر لين
+    # 5 ثواني قبل لا يرمي الخطأ (بدل ما يفشل فورًا).
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -578,6 +585,16 @@ def migrate(conn):
             # results عادي وتقدر تطبعها/تبحث عنها بأي وقت. لا علاقة له
             # بفاتورة المريض نفسها (خارج نطاق هذا الحقل).
             ("hidden_from_log", "INTEGER DEFAULT 0"),
+            # forwarded_lab_name / forwarded_cost (المطلوب 3): لو هذا
+            # التحليل بالذات ما يُنفَّذ فعليًا بمختبرك (مثل البرولاكتين
+            # الذي يُرسَل لمختبر القمة مثلاً) -- تسجّل هون اسم المختبر
+            # المُرسَل إليه وكلفته، ليُحسَب ضمن "الصرفيات" بالتقرير اليومي/
+            # الشهري تلقائيًا (راجع recompute_visit_forwarded_expenses
+            # بـapp.py). فاضي = هذا التحليل يُنفَّذ بمختبرك مباشرة (السلوك
+            # الافتراضي القديم، بلا أي تغيير). التقرير المطبوع للمريض نفسه
+            # لا يتأثر إطلاقًا بهذا الحقل -- يبقى يُطبع بقالب مختبرك (نفس
+            # الشعار والدكاترة) بغض النظر عن مكان الإرسال الفعلي.
+            ("forwarded_lab_name", "TEXT"), ("forwarded_cost", "REAL DEFAULT 0"),
         ],
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
         "visits": [("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
@@ -646,7 +663,8 @@ def migrate(conn):
         # NULL يعني نسبة عامة بغض النظر عن الجهاز. أولوية المطابقة الكاملة:
         # نسبة المريض الخاصة > نسبة نفس الجهاز > النسبة العامة.
         "reference_ranges": [("age_from_unit", "TEXT DEFAULT 'Years'"), ("age_to_unit", "TEXT DEFAULT 'Years'"),
-                              ("patient_id", "INTEGER"), ("range_label", "TEXT"), ("analyzer", "TEXT")],
+                              ("patient_id", "INTEGER"), ("range_label", "TEXT"), ("analyzer", "TEXT"),
+                              ("note", "TEXT")],
         # unit2 / unit2_factor: وحدة ثانية اختيارية تُعرض تلقائيًا جنب النتيجة
         # الأصلية وقت الطباعة (مثلاً mg/dL بالإضافة لـ mmol/L). القيمة الثانية
         # تُحسب دائمًا = القيمة الأصلية × unit2_factor، ولا تُخزَّن بجدول
@@ -984,6 +1002,47 @@ def ensure_bfretic_parameters(conn):
         ("Platelets_desc", "", "Text", None, None, None),
         ("Conclusion", "", "Text", None, None, None),
         ("Reticulocyte count", "%", "Numeric", None, None, None),
+        ("Corrected Retic count", "%", "Numeric", None, None, None),
+    ]
+    for name, unit, result_type, low, high, range_text in params:
+        conn.execute(
+            "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, ?, ?, ?)",
+            (test_id, name, unit, result_type),
+        )
+        param_id = conn.execute("SELECT last_insert_rowid() as id").fetchone()["id"]
+        if low is not None or high is not None or range_text is not None:
+            conn.execute(
+                "INSERT INTO reference_ranges (test_parameter_id, low, high, range_text) VALUES (?, ?, ?, ?)",
+                (param_id, low, high, range_text),
+            )
+    conn.commit()
+
+
+def ensure_retic_parameters(conn):
+    """RETIC ('Retic Count' المفرد -- بدون لطاخة الدم) اتسجّل بالكتالوج ضمن
+    EXAMINING_TEST_DEFS لكن ما انزرع له test_parameters إطلاقًا (خلافًا عن
+    BFRETIC اللي عنده ensure_bfretic_parameters أعلاه)، فشاشة إدخال نتيجته
+    تطلع فاضية تمامًا -- ماكو مكان أصلاً ينزل بيه Reticulocyte count.
+    يزرع له:
+      - Reticulocyte count % (تُدخل يدويًا من الجهاز/العدّ اليدوي)
+      - HCT % (قيمة المريض الفعلية وقت هذا التحليل -- تُستخدم فقط لحساب
+        Corrected Retic count، وما تُطبع لحالها بالتقرير)
+      - Corrected Retic count % (تُحسب تلقائيًا بـsave_order_test_results
+        بملف app.py، ما تُدخل يدويًا إلا لو المستخدم كتب قيمة بنفسه)
+    نفس أسلوب ensure_bfretic_parameters تمامًا: يفحص أول هل عنده parameters
+    مسبقًا حتى ما يتكرر على قاعدة بيانات مشغّلة هذا السكربت أكثر من مرة."""
+    row = conn.execute("SELECT id FROM test_definitions WHERE code='RETIC'").fetchone()
+    if not row:
+        return
+    test_id = row["id"]
+    has_params = conn.execute(
+        "SELECT COUNT(*) as c FROM test_parameters WHERE test_definition_id=?", (test_id,)
+    ).fetchone()["c"]
+    if has_params:
+        return
+    params = [
+        ("Reticulocyte count", "%", "Numeric", None, None, None),
+        ("HCT", "%", "Numeric", None, None, None),
         ("Corrected Retic count", "%", "Numeric", None, None, None),
     ]
     for name, unit, result_type, low, high, range_text in params:
@@ -1347,6 +1406,31 @@ def find_or_create_referral_center(db, name):
     return cur.lastrowid
 
 
+def ensure_interface_accounts(conn):
+    """المطلوب (استبدال نظام تسجيل الدخول الشخصي بواجهات الاستقبال/
+    المختبر/الاثنين معًا): عشرات الأماكن بـapp.py تكتب session["user_id"]
+    مباشرة لتسجيل "مين سوى شنو" (entered_by، log_action...الخ). بدل ما
+    نلمس كل تلك الأماكن (خطر كبير)، نسوي حساب "ظل" واحد بجدول users
+    لكل واجهة (Reception/Lab/Together) يُنشأ تلقائيًا أول مرة بس، ويُستخدم
+    داخليًا فقط (ما يُدخَل بيه من شاشة تسجيل دخول عادية) -- بمجرد ما
+    المستخدم يدخل واجهة معيّنة من الشاشة الرئيسية، جلسته تُربط بحساب تلك
+    الواجهة تلقائيًا، فيبقى كل الكود القديم يشتغل بدون أي تعديل."""
+    accounts = [
+        ("__interface_reception__", "حساب واجهة الاستقبال"),
+        ("__interface_lab__", "حساب واجهة المختبر"),
+        ("__interface_both__", "حساب واجهة الاستقبال والمختبر معًا"),
+    ]
+    for username, full_name in accounts:
+        row = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+        if not row:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, full_name, role, is_active, created_at) "
+                "VALUES (?, ?, ?, 'admin', 1, ?)",
+                (username, hash_password(os.urandom(16).hex()), full_name, datetime.now().isoformat(timespec="seconds")),
+            )
+    conn.commit()
+
+
 def init_db():
     fresh = not os.path.exists(DB_PATH)
     conn = get_db()
@@ -1357,6 +1441,8 @@ def init_db():
         seed(conn)
     ensure_examining_tests(conn)
     ensure_bfretic_parameters(conn)
+    ensure_retic_parameters(conn)
+    ensure_interface_accounts(conn)
     ensure_nrbc_parameter(conn)
     ensure_atypical_lymphocytes_parameter(conn)
     ensure_reactive_lymphocytes_parameter(conn)
