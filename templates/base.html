@@ -105,7 +105,7 @@
         <div class="nav-group-links">
         <a class="nav-link {{ 'active' if request.path == url_for('new_visit') else '' }}" href="{{ url_for('new_visit') }}">➕ {{ t('new_visit') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('visits_list') else '' }}" href="{{ url_for('visits_list') }}">📋 {{ t('visits') }}</a>
-        <a class="nav-link {{ 'active' if request.path == url_for('recent_visits_page') else '' }}" href="{{ url_for('recent_visits_page') }}">🕒 {{ 'آخر الزيارات' if lang=='ar' else 'Recent Visits' }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('visits_list') else '' }}" href="{{ url_for('visits_list') }}">🕒 {{ 'آخر الزيارات' if lang=='ar' else 'Recent Visits' }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('patients_list') else '' }}" href="{{ url_for('patients_list') }}">🧑‍🤝‍🧑 {{ t('patients') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('results_list') else '' }}" href="{{ url_for('results_list') }}">📄 {{ t('results') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('pdf_archive') else '' }}" href="{{ url_for('pdf_archive') }}">🗄️ أرشيف PDF</a>
