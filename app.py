@@ -1074,9 +1074,18 @@ def login_required(view):
     الدخول" صار يعني ببساطة "دخل من إحدى بطاقات الشاشة الرئيسية" --
     session["interface"] هو المرجع الحقيقي الآن، مو session["user_id"]
     (اللي يبقى موجود لأغراض ثانية فقط -- حساب الواجهة "الظل"، راجع
-    ensure_interface_accounts بـdatabase.py)."""
+    ensure_interface_accounts بـdatabase.py).
+
+    استثناء مهم: جلسة "المصمم" (session["designer_id"]) منفصلة كليًا عن
+    نظام الواجهات هذا ولا تحدد session["interface"] إطلاقًا -- بدونه كان
+    المصمم ما يقدر يوصل حتى لصفحة الإعدادات العادية أو الداشبورد نفسها
+    (بالضبط سبب عدم القدرة على تغيير ألوان الشاشة الرئيسية من لوحة
+    المصمم). المصمم مخوّل دائماً يشوف أي صفحة بالبرنامج بغض النظر عن
+    اختيار واجهة."""
     @wraps(view)
     def wrapped(*args, **kwargs):
+        if session.get("designer_id"):
+            return view(*args, **kwargs)
         if "interface" not in session:
             return redirect(url_for("landing"))
         return view(*args, **kwargs)
@@ -1089,10 +1098,16 @@ def roles_required(*roles):
     و"الاثنين معًا" بس (بدون تمييز فني/مسؤول حاليًا)، وممنوعة عن
     "استقبال". الأسماء الممرَّرة (roles) ما عادت تُستخدم فعليًا، أبقيتها
     بالتوقيع فقط حتى ما نضطر نلمس الـ85 مكان اللي يستخدمون هذا الديكوريتر
-    بكل أنحاء الملف -- التغيير صار بمكان واحد هنا بس."""
+    بكل أنحاء الملف -- التغيير صار بمكان واحد هنا بس.
+
+    نفس استثناء login_required: جلسة "المصمم" تتخطى فحص الواجهة بالكامل
+    (بدونه ما يقدر يوصل حتى لصفحة الإعدادات لتغيير ألوان/صور الشاشة
+    الرئيسية أو أي إعداد ثاني)."""
     def decorator(view):
         @wraps(view)
         def wrapped(*args, **kwargs):
+            if session.get("designer_id"):
+                return view(*args, **kwargs)
             if "interface" not in session:
                 return redirect(url_for("landing"))
             if session.get("interface") not in ("lab", "both"):
