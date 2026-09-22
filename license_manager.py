@@ -87,19 +87,17 @@ def _raw_machine_fingerprint():
             parts.append(out.strip())
     except Exception:
         pass
-    # ⚠️ الخلل الفعلي وراء تكرار طلب إعادة التفعيل (حتى بعد تصحيح MachineGuid
-    # أعلاه): هذا السطر كان يضيف uuid.getnode() دائمًا بغض النظر هل نجحنا
-    # نجيب MachineGuid (أو machine-id/IOPlatformUUID) أو لا -- ودمج القيمتين
-    # سوا بنفس الهاش يعني أي تذبذب بـuuid.getnode() (شي متوقّع ومو نادر:
-    # يتغيّر أحيانًا بعد سبات الجهاز، تبديل شبكة Wi-Fi، تفعيل/تعطيل كرت
-    # شبكة...الخ) يغيّر بصمة الجهاز كاملة حتى لو MachineGuid الثابت ما
-    # تغيّر إطلاقًا. الحل: uuid.getnode() يُستخدم فقط لو باقي المصادر
-    # الأثبت كلها فشلت (parts لسا فاضية) -- إذا حصلنا MachineGuid (أو
-    # مكافئه بلينكس/ماك) بنجاح، نعتمد عليه لحاله بدون أي إضافة متذبذبة.
-    if parts:
-        return "|".join(parts)
-    import uuid as _uuid
-    parts.append(str(_uuid.getnode()))
+    # uuid.getnode() احتياطي فقط لو فشلت كل الطرق أعلاه (Linux/Mac بدون
+    # الملفات المتوقعة، أو ويندوز فشل قراءة MachineGuid). ⚠️ لازم يكون
+    # فقط عند الفشل، مو مضاف دائماً — لأنه (موثّق ببايثون نفسها) ممكن
+    # يرجّع قيمة مبنية على عنوان MAC تتغيّر بين تشغيل وآخر (فصل/وصل VPN،
+    # تغيّر كارت شبكة، Sleep/Wake...). لو تضاف دائماً فوق MachineGuid
+    # الثابت، البصمة النهائية (التjميع الكامل) تتغيّر برضه حتى لو
+    # MachineGuid نفسه ثابت — وهذا بالضبط سبب مشكلة "يطلب إدخال الـID
+    # من جديد بعد يوم بدون تشغيل" اللي أبلغ عنها المستخدم.
+    if not parts:
+        import uuid as _uuid
+        parts.append(str(_uuid.getnode()))
     return "|".join(parts)
 
 
@@ -304,25 +302,45 @@ def log_issued_code(db, hardware_id, username, expiry, code):
 
 
 # --------------------------------------------------------------- designer --
+# بيانات دخول المصمم صارت ثابتة هون بالكود نفسه (Hardcoded) -- مو بقاعدة
+# البيانات (lis.db) اللي تترسل لكل عميل. هذا يمنع أي عميل من:
+#   (أ) الدخول لـ/designer/setup وسوي حساب مصمم لحاله لو نسخة lis.db
+#       اللي أرسلتها ماكو فيها حساب بعد.
+#   (ب) فتح lis.db بأداة SQLite عادية ومشاهدة/تغيير بيانات الدخول مباشرة.
+#
+# ⚠️ لازم تغيّر القيمتين تحت (USERNAME وكلمة المرور) لقيمك الخاصة قبل أي
+# تغليف/إرسال للعميل -- هذا الملف (license_manager.py) ما يترسل للعميل
+# أصلاً (مو ضمن أي --add-data بأمر PyInstaller)، فتبقى خاصة فيك بس، ثابتة
+# نفسها بكل نسخة تبنيها، بغض النظر عن أي lis.db مرتبط بأي عميل.
+#
+# لتغيير كلمة المرور مستقبلاً: غيّر _DESIGNER_PASSWORD تحت مباشرة (نص
+# عادي هنا، يتحول لهاش تلقائيًا بالسطر اللي بعده)، احفظ، وأعد بناء الـ.exe.
+_DESIGNER_USERNAME = "CHANGE_ME_USERNAME"
+_DESIGNER_PASSWORD = "CHANGE_ME_PASSWORD"
+DESIGNER_USERNAME = _DESIGNER_USERNAME
+DESIGNER_PASSWORD_HASH = hash_password(_DESIGNER_PASSWORD)
+
+
 def designer_exists(db):
-    return db.execute("SELECT 1 FROM designer_account WHERE id=1").fetchone() is not None
+    # صار دائمًا True -- بيانات الدخول ثابتة بالكود، مو بقاعدة البيانات،
+    # فما فيه معنى لحالة "لسا ما انسوّى حساب مصمم" أصلاً بعد الآن.
+    return True
 
 
 def create_designer_account(db, username, password):
-    db.execute(
-        "INSERT INTO designer_account (id, username, password_hash) VALUES (1, ?, ?)",
-        (username.strip(), hash_password(password)),
-    )
-    db.commit()
+    # مُعطَّلة عمدًا -- ما نسمح لأي حد ينشئ حساب مصمم من الواجهة إطلاقًا
+    # بعد الآن. أي استدعاء لهذي الدالة (لو بقي أي مسار قديم يستدعيها)
+    # ما يسوي شي.
+    return
 
 
 def verify_designer(db, username, password):
-    row = db.execute("SELECT * FROM designer_account WHERE id=1").fetchone()
-    if not row:
-        return False
-    return row["username"] == (username or "").strip() and row["password_hash"] == hash_password(password)
+    return (username or "").strip() == DESIGNER_USERNAME and hash_password(password) == DESIGNER_PASSWORD_HASH
 
 
 def change_designer_password(db, new_password):
-    db.execute("UPDATE designer_account SET password_hash=? WHERE id=1", (hash_password(new_password),))
-    db.commit()
+    # مُعطَّلة عمدًا لنفس السبب -- تغيير كلمة مرور المصمم صار يحتاج تعديل
+    # _DESIGNER_PASSWORD أعلاه بالكود نفسه وإعادة بناء الـ.exe، مو من
+    # داخل البرنامج وقت التشغيل (لأن أي تغيير وقت التشغيل لازم ينكتب
+    # بمكان ما -- وأقرب مكان هو lis.db نفسه، وهذا بالضبط اللي نتفاداه).
+    return

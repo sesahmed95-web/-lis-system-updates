@@ -51,7 +51,7 @@
         </div>
         <div class="landing-card-label">Laboratory</div>
       </div>
-      <div class="landing-card" onclick="enterInterface('both', false)">
+      <div class="landing-card" onclick="enterInterface('both', {{ both_needs_password|default(false)|tojson }})">
         <div class="landing-card-img">
           {% if landing_together_image %}<img src="{{ landing_together_image }}" alt="Together">{% else %}<span class="fallback-icon">🔀</span>{% endif %}
         </div>
@@ -66,10 +66,11 @@
   </form>
 
   <script>
+    var INTERFACE_LABELS = { reception: 'الاستقبال', lab: 'المختبر', both: 'الاثنين معًا' };
     function enterInterface(choice, needsPassword) {
       var pwd = '';
       if (needsPassword) {
-        pwd = prompt('أدخل كلمة مرور واجهة "' + (choice === 'reception' ? 'الاستقبال' : 'المختبر') + '":');
+        pwd = prompt('أدخل كلمة مرور واجهة "' + INTERFACE_LABELS[choice] + '":');
         if (pwd === null) return;
       }
       var name = prompt('اسمك (اختياري -- يُسجَّل فقط لمعرفة مين سوى شنو):') || '';

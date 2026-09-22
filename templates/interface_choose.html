@@ -15,7 +15,7 @@
     <button type="button" class="btn" style="padding:14px;" onclick="chooseInterface('lab', {{ lab_configured|tojson }})">
       🧪 مختبر {% if current_interface == 'lab' %}(الحالية){% endif %}
     </button>
-    <button type="button" class="btn secondary" style="padding:14px;" onclick="chooseInterface('both', false)">
+    <button type="button" class="btn secondary" style="padding:14px;" onclick="chooseInterface('both', {{ both_configured|tojson }})">
       🔀 الاثنين معًا {% if current_interface == 'both' %}(الحالية){% endif %}
     </button>
   </div>
@@ -27,10 +27,11 @@
 </div>
 
 <script>
+  var INTERFACE_LABELS = { reception: 'الاستقبال', lab: 'المختبر', both: 'الاثنين معًا' };
   function chooseInterface(choice, needsPassword) {
     var pwd = '';
     if (needsPassword) {
-      pwd = prompt('أدخل كلمة مرور واجهة "' + (choice === 'reception' ? 'الاستقبال' : 'المختبر') + '":');
+      pwd = prompt('أدخل كلمة مرور واجهة "' + INTERFACE_LABELS[choice] + '":');
       if (pwd === null) return;
     }
     document.getElementById('interfaceChoiceInput').value = choice;
