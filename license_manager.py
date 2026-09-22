@@ -318,7 +318,15 @@ def log_issued_code(db, hardware_id, username, expiry, code):
 _DESIGNER_USERNAME = "ah"
 _DESIGNER_PASSWORD = "123"
 DESIGNER_USERNAME = _DESIGNER_USERNAME
-DESIGNER_PASSWORD_HASH = hash_password(_DESIGNER_PASSWORD)
+# ⚠️ مقارنة نص صريح مباشرة، بدون أي هاش — والسبب: hash_password المستوردة
+# من database.py (غالبًا generate_password_hash بـWerkzeug) تضيف "ملح"
+# عشوائي مختلف بكل استدعاء، حتى لنفس النص بالضبط. فمقارنة هاش محسوب مرة
+# وحدة وقت الإقلاع (هنا) بهاش يُحسب من جديد وقت كل محاولة دخول (بداخل
+# verify_designer) تفشل دائمًا مهما كانت كلمة المرور صحيحة — هذا بالضبط
+# سبب "ما أقدر أدخل رغم إني غيّرت اليوزر والباسورد صح" اللي انصادف. ما
+# فيه داعي للهاش هنا أصلاً: كلمة المرور محفوظة كنص صريح بنفس هذا الملف
+# المصدري (ما يترسل للعميل)، فالتشفير ما يضيف أي حماية إضافية حقيقية.
+DESIGNER_PASSWORD = _DESIGNER_PASSWORD
 
 
 def designer_exists(db):
@@ -335,7 +343,7 @@ def create_designer_account(db, username, password):
 
 
 def verify_designer(db, username, password):
-    return (username or "").strip() == DESIGNER_USERNAME and hash_password(password) == DESIGNER_PASSWORD_HASH
+    return (username or "").strip() == DESIGNER_USERNAME and (password or "") == DESIGNER_PASSWORD
 
 
 def change_designer_password(db, new_password):
