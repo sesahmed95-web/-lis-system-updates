@@ -5,7 +5,6 @@ from werkzeug.utils import secure_filename
 from markupsafe import Markup, escape
 from io import BytesIO
 import os
-import sys
 import json
 import re
 import subprocess
@@ -175,25 +174,12 @@ import secrets
 import faulthandler
 
 # ------------------------------------------------------------------------
-# مكان دائم لأي بيانات يكتبها البرنامج (قاعدة البيانات، اللوقات، الصور
-# المرفوعة) -- مهم جدًا وقت التشغيل مغلّف بـPyInstoller بوضع --onefile:
-# os.path.dirname(__file__) بهذا الوضع يرجّع مجلد مؤقت (Temp\_MEIxxxxx)
-# يُفكّ فيه البرنامج مؤقتًا كل فتحة ويُمسح لما تسكّره بالكامل -- يعني أي
-# ملف ينكتب هناك (لوق، صورة مرفوعة...) يضيع فورًا. نستخدم مجلد ملف الـ.exe
-# نفسه بدلاً منه (ثابت ودائم) لو مغلّف، وإلا (تشغيل مباشر بالكود، وضع
-# التطوير) نفس السلوك القديم بالضبط.
-if getattr(sys, "frozen", False):
-    _BASE_DIR = os.path.dirname(sys.executable)
-else:
-    _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# ------------------------------------------------------------------------
 # شبكة أمان لتسجيل كراش أعمق من خطأ بايثون العادي (segfault/stack overflow
 # نادر يقفل العملية كاملة بدون أي traceback بالتيرمينال) — faulthandler
 # فقط، بدون أي errorhandler عام (كان سبب كسر كل الصفحات بمحاولة سابقة).
 # يُكتب بملف crash_log.txt بمجلد البرنامج نفسه — راجعه أول شي لو انغلق
 # البرنامج فجأة بدون أي رسالة حمراء بالتيرمينال.
-_CRASH_LOG_PATH = os.path.join(_BASE_DIR, "crash_log.txt")
+_CRASH_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crash_log.txt")
 try:
     _crash_log_file = open(_CRASH_LOG_PATH, "a", encoding="utf-8", buffering=1)
     faulthandler.enable(file=_crash_log_file, all_threads=True)
@@ -210,33 +196,12 @@ except Exception:
 # النتيجة: error_log.txt (بجذر البرنامج، جنب crash_log.txt) يحتوي كل
 # Traceback كامل لأي صفحة تطيح، بدون أي خطر تغيير سلوك الموقع.
 import logging as _logging
-
-# ============================================================================
-# مجلد static الدائم: لو مغلّف (sys.frozen)، مجلد static الأصلي (CSS/JS/
-# الأيقونات المرفقة) يوصل مؤقتًا بمجلد الفكّ (_MEIPASS) اللي يُمسح لما
-# تسكّر البرنامج -- فأول مرة تفتح فيها .exe مغلّف على هذا الجهاز، ننسخه
-# مرة وحدة لمجلد الـ.exe الدائم (_BASE_DIR/static)، وFlask يقرأ/يكتب من
-# هناك دائمًا بعدها (static_folder بتعريف app تحت). هذا يخلي أي صورة
-# ترفعها (شعار، أختام...) تضل موجودة حتى بعد تسكير وتشغيل الـ.exe من جديد.
-if getattr(sys, "frozen", False):
-    _BUNDLED_STATIC_DIR = os.path.join(getattr(sys, "_MEIPASS", _BASE_DIR), "static")
-else:
-    _BUNDLED_STATIC_DIR = os.path.join(_BASE_DIR, "static")
-
-_PERSISTENT_STATIC_DIR = os.path.join(_BASE_DIR, "static")
-
-if getattr(sys, "frozen", False) and not os.path.isdir(_PERSISTENT_STATIC_DIR):
-    try:
-        shutil.copytree(_BUNDLED_STATIC_DIR, _PERSISTENT_STATIC_DIR)
-    except Exception:
-        pass  # لو فشل النسخ لأي سبب، Flask يرجع يستخدم مجلد الفكّ المؤقت (سلوك قديم، أفضل من طيح كامل)
-
-_error_log_path = os.path.join(_BASE_DIR, "error_log.txt")
+_error_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "error_log.txt")
 _error_file_handler = _logging.FileHandler(_error_log_path, encoding="utf-8")
 _error_file_handler.setLevel(_logging.ERROR)
 _error_file_handler.setFormatter(_logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
 
-app = Flask(__name__, static_folder=_PERSISTENT_STATIC_DIR)
+app = Flask(__name__)
 app.logger.addHandler(_error_file_handler)
 app.logger.setLevel(_logging.ERROR)
 # مفتاح جلسة عشوائي مختلف بكل مرة يُشغَّل فيها السيرفر فعليًا (وليس نفس
@@ -247,14 +212,14 @@ app.logger.setLevel(_logging.ERROR)
 app.secret_key = secrets.token_hex(32)
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days when "remember me" is checked
 
-UPLOAD_DIR = os.path.join(_PERSISTENT_STATIC_DIR, "uploads")
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_LOGO_EXT = {"png", "jpg", "jpeg", "gif", "svg", "webp"}
 # صور الأختام/التواقيع — بدون svg (نحتاج نفتحها بمكتبة الصور Pillow لتحويل
 # أي خلفية شفافة/ملوّنة إلى خلفية بيضاء صلبة، وsvg متجه وليس بكسلي فلا يدعمه
 # نفس المسار).
 ALLOWED_STAMP_EXT = {"png", "jpg", "jpeg", "webp"}
-STAMPS_UPLOAD_DIR = os.path.join(_PERSISTENT_STATIC_DIR, "uploads", "stamps")
+STAMPS_UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "static", "uploads", "stamps")
 os.makedirs(STAMPS_UPLOAD_DIR, exist_ok=True)
 # صور خلفية شاشة الترحيب (dashboard) — صور فوتوغرافية بس، بدون svg/gif
 # (svg ما إله فايدة كخلفية ممتدة، وgif المتحرك يشتت الانتباه بشاشة ترحيب).
@@ -1278,7 +1243,9 @@ def landing():
         "landing_gradient_color2": get_setting(db, "landing_gradient_color2", "#205072"),
         "reception_needs_password": bool(get_setting(db, "interface_reception_password_hash", "")),
         "lab_needs_password": bool(get_setting(db, "interface_lab_password_hash", "")),
-        "both_needs_password": bool(get_setting(db, "interface_both_password_hash", "")),
+        "landing_image_shape": get_setting(db, "landing_image_shape", "square"),
+        "landing_image_position": get_setting(db, "landing_image_position", "top"),
+        "landing_image_opacity": get_setting(db, "landing_image_opacity", "100"),
     }
     for key in ("reception", "lab", "together"):
         img_path = get_setting(db, f"landing_{key}_image_path", "")
@@ -1297,18 +1264,13 @@ def landing_enter(interface):
     if interface not in ("reception", "lab", "both"):
         return redirect(url_for("landing"))
     db = get_db()
-    # الثلاث واجهات (استقبال/مختبر/الاثنين معًا) صارت متساوية بالحماية:
-    # كل وحدة كلمة مرورها الخاصة (تُضبط من الإعدادات)، والعميل حر يخليهم
-    # الثلاثة متشابهين أو مختلفين تمامًا -- أو يسيب أي وحدة منهم بدون
-    # كلمة مرور إطلاقًا (يدخلها أي حد بدون سؤال). "الاثنين معًا" ماكو
-    # استثناء بعد الآن (كان قبل بدون كلمة مرور دائمًا بحجة إنه أوسع
-    # خيار -- بالعكس، هذا يخليه أحوج لحماية، مو أقل).
-    stored_hash = get_setting(db, f"interface_{interface}_password_hash", "")
-    if stored_hash:
-        entered = request.form.get("password", "")
-        if hash_password(entered) != stored_hash:
-            flash("كلمة مرور هذي الواجهة غير صحيحة.")
-            return redirect(url_for("landing"))
+    if interface != "both":
+        stored_hash = get_setting(db, f"interface_{interface}_password_hash", "")
+        if stored_hash:
+            entered = request.form.get("password", "")
+            if hash_password(entered) != stored_hash:
+                flash("كلمة مرور هذي الواجهة غير صحيحة.")
+                return redirect(url_for("landing"))
     shadow_username = f"__interface_{interface}__"
     shadow_user = db.execute("SELECT * FROM users WHERE username=?", (shadow_username,)).fetchone()
     if not shadow_user:
@@ -1375,15 +1337,13 @@ def interface_choose():
     فلترة عرض فقط لأقسام القائمة الجانبية -- ما تغيّر صلاحيات اليوزر
     الفعلية (role) إطلاقًا. تبديل الواجهة لاحقًا (من نفس هذي الصفحة عبر
     زر "تبديل الواجهة" بأسفل القائمة) يحتاج كلمة مرور خاصة بتلك الواجهة
-    (تُضبط من صفحة الإعدادات) -- الثلاث واجهات متساوية بالحماية الآن،
-    كل وحدة كلمة مرورها الخاصة (أو بدون كلمة مرور لو العميل تركها فاضية)."""
+    (تُضبط من صفحة الإعدادات) -- اختيار "الاثنين معًا" ما يحتاج كلمة مرور
+    لأنه أوسع خيار (كل الأقسام)، فمافيه شي يُقيَّد عنه."""
     db = get_db()
     reception_configured = bool(get_setting(db, "interface_reception_password_hash", ""))
     lab_configured = bool(get_setting(db, "interface_lab_password_hash", ""))
-    both_configured = bool(get_setting(db, "interface_both_password_hash", ""))
     return render_template("interface_choose.html", current_interface=session.get("interface"),
-                            reception_configured=reception_configured, lab_configured=lab_configured,
-                            both_configured=both_configured)
+                            reception_configured=reception_configured, lab_configured=lab_configured)
 
 
 @app.route("/interface/set", methods=["POST"])
@@ -1394,15 +1354,16 @@ def interface_set():
         flash("اختيار غير صحيح.")
         return redirect(url_for("interface_choose"))
     db = get_db()
-    setting_key = f"interface_{choice}_password_hash"
-    stored_hash = get_setting(db, setting_key, "")
-    if stored_hash:
-        entered = request.form.get("password", "")
-        if hash_password(entered) != stored_hash:
-            flash("كلمة مرور هذي الواجهة غير صحيحة.")
-            return redirect(url_for("interface_choose"))
-    # لو ما فيه كلمة مرور مضبوطة لهذي الواجهة بعد، تُقبل بدون كلمة مرور
-    # (بدل ما تصير الميزة كلها معطّلة لين الأدمن يضبطها من الإعدادات).
+    if choice != "both":
+        setting_key = f"interface_{choice}_password_hash"
+        stored_hash = get_setting(db, setting_key, "")
+        if stored_hash:
+            entered = request.form.get("password", "")
+            if hash_password(entered) != stored_hash:
+                flash("كلمة مرور هذي الواجهة غير صحيحة.")
+                return redirect(url_for("interface_choose"))
+        # لو ما فيه كلمة مرور مضبوطة لهذي الواجهة بعد، تُقبل بدون كلمة مرور
+        # (بدل ما تصير الميزة كلها معطّلة لين الأدمن يضبطها من الإعدادات).
     # تبديل حساب الجلسة "الظل" لنفس واجهة الاختيار الجديد -- حتى entered_by
     # وaudit_logs يبقون متوافقين مع الواجهة الفعلية بعد التبديل (نفس مبدأ
     # landing_enter بالضبط).
@@ -1774,13 +1735,15 @@ def designer_delete_issue_log(log_id):
 @app.route("/designer/change-password", methods=["POST"])
 @designer_required
 def designer_change_password():
-    # صار تغيير كلمة مرور المصمم يحتاج تعديل الكود مباشرة (license_manager.py)
-    # وإعادة بناء الـ.exe -- مو من هذا الفورم وقت التشغيل، حتى تبقى كلمة
-    # المرور غير محفوظة إطلاقًا بـlis.db المُرسَل للعميل. راجع تعليق
-    # _DESIGNER_PASSWORD بأعلى license_manager.py للتفاصيل.
-    flash("تغيير كلمة مرور المصمم صار يحتاج تعديل _DESIGNER_PASSWORD مباشرة "
-          "بملف license_manager.py وإعادة بناء البرنامج -- ما عاد يتغيّر من هذا الفورم "
-          "(لحماية كلمة المرور من الحفظ بقاعدة بيانات أي عميل).")
+    new_password = request.form.get("new_password", "")
+    confirm = request.form.get("confirm", "")
+    if len(new_password) < 6 or new_password != confirm:
+        flash("تحقق من كلمة المرور الجديدة (6 أحرف على الأقل ومتطابقة)")
+        return redirect(url_for("designer_panel"))
+    db = get_db()
+    license_manager.change_designer_password(db, new_password)
+    db.close()
+    flash("تم تغيير كلمة مرور المصمم")
     return redirect(url_for("designer_panel"))
 
 
@@ -4969,7 +4932,7 @@ def print_report(order_test_id):
         import traceback
         tb_text = traceback.format_exc()
         try:
-            log_path = os.path.join(_BASE_DIR, "error_log.txt")
+            log_path = os.path.join(os.path.dirname(__file__), "error_log.txt")
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write("\n" + "=" * 80 + "\n")
                 f.write(datetime.now().isoformat(timespec="seconds") + f"  order_test_id={order_test_id}\n")
@@ -7769,10 +7732,8 @@ def app_settings():
             return redirect(url_for("app_settings"))
 
         # ------------------------------------------------------------
-        # كلمات مرور الواجهات الثلاث "استقبال"/"مختبر"/"الاثنين معًا"
-        # (المطلوب 3) -- كل وحدة مستقلة تمامًا، تُسأل بس وقت الدخول/تبديل
-        # الواجهة لتلك القيمة تحديدًا. العميل حر يخليهم متشابهين أو
-        # مختلفين، أو يترك أي وحدة فاضية (بدون كلمة مرور لتلك الواجهة).
+        # كلمات مرور واجهتي "استقبال" و"مختبر" (المطلوب 3) -- كل وحدة
+        # مستقلة، تُسأل بس وقت الدخول/تبديل الواجهة لتلك القيمة تحديدًا.
         # ترك الحقل فاضي = ما يغيّر كلمة المرور الحالية (يبقى نفس الشي
         # -- خله فاضي كل مرة إذا ما تريد تغييرها).
         # ------------------------------------------------------------
@@ -7783,9 +7744,6 @@ def app_settings():
             lab_pass = request.form.get("interface_lab_password", "")
             if lab_pass:
                 set_setting(db, "interface_lab_password_hash", hash_password(lab_pass))
-            both_pass = request.form.get("interface_both_password", "")
-            if both_pass:
-                set_setting(db, "interface_both_password_hash", hash_password(both_pass))
             db.commit()
             log_action("UpdateInterfacePasswords", "settings", 0)
             flash("تم حفظ كلمات مرور الواجهات.")
@@ -7805,6 +7763,23 @@ def app_settings():
                 gval = request.form.get(gkey, "").strip()
                 if gval and _HEX_COLOR_RE.match(gval):
                     set_setting(db, gkey, gval)
+            # المطلوب: التحكم بشكل صور البطاقات الثلاث (دائرية/مربعة/
+            # مستطيلة)، وضوحها (0-100)، وموضعها بالنسبة للبطاقة (داخل
+            # البطاقة بالأعلى -- الافتراضي، خلفية كاملة للبطاقة، أو جنب
+            # النص). إعداد واحد موحّد يطبَّق على الثلاث بطاقات مع بعض.
+            shape_raw = request.form.get("landing_image_shape", "").strip()
+            if shape_raw in ("circle", "square", "rectangle"):
+                set_setting(db, "landing_image_shape", shape_raw)
+            position_raw = request.form.get("landing_image_position", "").strip()
+            if position_raw in ("top", "background", "side"):
+                set_setting(db, "landing_image_position", position_raw)
+            opacity_raw = request.form.get("landing_image_opacity", "").strip()
+            if opacity_raw:
+                try:
+                    opacity_val = max(10, min(100, int(opacity_raw)))
+                    set_setting(db, "landing_image_opacity", str(opacity_val))
+                except ValueError:
+                    pass
             for img_key in ("reception", "lab", "together"):
                 setting_key = f"landing_{img_key}_image_path"
                 if request.form.get(f"remove_landing_{img_key}_image") == "1":
@@ -7854,6 +7829,9 @@ def app_settings():
         "landing_reception_image_path": get_setting(db, "landing_reception_image_path", ""),
         "landing_lab_image_path": get_setting(db, "landing_lab_image_path", ""),
         "landing_together_image_path": get_setting(db, "landing_together_image_path", ""),
+        "landing_image_shape": get_setting(db, "landing_image_shape", "square"),
+        "landing_image_position": get_setting(db, "landing_image_position", "top"),
+        "landing_image_opacity": get_setting(db, "landing_image_opacity", "100"),
         "dashboard_bg_blur": get_setting(db, "dashboard_bg_blur", "2"),
         "dashboard_bg_position": get_setting(db, "dashboard_bg_position", "center"),
         "report_row_pad": get_setting(db, "report_row_pad", "5"),
@@ -8763,7 +8741,7 @@ def preview_report_design(test_definition_id):
         import traceback
         tb_text = traceback.format_exc()
         try:
-            log_path = os.path.join(_BASE_DIR, "error_log.txt")
+            log_path = os.path.join(os.path.dirname(__file__), "error_log.txt")
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write("\n" + "=" * 80 + "\n")
                 f.write(datetime.now().isoformat(timespec="seconds") + f"  preview test_definition_id={test_definition_id}\n")

@@ -377,13 +377,13 @@
 </div>
 
 <div class="card">
-  <h3>🔀 كلمات مرور واجهات الدخول (استقبال / مختبر / الاثنين معًا)</h3>
+  <h3>🔀 كلمات مرور واجهتي الدخول (استقبال / مختبر)</h3>
   <p class="muted">
     تُسأل هذي الكلمة فقط وقت الدخول أو التبديل لتلك الواجهة تحديدًا (من زر
     "🔀" بأعلى أي صفحة) — تتحكم بأي أقسام تظهر بالقائمة الجانبية فقط، وما
-    تغيّر صلاحيات اليوزر الفعلية. الثلاث واجهات متساوية تمامًا -- خليهم
-    متشابهين، مختلفين، أو اترك أي وحدة فاضية (تدخل بدون كلمة مرور). اترك
-    أي حقل فاضي حتى لا تتغيّر كلمة مروره الحالية.
+    تغيّر صلاحيات اليوزر الفعلية. اختيار "الاثنين معًا" ما يحتاج كلمة مرور
+    إطلاقًا لأنه أوسع خيار. اترك أي حقل فاضي حتى لا تتغيّر كلمة مروره
+    الحالية.
   </p>
   <form method="POST">
     <input type="hidden" name="interface_passwords_form" value="1">
@@ -394,10 +394,6 @@
     <div class="form-field">
       <label>كلمة مرور واجهة "مختبر" (اتركه فاضي لعدم التغيير)</label>
       <input type="password" name="interface_lab_password" placeholder="كلمة مرور جديدة" dir="ltr">
-    </div>
-    <div class="form-field">
-      <label>كلمة مرور واجهة "الاثنين معًا" (اتركه فاضي لعدم التغيير)</label>
-      <input type="password" name="interface_both_password" placeholder="كلمة مرور جديدة" dir="ltr">
     </div>
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
@@ -423,6 +419,27 @@
     <div class="form-field">
       <label>🎨 لون التدرّج الثاني (الخلفية)</label>
       <input type="color" name="landing_gradient_color2" value="{{ current.landing_gradient_color2 }}" style="width:70px; height:38px; padding:2px;">
+    </div>
+    <hr style="margin:14px 0;">
+    <div class="form-field">
+      <label>🖼️ شكل صور البطاقات الثلاث</label>
+      <select name="landing_image_shape">
+        <option value="square" {{ 'selected' if current.landing_image_shape == 'square' }}>مربعة (الافتراضي)</option>
+        <option value="circle" {{ 'selected' if current.landing_image_shape == 'circle' }}>دائرية</option>
+        <option value="rectangle" {{ 'selected' if current.landing_image_shape == 'rectangle' }}>مستطيلة</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>موضع الصورة بالنسبة للبطاقة</label>
+      <select name="landing_image_position">
+        <option value="top" {{ 'selected' if current.landing_image_position == 'top' }}>أعلى البطاقة (الافتراضي)</option>
+        <option value="background" {{ 'selected' if current.landing_image_position == 'background' }}>خلفية كاملة للبطاقة</option>
+        <option value="side" {{ 'selected' if current.landing_image_position == 'side' }}>جنب الاسم (أفقي)</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>وضوح الصورة (10-100) — الافتراضي 100 (وضوح كامل)</label>
+      <input type="number" name="landing_image_opacity" min="10" max="100" value="{{ current.landing_image_opacity }}" style="width:100px;">
     </div>
     <hr style="margin:14px 0;">
     {% for key, label in [('reception', 'صورة بطاقة Reception'), ('lab', 'صورة بطاقة Laboratory'), ('together', 'صورة بطاقة To-Gather')] %}

@@ -21,12 +21,37 @@
     background: rgba(255,255,255,.06); border: 1.5px solid rgba(255,255,255,.15);
     border-radius: 16px; padding: 28px 18px; cursor: pointer;
     transition: transform .15s ease, background .15s ease, border-color .15s ease;
+    position: relative; overflow: hidden;
   }
   .landing-card:hover { transform: translateY(-4px); background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.35); }
   .landing-card-img { width: 84px; height: 84px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; }
-  .landing-card-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .landing-card-img img { max-width: 100%; max-height: 100%; object-fit: cover; opacity: {{ (landing_image_opacity|default(100)|int) / 100 }}; }
   .landing-card-img .fallback-icon { font-size: 52px; }
-  .landing-card-label { font-size: 17px; font-weight: 600; }
+  .landing-card-label { font-size: 17px; font-weight: 600; position: relative; z-index: 2; }
+  {# شكل الصورة: دائرية/مربعة/مستطيلة -- المطلوب: التحكم به من الإعدادات
+     (بطاقة "🌈 الشاشة الرئيسية"). يُطبَّق نفس الشكل على الثلاث بطاقات. #}
+  {% if landing_image_shape == 'circle' %}
+  .landing-card-img { border-radius: 50%; overflow: hidden; }
+  {% elif landing_image_shape == 'rectangle' %}
+  .landing-card-img { width: 140px; height: 84px; border-radius: 10px; overflow: hidden; }
+  {% else %}
+  .landing-card-img { border-radius: 10px; overflow: hidden; }
+  {% endif %}
+  {# موضع الصورة بالنسبة للبطاقة: أعلى البطاقة (الافتراضي)، خلفية كاملة
+     للبطاقة، أو جنب النص بشكل أفقي. #}
+  {% if landing_image_position == 'background' %}
+  .landing-card { padding: 0; }
+  .landing-card-img { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border-radius: 16px; z-index: 0; }
+  .landing-card-img img { width: 100%; height: 100%; object-fit: cover; }
+  .landing-card::after {
+    content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 16px;
+    background: linear-gradient(180deg, rgba(15,23,42,.15) 0%, rgba(15,23,42,.75) 100%);
+  }
+  .landing-card-label { position: absolute; bottom: 18px; inset-inline-start: 0; inset-inline-end: 0; }
+  {% elif landing_image_position == 'side' %}
+  .landing-card { display: flex; align-items: center; gap: 16px; text-align: start; }
+  .landing-card-img { margin: 0; flex-shrink: 0; }
+  {% endif %}
   .landing-designer-link {
     position: fixed; bottom: 14px; inset-inline-end: 14px; opacity: .35; font-size: 20px;
     text-decoration: none; color: #fff; transition: opacity .15s ease;
@@ -51,7 +76,7 @@
         </div>
         <div class="landing-card-label">Laboratory</div>
       </div>
-      <div class="landing-card" onclick="enterInterface('both', {{ both_needs_password|default(false)|tojson }})">
+      <div class="landing-card" onclick="enterInterface('both', false)">
         <div class="landing-card-img">
           {% if landing_together_image %}<img src="{{ landing_together_image }}" alt="Together">{% else %}<span class="fallback-icon">🔀</span>{% endif %}
         </div>
@@ -66,11 +91,10 @@
   </form>
 
   <script>
-    var INTERFACE_LABELS = { reception: 'الاستقبال', lab: 'المختبر', both: 'الاثنين معًا' };
     function enterInterface(choice, needsPassword) {
       var pwd = '';
       if (needsPassword) {
-        pwd = prompt('أدخل كلمة مرور واجهة "' + INTERFACE_LABELS[choice] + '":');
+        pwd = prompt('أدخل كلمة مرور واجهة "' + (choice === 'reception' ? 'الاستقبال' : 'المختبر') + '":');
         if (pwd === null) return;
       }
       var name = prompt('اسمك (اختياري -- يُسجَّل فقط لمعرفة مين سوى شنو):') || '';

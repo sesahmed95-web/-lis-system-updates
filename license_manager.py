@@ -315,8 +315,8 @@ def log_issued_code(db, hardware_id, username, expiry, code):
 #
 # لتغيير كلمة المرور مستقبلاً: غيّر _DESIGNER_PASSWORD تحت مباشرة (نص
 # عادي هنا، يتحول لهاش تلقائيًا بالسطر اللي بعده)، احفظ، وأعد بناء الـ.exe.
-_DESIGNER_USERNAME = "CHANGE_ME_USERNAME"
-_DESIGNER_PASSWORD = "CHANGE_ME_PASSWORD"
+_DESIGNER_USERNAME = "ah"
+_DESIGNER_PASSWORD = "123"
 DESIGNER_USERNAME = _DESIGNER_USERNAME
 DESIGNER_PASSWORD_HASH = hash_password(_DESIGNER_PASSWORD)
 
