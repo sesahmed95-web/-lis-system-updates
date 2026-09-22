@@ -1747,14 +1747,43 @@ def dashboard():
     critical_count = db.execute(
         "SELECT COUNT(*) c FROM results WHERE flag='Critical' AND verified_at IS NULL"
     ).fetchone()["c"]
+    # "آخر الزيارات" انتقلت لصفحتها الخاصة (راجع recent_visits_page أدناه)
+    # وصارت وحدة من قوائم Front Desk المنسدلة، بدل ما تظهر مباشرة أسفل
+    # لوحة التحكم -- فما نجيب هذا الاستعلام هنا بعد الآن.
+    return render_template("dashboard.html", visits_today=visits_today, revenue_today=revenue_today,
+                            pending_results=pending_results, critical_count=critical_count)
+
+
+@app.route("/front-desk/recent-visits")
+@login_required
+def recent_visits_page():
+    """صفحة "آخر الزيارات" المستقلة -- كانت جدول ثابت أسفل لوحة التحكم،
+    صارت صفحة خاصة بيها ضمن قائمة Front Desk المنسدلة (بطلب المستخدم)."""
+    db = get_db()
     recent_visits = db.execute(
         "SELECT v.registration_number, p.id as patient_id, p.full_name, v.status, v.created_at "
         "FROM visits v JOIN patients p ON p.id=v.patient_id "
-        "ORDER BY v.id DESC LIMIT 8"
+        "ORDER BY v.id DESC LIMIT 100"
     ).fetchall()
-    return render_template("dashboard.html", visits_today=visits_today, revenue_today=revenue_today,
-                            pending_results=pending_results, critical_count=critical_count,
-                            recent_visits=recent_visits)
+    return render_template("front_desk/recent_visits.html", recent_visits=recent_visits)
+
+
+@app.route("/front-desk/visits/<int:visit_id>/print/full-report")
+@login_required
+def print_visit_full_report(visit_id):
+    """يعرض نفس التقرير الكامل الحقيقي (نفس التصميم بالضبط المستخدم أصلاً
+    للأرشفة الآلية، لإرسال واتساب، وللنسخة الاحتياطية القابلة للبحث بدون
+    تنصيب) لكل التحاليل المكتملة/الموثّقة بزيارة وحدة -- بصفحة متصفح
+    عادية جاهزة للطباعة مباشرة (Ctrl+P أو زر الطباعة بالمتصفح). يُستخدم
+    من صفحة سجل زيارات المريض (front_desk/patient_history.html)."""
+    html_content = _build_combined_designed_reports_html(visit_id)
+    if not html_content:
+        return (
+            "<div dir='rtl' style='padding:40px;text-align:center;"
+            "font-family:Tahoma,Arial,sans-serif;color:#64748B;'>"
+            "لا توجد نتائج مكتملة بهذي الزيارة بعد لعرضها أو طباعتها.</div>"
+        )
+    return html_content
 
 
 # --------------------------------------------------------------- front desk
@@ -4117,12 +4146,23 @@ def delete_order_test(order_test_id):
     """يمسح تحليل مطلوب لحاله (سطر وحد من قائمة Orders) — لا يمسح الزيارة
     ولا التحاليل الثانية المرتبطة فيها، فقط هذا التحليل بالذات (مثلاً طلب
     خطأ بالغلط). يمسح أي نتائج مدخلة له مسبقًا أيضًا حتى لا تبقى نتائج
-    يتيمة بقاعدة البيانات."""
+    يتيمة بقاعدة البيانات.
+
+    المطلوب 2: حذف تحليل مكتمل (نتيجته جاهزة ومحفوظة) محمي بنفس كلمة
+    مرور حماية النتائج المكتملة (_check_completed_result_gate) المستخدمة
+    بباقي أماكن التعديل على نتيجة مكتملة -- كانت ناقصة هنا تحديداً."""
     db = get_db()
-    ot = db.execute("SELECT id FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    ot = db.execute("SELECT id, status FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
     if not ot:
         flash("هذا الطلب غير موجود أصلاً.")
         return redirect(url_for("orders_list"))
+    if ot["status"] in ("Completed", "Verified"):
+        ok, err = _check_completed_result_gate(db, request.form)
+        if not ok:
+            flash(err)
+            return redirect(url_for("orders_list"))
+        log_action("DeleteCompletedOrderTest", "order_tests", order_test_id,
+                    (request.form.get("gate_person_name") or "").strip())
     db.execute("DELETE FROM results WHERE order_test_id=?", (order_test_id,))
     db.execute("DELETE FROM order_tests WHERE id=?", (order_test_id,))
     db.commit()

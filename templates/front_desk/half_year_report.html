@@ -37,7 +37,7 @@
 
 <table class="report-table">
   <thead>
-    <tr><th>الشهر</th><th>عدد الزيارات</th><th>الدخل الإجمالي</th><th>الصرفيات</th><th>الصافي</th></tr>
+    <tr><th>الشهر</th><th>عدد الزيارات</th><th>الدخل الإجمالي</th><th>الصرفيات</th><th>أجور الفاحص</th><th>الصافي</th></tr>
   </thead>
   <tbody>
     {% for r in rows %}
@@ -45,11 +45,12 @@
       <td><a class="row-link" href="{{ url_for('monthly_report', month=r.period) }}">{{ r.period|iraqi_month }}</a></td>
       <td>{{ r.visits_count }}</td>
       <td>{{ "%.0f"|format(r.revenue) }}</td>
-      <td>{{ "%.0f"|format(r.expenses) }}</td>
+      <td>{{ "%.0f"|format(r.expenses - r.examining_fees) }}</td>
+      <td>{{ "%.0f"|format(r.examining_fees) }}</td>
       <td>{{ "%.0f"|format(r.net) }}</td>
     </tr>
     {% else %}
-    <tr><td colspan="5">لا توجد زيارات مسجلة بهذي الفترة</td></tr>
+    <tr><td colspan="6">لا توجد زيارات مسجلة بهذي الفترة</td></tr>
     {% endfor %}
   </tbody>
   <tfoot>
@@ -57,7 +58,8 @@
       <td>الإجمالي</td>
       <td>{{ totals.visits_count }}</td>
       <td>{{ "%.0f"|format(totals.revenue) }}</td>
-      <td>{{ "%.0f"|format(totals.expenses) }}</td>
+      <td>{{ "%.0f"|format(totals.expenses - totals.examining_fees) }}</td>
+      <td>{{ "%.0f"|format(totals.examining_fees) }}</td>
       <td>{{ "%.0f"|format(totals.net) }}</td>
     </tr>
   </tfoot>

@@ -1,0 +1,143 @@
+{#
+  partials/stamp_picker.html
+  ==========================
+  ختم/توقيع رقمي قابل للسحب فوق أي تقرير. مُدمَج بالفعل مرة واحدة داخل
+  templates/reports/base_report.html (بعد مربع "توقيع وختم الدكتور الفاحص")
+  — فيظهر تلقائيًا بكل التقارير اللي تمتد base_report.html (CBC، Custom،
+  Blood film، اللوحة المجمّعة...) بدون أي تكرار لأي قالب إضافي.
+
+  الشرط الوحيد: app.py يمرّر هذي المتغيرات دائمًا الآن (راجع
+  print_combined_panel و_print_report_impl):
+      - stamp_target_type   ('visit' أو 'order_test')
+      - stamp_target_id     (رقم الزيارة أو رقم order_test)
+      - digital_stamps      (قائمة كل الأختام/التواقيع الفعّالة)
+      - stamp_placements    (الأختام الملصوقة فعلاً فوق هذا التقرير حاليًا)
+#}
+
+{% if stamp_target_type and stamp_target_id %}
+<div class="no-print" style="margin:10px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+  <label style="font-weight:600;">🖋️ إضافة ختم / توقيع:</label>
+  <select id="stampPickerSelect" style="min-width:220px;">
+    <option value="">— اختر ختم أو توقيع —</option>
+    {% for s in digital_stamps %}
+    <option value="{{ s['id'] }}"
+            data-image="{{ url_for('static', filename='uploads/stamps/' + s['image_filename']) }}"
+            data-width="{{ s['default_width'] or 140 }}">
+      {{ s['label'] }}{% if s['doctor_name'] %} ({{ s['doctor_name'] }}){% endif %}
+    </option>
+    {% endfor %}
+  </select>
+  <button type="button" class="btn small secondary" onclick="window.__addSelectedStamp()">➕ إضافة</button>
+  <span class="muted" style="font-size:12px;">بعد الإضافة، اسحب الختم/التوقيع لمكانه المناسب — يُحفظ موضعه تلقائيًا.</span>
+</div>
+
+<style>
+  .stamp-overlay-item { position:absolute; cursor:move; user-select:none; touch-action:none; }
+  .stamp-overlay-item img { display:block; width:100%; height:auto; pointer-events:none; }
+  .stamp-overlay-item .stamp-remove-btn {
+    position:absolute; top:-10px; left:-10px; width:20px; height:20px; border-radius:50%;
+    background:#DC2626; color:#fff; border:none; font-size:12px; line-height:20px; cursor:pointer;
+  }
+  @media print { .stamp-overlay-item .stamp-remove-btn { display:none; } }
+</style>
+
+<script>
+(function () {
+  var TARGET_TYPE = {{ stamp_target_type|tojson }};
+  var TARGET_ID = {{ stamp_target_id|tojson }};
+  var EXISTING = {{ stamp_placements|tojson }};
+
+  // العنصر اللي تُرسم فوقه الأختام — .sheet هو حاوية ورقة التقرير الفعلية
+  // بـbase_report.html (المشترك بكل التقارير: CBC، Custom، Blood film...).
+  var host = document.querySelector('.sheet, .report-page, #reportRoot, body');
+  if (!host) return;
+  if (getComputedStyle(host).position === 'static') {
+    host.style.position = 'relative';
+  }
+
+  function addOverlay(placementId, stampId, imageUrl, x, y, width) {
+    var el = document.createElement('div');
+    el.className = 'stamp-overlay-item';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.width = width + 'px';
+    el.dataset.placementId = placementId || '';
+    el.dataset.stampId = stampId;
+
+    var img = document.createElement('img');
+    img.src = imageUrl;
+    el.appendChild(img);
+
+    var removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'stamp-remove-btn no-print';
+    removeBtn.textContent = '×';
+    removeBtn.onclick = function () {
+      if (el.dataset.placementId) {
+        fetch('/api/reports/stamps/' + el.dataset.placementId + '/remove', { method: 'POST' });
+      }
+      el.remove();
+    };
+    el.appendChild(removeBtn);
+
+    host.appendChild(el);
+    makeDraggable(el);
+    return el;
+  }
+
+  function makeDraggable(el) {
+    var dragging = false, startX, startY, startLeft, startTop;
+    el.addEventListener('pointerdown', function (e) {
+      if (e.target.classList.contains('stamp-remove-btn')) return;
+      dragging = true;
+      startX = e.clientX; startY = e.clientY;
+      startLeft = parseFloat(el.style.left) || 0;
+      startTop = parseFloat(el.style.top) || 0;
+      el.setPointerCapture(e.pointerId);
+    });
+    el.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      el.style.left = (startLeft + (e.clientX - startX)) + 'px';
+      el.style.top = (startTop + (e.clientY - startY)) + 'px';
+    });
+    el.addEventListener('pointerup', function (e) {
+      if (!dragging) return;
+      dragging = false;
+      var x = parseFloat(el.style.left), y = parseFloat(el.style.top);
+      var width = el.getBoundingClientRect().width;
+      var body = new URLSearchParams({
+        stamp_id: el.dataset.stampId, pos_x: x, pos_y: y, width: width,
+      });
+      fetch('/api/reports/' + TARGET_TYPE + '/' + TARGET_ID + '/stamps', {
+        method: 'POST', body: body,
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (data && data.placement_id) el.dataset.placementId = data.placement_id;
+      });
+    });
+  }
+
+  // ارسم أي أختام مُلصقة سابقًا فوق هذا التقرير
+  EXISTING.forEach(function (p) {
+    addOverlay(p.placement_id, p.stamp_id, p.image_url, p.pos_x, p.pos_y, p.width);
+  });
+
+  window.__addSelectedStamp = function () {
+    var select = document.getElementById('stampPickerSelect');
+    var opt = select.options[select.selectedIndex];
+    if (!opt || !opt.value) return;
+    var imageUrl = opt.getAttribute('data-image');
+    var width = parseInt(opt.getAttribute('data-width'), 10) || 140;
+    // موضع افتراضي أول ما يُضاف (زاوية أسفل يمين التقرير تقريبًا) — يُسحب بعدها بحرية.
+    var x = 40, y = (host.offsetHeight || 800) - width - 60;
+    var el = addOverlay(null, opt.value, imageUrl, x, y, width);
+    var body = new URLSearchParams({ stamp_id: opt.value, pos_x: x, pos_y: y, width: width });
+    fetch('/api/reports/' + TARGET_TYPE + '/' + TARGET_ID + '/stamps', {
+      method: 'POST', body: body,
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (data && data.placement_id) el.dataset.placementId = data.placement_id;
+    });
+    select.selectedIndex = 0;
+  };
+})();
+</script>
+{% endif %}

@@ -105,7 +105,7 @@
         <div class="nav-group-links">
         <a class="nav-link {{ 'active' if request.path == url_for('new_visit') else '' }}" href="{{ url_for('new_visit') }}">➕ {{ t('new_visit') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('visits_list') else '' }}" href="{{ url_for('visits_list') }}">📋 {{ t('visits') }}</a>
-        <a class="nav-link {{ 'active' if request.path == url_for('visits_list') else '' }}" href="{{ url_for('visits_list') }}">🕒 {{ 'آخر الزيارات' if lang=='ar' else 'Recent Visits' }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('recent_visits_page') else '' }}" href="{{ url_for('recent_visits_page') }}">🕒 {{ 'آخر الزيارات' if lang=='ar' else 'Recent Visits' }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('patients_list') else '' }}" href="{{ url_for('patients_list') }}">🧑‍🤝‍🧑 {{ t('patients') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('results_list') else '' }}" href="{{ url_for('results_list') }}">📄 {{ t('results') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('pdf_archive') else '' }}" href="{{ url_for('pdf_archive') }}">🗄️ أرشيف PDF</a>
@@ -148,7 +148,13 @@
         </div>
       </div>
       {% endif %}
-      {% if current_role in ['admin', 'supervisor'] %}
+      {# المطلوب: Master Definitions وManagement تابعتين فعليًا لواجهة
+         "مختبر" أو "الاثنين معًا" بعد تحديث roles_required (بدل أي تمييز
+         فني/مسؤول قديم) — كانتا لسا معتمدتين هنا على current_role القديم،
+         وهذا كان سبب ظهورهم بالغلط لواجهة "استقبال" (لأن حساب الظل لكل
+         واجهة دوره الداخلي 'admin')، رغم إن الباك-إند يمنعها فعليًا لو
+         ضُغط عليها. صار الشرط هنا نفسه شرط قسم Workbench بالضبط. #}
+      {% if session.get('interface') in (None, 'lab', 'both') %}
       <div class="nav-group">
         <div class="nav-group-title nav-group-toggle" data-group="master_definitions" onclick="lisToggleNavGroup(this)">
           <span>{{ t('master_definitions') }}</span><span class="nav-group-arrow">▾</span>
@@ -165,7 +171,7 @@
         </div>
       </div>
       {% endif %}
-      {% if current_role == 'admin' %}
+      {% if session.get('interface') in (None, 'lab', 'both') %}
       <div class="nav-group">
         <div class="nav-group-title nav-group-toggle" data-group="management" onclick="lisToggleNavGroup(this)">
           <span>{{ t('management') }}</span><span class="nav-group-arrow">▾</span>
@@ -176,6 +182,7 @@
         <a class="nav-link {{ 'active' if request.path == url_for('referral_labs_list') else '' }}" href="{{ url_for('referral_labs_list') }}">🧪 المختبرات المُرسِلة</a>
         <a class="nav-link {{ 'active' if request.path == url_for('report_designer') else '' }}" href="{{ url_for('report_designer') }}">🖨️ مصمم التقارير</a>
         <a class="nav-link {{ 'active' if request.path == url_for('app_settings') else '' }}" href="{{ url_for('app_settings') }}">⚙️ {{ t('settings') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('backup_center') else '' }}" href="{{ url_for('backup_center') }}">💾 {{ 'نسخ احتياطي' if lang=='ar' else 'Backup' }}</a>
         </div>
       </div>
       {% endif %}

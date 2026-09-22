@@ -38,7 +38,7 @@
       </h3>
       <div style="display:flex; gap:8px;">
         <a class="btn small" target="_blank" rel="noopener"
-           href="{{ url_for('print_visit_results_bundle', visit_id=vd.visit['id']) }}">🖨️ عرض/طباعة التقرير الكامل</a>
+           href="{{ url_for('print_visit_full_report', visit_id=vd.visit['id']) }}">🖨️ عرض/طباعة التقرير الكامل</a>
         <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=vd.visit['id']) }}">✏️ تعديل هذه الزيارة</a>
       </div>
     </div>

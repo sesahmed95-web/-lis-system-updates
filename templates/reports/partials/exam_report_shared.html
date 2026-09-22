@@ -88,7 +88,13 @@
   /* ============== صف نتيجة مفردة ============== */
   .result-row {
     display: grid; grid-template-columns: 18px 260px 18px 160px 1fr auto;
-    align-items: center; padding: var(--exam-row-pad, 5px) 0; font-size: 1em; gap: 2px;
+    /* start (مو center) — لأن عمود القيمة (rval) قد يلف النتيجة + الوحدة
+       على سطرين لو ما وسعوا (160px)، ووقتها align-items:center كان
+       يحط عمود المدى الطبيعي (rnorm) بمنتصف الارتفاع، أي بين سطر
+       النتيجة وسطر الوحدة، فيظهر متراكب فوق الاثنين بصريًا. start يخلي
+       كل الأعمدة تبدأ من أعلى الصف دائمًا، بغض النظر عن أي عمود لف
+       سطرين — يحل التراكب لأي تحليل عنده وحدة طويلة (mg/dL، uIU/mL...). */
+    align-items: start; padding: var(--exam-row-pad, 5px) 0; font-size: 1em; gap: 2px;
   }
   .result-row .rname {
     color: #1a1a1a;

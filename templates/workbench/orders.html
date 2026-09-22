@@ -53,7 +53,7 @@
           </button>
           {% endif %}
           <form method="POST" action="{{ url_for('delete_order_test', order_test_id=ot['id']) }}" style="display:inline"
-                onsubmit="return confirm('متأكد تريد حذف هذا الطلب (' + {{ ot['test_name']|tojson }} + ') نهائيًا؟');">
+                onsubmit="return handleOrderDeleteSubmit(event, this, {{ ot['test_name']|tojson }}, {{ ot['status']|tojson }});">
             <button class="btn small danger" type="submit">حذف</button>
           </form>
         </td>
@@ -64,6 +64,30 @@
 </div>
 <script>
   const FEE_WAIVER_CONFIGURED = {{ fee_waiver_configured|tojson }};
+
+  // ------------------------------------------------------------------
+  // حذف تحليل نتيجته مكتملة/معتمدة (المطلوب: منع الحذف/التعديل على نتيجة
+  // مكتملة إلا بنفس كلمة مرور "تحليل مجاني" -- حتى الأدمن نفسه) -- لأي
+  // تحليل لسا Pending/Collected/Accepted يبقى نفس تأكيد الحذف العادي.
+  // ------------------------------------------------------------------
+  function handleOrderDeleteSubmit(e, form, testName, status) {
+    if (status === 'Completed' || status === 'Verified') {
+      if (!confirm('هذا التحليل نتيجته مكتملة (' + testName + ') -- حذفه محمي بكلمة مرور خاصة حتى لو كنت أدمن. متابعة؟')) {
+        return false;
+      }
+      const password = prompt('أدخل كلمة مرور الحماية (نفس كلمة مرور "تحليل مجاني") لتأكيد الحذف:');
+      if (password === null) return false;
+      const personName = prompt('اسمك (يُسجَّل فقط للمراجعة):') || '';
+      const pInput = document.createElement('input');
+      pInput.type = 'hidden'; pInput.name = 'gate_password'; pInput.value = password;
+      form.appendChild(pInput);
+      const nInput = document.createElement('input');
+      nInput.type = 'hidden'; nInput.name = 'gate_person_name'; nInput.value = personName;
+      form.appendChild(nInput);
+      return true;
+    }
+    return confirm('متأكد تريد حذف هذا الطلب (' + testName + ') نهائيًا؟');
+  }
   function toggleFeeWaiver(orderTestId, willWaive) {
     if (!FEE_WAIVER_CONFIGURED) {
       alert('لم تُضبط كلمة مرور ميزة "تحليل مجاني" بعد -- اطلب من المسؤول ضبطها أولاً من صفحة الإعدادات.');

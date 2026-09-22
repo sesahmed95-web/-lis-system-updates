@@ -45,6 +45,34 @@ import subprocess
 PORT = 9090
 URL = f"http://127.0.0.1:{PORT}"
 
+# ----------------------------------------------------------------------
+# سجل الأخطاء (error_log.txt): البرنامج مغلّف بـ--noconsole (بدون أي
+# نافذة تيرمنال تظهر) — فأي خطأ يصير بالسيرفر (مثل فشل "Create Visit")
+# كان يضيع تمامًا بدون ما نقدر نشوفه. الحين كل شي يُكتب بملف نصي بجانب
+# البرنامج نفسه (سواء .py وقت التطوير أو .exe بعد التغليف)، فيصير عندك
+# دايمًا سجل تفتحه بأي وقت وترسللي محتواه لو صار خطأ، بدل ما تحتاج تشغّل
+# البرنامج بطريقة خاصة بس عشان تشوف الخطأ.
+# ----------------------------------------------------------------------
+def _log_file_path():
+    # عند التغليف بـPyInstaller (--onefile)، sys.executable يشير لمكان
+    # ملف الـexe الفعلي على القرص (مو مجلد مؤقت) — نحط السجل بجانبه
+    # تماماً. أثناء التطوير العادي (تشغيل launcher.py مباشرة بـpython)،
+    # نحطه بجانب هذا الملف نفسه.
+    base_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, "error_log.txt")
+
+
+def _setup_error_logging():
+    log_path = _log_file_path()
+    try:
+        log_file = open(log_path, "a", encoding="utf-8", buffering=1)
+    except Exception:
+        return  # لو تعذّر فتح ملف السجل لأي سبب، نكمّل تشغيل عادي بدونه
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    log_file.write(f"\n{'=' * 60}\n=== بدء تشغيل جديد -- {stamp} ===\n{'=' * 60}\n")
+    sys.stdout = log_file
+    sys.stderr = log_file
+
 # عنوان النافذة والأيقونة يظهران من <title> بصفحات البرنامج نفسها ومن
 # ملف app_icon.ico اللي تمرره لـPyInstaller بـ--icon أعلاه -- ما يحتاجون
 # ضبط هنا.
@@ -76,7 +104,7 @@ def _start_flask_server():
     # جوّا ملف exe واحد بدون الحاجة لعملية Python ثانية منفصلة.
     import app as flask_app_module  # يفترض وجود app.py بنفس المجلد
     flask_app_module.init_db()
-    flask_app_module.app.run(host="0.0.0.0", port=PORT, debug=True, use_reloader=False)
+    flask_app_module.app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
 
 
 def _open_app_window():
@@ -102,6 +130,7 @@ def _open_app_window():
 
 
 def main():
+    _setup_error_logging()
     server_thread = threading.Thread(target=_start_flask_server, daemon=True)
     server_thread.start()
 
