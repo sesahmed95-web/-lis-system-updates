@@ -19,10 +19,9 @@ from datetime import datetime
 #
 # الحل القياسي: لو البرنامج مغلّف (sys.frozen موجودة، علامة PyInstaller
 # الرسمية)، نستخدم مجلد ملف الـ.exe نفسه (sys.executable) بدل مجلد
-# الفكّ المؤقت -- هذا المجلد ثابت ودائم (بجانب الـ.exe اللي المستخدم
-# نفسه حطّه بمكانه، ما ينمسح إطلاقًا). لو تشغيل مباشر بالكود (python
-# app.py أو python launcher.py، وضع التطوير عندك)، يبقى نفس السلوك
-# القديم بالضبط (بجانب ملفات الكود).
+# الفكّ المؤقت -- هذا المجلد ثابت ودائم. لو تشغيل مباشر بالكود (python
+# app.py أو run.ps1، وضع الإنتاج الفعلي عندك)، يبقى نفس السلوك القديم
+# بالضبط (بجانب ملفات الكود، __file__ يرجع مسار حقيقي ثابت في الحالتين).
 if getattr(sys, "frozen", False):
     _BASE_DIR = os.path.dirname(sys.executable)
 else:
@@ -35,6 +34,13 @@ def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # المطلوب 4 (مزامنة حية بين جهاز الاستقبال وجهاز المختبر على نفس
+    # الشبكة): بدون هذا، أي جهازين يحفظون بنفس اللحظة تقريبًا معرضين
+    # لخطأ "database is locked". WAL يخلي القراءة والكتابة تصير بنفس
+    # الوقت من أكثر من اتصال، وbusy_timeout يخلي أي اتصال ينتظر لين
+    # 5 ثواني قبل لا يرمي الخطأ (بدل ما يفشل فورًا).
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -111,6 +117,8 @@ CREATE TABLE IF NOT EXISTS test_parameters (
     unit TEXT,
     result_type TEXT DEFAULT 'Numeric',   -- Numeric, Text
     highlight INTEGER DEFAULT 0,          -- 1 = shade this row yellow on printed reports (admin-chosen, not automatic)
+    unit2 TEXT,                           -- optional second unit shown alongside the result on printed reports
+    unit2_factor REAL,                    -- value2 = value1 * unit2_factor, computed at print time only
     FOREIGN KEY (test_definition_id) REFERENCES test_definitions(id)
 );
 
@@ -368,6 +376,23 @@ CREATE TABLE IF NOT EXISTS examining_doctor_rates (
     FOREIGN KEY (test_definition_id) REFERENCES test_definitions(id)
 );
 
+-- قائمة (دكتور المختبر الفاحص) الكاملة — تحل محل التخزين القديم كنص JSON
+-- بسيط داخل جدول settings. name يبقى هو المفتاح اللي تعتمد عليه بقية
+-- الجداول (examining_doctor_rates.doctor_name، visits.examining_doctor)
+-- كنص وليس مفتاحاً أجنبياً، فتغيير الاسم هنا لازم ينعكس يدوياً إذا احتجت
+-- تطابق أجور/زيارات قديمة. title/degree_ar/degree_en تُطبع بترويسة كل
+-- تقرير (راجع get_letterhead_doctors)، وshow_on_letterhead يتحكم هل هذا
+-- الدكتور يظهر بالترويسة أصلاً أو هو فقط بقائمة اختيار الفاحص بالزيارات.
+CREATE TABLE IF NOT EXISTS examining_doctors_list (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    title TEXT DEFAULT 'الدكتور',
+    degree_ar TEXT,
+    degree_en TEXT,
+    sort_order INTEGER DEFAULT 0,
+    show_on_letterhead INTEGER DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS report_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     test_definition_id INTEGER UNIQUE NOT NULL,
@@ -404,6 +429,109 @@ CREATE TABLE IF NOT EXISTS whatsapp_sends (
     FOREIGN KEY (order_test_id) REFERENCES order_tests(id),
     FOREIGN KEY (patient_id) REFERENCES patients(id)
 );
+
+-- مكتبة الأختام والتواقيع الرقمية — يضيف المدير هنا عدد غير محدود من صور
+-- الأختام/التواقيع (ختم المختبر نفسه، وختم/توقيع كل دكتور فاحص على حدة،
+-- لأن كل واحد منهم يختلف عن الثاني). image_filename هو اسم الملف داخل
+-- static/uploads/stamps فقط (بعد تحويله لخلفية بيضاء صلبة عند الرفع حتى لا
+-- يظهر "نشازًا" فوق التقرير). linked_examining_doctor_id اختياري — لو
+-- انربط بدكتور معيّن من قائمة examining_doctors_list يظهر مقترحًا تلقائيًا
+-- أول ما يُختار ذلك الدكتور كفاحص للزيارة، لكن يبقى بإمكان أي مستخدم
+-- اختيار أي ختم آخر يدويًا بغض النظر عن الربط. default_width/height هي
+-- القياس الافتراضي بالبكسل أول مرة يُسحب فيها الختم فوق أي تقرير (يتغيّر
+-- بعدها حرًا بالسحب لكل تقرير على حدة — راجع report_stamp_placements).
+CREATE TABLE IF NOT EXISTS digital_stamps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,                 -- اسم مختصر يظهر بالقائمة المنسدلة، مثلاً "ختم د. خليل حمود"
+    kind TEXT NOT NULL DEFAULT 'stamp',  -- stamp | signature | stamp_signature (ختم مدموج مع توقيع بصورة وحدة)
+    linked_examining_doctor_id INTEGER,  -- ربط اختياري بدكتور من examining_doctors_list
+    image_filename TEXT NOT NULL,
+    default_width INTEGER DEFAULT 140,
+    sort_order INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_by INTEGER,
+    created_at TEXT,
+    FOREIGN KEY (linked_examining_doctor_id) REFERENCES examining_doctors_list(id)
+);
+
+-- الختم/التوقيع الفعلي المُلصق على تقرير معيّن (زيارة كاملة أو تحليل مفرد)،
+-- مع موضعه بالضبط (pos_x/pos_y بالبكسل من الزاوية العلوية اليسرى لصفحة
+-- التقرير) بعد ما يسحبه المستخدم بالماوس فوق معاينة التقرير. UNIQUE على
+-- (target_type, target_id, stamp_id) يعني: لو نفس الختم انسحب مرة ثانية
+-- لنفس التقرير يتحدّث موضعه فقط (upsert)، بدون أي تكرار — بينما يمكن إضافة
+-- أكثر من ختم/توقيع مختلف لنفس التقرير الواحد (مثلاً ختم المختبر + توقيع
+-- الدكتور الفاحص سوا) لأن كل واحد صف منفصل بـstamp_id مختلف.
+CREATE TABLE IF NOT EXISTS report_stamp_placements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_type TEXT NOT NULL,   -- 'visit' (تقرير موحّد لكل الزيارة) أو 'order_test' (تحليل مفرد)
+    target_id INTEGER NOT NULL,
+    stamp_id INTEGER NOT NULL,
+    pos_x REAL NOT NULL DEFAULT 40,
+    pos_y REAL NOT NULL DEFAULT 40,
+    width REAL,
+    placed_by INTEGER,
+    placed_at TEXT,
+    UNIQUE(target_type, target_id, stamp_id),
+    FOREIGN KEY (stamp_id) REFERENCES digital_stamps(id)
+);
+
+-- التقارير المحفوظة (PDF) لكل زيارة، تُستخدم لأرشيف التقارير والبحث عنها لاحقًا.
+CREATE TABLE IF NOT EXISTS saved_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visit_id INTEGER NOT NULL UNIQUE,
+    patient_id INTEGER,
+    full_name TEXT,
+    registration_number TEXT,
+    pdf_path TEXT NOT NULL,
+    referring_doctor_name TEXT,
+    referral_center_name TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    FOREIGN KEY (visit_id) REFERENCES visits(id),
+    FOREIGN KEY (patient_id) REFERENCES patients(id)
+);
+
+-- موافقة الموظف على دمج نتيجة تحليل قديم (من زيارة سابقة لنفس المريض)
+-- بتقرير الزيارة الجديدة — تُسجَّل فقط عند التأكيد الصريح بشاشة "زيارة
+-- جديدة" (بنك تنبيه الزيارة السابقة)، ولا يوجد أي عرض تلقائي بدونها.
+-- source_order_test_id يشير للتحليل القديم نفسه (من الزيارة السابقة)،
+-- بغض النظر إن كان نفس التحليل معاد طلبه بالزيارة الجديدة أو لا — هذا ما
+-- يسمح بعرضه كصف "Previous" جنب تحليل مطابق بالزيارة الجديدة، أو كصف
+-- مستقل إضافي بنفس مجموعة القسم لو ما تكرر طلبه. UNIQUE يمنع تكرار نفس
+-- الموافقة مرتين لو ضغط الموظف الزر أكثر من مرة بالغلط.
+CREATE TABLE IF NOT EXISTS visit_previous_merges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visit_id INTEGER NOT NULL,
+    source_order_test_id INTEGER NOT NULL,
+    approved_by INTEGER,
+    approved_at TEXT,
+    UNIQUE(visit_id, source_order_test_id),
+    FOREIGN KEY (visit_id) REFERENCES visits(id),
+    FOREIGN KEY (source_order_test_id) REFERENCES order_tests(id)
+);
+
+-- ============================================================================
+-- تخصيص مظهر التقرير المطبوع (سحب باراميتر، لون/خط/حجم نتيجة، إزاحة
+-- الصفحة، موضع الختم...) — راجع editor_script بـ exam_report_shared.html
+-- و get_report_layout/save_report_layout بـ app.py.
+-- scope='test'       : scope_id = test_definition_id — يطبّق على كل مريض
+--                       عنده هذا التحليل (التصميم "الافتراضي" الجديد).
+-- scope='order_test'  : scope_id = order_test_id — استثناء خاص بمريض واحد
+--                       بالذات فقط، يتفوّق دائمًا على تخصيص scope='test'
+--                       لو موجود، ولا يأثر على أي مريض ثاني إطلاقًا.
+-- layout_json: نص JSON حر الشكل (param_order, param_overrides بالاسم
+-- {color, font_family, font_size, label}, section_order, page_offset_mm,
+-- stamp_pos) — قابل للتوسّع بدون أي تعديل بقاعدة البيانات مستقبلاً.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS report_layout_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL,
+    scope_id INTEGER NOT NULL,
+    layout_json TEXT NOT NULL,
+    updated_by INTEGER,
+    updated_at TEXT,
+    UNIQUE(scope, scope_id)
+);
 """
 
 
@@ -416,6 +544,12 @@ def migrate(conn):
             ("lab_card_number", "TEXT"), ("contact_method", "TEXT DEFAULT 'None'"),
             ("title", "TEXT DEFAULT 'Mr.'"), ("travel_certificate_number", "TEXT"),
             ("age_unit", "TEXT DEFAULT 'Years'"),
+            # full_name_en: الاسم الإنكليزي — app.py يقرأ/يكتب هذا العمود
+            # أصلاً (تسجيل مريض جديد، تعديل مريض، تعديل زيارة، وطباعة
+            # التقرير عبر _pt_en_row) لكن العمود ما كان مُضافًا هنا بقاعدة
+            # البيانات، فكان أي حفظ لمريض أو طباعة تقرير سينهار فورًا
+            # بخطأ "no such column: full_name_en". هذا العمود هو الإصلاح.
+            ("full_name_en", "TEXT"),
         ],
         "doctors": [("email", "TEXT"), ("commission_percent", "REAL DEFAULT 0")],
         # phone: رقم واتساب مدير المختبر المُرسِل (لإرسال كشف الحساب الشهري له)
@@ -423,13 +557,173 @@ def migrate(conn):
         "order_tests": [
             ("doctor_id", "INTEGER"), ("collected_at", "TEXT"), ("accessioned_at", "TEXT"),
             ("price", "REAL"),
+            # report_comment: الميزة أُلغيت نهائيًا — العمود يبقى موجودًا
+            # (بدون DROP) لعدم فقدان بيانات قديمة، لكن لا يُقرأ ولا يُكتب
+            # فيه بعد الآن من أي مكان بالبرنامج.
+            ("report_comment", "TEXT"),
+            # analyzer: اسم الجهاز الحر اللي اشتغل عليه هذا التحليل تحديداً
+            # بهذي الزيارة (E411 / Pure / Beckman 520 DX...) — يُختار وقت
+            # إدخال النتيجة، لأن نفس التحليل ممكن يشتغل بجهاز مختلف بين
+            # زيارة وأخرى. فاضي = بدون تحديد جهاز (يرجع find_reference_range
+            # للنسبة العامة كالمعتاد). راجع find_reference_range بـ database.py.
+            ("analyzer", "TEXT"),
+            # selected_param_ids: طلب بارامترات معيّنة بس من داخل تحليل متعدد
+            # الباراميترات (مثلاً PT وINR بس من Coagulation)، بدل التحليل
+            # كامل — نص "id,id,id" (معرّفات test_parameters). NULL/فاضي =
+            # السلوك الافتراضي القديم تمامًا: كل باراميترات هذا التحليل
+            # مطلوبة (لا يتغير أي طلب قديم). راجع شاشة "زيارة جديدة" (سهم ▾
+            # جنب كل تحليل) وحساب order_test_price بـ app.py.
+            ("selected_param_ids", "TEXT"),
+            # tube_barcode: باركود العينة/الأنبوب المشترك — كل التحاليل
+            # بنفس الزيارة اللي تحتاج نفس نوع العينة (sample_type، مثل
+            # Serum أو EDTA أو Citrate) تاخذ نفس القيمة هنا، بدل باركود
+            # مستقل لكل تحليل لحاله. الهدف: أنبوب واحد فعلي = باركود واحد
+            # يغطّي كل التحاليل المسحوبة منه (كيمياء/هرمونات/فايروسات/
+            # فيتامينات/دلائل ورمية = Serum، كل تحاليل التخثر = Plasma/
+            # Citrate، وCBC وBlood film وHb Electrophoresis وH.preparation
+            # وSickling test وRetic count وBMA = EDTA). يُنشأ تلقائيًا أول
+            # مرة تُطبع فيها باركودات عينات هذي الزيارة (راجع
+            # print_sample_barcodes بـapp.py). عمود "barcode" الأصلي يبقى
+            # موجودًا وغير متأثر — لطباعة باركود إضافي لتحليل وحيد بس عند
+            # الحاجة.
+            ("tube_barcode", "TEXT"),
+            # fee_waived: علامة "تحليل مجاني" -- الدكتور الفاحص لا يتقاضى أجرًا
+            # عن هذا التحليل بالذات لهذه الزيارة (يبقى التحليل يُطبع ويُحفظ
+            # بالتقرير كالمعتاد -- فقط يُستثنى من حساب أجر دكتور المختبر
+            # الفاحص visits.examining_doctor_fee). يُبدَّل من زر محمي بكلمة
+            # مرور خاصة (راجع fee_waiver_password_hash بجدول settings وشاشة
+            # الإعدادات). 0 افتراضيًا لكل التحاليل القديمة والجديدة.
+            ("fee_waived", "INTEGER DEFAULT 0"),
+            # hidden_from_log: يُبدَّل مع fee_waived نفسه (سؤال إضافي وقت
+            # الضغط على زر "🆓 تحليل مجاني": "يدخل ضمن سجل المرضى اليومي؟").
+            # ملاحظة: استثناء السعر من الحسابات (يومي/شهري/نصف سنوي/سنوي)
+            # يعتمد على fee_waived لحاله (أي تحليل مجاني يُستثنى ماديًا
+            # بكل الأحوال، ظاهر أو مخفي). hidden_from_log يتحكم فقط هل
+            # اسم التحليل يظهر بعمود "التحاليل" بصفحة daily_report أم
+            # يختفي منها كليًا -- بالحالتين نتيجته تبقى محفوظة بجدول
+            # results عادي وتقدر تطبعها/تبحث عنها بأي وقت. لا علاقة له
+            # بفاتورة المريض نفسها (خارج نطاق هذا الحقل).
+            ("hidden_from_log", "INTEGER DEFAULT 0"),
+            # forwarded_lab_name / forwarded_cost (المطلوب 3): لو هذا
+            # التحليل بالذات ما يُنفَّذ فعليًا بمختبرك (مثل البرولاكتين
+            # الذي يُرسَل لمختبر القمة مثلاً) -- تسجّل هون اسم المختبر
+            # المُرسَل إليه وكلفته، ليُحسَب ضمن "الصرفيات" بالتقرير اليومي/
+            # الشهري تلقائيًا (راجع recompute_visit_forwarded_expenses
+            # بـapp.py). فاضي = هذا التحليل يُنفَّذ بمختبرك مباشرة (السلوك
+            # الافتراضي القديم، بلا أي تغيير). التقرير المطبوع للمريض نفسه
+            # لا يتأثر إطلاقًا بهذا الحقل -- يبقى يُطبع بقالب مختبرك (نفس
+            # الشعار والدكاترة) بغض النظر عن مكان الإرسال الفعلي.
+            ("forwarded_lab_name", "TEXT"), ("forwarded_cost", "REAL DEFAULT 0"),
         ],
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
         "visits": [("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
-                    ("examining_doctor_fee", "REAL DEFAULT 0"), ("attending_doctor", "TEXT")],
-        "test_definitions": [("is_examining_test", "INTEGER DEFAULT 0")],
-        "reference_ranges": [("age_from_unit", "TEXT DEFAULT 'Years'"), ("age_to_unit", "TEXT DEFAULT 'Years'")],
-        "test_parameters": [("highlight", "INTEGER DEFAULT 0")],
+                    ("examining_doctor_fee", "REAL DEFAULT 0"), ("attending_doctor", "TEXT"),
+                    # حقول "المعلومات الصحية" الجديدة بشاشة "زيارة جديدة" — خاصة
+                    # بكل زيارة تحديداً (تختلف من زيارة لأخرى لنفس المريض)، لذلك
+                    # على جدول visits وليس patients.
+                    ("weight", "REAL"), ("height", "REAL"), ("symptoms", "TEXT"),
+                    ("disease", "TEXT"), ("therapy", "TEXT"),
+                    # الزيارة المنزلية (Home Visit): علامة + عنوان + أجرة إضافية
+                    # خاصة بهذي الزيارة فقط.
+                    ("is_home_visit", "INTEGER DEFAULT 0"), ("home_visit_address", "TEXT"),
+                    ("home_visit_fee", "REAL DEFAULT 0")],
+        "test_definitions": [("is_examining_test", "INTEGER DEFAULT 0"),
+                               # report_group: اسم "الريبورت المجمّع" اللي ينتمي له هذا
+                               # التحليل (مثلاً "Thyroid function test" أو "Viral study")،
+                               # مستقل تماماً عن حقل department. يُستخدم فقط بلوحة الطباعة
+                               # المجمّعة (print_combined_panel) لتجميع التحاليل تحت عنوان
+                               # فرعي محدد بدل الاعتماد على القسم العام. فاضي = يرجع
+                               # للسلوك القديم (تجميع حسب department كالمعتاد).
+                               ("report_group", "TEXT"),
+                               # enable_stamp_widget: تفعيل/تعطيل صندوق "إضافة
+                               # ختم / توقيع" (partials/stamp_picker.html) لهذا
+                               # التحليل تحديداً — ينطبق على كل أنواع التقارير
+                               # (CBC، Blood film، مخصص...). الافتراضي 0
+                               # (معطّل) لكل التحاليل القديمة والجديدة، حتى لا
+                               # يظهر الصندوق أبداً إلا إذا فعّله المدير صراحةً
+                               # من صفحة مصمم التقارير.
+                               ("enable_stamp_widget", "INTEGER DEFAULT 0"),
+                               # panel_color / panel_page_break: تخصيص اختياري
+                               # لهذا التحليل بـ"اللوحة المجمّعة" (combined_panel
+                               # — لما تُطبع أكثر من تحليل سوا بنفس الورقة).
+                               # panel_color يلوّن اسم ونتيجة كل باراميتر تابع
+                               # لهذا التحليل بالجدول المجمّع؛ panel_page_break
+                               # يجبر أول صف تابع له يبدأ بأعلى صفحة جديدة.
+                               # فاضي/0 = السلوك الافتراضي بدون أي تغيير.
+                               ("panel_color", "TEXT"), ("panel_page_break", "INTEGER DEFAULT 0"),
+                               # report_style: لو 'generic_exam' يطبع هذا التحليل عبر
+                               # reports/generic_exam.html (قوالب فحص عام قابل للبناء
+                               # كامل من صفحة المعاينة نفسها — سحب أقسام/باراميترات،
+                               # بدون كتابة قالب HTML يدوي أصلاً) بدل مسار "مصمم
+                               # التقارير" العام. راجع _print_report_impl بـ app.py
+                               # وشرح كامل بأعلى reports/generic_exam.html.
+                               ("report_style", "TEXT"),
+                               # done_by_note: سطر "Done by ..." اختياري لهذا التحليل
+                               # تحديداً (مثلاً "Done by Beckman 520 DX")، يُدار من
+                               # مصمم التقارير أو صفحة النسب الطبيعية. فاضي = لا
+                               # يظهر أبداً. يُطبع بـ.footer-block (base_report.html)
+                               # بكل قوالب التقارير (custom/CBC/panel/exam). بديل
+                               # عن reference_ranges.source_note المتوقف عرضه.
+                               ("done_by_note", "TEXT"),
+                               # row_spacing (المطلوب 8): المسافة بين صفوف
+                               # الباراميترات بتقرير هذا التحليل — 'tight' /
+                               # 'normal' / 'loose' أو رقم بكسل حر (نص رقمي).
+                               # فاضي/NULL = نفس الافتراضي القديم بكل قالب
+                               # (لا يتغير أي تقرير قديم). يُطبّق على exam rows،
+                               # custom cards، CBC، combined panel — راجع
+                               # row_spacing_px بـapp.py لتحويلها لبكسل فعلي.
+                               ("row_spacing", "TEXT")],
+        # patient_id: نسبة طبيعية خاصة بمريض واحد بالذات (حالات خاصة/علاج) —
+        # NULL يعني نسبة عامة تنطبق على كل المرضى كالمعتاد. تتفوّق على أي
+        # نسبة عامة لنفس الباراميتر لو موجودة (راجع find_reference_range).
+        # range_label: تسمية اختيارية توضّح سبب النسبة الخاصة (مثلاً "مرضى
+        # الكورتيزون") — عرض فقط، لا تدخل بمنطق المطابقة.
+        # analyzer: اسم الجهاز الحر (E411 / Pure / Beckman 520 DX...) —
+        # NULL يعني نسبة عامة بغض النظر عن الجهاز. أولوية المطابقة الكاملة:
+        # نسبة المريض الخاصة > نسبة نفس الجهاز > النسبة العامة.
+        "reference_ranges": [("age_from_unit", "TEXT DEFAULT 'Years'"), ("age_to_unit", "TEXT DEFAULT 'Years'"),
+                              ("patient_id", "INTEGER"), ("range_label", "TEXT"), ("analyzer", "TEXT"),
+                              ("note", "TEXT")],
+        # unit2 / unit2_factor: وحدة ثانية اختيارية تُعرض تلقائيًا جنب النتيجة
+        # الأصلية وقت الطباعة (مثلاً mg/dL بالإضافة لـ mmol/L). القيمة الثانية
+        # تُحسب دائمًا = القيمة الأصلية × unit2_factor، ولا تُخزَّن بجدول
+        # results أبدًا — تُحسب لحظة الطباعة فقط. فاضي = بدون وحدة ثانية
+        # (السلوك القديم كما هو).
+        "test_parameters": [("highlight", "INTEGER DEFAULT 0"), ("unit2", "TEXT"), ("unit2_factor", "REAL"),
+                             # panel_color / panel_page_break: نفس فكرة أعمدة
+                             # test_definitions بنفس الاسم، بس هنا على مستوى
+                             # الباراميتر المفرد — يسمح بتلوين/فصل صفحة
+                             # لباراميتر وحدة بس داخل تحليل متعدد الباراميترات
+                             # (مثل NRBC بس داخل Blood film) عند ظهوره باللوحة
+                             # المجمّعة، بدل تلوين كل التحليل سوا.
+                             ("panel_color", "TEXT"), ("panel_page_break", "INTEGER DEFAULT 0"),
+                             # sort_order: ترتيب عرض الباراميتر داخل تحليله (بشاشة
+                             # إدخال النتائج وبالتقرير المطبوع) — رقم أصغر يظهر
+                             # أولاً. الافتراضي 0 لكل الباراميترات القديمة، فيبقى
+                             # ترتيبها كما هو (حسب id) حتى يعدّلها المدير يدويًا من
+                             # صفحة "ترتيب الباراميترات" الجديدة.
+                             ("sort_order", "INTEGER DEFAULT 0"),
+                             # display_label (المطلوب 9ب): تسمية عرض بديلة تُطبع
+                             # بدل name الأصلي بكل القوالب (exam rows، CBC،
+                             # combined panel، وcustom.html كـfallback لو ما
+                             # فيه label مضبوط أصلاً من مصمم التقارير rows_json).
+                             # فاضي = يبقى name الأصلي كالسابق. لا يغيّر name
+                             # الحقيقي المستخدم بحفظ/قراءة النتائج نفسها.
+                             ("display_label", "TEXT"),
+                             # value_align (المطلوب 11): موضع رقم النتيجة —
+                             # near_name / center / near_unit. NULL/فاضي = نفس
+                             # السلوك الحالي القديم تمامًا (لا يتغير أي تقرير
+                             # قديم). راجع resolve_value_align بـapp.py.
+                             ("value_align", "TEXT"),
+                             # price: سعر هذا الباراميتر لحاله — يُستخدم فقط
+                             # لما يطلب الموظف بارامترات معيّنة من تحليل متعدد
+                             # الباراميترات بدل التحليل كامل (سهم ▾ بشاشة
+                             # "زيارة جديدة" — راجع order_tests.selected_param_ids
+                             # أعلاه). NULL = لسا ما تحدد سعره؛ الموظف يقدر
+                             # يكتبه أول مرة يختاره بشاشة الطلب نفسها وينحفظ
+                             # هنا تلقائيًا لكل الطلبات الجاية. لا علاقة له
+                             # بسعر التحليل الكامل (test_definitions.price).
+                             ("price", "REAL")],
         # is_trial: يميّز الترخيص التجريبي عن ترخيص العميل العادي (بالأيام)،
         # حتى يظهر شريط "متبقي كم يوم" فقط للتجريبي وليس لكل ترخيص له تاريخ انتهاء.
         # revoked_reason: سبب الإلغاء عن بُعد (يُعبّى تلقائياً لو المصمم ألغى
@@ -445,7 +739,23 @@ def migrate(conn):
         # التقارير" — توسيط/يمين/يسار لعنوان التقرير المخصَّص ولعمود اسم
         # الفحص وقيمة النتيجة بجدول الفحوصات (custom.html فقط، التقارير
         # الجاهزة CBC/التخثر... إلخ لها تصميم ثابت منفصل).
-        "report_templates": [("heading_align", "TEXT DEFAULT 'center'"), ("rows_align", "TEXT DEFAULT 'right'")],
+        "report_templates": [("heading_align", "TEXT DEFAULT 'center'"), ("rows_align", "TEXT DEFAULT 'right'"),
+                              # unit_column: تخطيط أعمدة بديل لهذا التقرير تحديداً —
+                              # لو مفعّل (1)، عمود الوحدة ينفصل عن عمود النتيجة
+                              # ويصير بأقصى اليمين لحاله، والنتيجة توسّط بعمودها،
+                              # بدل الوضع الافتراضي (0) اللي تكون فيه الوحدة
+                              # ملتصقة بنهاية النتيجة بنفس العمود.
+                              ("unit_column", "INTEGER DEFAULT 0")],
+        # font_size: تجاوز اختياري لحجم خط اسم/شهادة هذا الدكتور تحديداً
+        # بترويسة التقرير (بالبكسل). فاضي (NULL) = يرث الحجم العام
+        # letterhead_font_size من الإعدادات كالسابق تماماً — هذا العمود لا
+        # يغيّر أي تصميم محفوظ إلا إذا عبّاه المدير صراحةً من شاشة إدارة
+        # الدكاترة لدكتور معيّن.
+        "examining_doctors_list": [("font_size", "INTEGER")],
+        # note: ملاحظة قصيرة أمام باراميتر واحد بالذات (زر 📝 بتقارير الفحص
+        # GUE/GSE/SFA — راجع exam_row بـ exam_report_shared.html)، مستقلة
+        # تمامًا عن order_tests.report_comment (الملاحظة العامة للتقرير كامل).
+        "results": [("note", "TEXT")],
     }
     for table, columns in needed.items():
         existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -453,6 +763,33 @@ def migrate(conn):
             if col_name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
     conn.commit()
+
+    # ترحيل قائمة (دكتور المختبر الفاحص) من التخزين القديم (نص JSON بسيط
+    # داخل جدول settings) إلى جدول examining_doctors_list الجديد — مرة وحدة
+    # فقط (لو الجدول الجديد فاضي أصلاً)، حتى لا تضيع أسماء محفوظة سابقًا عند
+    # الترقية. الشهادات (degree_ar/degree_en) تبقى فاضية بعد الترحيل — يعبّيها
+    # المدير يدويًا من الشاشة الجديدة، لأن التخزين القديم أصلاً ما كان فيه
+    # هذا الحقل إطلاقًا.
+    already_migrated = conn.execute("SELECT COUNT(*) as c FROM examining_doctors_list").fetchone()["c"]
+    if not already_migrated:
+        legacy_names = []
+        legacy_row = conn.execute("SELECT value FROM settings WHERE key='examining_doctors'").fetchone()
+        if legacy_row and legacy_row["value"]:
+            try:
+                parsed = json.loads(legacy_row["value"])
+                if isinstance(parsed, list):
+                    legacy_names = [str(n).strip() for n in parsed if str(n).strip()]
+            except (ValueError, TypeError):
+                pass
+        if not legacy_names:
+            legacy_names = list(DEFAULT_EXAMINING_DOCTORS)
+        for i, n in enumerate(legacy_names):
+            conn.execute(
+                "INSERT INTO examining_doctors_list (name, title, sort_order, show_on_letterhead) "
+                "VALUES (?, 'الدكتور', ?, 1)",
+                (n, i),
+            )
+        conn.commit()
 
     # Backfill: any order_tests row created before the "price" column existed
     # gets the test's current default price locked in, so nothing breaks.
@@ -511,6 +848,101 @@ def migrate(conn):
                 (pcur.lastrowid, low, high, range_text),
             )
         conn.commit()
+
+    # GUE / GSE / SFA (فحص البول العام، فحص البراز العام، تحليل السائل
+    # المنوي) — تقارير طباعة ثابتة جديدة (reports/urine_exam.html،
+    # reports/stool_exam.html، reports/seminal_fluid.html — راجع
+    # REPORT_TEMPLATE_MAP بـ app.py) بدل مسار "مصمم التقارير" العام. أسماء
+    # الباراميترات هنا يجب أن تطابق بالضبط أسماء macro_names/micro_names
+    # المكتوبة داخل تلك القوالب (حساسة لحالة الأحرف والمسافات) حتى تظهر كل
+    # نتيجة تحت قسمها الصحيح بالتقرير المطبوع. لا يُنشئ التحليل من الصفر لو
+    # كان موجودًا أصلاً (بأي اسم/قسم عدّله المستخدم) — فقط يُكمّل الباراميترات
+    # الناقصة له (بدون تكرار لو الاسم موجود أصلاً، بغض النظر عمّن أضافه).
+    exam_test_specs = [
+        ("GUE", "General Urine Examination", "فحص البول العام", "Others", "Urine", [
+            ("Color", "", "Text", None, None, "Yellow"),
+            ("Specific Gravity", "", "Numeric", 1.005, 1.030, None),
+            ("Reaction (pH)", "", "Numeric", 5.0, 8.0, None),
+            ("Glucose", "", "Text", None, None, "Negative"),
+            ("Protein", "", "Text", None, None, "Negative"),
+            ("Ketone", "", "Text", None, None, "Negative"),
+            ("Bile Pigment", "", "Text", None, None, "Negative"),
+            ("Urobilinogen", "eu/dl", "Numeric", 0.2, 1.0, None),
+            ("Nitrite", "", "Text", None, None, "Negative"),
+            ("RBCs", "/HPF", "Text", None, None, "0-2"),
+            ("PUS", "/HPF", "Text", None, None, "0-5"),
+            ("Casts", "", "Text", None, None, "Nil"),
+            ("Epithelial Cells", "/HPF", "Text", None, None, "0-2"),
+            ("Amorphous", "", "Text", None, None, "Nil"),
+            ("Mucus", "", "Text", None, None, "Nil"),
+            ("Crystals", "", "Text", None, None, "Nil"),
+            ("Parasites / Others", "", "Text", None, None, "Nil"),
+        ]),
+        ("GSE", "General Stool Examination", "فحص البراز العام", "Others", "Stool", [
+            ("Color", "", "Text", None, None, "Brown"),
+            ("Consistency", "", "Text", None, None, "Formed"),
+            ("Mucus", "", "Text", None, None, "Nil"),
+            ("Blood", "", "Text", None, None, "Nil"),
+            ("Worms / Helminths", "", "Text", None, None, "Nil"),
+            ("Pus Cells", "/HPF", "Text", None, None, "0-2"),
+            ("RBCs", "", "Text", None, None, "Nil"),
+            ("Amoeba (E. histolytica)", "", "Text", None, None, "Not seen"),
+            ("Giardia lamblia", "", "Text", None, None, "Not seen"),
+            ("Helminthes Ova", "", "Text", None, None, "Not seen"),
+            ("Undigested Food Particles", "", "Text", None, None, "Nil"),
+            ("Fungi / Yeast", "", "Text", None, None, "Nil"),
+        ]),
+        ("SFA", "Seminal Fluid Analysis", "تحليل السائل المنوي", "Others", "Semen", [
+            ("Volume", "mL", "Numeric", 1.5, 5.0, None),
+            ("Color / Appearance", "", "Text", None, None, "Grey-white / Opalescent"),
+            ("Liquefaction Time", "min", "Numeric", 15, 30, None),
+            ("Viscosity", "", "Text", None, None, "Normal"),
+            ("pH", "", "Numeric", 7.2, 8.0, None),
+            ("Sperm Count", "M/mL", "Numeric", None, None, "≥ 16 Million/mL"),
+            ("Total Sperm Count", "M", "Numeric", None, None, "≥ 39 Million/ejaculate"),
+            ("Active (Progressive)", "%", "Numeric", None, None, "≥ 30%"),
+            ("Sluggish (Non-progressive)", "%", "Numeric", None, None, None),
+            ("Immotile", "%", "Numeric", None, None, None),
+            ("Normal Forms", "%", "Numeric", None, None, "≥ 4%"),
+            ("Abnormal Forms", "%", "Numeric", None, None, None),
+            ("Pus Cells", "/HPF", "Text", None, None, "< 1 Million/mL"),
+            ("RBCs", "/HPF", "Text", None, None, "Nil"),
+            ("Agglutination", "", "Text", None, None, "Nil"),
+        ]),
+    ]
+    for code, name, name_ar, department, sample_type, param_specs in exam_test_specs:
+        existing_def = conn.execute(
+            "SELECT id FROM test_definitions WHERE code=?", (code,)
+        ).fetchone()
+        if existing_def:
+            test_def_id = existing_def["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO test_definitions (code, name, name_ar, department, sample_type, price) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (code, name, name_ar, department, sample_type, 0),
+            )
+            test_def_id = cur.lastrowid
+        existing_param_names = {
+            row["name"] for row in conn.execute(
+                "SELECT name FROM test_parameters WHERE test_definition_id=?", (test_def_id,)
+            ).fetchall()
+        }
+        for pname, unit, rtype, low, high, range_text in param_specs:
+            if pname in existing_param_names:
+                continue
+            pcur = conn.execute(
+                "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) "
+                "VALUES (?, ?, ?, ?)",
+                (test_def_id, pname, unit, rtype),
+            )
+            if low is not None or high is not None or range_text is not None:
+                conn.execute(
+                    "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_to, low, high, range_text) "
+                    "VALUES (?, 'Both', 0, 120, ?, ?, ?)",
+                    (pcur.lastrowid, low, high, range_text),
+                )
+    conn.commit()
 
     # الشعار (logo_path) صار يُضاف افتراضيًا للتنصيبات الجديدة فقط عبر seed()،
     # فأي قاعدة بيانات موجودة من قبل هذا التحديث ما عندها هذا الإعداد إطلاقًا
@@ -605,6 +1037,47 @@ def ensure_bfretic_parameters(conn):
     conn.commit()
 
 
+def ensure_retic_parameters(conn):
+    """RETIC ('Retic Count' المفرد -- بدون لطاخة الدم) اتسجّل بالكتالوج ضمن
+    EXAMINING_TEST_DEFS لكن ما انزرع له test_parameters إطلاقًا (خلافًا عن
+    BFRETIC اللي عنده ensure_bfretic_parameters أعلاه)، فشاشة إدخال نتيجته
+    تطلع فاضية تمامًا -- ماكو مكان أصلاً ينزل بيه Reticulocyte count.
+    يزرع له:
+      - Reticulocyte count % (تُدخل يدويًا من الجهاز/العدّ اليدوي)
+      - HCT % (قيمة المريض الفعلية وقت هذا التحليل -- تُستخدم فقط لحساب
+        Corrected Retic count، وما تُطبع لحالها بالتقرير)
+      - Corrected Retic count % (تُحسب تلقائيًا بـsave_order_test_results
+        بملف app.py، ما تُدخل يدويًا إلا لو المستخدم كتب قيمة بنفسه)
+    نفس أسلوب ensure_bfretic_parameters تمامًا: يفحص أول هل عنده parameters
+    مسبقًا حتى ما يتكرر على قاعدة بيانات مشغّلة هذا السكربت أكثر من مرة."""
+    row = conn.execute("SELECT id FROM test_definitions WHERE code='RETIC'").fetchone()
+    if not row:
+        return
+    test_id = row["id"]
+    has_params = conn.execute(
+        "SELECT COUNT(*) as c FROM test_parameters WHERE test_definition_id=?", (test_id,)
+    ).fetchone()["c"]
+    if has_params:
+        return
+    params = [
+        ("Reticulocyte count", "%", "Numeric", None, None, None),
+        ("HCT", "%", "Numeric", None, None, None),
+        ("Corrected Retic count", "%", "Numeric", None, None, None),
+    ]
+    for name, unit, result_type, low, high, range_text in params:
+        conn.execute(
+            "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, ?, ?, ?)",
+            (test_id, name, unit, result_type),
+        )
+        param_id = conn.execute("SELECT last_insert_rowid() as id").fetchone()["id"]
+        if low is not None or high is not None or range_text is not None:
+            conn.execute(
+                "INSERT INTO reference_ranges (test_parameter_id, low, high, range_text) VALUES (?, ?, ?, ?)",
+                (param_id, low, high, range_text),
+            )
+    conn.commit()
+
+
 def ensure_nrbc_parameter(conn):
     """NRBC is a newly-added field for Blood Film / Blood Film and Retic Count
     / WBCs differential (unit '100/wbc'), inserted right after Promyelocytes.
@@ -671,6 +1144,49 @@ def ensure_reactive_lymphocytes_parameter(conn):
             "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, 'Reactive lymphocytes', '%', 'Numeric')",
             (test_id,),
         )
+    conn.commit()
+
+
+def ensure_basophils_after_eosinophils_order(conn):
+    """طلب المستخدم: بكل تحاليل الـDifferential (Blood Film / Blood Film and
+    Retic Count / WBC Differential / Fluid Examination) لازم يظهر Basophils
+    مباشرة بعد Eosinophils بترتيب العرض والطباعة وإدخال النتائج. يعتمد على
+    عمود test_parameters.sort_order (يُقرأ بكل الأماكن اللي تجيب باراميترات
+    تحليل معيّن — انظر ORDER BY sort_order, id بـ app.py). يشتغل بمطابقة اسم
+    تام (بأي حالة أحرف، بدون حساسية للجمع/المفرد: Basophil/Basophils) حتى ما
+    يتأثر بأي تحليل الاسمين فيه غير موجودين (متل بعض حالات Fluid Examination
+    اللي ما تحتوي Differential أصلاً — يتم تجاوزه بصمت). يعيد ترقيم كل
+    باراميترات التحليل بالكامل حسب ترتيبها الحالي (sort_order ثم id) مع
+    إزاحة Basophils بس لموقعه الجديد — يبقى ثابت (idempotent) لو انشغل أكثر
+    من مرة، وما يغيّر ترتيب أي باراميتر ثاني فيما بينهم."""
+    def norm(name):
+        return (name or "").strip().lower().rstrip("s")
+
+    for code in ("BF", "BFRETIC", "WBCDIFF", "FLUIDEXAM"):
+        row = conn.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
+        if not row:
+            continue
+        test_id = row["id"]
+        params = conn.execute(
+            "SELECT id, name FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
+            (test_id,),
+        ).fetchall()
+        names = [norm(p["name"]) for p in params]
+        if "eosinophil" not in names or "basophil" not in names:
+            continue  # هذا التحليل ما فيه الاثنين (مثلاً بعض إعدادات Fluid Examination) — تجاوزه
+
+        eo_idx = names.index("eosinophil")
+        ba_idx = names.index("basophil")
+        if ba_idx == eo_idx + 1:
+            continue  # مرتب صح أصلاً — لا شي يسوى (يخلي التشغيل مكرر بأمان)
+
+        ordered = list(params)
+        basophil_row = ordered.pop(ba_idx)
+        new_eo_idx = ordered.index(next(p for p in ordered if norm(p["name"]) == "eosinophil"))
+        ordered.insert(new_eo_idx + 1, basophil_row)
+
+        for i, p in enumerate(ordered):
+            conn.execute("UPDATE test_parameters SET sort_order=? WHERE id=?", (i + 1, p["id"]))
     conn.commit()
 
 
@@ -766,7 +1282,7 @@ def age_to_days(value, unit):
     return value * AGE_UNIT_DAYS.get(unit or "Years", 365)
 
 
-def find_reference_range(conn, test_parameter_id, gender, age, age_unit):
+def find_reference_range(conn, test_parameter_id, gender, age, age_unit, patient_id=None, analyzer=None):
     """Picks the ONE reference-range row that actually applies to this
     patient, out of every row defined for this parameter — matching both
     gender and age bracket (each row's age_from/age_to can each be in a
@@ -779,12 +1295,49 @@ def find_reference_range(conn, test_parameter_id, gender, age, age_unit):
          range at all)
       4. among whatever's left, a row naming this patient's exact gender
          wins over a generic 'Both' row.
+
+    patient_id / analyzer (both optional, default None so every existing
+    call site keeps working untouched): before any of the age/gender logic
+    above, the candidate pool is narrowed by specificity —
+      1. rows pinned to this exact patient_id (a private range for a
+         special case/treatment) win over everything else for this
+         parameter, if any exist.
+      2. otherwise, rows pinned to this exact analyzer name (and not
+         pinned to any patient) win — e.g. Ferritin on 'E411' vs 'Pure'.
+      3. otherwise, the general rows (no patient_id, no analyzer) are used
+         — the original behaviour.
+    Only after narrowing to one of these pools does the existing age/gender
+    matching run, so a private/analyzer range still needs to match the
+    patient's age+gender like any other row.
     """
     rows = conn.execute(
         "SELECT * FROM reference_ranges WHERE test_parameter_id=?", (test_parameter_id,)
     ).fetchall()
     if not rows:
         return None
+
+    if patient_id:
+        patient_rows = [r for r in rows if r["patient_id"] == patient_id]
+    else:
+        patient_rows = []
+    if patient_rows:
+        rows = patient_rows
+    else:
+        if analyzer:
+            analyzer_rows = [
+                r for r in rows
+                if not r["patient_id"] and r["analyzer"] and r["analyzer"] == analyzer
+            ]
+        else:
+            analyzer_rows = []
+        if analyzer_rows:
+            rows = analyzer_rows
+        else:
+            general_rows = [r for r in rows if not r["patient_id"] and not r["analyzer"]]
+            # لو ما فيه ولا صف عام أصلاً لهذا الباراميتر (كل الصفوف مخصصة
+            # لمريض أو جهاز معيّن) — نرجع لأي صف غير مخصص لمريض ثاني، أفضل
+            # من إرجاع None بلا أي مدى طبيعي إطلاقاً.
+            rows = general_rows or [r for r in rows if not r["patient_id"]] or rows
 
     age_days = age_to_days(age, age_unit)
 
@@ -872,6 +1425,31 @@ def find_or_create_referral_center(db, name):
     return cur.lastrowid
 
 
+def ensure_interface_accounts(conn):
+    """المطلوب (استبدال نظام تسجيل الدخول الشخصي بواجهات الاستقبال/
+    المختبر/الاثنين معًا): عشرات الأماكن بـapp.py تكتب session["user_id"]
+    مباشرة لتسجيل "مين سوى شنو" (entered_by، log_action...الخ). بدل ما
+    نلمس كل تلك الأماكن (خطر كبير)، نسوي حساب "ظل" واحد بجدول users
+    لكل واجهة (Reception/Lab/Together) يُنشأ تلقائيًا أول مرة بس، ويُستخدم
+    داخليًا فقط (ما يُدخَل بيه من شاشة تسجيل دخول عادية) -- بمجرد ما
+    المستخدم يدخل واجهة معيّنة من الشاشة الرئيسية، جلسته تُربط بحساب تلك
+    الواجهة تلقائيًا، فيبقى كل الكود القديم يشتغل بدون أي تعديل."""
+    accounts = [
+        ("__interface_reception__", "حساب واجهة الاستقبال"),
+        ("__interface_lab__", "حساب واجهة المختبر"),
+        ("__interface_both__", "حساب واجهة الاستقبال والمختبر معًا"),
+    ]
+    for username, full_name in accounts:
+        row = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+        if not row:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, full_name, role, is_active, created_at) "
+                "VALUES (?, ?, ?, 'admin', 1, ?)",
+                (username, hash_password(os.urandom(16).hex()), full_name, datetime.now().isoformat(timespec="seconds")),
+            )
+    conn.commit()
+
+
 def init_db():
     fresh = not os.path.exists(DB_PATH)
     conn = get_db()
@@ -882,12 +1460,46 @@ def init_db():
         seed(conn)
     ensure_examining_tests(conn)
     ensure_bfretic_parameters(conn)
+    ensure_retic_parameters(conn)
+    ensure_interface_accounts(conn)
     ensure_nrbc_parameter(conn)
     ensure_atypical_lymphocytes_parameter(conn)
     ensure_reactive_lymphocytes_parameter(conn)
+    ensure_basophils_after_eosinophils_order(conn)
     ensure_cbc_comment_parameter(conn)
     ensure_coag_parameters(conn)
+    ensure_vldl_parameter(conn)
     conn.close()
+
+
+def ensure_vldl_parameter(conn):
+    """يضيف معامل VLDL لتحليل Lipid Profile (LIPID) للقواعد الموجودة مسبقًا —
+    هذا المعامل غير موجود أصلاً بقاعدة البيانات القديمة، ويُحسب تلقائيًا من
+    Triglycerides ÷ 5 بواجهة إدخال النتائج. يعمل مرة واحدة فقط؛ لا شيء يحدث
+    إذا كان المعامل مضافًا مسبقًا. المدى الطبيعي (low/high) يُضاف بجدول
+    reference_ranges المنفصل (نفس أسلوب باقي معاملات الاختبارات)، وليس بجدول
+    test_parameters نفسه."""
+    row = conn.execute("SELECT id FROM test_definitions WHERE code='LIPID'").fetchone()
+    if not row:
+        return
+    test_id = row["id"]
+    param_row = conn.execute(
+        "SELECT id FROM test_parameters WHERE test_definition_id=? AND name='VLDL'", (test_id,)
+    ).fetchone()
+    if param_row:
+        return
+    cur = conn.execute(
+        "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) "
+        "VALUES (?, 'VLDL', 'mg/dL', 'Numeric')",
+        (test_id,),
+    )
+    param_id = cur.lastrowid
+    conn.execute(
+        "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, "
+        "age_to, age_to_unit, low, high) VALUES (?, 'Both', 0, 'Years', 120, 'Years', 2, 30)",
+        (param_id,),
+    )
+    conn.commit()
 
 
 def seed(conn):
@@ -1090,22 +1702,23 @@ def get_report_template(db, test_definition_id):
 
 
 def save_report_template(db, test_definition_id, heading, rows_json, source_docx_name, user_id,
-                          heading_align=None, rows_align=None):
+                          heading_align=None, rows_align=None, unit_column=0):
     now = datetime.now().isoformat(timespec="seconds")
     existing = get_report_template(db, test_definition_id)
     heading_align = heading_align or "center"
     rows_align = rows_align or "right"
+    unit_column = 1 if unit_column else 0
     if existing:
         db.execute(
             "UPDATE report_templates SET heading=?, rows_json=?, source_docx_name=COALESCE(?, source_docx_name), "
-            "heading_align=?, rows_align=?, updated_at=? WHERE test_definition_id=?",
-            (heading, rows_json, source_docx_name, heading_align, rows_align, now, test_definition_id),
+            "heading_align=?, rows_align=?, unit_column=?, updated_at=? WHERE test_definition_id=?",
+            (heading, rows_json, source_docx_name, heading_align, rows_align, unit_column, now, test_definition_id),
         )
     else:
         db.execute(
             "INSERT INTO report_templates (test_definition_id, heading, rows_json, source_docx_name, "
-            "heading_align, rows_align, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (test_definition_id, heading, rows_json, source_docx_name, heading_align, rows_align, user_id, now, now),
+            "heading_align, rows_align, unit_column, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (test_definition_id, heading, rows_json, source_docx_name, heading_align, rows_align, unit_column, user_id, now, now),
         )
     db.commit()
 
@@ -1123,44 +1736,170 @@ def set_setting(db, key, value):
         db.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, value))
 
 
+def save_saved_report(db, visit_id, patient_id, full_name, registration_number,
+                       pdf_path, referring_doctor_name=None, referral_center_name=None):
+    """يحفظ (أو يحدّث) مسار PDF المحفوظ لزيارة معيّنة في أرشيف التقارير."""
+    now = datetime.now().isoformat(timespec="seconds")
+    existing = get_saved_report(db, visit_id)
+    if existing:
+        db.execute(
+            "UPDATE saved_reports SET patient_id=?, full_name=?, registration_number=?, "
+            "pdf_path=?, referring_doctor_name=?, referral_center_name=?, updated_at=? "
+            "WHERE visit_id=?",
+            (patient_id, full_name, registration_number, pdf_path,
+             referring_doctor_name, referral_center_name, now, visit_id)
+        )
+    else:
+        db.execute(
+            "INSERT INTO saved_reports (visit_id, patient_id, full_name, registration_number, "
+            "pdf_path, referring_doctor_name, referral_center_name, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (visit_id, patient_id, full_name, registration_number, pdf_path,
+             referring_doctor_name, referral_center_name, now, now)
+        )
+    db.commit()
+
+
+def get_saved_report(db, visit_id):
+    """يرجع صف التقرير المحفوظ لزيارة معيّنة، أو None إذا ما كان موجود."""
+    return db.execute(
+        "SELECT * FROM saved_reports WHERE visit_id=?", (visit_id,)
+    ).fetchone()
+
+
+def search_saved_reports(db, q):
+    """يبحث عن التقارير المحفوظة بالاسم أو رقم التسجيل أو رقم المريض.
+    إذا q فاضي، يرجع كل التقارير مرتبة من الأحدث للأقدم."""
+    if not q:
+        return db.execute(
+            "SELECT * FROM saved_reports ORDER BY updated_at DESC"
+        ).fetchall()
+    like = f"%{q}%"
+    return db.execute(
+        "SELECT * FROM saved_reports "
+        "WHERE full_name LIKE ? OR registration_number LIKE ? OR patient_id LIKE ? "
+        "ORDER BY updated_at DESC",
+        (like, like, like)
+    ).fetchall()
+
+
 DEFAULT_EXAMINING_DOCTORS = ["د.خليل حمود", "د.هدى نصيف", "د.اسراء عبد الاقر"]
 
 
+def get_examining_doctors_full(db):
+    """كل دكاترة الفحص بكل تفاصيلهم (اسم/لقب/شهادة عربي/شهادة انكليزي/ترتيب/
+    هل يظهر بترويسة التقرير) مرتبين حسب الترتيب اليدوي (sort_order)."""
+    return db.execute(
+        "SELECT * FROM examining_doctors_list ORDER BY sort_order, id"
+    ).fetchall()
+
+
 def get_examining_doctors(db):
-    """قائمة (دكتور المختبر الفاحص) — قابلة للتعديل من Management → Settings.
-    تُخزَّن بصيغة JSON داخل جدول settings؛ إذا لم تُحفظ من قبل تُستخدم القائمة
-    الافتراضية القديمة."""
-    raw = get_setting(db, "examining_doctors", "")
-    if not raw:
-        return list(DEFAULT_EXAMINING_DOCTORS)
-    try:
-        names = json.loads(raw)
-        if isinstance(names, list) and names:
-            return [str(n).strip() for n in names if str(n).strip()]
-    except (ValueError, TypeError):
-        pass
+    """قائمة (دكتور المختبر الفاحص) — أسماء فقط، بنفس التوقيع القديم، لقوائم
+    الاختيار السريع بشاشات الزيارات والفواتير. مصدرها الآن جدول
+    examining_doctors_list (مرتبة sort_order)؛ إذا كان فاضي تمامًا (حالة
+    نادرة) ترجع القائمة الافتراضية القديمة بدل قائمة فاضية."""
+    rows = get_examining_doctors_full(db)
+    if rows:
+        return [r["name"] for r in rows]
     return list(DEFAULT_EXAMINING_DOCTORS)
 
 
+def get_letterhead_doctors(db):
+    """فقط الدكاترة اللي يُفعَّل لهم عرض بترويسة التقرير المطبوع، مرتبين
+    حسب الترتيب اليدوي — تُستخدم بـ inject_globals لحقن letterhead_doctors
+    بكل قوالب reports/* تلقائيًا."""
+    return db.execute(
+        "SELECT * FROM examining_doctors_list WHERE show_on_letterhead=1 ORDER BY sort_order, id"
+    ).fetchall()
+
+
 def set_examining_doctors(db, names):
-    cleaned = []
-    for n in names:
-        n = (n or "").strip()
-        if n and n not in cleaned:
-            cleaned.append(n)
-    set_setting(db, "examining_doctors", json.dumps(cleaned, ensure_ascii=False))
+    """يستبدل القائمة كاملة بأسماء فقط (يبقى موجود للتوافق القديم فقط).
+    يحافظ على شهادة/لقب/ظهور بالترويسة لأي اسم موجود مسبقًا بنفس الحروف."""
+    existing = {r["name"]: r for r in get_examining_doctors_full(db)}
+    db.execute("DELETE FROM examining_doctors_list")
+    cleaned = list(dict.fromkeys(n.strip() for n in names if (n or "").strip()))
+    for i, n in enumerate(cleaned):
+        old = existing.get(n)
+        db.execute(
+            "INSERT INTO examining_doctors_list (name, title, degree_ar, degree_en, sort_order, show_on_letterhead) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (n, old["title"] if old else "الدكتور", old["degree_ar"] if old else None,
+             old["degree_en"] if old else None, i, old["show_on_letterhead"] if old else 1),
+        )
+    db.commit()
 
 
 def add_examining_doctor(db, name):
     """يضيف اسم طبيب جديد لقائمة (دكتور المختبر الفاحص) إن لم يكن موجودًا أصلاً،
     حتى يظهر فورًا بقوائم اختيار الطبيب الفاحص بشاشة (زيارة جديدة) دون
-    الحاجة للذهاب لإعدادات النظام أولًا."""
+    الحاجة للذهاب لإعدادات النظام أولًا. يُضاف بدون شهادة ومن دون إظهار
+    بترويسة التقرير تلقائيًا (المدير يفعّلها يدويًا لاحقًا إذا أراد)."""
     name = (name or "").strip()
-    names = get_examining_doctors(db)
-    if name and name not in names:
-        names.append(name)
-        set_examining_doctors(db, names)
-    return names
+    if name and name not in get_examining_doctors(db):
+        max_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) as m FROM examining_doctors_list"
+        ).fetchone()["m"]
+        db.execute(
+            "INSERT INTO examining_doctors_list (name, title, sort_order, show_on_letterhead) "
+            "VALUES (?, 'الدكتور', ?, 0)",
+            (name, max_order + 1),
+        )
+        db.commit()
+    return get_examining_doctors(db)
+
+
+def add_examining_doctor_full(db, name, title, degree_ar, degree_en, show_on_letterhead, font_size=None):
+    """يضيف دكتور فحص جديد بكامل تفاصيله من شاشة إدارة الدكاترة.
+    font_size: تجاوز اختياري لحجم خط اسمه/شهادته بالترويسة (بكسل)؛ فاضي
+    (None) يعني يرث الحجم العام letterhead_font_size من الإعدادات كالمعتاد."""
+    name = (name or "").strip()
+    if not name:
+        return
+    max_order = db.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) as m FROM examining_doctors_list"
+    ).fetchone()["m"]
+    db.execute(
+        "INSERT INTO examining_doctors_list (name, title, degree_ar, degree_en, sort_order, show_on_letterhead, font_size) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (name, (title or "").strip() or "الدكتور", degree_ar, degree_en,
+         max_order + 1, 1 if show_on_letterhead else 0, font_size),
+    )
+    db.commit()
+
+
+def update_examining_doctor(db, doctor_id, name, title, degree_ar, degree_en, show_on_letterhead, font_size=None):
+    db.execute(
+        "UPDATE examining_doctors_list SET name=?, title=?, degree_ar=?, degree_en=?, show_on_letterhead=?, font_size=? "
+        "WHERE id=?",
+        ((name or "").strip(), (title or "").strip() or "الدكتور", degree_ar, degree_en,
+         1 if show_on_letterhead else 0, font_size, doctor_id),
+    )
+    db.commit()
+
+
+def delete_examining_doctor(db, doctor_id):
+    db.execute("DELETE FROM examining_doctors_list WHERE id=?", (doctor_id,))
+    db.commit()
+
+
+def move_examining_doctor(db, doctor_id, direction):
+    """يبدّل ترتيب هذا الدكتور مع جاره بالقائمة (فوق أو تحت) —
+    direction: 'up' أو 'down'. يُستخدم بدل السحب-والإفلات لتفادي الاعتماد
+    على مكتبة جافاسكربت خارجية بأداة تعمل بدون إنترنت."""
+    rows = list(get_examining_doctors_full(db))
+    ids = [r["id"] for r in rows]
+    if doctor_id not in ids:
+        return
+    idx = ids.index(doctor_id)
+    swap_idx = idx - 1 if direction == "up" else idx + 1
+    if swap_idx < 0 or swap_idx >= len(rows):
+        return
+    a, b = rows[idx], rows[swap_idx]
+    db.execute("UPDATE examining_doctors_list SET sort_order=? WHERE id=?", (b["sort_order"], a["id"]))
+    db.execute("UPDATE examining_doctors_list SET sort_order=? WHERE id=?", (a["sort_order"], b["id"]))
+    db.commit()
 
 
 def get_examining_tests(db):
@@ -1212,6 +1951,281 @@ def compute_examining_doctor_fee(db, doctor_name, test_ids):
     return total
 
 
+def recompute_examining_doctor_fee(db, visit_id):
+    """يعيد حساب أجر دكتور المختبر الفاحص لكل زيارة من الفحوصات الحالية
+    غير الملغى أجرها فقط (fee_waived=0) ويحدّث visits.examining_doctor_fee
+    مباشرة. يُستدعى بعد أي تبديل لعلامة "تحليل مجاني" (راجع
+    toggle_order_test_fee_waiver بـapp.py) وأيضًا من شاشة تعديل الزيارة
+    بدل الحساب اليدوي القديم، حتى يبقى المصدر الوحيد لهذا الحساب مكانًا
+    واحدًا. لا يستدعي commit بنفسه -- الطرف المستدعي يتحكم بذلك."""
+    visit = db.execute("SELECT examining_doctor FROM visits WHERE id=?", (visit_id,)).fetchone()
+    if not visit:
+        return 0.0
+    order = db.execute("SELECT id FROM orders WHERE visit_id=?", (visit_id,)).fetchone()
+    test_ids = []
+    if order:
+        test_ids = [
+            r["test_definition_id"] for r in db.execute(
+                "SELECT test_definition_id FROM order_tests WHERE order_id=? "
+                "AND (fee_waived IS NULL OR fee_waived=0)",
+                (order["id"],),
+            ).fetchall()
+        ]
+    fee = compute_examining_doctor_fee(db, visit["examining_doctor"], test_ids)
+    db.execute("UPDATE visits SET examining_doctor_fee=? WHERE id=?", (fee, visit_id))
+    return fee
+
+
+# ------------------------------------------------------------------------
+# مكتبة الأختام والتواقيع الرقمية (digital_stamps) + مواضعها فوق كل تقرير
+# (report_stamp_placements). راجع تعريف الجدولين بأعلى SCHEMA لشرح كامل.
+# ------------------------------------------------------------------------
+def get_digital_stamps(db, kind=None, active_only=True):
+    """كل الأختام/التواقيع المحفوظة، مع اسم الدكتور المرتبط بيها (إن وجد)
+    لعرضه بالقائمة المنسدلة. kind لو انمرر يفلتر فقط 'stamp' أو 'signature'
+    أو 'stamp_signature'؛ active_only=False تُستخدم بشاشة الإدارة نفسها حتى
+    يقدر المدير يشوف/يفعّل الأختام الموقوفة أيضًا."""
+    q = ("SELECT ds.*, edl.name as doctor_name FROM digital_stamps ds "
+         "LEFT JOIN examining_doctors_list edl ON edl.id = ds.linked_examining_doctor_id WHERE 1=1")
+    params = []
+    if active_only:
+        q += " AND ds.is_active=1"
+    if kind:
+        q += " AND ds.kind=?"
+        params.append(kind)
+    q += " ORDER BY ds.sort_order, ds.id"
+    return db.execute(q, params).fetchall()
+
+
+def get_digital_stamp(db, stamp_id):
+    return db.execute("SELECT * FROM digital_stamps WHERE id=?", (stamp_id,)).fetchone()
+
+
+def add_digital_stamp(db, label, kind, image_filename, linked_examining_doctor_id=None,
+                       default_width=140, created_by=None):
+    max_order = db.execute("SELECT COALESCE(MAX(sort_order), -1) as m FROM digital_stamps").fetchone()["m"]
+    now = datetime.now().isoformat(timespec="seconds")
+    cur = db.execute(
+        "INSERT INTO digital_stamps (label, kind, linked_examining_doctor_id, image_filename, "
+        "default_width, sort_order, is_active, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        (label, kind, linked_examining_doctor_id or None, image_filename, default_width,
+         max_order + 1, created_by, now),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def update_digital_stamp(db, stamp_id, label, kind, linked_examining_doctor_id=None, is_active=True):
+    """تعديل بيانات ختم موجود بدون تغيير صورته (تغيير الصورة نفسها يكون
+    بحذف الختم وإضافته من جديد، تفاديًا لتعقيد استبدال الملف على القرص)."""
+    db.execute(
+        "UPDATE digital_stamps SET label=?, kind=?, linked_examining_doctor_id=?, is_active=? WHERE id=?",
+        (label, kind, linked_examining_doctor_id or None, 1 if is_active else 0, stamp_id),
+    )
+    db.commit()
+
+
+def delete_digital_stamp(db, stamp_id):
+    """يحذف الختم من المكتبة وأي أماكن لصقه سابقًا فوق تقارير — لا يحذف
+    ملف الصورة نفسه من القرص (يبقى الطرف المستدعي بـapp.py مسؤول عن ذلك
+    إن أراد، عبر image_filename المرجَع من get_digital_stamp قبل الحذف)."""
+    db.execute("DELETE FROM report_stamp_placements WHERE stamp_id=?", (stamp_id,))
+    db.execute("DELETE FROM digital_stamps WHERE id=?", (stamp_id,))
+    db.commit()
+
+
+def get_stamp_placements(db, target_type, target_id):
+    """كل الأختام/التواقيع الملصوقة حاليًا فوق تقرير معيّن (زيارة أو تحليل
+    مفرد)، بمواضعها بالضبط — تُستخدم لرسمها فوق معاينة/طباعة التقرير."""
+    return db.execute(
+        "SELECT rsp.*, ds.image_filename, ds.label, ds.kind, ds.default_width "
+        "FROM report_stamp_placements rsp JOIN digital_stamps ds ON ds.id = rsp.stamp_id "
+        "WHERE rsp.target_type=? AND rsp.target_id=? ORDER BY rsp.id",
+        (target_type, target_id),
+    ).fetchall()
+
+
+def upsert_stamp_placement(db, target_type, target_id, stamp_id, pos_x, pos_y, width=None, placed_by=None):
+    """يضيف ختمًا جديدًا فوق التقرير أو يحدّث موضعه لو كان ملصوقًا أصلاً
+    (نفس stamp_id لنفس target) — بهذا السحب المتكرر لنفس الختم يحرّكه فقط
+    بدل ما يكرره. يرجّع id الصف بعد الإضافة/التحديث."""
+    now = datetime.now().isoformat(timespec="seconds")
+    db.execute(
+        "INSERT INTO report_stamp_placements (target_type, target_id, stamp_id, pos_x, pos_y, width, "
+        "placed_by, placed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(target_type, target_id, stamp_id) DO UPDATE SET "
+        "pos_x=excluded.pos_x, pos_y=excluded.pos_y, width=excluded.width, "
+        "placed_by=excluded.placed_by, placed_at=excluded.placed_at",
+        (target_type, target_id, stamp_id, pos_x, pos_y, width, placed_by, now),
+    )
+    db.commit()
+    return db.execute(
+        "SELECT id FROM report_stamp_placements WHERE target_type=? AND target_id=? AND stamp_id=?",
+        (target_type, target_id, stamp_id),
+    ).fetchone()["id"]
+
+
+def remove_stamp_placement(db, placement_id):
+    db.execute("DELETE FROM report_stamp_placements WHERE id=?", (placement_id,))
+    db.commit()
+
+
+# ============== تخصيص مظهر التقرير المطبوع (report_layout_overrides) ==============
+# راجع شرح الجدول بأعلى SCHEMA. الدمج دائمًا: تخصيص المريض المفرد
+# (scope='order_test') يتفوّق على تخصيص نوع التحليل (scope='test') حقل
+# حقل — مو استبدال كامل — حتى لو المريض بدّل بس اللون، يبقى الترتيب
+# والخط المحفوظين على مستوى التحليل كما هم.
+def _get_layout_row(db, scope, scope_id):
+    row = db.execute(
+        "SELECT layout_json FROM report_layout_overrides WHERE scope=? AND scope_id=?",
+        (scope, scope_id),
+    ).fetchone()
+    if not row:
+        return {}
+    try:
+        parsed = json.loads(row["layout_json"])
+        return parsed if isinstance(parsed, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def get_raw_layout(db, scope, scope_id):
+    """نفس _get_layout_row لكن عامة (تُستخدم مباشرة من app.py — شاشة تحرير
+    التقرير تحتاج القيم الخام غير المدموجة لكل مستوى على حدة، عكس
+    get_report_layout اللي ترجّع نسخة مدموجة جاهزة للطباعة فقط)."""
+    return _get_layout_row(db, scope, scope_id)
+
+
+def get_report_layout(db, test_definition_id, order_test_id):
+    """يرجّع (merged_layout, has_patient_override). merged_layout جاهز
+    يُمرَّر مباشرة كمتغيّر Jinja report_layout للقالب. has_patient_override
+    يتحكم بإظهار زر "إرجاع لتصميم افتراضي" (يظهر فقط لو فيه استثناء خاص
+    فعلاً بهذا المريض)."""
+    test_layout = _get_layout_row(db, "test", test_definition_id)
+    patient_layout = _get_layout_row(db, "order_test", order_test_id)
+    merged = dict(test_layout)
+    for key, value in patient_layout.items():
+        if key == "param_overrides" and isinstance(value, dict):
+            merged_po = dict(test_layout.get("param_overrides", {}))
+            for pname, pval in value.items():
+                merged_row = dict(merged_po.get(pname, {}))
+                merged_row.update(pval)
+                merged_po[pname] = merged_row
+            merged["param_overrides"] = merged_po
+        else:
+            merged[key] = value
+    return merged, bool(patient_layout)
+
+
+def save_report_layout(db, scope, scope_id, layout_dict, user_id=None):
+    layout_json = json.dumps(layout_dict, ensure_ascii=False)
+    now = datetime.now().isoformat(timespec="seconds")
+    existing = db.execute(
+        "SELECT id FROM report_layout_overrides WHERE scope=? AND scope_id=?", (scope, scope_id)
+    ).fetchone()
+    if existing:
+        db.execute(
+            "UPDATE report_layout_overrides SET layout_json=?, updated_by=?, updated_at=? WHERE id=?",
+            (layout_json, user_id, now, existing["id"]),
+        )
+    else:
+        db.execute(
+            "INSERT INTO report_layout_overrides (scope, scope_id, layout_json, updated_by, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (scope, scope_id, layout_json, user_id, now),
+        )
+    db.commit()
+
+
+def reset_report_layout(db, scope, scope_id):
+    db.execute("DELETE FROM report_layout_overrides WHERE scope=? AND scope_id=?", (scope, scope_id))
+    db.commit()
+
+
 if __name__ == "__main__":
     init_db()
     print("Database initialized at", DB_PATH)
+
+
+# ============== دمج نتائج الزيارة السابقة (visit_previous_merges) ==============
+def find_last_visit_by_name_age(db, full_name, age, exclude_patient_id=None):
+    """آخر زيارة سابقة (الأحدث) لمريض بنفس الاسم الثلاثي + العمر بالضبط —
+    تُستخدم بشاشة 'زيارة جديدة' لحظة كتابة الاسم والعمر لاكتشاف مراجعة
+    سابقة. exclude_patient_id اختياري (مو مستخدم حاليًا، محجوز لو احتجنا
+    نستثني نفس بطاقة المريض المختارة يدويًا مستقبلاً)."""
+    return db.execute(
+        "SELECT v.id as visit_id, v.created_at, p.id as patient_id, p.full_name, p.age, p.age_unit, p.gender "
+        "FROM visits v JOIN patients p ON p.id = v.patient_id "
+        "WHERE LOWER(TRIM(p.full_name)) = LOWER(TRIM(?)) AND p.age = ? "
+        "ORDER BY v.created_at DESC LIMIT 1",
+        (full_name or "", age),
+    ).fetchone()
+
+
+def get_visit_completed_tests(db, visit_id):
+    """كل تحاليل هذي الزيارة اللي عندها نتيجة مكتملة/معتمدة — تُستخدم لعرض
+    خيارات الدمج (Biochemistry/Hormones/...) أو رسالة إعلامية بس
+    (Blood Film/Retic/...) بشاشة 'زيارة جديدة'."""
+    return db.execute(
+        "SELECT ot.id as order_test_id, ot.test_definition_id, td.name as test_name, "
+        "td.code as test_code, td.department FROM order_tests ot "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "WHERE ot.order_id IN (SELECT id FROM orders WHERE visit_id=?) "
+        "AND ot.status IN ('Completed', 'Verified') ORDER BY ot.id",
+        (visit_id,),
+    ).fetchall()
+
+
+def save_visit_previous_merges(db, visit_id, source_order_test_ids):
+    """يسجّل موافقة الموظف على دمج كل تحليل قديم اختاره (من نافذة تنبيه
+    الزيارة السابقة) — يُستدعى مرة وحدة بعد إنشاء الزيارة الجديدة."""
+    now = datetime.now().isoformat(timespec="seconds")
+    for otid in source_order_test_ids:
+        try:
+            db.execute(
+                "INSERT OR IGNORE INTO visit_previous_merges "
+                "(visit_id, source_order_test_id, approved_by, approved_at) VALUES (?, ?, ?, ?)",
+                (visit_id, int(otid), None, now),
+            )
+        except (TypeError, ValueError):
+            continue
+    db.commit()
+
+
+def get_visit_previous_merges(db, visit_id):
+    """كل التحاليل القديمة الموافَق على دمجها بهذي الزيارة تحديدًا، مع
+    اسم التحليل وقسمه وتاريخ زيارتها الأصلية ونتائجها — تُستخدم من طبقة
+    التقارير (المفرد والمجمّع) لعرض صف/بطاقة 'Previous' فقط لما توجد
+    موافقة صريحة، بدون أي عرض تلقائي."""
+    rows = db.execute(
+        "SELECT vpm.source_order_test_id, ot.test_definition_id, td.name as test_name, "
+        "td.code as test_code, td.department, v.created_at as source_visit_created_at "
+        "FROM visit_previous_merges vpm "
+        "JOIN order_tests ot ON ot.id = vpm.source_order_test_id "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "JOIN orders o ON o.id = ot.order_id JOIN visits v ON v.id = o.visit_id "
+        "WHERE vpm.visit_id=?",
+        (visit_id,),
+    ).fetchall()
+    out = []
+    for row in rows:
+        results = db.execute(
+            "SELECT r.*, tp.name as param_name FROM results r "
+            "JOIN test_parameters tp ON tp.id = r.test_parameter_id WHERE r.order_test_id=?",
+            (row["source_order_test_id"],),
+        ).fetchall()
+        try:
+            dt = datetime.fromisoformat(row["source_visit_created_at"])
+            date_display = f"{dt.day}/{dt.month}/{dt.year}"
+        except (TypeError, ValueError):
+            date_display = row["source_visit_created_at"] or ""
+        out.append({
+            "source_order_test_id": row["source_order_test_id"],
+            "test_definition_id": row["test_definition_id"],
+            "test_name": row["test_name"],
+            "test_code": row["test_code"],
+            "department": row["department"],
+            "date_display": date_display,
+            "results": {r["param_name"]: (r["value_text"] if r["value_text"] not in (None, "") else r["value_numeric"]) for r in results},
+        })
+    return out
