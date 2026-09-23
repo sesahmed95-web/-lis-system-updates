@@ -11,10 +11,32 @@
     margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
     font-family: "Segoe UI", Tahoma, Arial, sans-serif;
     background: linear-gradient(135deg, {{ landing_gradient_color1 }} 0%, {{ landing_gradient_color2 }} 100%);
-    color: #f8fafc; padding: 24px;
+    color: #f8fafc; padding: 24px; position: relative; overflow-x: hidden;
   }
+  {# صورة خلفية كاملة للشاشة الرئيسية (اختيارية من الإعدادات) -- لو ما
+     انرفعت صورة (landing_bg_image فاضي)، ما ينرسم أي شيء هنا وتبقى
+     الخلفية تدرّج الألوان القديم زي ما كانت بالضبط. #}
+  {% if landing_bg_image %}
+  .landing-bg-photo {
+    position: absolute; inset: 0; z-index: 0;
+    background-image: url('{{ landing_bg_image }}');
+    background-size: cover; background-position: center; background-repeat: no-repeat;
+  }
+  .landing-bg-overlay {
+    position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(180deg,
+      rgba(8,14,26,{{ ((landing_bg_overlay_opacity|default(55)|int) / 100) * 0.85 }}) 0%,
+      rgba(8,14,26,{{ ((landing_bg_overlay_opacity|default(55)|int) / 100) }}) 100%);
+  }
+  .landing-wrap { position: relative; z-index: 2; }
+  {% endif %}
   .landing-wrap { width: 100%; max-width: 960px; text-align: center; }
   .landing-title { font-size: clamp(24px, 4vw, 36px); font-weight: 700; margin-bottom: 42px; letter-spacing: .5px; }
+  .landing-title.has-en { margin-bottom: 8px; }
+  {# عنوان فرعي انكليزي اختياري تحت العنوان العربي -- ما يظهر إطلاقًا إذا
+     الإعداد فاضي (landing_title_en). #}
+  .landing-title-en { font-size: clamp(13px, 2vw, 17px); font-weight: 400; color: rgba(248,250,252,.75);
+    letter-spacing: .4px; margin-bottom: 42px; direction: ltr; }
   .landing-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
   @media (max-width: 720px) { .landing-cards { grid-template-columns: 1fr; } }
   .landing-card {
@@ -60,9 +82,14 @@
 </style>
 </head>
 <body>
+  {% if landing_bg_image %}
+  <div class="landing-bg-photo"></div>
+  <div class="landing-bg-overlay"></div>
+  {% endif %}
   <a class="landing-designer-link" href="{{ url_for('designer_login') }}" title="⚙">⚙</a>
   <div class="landing-wrap">
-    <div class="landing-title">{{ landing_title }}</div>
+    <div class="landing-title{{ ' has-en' if landing_title_en else '' }}">{{ landing_title }}</div>
+    {% if landing_title_en %}<div class="landing-title-en">{{ landing_title_en }}</div>{% endif %}
     <div class="landing-cards">
       <div class="landing-card" onclick="enterInterface('reception', {{ reception_needs_password|default(false)|tojson }})">
         <div class="landing-card-img">

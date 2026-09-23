@@ -409,8 +409,12 @@
   <form method="POST" enctype="multipart/form-data">
     <input type="hidden" name="landing_page_form" value="1">
     <div class="form-field">
-      <label>عنوان الشاشة الرئيسية</label>
+      <label>عنوان الشاشة الرئيسية (عربي)</label>
       <input type="text" name="landing_title" value="{{ current.landing_title }}" placeholder="نظام الإدارة المتكامل">
+    </div>
+    <div class="form-field">
+      <label>عنوان فرعي بالانكليزي (اختياري -- يظهر تحت العنوان العربي)</label>
+      <input type="text" name="landing_title_en" value="{{ current.landing_title_en }}" placeholder="Integrated Management System" dir="ltr">
     </div>
     <div class="form-field">
       <label>🎨 لون التدرّج الأول (الخلفية)</label>
@@ -419,6 +423,29 @@
     <div class="form-field">
       <label>🎨 لون التدرّج الثاني (الخلفية)</label>
       <input type="color" name="landing_gradient_color2" value="{{ current.landing_gradient_color2 }}" style="width:70px; height:38px; padding:2px;">
+    </div>
+    <hr style="margin:14px 0;">
+    <div class="form-field">
+      <label>🖼️ صورة خلفية كاملة للشاشة الرئيسية (اختياري)</label>
+      <p class="muted" style="margin:2px 0 8px;">
+        لو رفعت صورة هنا، تظهر خلف العنوان والبطاقات الثلاث بدل التدرّج
+        اللوني وحده (التدرّج فوق يبقى محفوظ ويُستخدم تلقائيًا إذا حذفت
+        الصورة). طبقة تعتيم خفيفة تنحط فوق الصورة حتى يضل العنوان والبطاقات
+        واضحة -- تتحكم بمقدارها من حقل "وضوح التعتيم" تحت.
+      </p>
+      {% if current.landing_bg_image_path %}
+        <img src="{{ url_for('static', filename=current.landing_bg_image_path) }}" alt="landing background preview"
+             style="max-height:90px; max-width:220px; object-fit:cover; border:1px solid var(--border); border-radius:8px; padding:4px; display:block; margin-bottom:8px;">
+        <label class="checkbox-item">
+          <input type="checkbox" name="remove_landing_bg_image" value="1">
+          إزالة صورة الخلفية والرجوع للتدرّج اللوني فقط
+        </label>
+      {% endif %}
+      <input type="file" name="landing_bg_image" accept=".png,.jpg,.jpeg,.webp">
+    </div>
+    <div class="form-field">
+      <label>تعتيم الخلفية فوق الصورة (0-100) -- الافتراضي 55</label>
+      <input type="number" name="landing_bg_overlay_opacity" min="0" max="100" value="{{ current.landing_bg_overlay_opacity }}" style="width:100px;">
     </div>
     <hr style="margin:14px 0;">
     <div class="form-field">

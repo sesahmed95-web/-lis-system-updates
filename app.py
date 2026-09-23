@@ -865,7 +865,7 @@ def _check_completed_result_gate(db, form):
     return True, None
 
 
-
+def get_visit_hct(db, visit_id):
     """يجيب آخر قيمة HCT مُدخلة ضمن تحليل CBC لنفس الزيارة (إن وجدت)، تُستخدم
     لحساب Corrected Retic count تلقائيًا من Reticulocyte count. يرجع None إذا
     ما كان فيه CBC بعد أو ما دخلت قيمة HCT."""
@@ -1239,6 +1239,9 @@ def landing():
     db = get_db()
     ctx = {
         "landing_title": get_setting(db, "landing_title", "نظام الإدارة المتكامل"),
+        # عنوان فرعي انكليزي اختياري تحت العنوان العربي -- فاضي افتراضيًا
+        # فيبقى شكل الشاشة تمامًا زي ما كان قبل هذي الإضافة.
+        "landing_title_en": get_setting(db, "landing_title_en", ""),
         "landing_gradient_color1": get_setting(db, "landing_gradient_color1", "#0f172a"),
         "landing_gradient_color2": get_setting(db, "landing_gradient_color2", "#205072"),
         "reception_needs_password": bool(get_setting(db, "interface_reception_password_hash", "")),
@@ -1246,10 +1249,16 @@ def landing():
         "landing_image_shape": get_setting(db, "landing_image_shape", "square"),
         "landing_image_position": get_setting(db, "landing_image_position", "top"),
         "landing_image_opacity": get_setting(db, "landing_image_opacity", "100"),
+        "landing_bg_overlay_opacity": get_setting(db, "landing_bg_overlay_opacity", "55"),
     }
     for key in ("reception", "lab", "together"):
         img_path = get_setting(db, f"landing_{key}_image_path", "")
         ctx[f"landing_{key}_image"] = url_for("static", filename=img_path) if img_path else None
+    # صورة خلفية كاملة للشاشة الرئيسية (اختيارية) -- لو ما انرفعت، تبقى
+    # الخلفية تدرّج الألوان القديم بالضبط زي ما كانت (landing.html يتحقق
+    # من None ويتجاهل كل كود الصورة إذا ما فيه صورة مرفوعة).
+    bg_img_path = get_setting(db, "landing_bg_image_path", "")
+    ctx["landing_bg_image"] = url_for("static", filename=bg_img_path) if bg_img_path else None
     return render_template("landing.html", **ctx)
 
 
@@ -7759,6 +7768,11 @@ def app_settings():
             landing_title_raw = request.form.get("landing_title", "").strip()
             if landing_title_raw:
                 set_setting(db, "landing_title", landing_title_raw)
+            # عنوان فرعي بالانكليزي يظهر تحت العنوان العربي فوق خلفية الشاشة
+            # الرئيسية -- اختياري، حقل فاضي = ما يظهر أي سطر انكليزي (نفس
+            # سلوك landing_title القديم يبقى شغال بدون أي تغيير).
+            landing_title_en_raw = request.form.get("landing_title_en", "")
+            set_setting(db, "landing_title_en", landing_title_en_raw.strip())
             for gkey in ("landing_gradient_color1", "landing_gradient_color2"):
                 gval = request.form.get(gkey, "").strip()
                 if gval and _HEX_COLOR_RE.match(gval):
@@ -7780,7 +7794,18 @@ def app_settings():
                     set_setting(db, "landing_image_opacity", str(opacity_val))
                 except ValueError:
                     pass
-            for img_key in ("reception", "lab", "together"):
+            # وضوح طبقة التعتيم فوق صورة خلفية الشاشة الرئيسية (0-100) --
+            # نفس فكرة dashboard_bg_overlay_opacity الموجودة أصلاً لشاشة
+            # الداشبورد، لكن بإعداد منفصل خاص بهذي الشاشة فقط. الافتراضي 55
+            # يخلي الصورة واضحة والنص/البطاقات مقروءة فوقها.
+            bg_opacity_raw = request.form.get("landing_bg_overlay_opacity", "").strip()
+            if bg_opacity_raw:
+                try:
+                    bg_opacity_val = max(0, min(100, int(bg_opacity_raw)))
+                    set_setting(db, "landing_bg_overlay_opacity", str(bg_opacity_val))
+                except ValueError:
+                    pass
+            for img_key in ("reception", "lab", "together", "bg"):
                 setting_key = f"landing_{img_key}_image_path"
                 if request.form.get(f"remove_landing_{img_key}_image") == "1":
                     old_path = get_setting(db, setting_key, "")
@@ -7802,7 +7827,8 @@ def app_settings():
                         img_file.save(os.path.join(UPLOAD_DIR, img_filename))
                         set_setting(db, setting_key, f"uploads/{img_filename}")
                     else:
-                        flash(f"صيغة صورة غير مدعومة لبطاقة {img_key}. استخدم PNG أو JPG أو WEBP.")
+                        img_label = "خلفية الشاشة الرئيسية" if img_key == "bg" else f"بطاقة {img_key}"
+                        flash(f"صيغة صورة غير مدعومة لـ{img_label}. استخدم PNG أو JPG أو WEBP.")
             db.commit()
             log_action("UpdateLandingPage", "settings", 0)
             flash("تم حفظ إعدادات الشاشة الرئيسية.")
@@ -7824,11 +7850,14 @@ def app_settings():
         "theme_primary_color": get_setting(db, "theme_primary_color", "#205072"),
         "theme_page_bg_color": get_setting(db, "theme_page_bg_color", "#F3F6F8"),
         "landing_title": get_setting(db, "landing_title", "نظام الإدارة المتكامل"),
+        "landing_title_en": get_setting(db, "landing_title_en", ""),
         "landing_gradient_color1": get_setting(db, "landing_gradient_color1", "#0f172a"),
         "landing_gradient_color2": get_setting(db, "landing_gradient_color2", "#205072"),
         "landing_reception_image_path": get_setting(db, "landing_reception_image_path", ""),
         "landing_lab_image_path": get_setting(db, "landing_lab_image_path", ""),
         "landing_together_image_path": get_setting(db, "landing_together_image_path", ""),
+        "landing_bg_image_path": get_setting(db, "landing_bg_image_path", ""),
+        "landing_bg_overlay_opacity": get_setting(db, "landing_bg_overlay_opacity", "55"),
         "landing_image_shape": get_setting(db, "landing_image_shape", "square"),
         "landing_image_position": get_setting(db, "landing_image_position", "top"),
         "landing_image_opacity": get_setting(db, "landing_image_opacity", "100"),
