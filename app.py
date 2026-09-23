@@ -1259,6 +1259,12 @@ def landing():
     # من None ويتجاهل كل كود الصورة إذا ما فيه صورة مرفوعة).
     bg_img_path = get_setting(db, "landing_bg_image_path", "")
     ctx["landing_bg_image"] = url_for("static", filename=bg_img_path) if bg_img_path else None
+    ctx["landing_bg_position"] = get_setting(db, "landing_bg_position", "background")
+    ctx["landing_bg_shape"] = get_setting(db, "landing_bg_shape", "rectangle")
+    ctx["landing_bg_banner_size"] = get_setting(db, "landing_bg_banner_size", "160")
+    logo_img_path = get_setting(db, "landing_bglogo_image_path", "")
+    ctx["landing_bg_logo_image"] = url_for("static", filename=logo_img_path) if logo_img_path else None
+    ctx["landing_bg_logo_size"] = get_setting(db, "landing_bg_logo_size", "90")
     return render_template("landing.html", **ctx)
 
 
@@ -7805,7 +7811,33 @@ def app_settings():
                     set_setting(db, "landing_bg_overlay_opacity", str(bg_opacity_val))
                 except ValueError:
                     pass
-            for img_key in ("reception", "lab", "together", "bg"):
+            # موضع صورة الخلفية: خلف البطاقات الثلاث كخلفية كاملة للشاشة
+            # (الافتراضي -- نفس السلوك القديم)، أو فوق البطاقات كـ"بانر"
+            # بحجم وشكل محدَّدين بدل تغطية الشاشة كلها.
+            bg_position_raw = request.form.get("landing_bg_position", "").strip()
+            if bg_position_raw in ("background", "banner"):
+                set_setting(db, "landing_bg_position", bg_position_raw)
+            bg_shape_raw = request.form.get("landing_bg_shape", "").strip()
+            if bg_shape_raw in ("rectangle", "square", "circle"):
+                set_setting(db, "landing_bg_shape", bg_shape_raw)
+            banner_size_raw = request.form.get("landing_bg_banner_size", "").strip()
+            if banner_size_raw:
+                try:
+                    banner_size_val = max(60, min(400, int(banner_size_raw)))
+                    set_setting(db, "landing_bg_banner_size", str(banner_size_val))
+                except ValueError:
+                    pass
+            # حجم شعار المختبر (لو انرفع) -- شعار المختبر مستقل تمامًا عن
+            # صورة الخلفية/البانر ونص العنوان: يظهر فوق العنوان بغض النظر
+            # عن باقي الإعدادات، ويُطبَّق/يُزال بشكل منفصل عن الصورة والنص.
+            logo_size_raw = request.form.get("landing_bg_logo_size", "").strip()
+            if logo_size_raw:
+                try:
+                    logo_size_val = max(30, min(300, int(logo_size_raw)))
+                    set_setting(db, "landing_bg_logo_size", str(logo_size_val))
+                except ValueError:
+                    pass
+            for img_key in ("reception", "lab", "together", "bg", "bglogo"):
                 setting_key = f"landing_{img_key}_image_path"
                 if request.form.get(f"remove_landing_{img_key}_image") == "1":
                     old_path = get_setting(db, setting_key, "")
@@ -7827,7 +7859,12 @@ def app_settings():
                         img_file.save(os.path.join(UPLOAD_DIR, img_filename))
                         set_setting(db, setting_key, f"uploads/{img_filename}")
                     else:
-                        img_label = "خلفية الشاشة الرئيسية" if img_key == "bg" else f"بطاقة {img_key}"
+                        if img_key == "bg":
+                            img_label = "خلفية الشاشة الرئيسية"
+                        elif img_key == "bglogo":
+                            img_label = "شعار المختبر"
+                        else:
+                            img_label = f"بطاقة {img_key}"
                         flash(f"صيغة صورة غير مدعومة لـ{img_label}. استخدم PNG أو JPG أو WEBP.")
             db.commit()
             log_action("UpdateLandingPage", "settings", 0)
@@ -7858,6 +7895,11 @@ def app_settings():
         "landing_together_image_path": get_setting(db, "landing_together_image_path", ""),
         "landing_bg_image_path": get_setting(db, "landing_bg_image_path", ""),
         "landing_bg_overlay_opacity": get_setting(db, "landing_bg_overlay_opacity", "55"),
+        "landing_bg_position": get_setting(db, "landing_bg_position", "background"),
+        "landing_bg_shape": get_setting(db, "landing_bg_shape", "rectangle"),
+        "landing_bg_banner_size": get_setting(db, "landing_bg_banner_size", "160"),
+        "landing_bglogo_image_path": get_setting(db, "landing_bglogo_image_path", ""),
+        "landing_bg_logo_size": get_setting(db, "landing_bg_logo_size", "90"),
         "landing_image_shape": get_setting(db, "landing_image_shape", "square"),
         "landing_image_position": get_setting(db, "landing_image_position", "top"),
         "landing_image_opacity": get_setting(db, "landing_image_opacity", "100"),

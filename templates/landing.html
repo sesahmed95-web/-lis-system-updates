@@ -13,10 +13,12 @@
     background: linear-gradient(135deg, {{ landing_gradient_color1 }} 0%, {{ landing_gradient_color2 }} 100%);
     color: #f8fafc; padding: 24px; position: relative; overflow-x: hidden;
   }
-  {# صورة خلفية كاملة للشاشة الرئيسية (اختيارية من الإعدادات) -- لو ما
+  {# صورة خلفية/بانر الشاشة الرئيسية (اختيارية من الإعدادات) -- لو ما
      انرفعت صورة (landing_bg_image فاضي)، ما ينرسم أي شيء هنا وتبقى
-     الخلفية تدرّج الألوان القديم زي ما كانت بالضبط. #}
-  {% if landing_bg_image %}
+     الخلفية تدرّج الألوان القديم زي ما كانت بالضبط. فيها وضعين:
+     "background" (تغطي كامل الشاشة خلف كل شيء -- الافتراضي)، أو
+     "banner" (صورة بحجم محدد فوق البطاقات، مو خلفية كاملة). #}
+  {% if landing_bg_image and landing_bg_position != 'banner' %}
   .landing-bg-photo {
     position: absolute; inset: 0; z-index: 0;
     background-image: url('{{ landing_bg_image }}');
@@ -29,6 +31,30 @@
       rgba(8,14,26,{{ ((landing_bg_overlay_opacity|default(55)|int) / 100) }}) 100%);
   }
   .landing-wrap { position: relative; z-index: 2; }
+  {% endif %}
+  {# وضع "بانر": صورة بحجم وشكل محدَّدين تترسم فوق البطاقات (مو خلفية
+     كاملة للشاشة) -- الخلفية تبقى تدرّج الألوان العادي بهذا الوضع. #}
+  {% if landing_bg_image and landing_bg_position == 'banner' %}
+  .landing-banner-img {
+    display: block; margin: 0 auto 28px; object-fit: cover;
+    height: {{ landing_bg_banner_size|default(160)|int }}px;
+    {% if landing_bg_shape == 'circle' %}
+    width: {{ landing_bg_banner_size|default(160)|int }}px; border-radius: 50%;
+    {% elif landing_bg_shape == 'square' %}
+    width: {{ landing_bg_banner_size|default(160)|int }}px; border-radius: 14px;
+    {% else %}
+    width: auto; max-width: 90%; border-radius: 14px;
+    {% endif %}
+    box-shadow: 0 6px 24px rgba(0,0,0,.35);
+  }
+  {% endif %}
+  {# شعار المختبر (اختياري ومستقل تمامًا عن صورة الخلفية/البانر والعنوان)
+     -- يظهر فوق العنوان لو انرفع، بغض النظر عن باقي إعدادات هذي الشاشة. #}
+  {% if landing_bg_logo_image %}
+  .landing-logo-img {
+    display: block; margin: 0 auto 18px; object-fit: contain;
+    max-height: {{ landing_bg_logo_size|default(90)|int }}px; max-width: 260px;
+  }
   {% endif %}
   .landing-wrap { width: 100%; max-width: 960px; text-align: center; }
   .landing-title { font-size: clamp(24px, 4vw, 36px); font-weight: 700; margin-bottom: 42px; letter-spacing: .5px; }
@@ -82,12 +108,18 @@
 </style>
 </head>
 <body>
-  {% if landing_bg_image %}
+  {% if landing_bg_image and landing_bg_position != 'banner' %}
   <div class="landing-bg-photo"></div>
   <div class="landing-bg-overlay"></div>
   {% endif %}
   <a class="landing-designer-link" href="{{ url_for('designer_login') }}" title="⚙">⚙</a>
   <div class="landing-wrap">
+    {% if landing_bg_image and landing_bg_position == 'banner' %}
+    <img class="landing-banner-img" src="{{ landing_bg_image }}" alt="">
+    {% endif %}
+    {% if landing_bg_logo_image %}
+    <img class="landing-logo-img" src="{{ landing_bg_logo_image }}" alt="شعار المختبر">
+    {% endif %}
     <div class="landing-title{{ ' has-en' if landing_title_en else '' }}">{{ landing_title }}</div>
     {% if landing_title_en %}<div class="landing-title-en">{{ landing_title_en }}</div>{% endif %}
     <div class="landing-cards">
