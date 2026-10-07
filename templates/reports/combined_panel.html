@@ -1,172 +1,32 @@
 {% extends "reports/base_report.html" %}
+{% from "reports/partials/result_styles.html" import styles, render_results, note_script with context %}
 {% block report_body %}
+{# الجدول صار يُرسم عبر القالب المشترك result_styles.html (نفس شكل معاينة المصمم بالضبط) #}
+{{ styles(layout_view) }}
 <style>
-  /* عنوان كل قسم (BIOCHEMISTRY TESTS / HORMONES TESTS / VITAMINS TESTS /
-     VIROLOGY SCREENING...) — غامق، وسط الصفحة، بحروف كبيرة (text-transform
-     يكبّرها تلقائياً حتى لو الأدمن كتبها بحروف عادية بكتالوج التحاليل)،
-     مع خط فاصل تحته وتحت الجدول كامل يفصل كل قسم عن اللي بعده بوضوح. */
   .panel-dept-heading {
-    font-weight: bold;
-    font-size: 1.05em;
-    color: #26529C;
-    text-align: center;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin: 16px 0 6px 0;
+    font-weight: bold; font-size: 1.05em; color: #26529C; text-align: center;
+    text-transform: uppercase; letter-spacing: 0.5px; margin: 16px 0 6px 0;
   }
   .panel-dept-heading:first-child { margin-top: 0; }
-  .panel-table { border-bottom: 1px dashed #94A3B8; padding-bottom: 6px; margin-bottom: 4px; }
-  .panel-table th {
-    border-bottom: 1.5px solid #26529C; padding-bottom: 4px; font-size: 0.92em;
-  }
-  .panel-table col.col-name { width: 34%; }
-  .panel-table col.col-result,
-  .panel-table col.col-unit { width: 20%; }
-  .panel-table col.col-range { width: 26%; }
-  .panel-secondary-line { font-size: 0.72em; color: #64748B; display: block; margin-top: 1px; }
-  /* صف "Previous" — نتيجة تحليل قديم انوافَق صراحة على دمجها بهذا التقرير
-     (راجع visit_previous_merges بـapp.py)، يظهر بلون خلفية خفيف مميّز
-     تحت صف النتيجة الحالية مباشرة (أو لحاله لو ما فيه نتيجة حالية مطابقة
-     بهذي الزيارة) — حتى يبين واضح إنه بيانات من زيارة سابقة، مو نتيجة
-     هذي الزيارة. */
-  .panel-previous-row td {
-    background: #EFF6FF; color: #1D4ED8; font-size: 0.78em; text-align: left;
-    padding-top: 3px; padding-bottom: 3px; border-top: none;
-  }
-  .panel-previous-icon { font-weight: bold; }
-  /* مستويات المدى الطبيعي متعددة الأسطر (المطلوب 4ب) — نفس تنسيق custom.html. */
-  .panel-range-label { font-weight: 600; color: #475569; margin: 4px 0 1px 0; text-align: left; font-size: 0.85em; }
-  .panel-range-row { display: flex; justify-content: space-between; gap: 8px; text-align: left; font-size: 0.85em; }
-  .panel-range-row .panel-range-title { font-weight: 600; color: #475569; margin-inline-start: 0; }
-  .flag-badge { font-size: 0.7em; font-weight: bold; margin-inline-start: 5px; }
-
-  /* ============== تصميم الجدول الجديد (Conventional/SI Units) ==============
-     نفس تصميم reports/custom_v2.html بالضبط، بس بأسماء حقول group.rows
-     الخاصة باللوحة المجمّعة (value2/range2_display/previous_display بدل
-     result2/normal_range2/previous بـcustom_rows) — يُفعَّل تلقائيًا فقط
-     لأقسام الكيمياء/الهرمونات/الفيتامينات/الفايروسات/الدلائل الورمية
-     (uses_order_style_report على اسم القسم)، وباقي الأقسام (CBC، التخثر
-     لو انضافت يومًا...) تبقى بالجدول الكلاسيكي القديم بدون أي تغيير. #}
-  .ov2-table-head {
-    display: grid; grid-template-columns: 1fr 130px 130px; gap: 8px;
-    border-bottom: 1.5px solid #26529C; padding-bottom: 4px; margin-bottom: 4px;
-    font-weight: 700; font-size: 0.92em; text-align: start;
-  }
-  .ov2-table-head .ov2-col-si { text-align: center; }
-  .ov2-block { border-bottom: 1px dashed #CBD5E1; padding: 8px 0; }
-  .ov2-block:last-child { border-bottom: none; }
-  .ov2-name-row { display: grid; grid-template-columns: 1fr 130px 130px; gap: 8px; align-items: baseline; }
-  .ov2-name { font-weight: 700; }
-  .ov2-conv, .ov2-si { text-align: center; white-space: nowrap; }
-  .ov2-conv .ov2-result, .ov2-si .ov2-result { font-weight: 700; }
-  .ov2-conv .ov2-unit, .ov2-si .ov2-unit { color: #475569; font-size: 0.85em; margin-inline-start: 4px; }
-  .ov2-normal { margin-top: 3px; margin-inline-start: 4px; font-size: 0.88em; color: #334155; }
-  .ov2-normal-label { font-weight: 700; color: #475569; }
-  .ov2-tier { display: flex; gap: 10px; padding: 1px 0 1px 14px; }
-  .ov2-tier .ov2-tier-label { min-width: 140px; }
-  .ov2-prev { margin-top: 4px; margin-inline-start: 4px; font-size: 0.82em; color: #1D4ED8; background: #EFF6FF; padding: 3px 8px; border-radius: 4px; display: inline-block; }
 </style>
-
+{% if merged_title %}<div class="report-heading" style="text-align:center;">{{ merged_title }}</div>{% endif %}
+{% if show_dept_headings %}
 {% for group in panel_groups %}
-<div class="panel-dept-heading">{{ group.department }}</div>
-
-{% if uses_order_style_report(group.department) %}
-<div class="ov2-table-head">
-  <div>{{ group.name_header }}</div>
-  <div class="ov2-col-si">Conventional Units</div>
-  <div class="ov2-col-si">SI Units</div>
-</div>
-{% for row in group.rows %}
-{% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and not row.color) else none %}
-{% if row.result is not none %}
-<div class="ov2-block"{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
-  <div class="ov2-name-row">
-    <div class="ov2-name" style="{% if row.color %}color:{{ row.color }};{% endif %}">{{ row.name }}</div>
-    <div class="ov2-conv">
-      <span class="ov2-result" style="{% if row.color %}color:{{ row.color }};{% elif auto_color %}color:{{ auto_color }};{% endif %}">{{ row.result }}</span>
-      {% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="flag-badge" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}
-      {% if row.unit %}<span class="ov2-unit">{{ row.unit }}</span>{% endif %}
-    </div>
-    <div class="ov2-si">
-      {% if row.value2 is not none %}<span class="ov2-result">{{ row.value2 }}</span>{% endif %}
-      {% if row.unit2 %}<span class="ov2-unit">{{ row.unit2 }}</span>{% endif %}
-    </div>
-  </div>
-  <div class="ov2-normal">
-    {% if row.range_tiers %}
-      {% if row.range_tiers|length == 1 and not row.range_tiers[0].label %}
-      <span class="ov2-normal-label">Normal Range</span> <span>{{ row.range_tiers[0].value }}</span>
-      {% else %}
-      <div class="ov2-normal-label">Normal Range</div>
-      {% for tier in row.range_tiers %}
-      <div class="ov2-tier">{% if tier.label %}<span class="ov2-tier-label">{{ tier.label }}</span>{% endif %}<span>{{ tier.value }}</span></div>
-      {% endfor %}
-      {% endif %}
-    {% else %}
-      <span class="ov2-normal-label">Normal Range</span> <span>{{ row.range_display }}</span>
-    {% endif %}
-    {% if row.range2_display %}<div>{{ row.range2_display }}</div>{% endif %}
-  </div>
-  {% if row.previous_display %}
-  <div class="ov2-prev">↩ Previous — {{ row.previous_display }}</div>
-  {% endif %}
-</div>
-{% endif %}
-{% endfor %}
-
+{% if layout_view.style in ('a1', 'a2') %}
+{{ render_results(group.rows, layout_view, group_title=group.department) }}
 {% else %}
-<table class="data-table panel-table" style="text-align:center; direction:ltr; page-break-inside: avoid;{% if row_spacing_px %} --row-pad-override:{{ row_spacing_px }}px;{% endif %}">
-  <colgroup>
-    <col class="col-name"><col class="col-result"><col class="col-unit"><col class="col-range">
-  </colgroup>
-  <tr>
-    <th style="text-align:left;">{{ group.name_header }}</th>
-    <th>Result</th>
-    <th>Unit</th>
-    <th>{{ group.range_header }}</th>
-  </tr>
-  {% for row in group.rows %}
-  {% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and not row.color) else none %}
-  {% if row.result is not none %}
-  <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
-    <td style="text-align:left; font-weight:bold; font-size:{{ test_name_font_size|default(16) }}px;{% if row.color %} color: {{ row.color }};{% endif %}">{{ row.name }}</td>
-    <td{% if row.color or row.value_align %} style="{% if row.color %}color: {{ row.color }};{% endif %}{% if row.value_align %}text-align:{{ row.value_align }};{% endif %}"{% endif %}>
-      <span style="font-weight:bold;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ row.result }}</span>
-      {% if show_result_flag and row.flag and row.flag != 'Normal' %}<span class="flag-badge" style="{% if auto_color %}color:{{ auto_color }};{% endif %}">{{ row.flag }}</span>{% endif %}
-      {% if row.value2 is not none %}<span class="panel-secondary-line">{{ row.value2 }}</span>{% endif %}
-    </td>
-    <td{% if row.color %} style="color: {{ row.color }};"{% endif %}>
-      {{ row.unit }}
-      {% if row.unit2 %}<span class="panel-secondary-line">{{ row.unit2 }}</span>{% endif %}
-    </td>
-    <td>
-      {% if row.range_tiers %}
-        {% if row.range_tiers|length == 1 and not row.range_tiers[0].label %}
-        {{ row.range_tiers[0].value }}
-        {% else %}
-        <div class="panel-range-label">Normal Range :</div>
-        {% for tier in row.range_tiers %}
-        <div class="panel-range-row"><span class="panel-range-title">{{ tier.label }}</span><span>{{ tier.value }}</span></div>
-        {% endfor %}
-        {% endif %}
-      {% else %}
-        {{ row.range_display }}
-      {% endif %}
-      {% if row.range2_display %}<span class="panel-secondary-line">{{ row.range2_display }}</span>{% endif %}
-    </td>
-  </tr>
-  {% endif %}
-  {% if row.previous_display %}
-  <tr class="panel-previous-row"{% if row.page_break_before and row.result is none %} style="page-break-before: always; break-before: page;"{% endif %}>
-    <td colspan="4">
-      <span class="panel-previous-icon">↩</span> Previous — {{ row.previous_display }}
-    </td>
-  </tr>
-  {% endif %}
-  {% endfor %}
-</table>
+<div class="panel-dept-heading">{{ group.department }}</div>
+{{ render_results(group.rows, layout_view) }}
 {% endif %}
 {% else %}
 <p class="muted" style="text-align:center;">لا توجد نتائج مكتملة بعد لأي تحليل ضمن هذي اللوحة.</p>
 {% endfor %}
+{% elif all_rows %}
+{# تقرير شامل بدون عناوين أقسام: كل التحاليل بجدول واحد #}
+{{ render_results(all_rows, layout_view) }}
+{% else %}
+<p class="muted" style="text-align:center;">لا توجد نتائج مكتملة بعد لأي تحليل ضمن هذي اللوحة.</p>
+{% endif %}
+{{ note_script() }}
 {% endblock %}

@@ -23,5 +23,6 @@ __pycache__/
 # نسخ احتياطية يسويها البرنامج نفسه
 *.bak
 backups/
-
 local_config.py
+.env
+portal_public.db
