@@ -7,6 +7,7 @@ from io import BytesIO
 import os
 import json
 import re
+from html import escape as _html_escape
 import subprocess
 import webbrowser
 import shutil
@@ -1426,6 +1427,14 @@ def doctor_pricing_context(db):
 
 
 # --------------------------------------------------------------- auth ------
+def _scan_like(q):
+    """باركود أنبوب مطبوع بصيغة <رقم التسجيل>T<رقم> (مثل 19004T1): أي أنبوب يُمسح يفتح كل زيارة المريض، لذلك
+    نحوّله إلى رقم التسجيل نفسه (مطابقة تامة بدون %). أي نص آخر يبقى بحث جزئي عادي."""
+    m = re.fullmatch(r"(\d+)[Tt]\d+", (q or "").strip())
+    return m.group(1) if m else f"%{q}%"
+
+
+
 @app.route("/set-lang/<lang>")
 def set_lang(lang):
     if lang in ("en", "ar"):
@@ -2643,7 +2652,7 @@ def api_results_quick_search():
         "JOIN patients p ON p.id = v.patient_id "
         "WHERE p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR ot.barcode LIKE ? "
         "ORDER BY ot.id DESC LIMIT 20",
-        (f"%{q}%", f"%{q}%", f"%{q}%"),
+        (f"%{q}%", _scan_like(q), f"%{q}%"),
     ).fetchall()
     use_front_desk = session.get("interface") in (None, "reception", "both")
     items = []
@@ -2932,7 +2941,7 @@ def results_list():
         )
         filter_label = "زيارات فيها تنبيهات حرجة غير مُصادَق عليها"
     query += "GROUP BY v.id ORDER BY v.id DESC LIMIT 200"
-    q_params = [f"%{q}%", f"%{q}%", f"%{q}%"] if q else []
+    q_params = [f"%{q}%", _scan_like(q), f"%{q}%"] if q else []
     rows = db.execute(query, q_params).fetchall()
     return render_template("front_desk/results.html", rows=rows, filter_type=filter_type,
                             filter_label=filter_label, q=q)
@@ -2963,7 +2972,7 @@ def global_result_search():
             "JOIN patients p ON p.id = v.patient_id "
             "WHERE p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR ot.barcode LIKE ? "
             "ORDER BY ot.id DESC LIMIT 100",
-            (f"%{q}%", f"%{q}%", f"%{q}%"),
+            (f"%{q}%", _scan_like(q), f"%{q}%"),
         ).fetchall()
     return render_template("search_results.html", q=q, rows=rows)
 
@@ -3347,7 +3356,7 @@ def visits_list():
         params.append(referral_center_id)
     elif q:
         conditions.append("(p.full_name LIKE ? OR p.phone LIKE ? OR v.registration_number LIKE ?)")
-        params += [f"%{q}%", f"%{q}%", f"%{q}%"]
+        params += [f"%{q}%", f"%{q}%", _scan_like(q)]   # (الاسم، الهاتف، رقم التسجيل)
     elif not show_all:
         # الصفحة تعرض زيارات اليوم الحالي فقط افتراضيًا — تُصفَّر تلقائيًا كل
         # يوم جديد. السجل الكامل لكل الأيام السابقة يبقى متوفرًا دائمًا عبر
@@ -3733,11 +3742,12 @@ def _visit_barcode_context(db, visit_id):
         (visit_id,),
     ).fetchone()
     if not visit:
-        return None, None
+        return None, None, None
     tests = db.execute(
-        "SELECT td.name, td.name_ar, td.code FROM order_tests ot "
+        "SELECT td.name, td.name_ar, td.code, td.short_name FROM order_tests ot "
         "JOIN test_definitions td ON td.id = ot.test_definition_id "
-        "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
+        "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=? "
+        "AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected') ORDER BY ot.id",
         (visit_id,),
     ).fetchall()
     # ساعة السحب: أوّل collected_at مسجّل بين تحاليل الزيارة، وإن ما كانت
@@ -3793,11 +3803,29 @@ def visit_barcode_qr(visit_id):
 @app.route("/front-desk/visits/<int:visit_id>/print/barcode")
 @login_required
 def print_visit_barcode(visit_id):
+    """ملصق باركود الزيارة (لأي قنينة): اسم المريض + كل أسماء التحاليل + باركود واحد
+    إذا انمسح بأي قارئ يرجّع رقم الزيارة وأكواد كل تحاليلها. عدد النسخ وحجم
+    الملصق وطريقة عرض الأسماء تُحفظ بالإعدادات وتتغير من شريط أعلى الصفحة."""
     db = get_db()
     visit, tests, draw_time = _visit_barcode_context(db, visit_id)
     if not visit:
         return "Not found", 404
-    return render_template("front_desk/print_visit_barcode.html", visit=visit, tests=tests, draw_time=draw_time)
+
+    def _int(key, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(get_setting(db, key, str(default)))))
+        except (TypeError, ValueError):
+            return default
+    lab_name_ar = get_setting(db, "app_name_ar", "") or get_setting(db, "app_name", "")
+    mode = get_setting(db, "vb_names_mode", "full")
+    if mode not in ("full", "short", "none"):
+        mode = "full"
+    return render_template(
+        "front_desk/print_visit_barcode.html", visit=visit, tests=tests, draw_time=draw_time,
+        lab_name_ar=lab_name_ar,
+        vb_copies=_int("vb_copies", 1, 1, 50), vb_w=_int("vb_w", 50, 20, 200),
+        vb_h=_int("vb_h", 30, 15, 200), vb_names_mode=mode,
+    )
 
 
 @app.route("/api/barcode/<code>")
@@ -3809,6 +3837,10 @@ def api_barcode_lookup(code):
     لأي جهاز/برنامج وسيط خارجي (Middleware) يقرأ الباركود من الأنبوب ويريد
     يعرف شنو التحاليل المطلوبة ولمين، بدون الحاجة يفتح الواجهة."""
     db = get_db()
+    # باركود الزيارة (ملصق print/barcode) يحمل "رقم التسجيل|أكواد" — نطابق رقم التسجيل.
+    _reg = code.split("|", 1)[0].strip()
+    _visit_mode = _reg.isdigit() and db.execute(
+        "SELECT 1 FROM order_tests WHERE tube_barcode=? OR barcode=? LIMIT 1", (code, code)).fetchone() is None
     rows = db.execute(
         "SELECT ot.id as order_test_id, ot.status, ot.barcode, ot.tube_barcode, "
         "td.name as test_name, td.sample_type, td.department, "
@@ -3817,12 +3849,26 @@ def api_barcode_lookup(code):
         "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id "
         "JOIN orders o ON o.id = ot.order_id JOIN visits v ON v.id = o.visit_id "
         "JOIN patients p ON p.id = v.patient_id "
-        "WHERE ot.tube_barcode=? OR ot.barcode=?",
-        (code, code),
+        + ("WHERE v.registration_number=?" if _visit_mode else "WHERE ot.tube_barcode=? OR ot.barcode=?"),
+        (_reg,) if _visit_mode else (code, code),
     ).fetchall()
     if not rows:
         return jsonify({"ok": False, "error": "لا يوجد باركود مطابق"}), 404
     first = rows[0]
+    # أي أنبوب يُمسح يرجّع كل تحاليل الزيارة (مو بس تحاليل هذا الأنبوب): نجيب الزيارة من الباركود الممسوح
+    # ثم كل تحاليلها، ونعلّم اللي تخص الأنبوب الممسوح بـ in_this_tube.
+    tube_ids = {r["order_test_id"] for r in rows}
+    all_rows = db.execute(
+        "SELECT ot.id as order_test_id, ot.status, td.name as test_name, td.sample_type, td.department "
+        "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=? ORDER BY ot.id",
+        (first["visit_id"],),
+    ).fetchall()
+    tests = [
+        {"order_test_id": r["order_test_id"], "name": r["test_name"], "sample_type": r["sample_type"],
+         "department": r["department"], "status": r["status"], "in_this_tube": r["order_test_id"] in tube_ids}
+        for r in all_rows
+    ]
     return jsonify({
         "ok": True,
         "barcode": code,
@@ -3831,11 +3877,8 @@ def api_barcode_lookup(code):
             "age": first["age"], "age_unit": first["age_unit"], "gender": first["gender"],
         },
         "visit": {"id": first["visit_id"], "registration_number": first["registration_number"]},
-        "tests": [
-            {"order_test_id": r["order_test_id"], "name": r["test_name"], "sample_type": r["sample_type"],
-             "department": r["department"], "status": r["status"]}
-            for r in rows
-        ],
+        "tests": tests,                                            # كل تحاليل الزيارة
+        "tube_tests": [t for t in tests if t["in_this_tube"]],     # تحاليل هذا الأنبوب فقط
     })
 
 
@@ -4043,6 +4086,25 @@ def api_set_barcode_print_prefs():
             return jsonify({"ok": False, "error": "قيمة غير صالحة"}), 400
         set_setting(db, "barcode_test_names_mode", mode)
         updated["test_names_mode"] = mode
+    # تفضيلات ملصق "باركود الزيارة" (صفحة print/barcode) — مفاتيح منفصلة حتى لا
+    # تتأثر ملصقات العينات.
+    for key, setting, lo, hi in (("vb_copies", "vb_copies", 1, 50), ("vb_w", "vb_w", 20, 200),
+                                 ("vb_h", "vb_h", 15, 200)):
+        if key in body:
+            try:
+                n = int(body.get(key))
+                if n < lo or n > hi:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error": f"{key}: القيمة يجب أن تكون بين {lo} و{hi}"}), 400
+            set_setting(db, setting, str(n))
+            updated[key] = n
+    if "vb_names_mode" in body:
+        mode = (body.get("vb_names_mode") or "").strip()
+        if mode not in ("full", "short", "none"):
+            return jsonify({"ok": False, "error": "قيمة غير صالحة"}), 400
+        set_setting(db, "vb_names_mode", mode)
+        updated["vb_names_mode"] = mode
     db.commit()
     return jsonify({"ok": True, **updated})
 
@@ -4845,7 +4907,7 @@ def orders_list():
     params = []
     if q:
         conditions.append("(p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR ot.barcode LIKE ?)")
-        params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
+        params.extend([f"%{q}%", _scan_like(q), f"%{q}%"])
     else:
         # بدون بحث: التحاليل اللي انرسلت أصلاً للاستقبال تختفي من هذي
         # القائمة الافتراضية (خلصت مهمتها بشاشة المختبر) -- تبقى موجودة
@@ -10551,37 +10613,47 @@ def _sample_panel_groups(style, prev_count, show_prev, prev_order="desc"):
 def result_style_preview():
     """معاينة حيّة لأسلوب جدول النتائج (iframe بصفحة تصميم التقارير) — نفس combined_panel.html
     ونفس القالب المشترك بالضبط. ?style= ?theme= للمعاينة بدون حفظ، ?prev=0 لإخفاء السابقة."""
-    db = get_db()
-    cfg = get_result_layout(db)
-    view = build_layout_view(db, style_override=request.args.get("style"), cfg=cfg,
-                             theme_override=request.args.get("theme"))
-    show_prev = request.args.get("prev", "1") != "0" and cfg["prev_count"] > 0
-    groups = _sample_panel_groups(view["style"], cfg["prev_count"], show_prev, cfg["prev_order"])
-    for g in groups:
-        for r in g["rows"]:
-            for c in cfg["extra_cols"]:
-                r["extras"][c["id"]] = "—" if c.get("show") else ""
-    # في المعاينة نفعّل تلوين الـHigh/Low حتى يظهر مثل الصور المرجعية
-    flag_red = "#DC2626" if view["theme"] == "green" else "#B91C1C"
-    show_headings = cfg["dept_headings"] == "show" or (cfg["dept_headings"] == "auto" and view["style"] in ("a1", "a2"))
-    _, show_result_flag, _ = get_report_flag_settings(db)
-    logo_path = get_setting(db, "logo_path", "")
-    logo_url = url_for("static", filename=logo_path) if logo_path else None
-    return render_template(
-        "reports/combined_panel.html",
-        panel_groups=groups, all_rows=[r for g in groups for r in g["rows"]], show_dept_headings=show_headings,
-        merged_title=cfg["merged_title"], logo_url=logo_url, from_other_lab=False,
-        layout_view=view, note_visit_id=None, prev_toggle_available=False, show_prev_values=show_prev,
-        report_layout={}, report_layout_has_patient_override=False,
-        visit_date="28/9/2026", sex="Male", age="45 Year",
-        patient_name="أحمد كريم جاسم", patient_name_en="Ahmed Kareem Jasim", patient_id="19010",
-        sample_no="19010023", sample_time="09:12", number_of="1", referring_doctor_name="د. سالم راضي",
-        show_exam_signature=False, is_design_preview=True, preview_test_id=None,
-        auto_flag_color_enabled=True, show_result_flag=show_result_flag,
-        AUTO_FLAG_COLORS={"High": flag_red, "Low": flag_red, "Critical": flag_red},
-        row_spacing_px=None, done_by_notes=[],
-        stamp_target_type="visit", stamp_target_id=0, digital_stamps=[], stamp_placements=[],
-    )
+    try:
+        db = get_db()
+        cfg = get_result_layout(db)
+        view = build_layout_view(db, style_override=request.args.get("style"), cfg=cfg,
+                                 theme_override=request.args.get("theme"))
+        show_prev = request.args.get("prev", "1") != "0" and cfg["prev_count"] > 0
+        groups = _sample_panel_groups(view["style"], cfg["prev_count"], show_prev, cfg["prev_order"])
+        for g in groups:
+            for r in g["rows"]:
+                for c in cfg["extra_cols"]:
+                    r["extras"][c["id"]] = "—" if c.get("show") else ""
+        # في المعاينة نفعّل تلوين الـHigh/Low حتى يظهر مثل الصور المرجعية
+        flag_red = "#DC2626" if view["theme"] == "green" else "#B91C1C"
+        show_headings = cfg["dept_headings"] == "show" or (cfg["dept_headings"] == "auto" and view["style"] in ("a1", "a2"))
+        _, show_result_flag, _ = get_report_flag_settings(db)
+        logo_path = get_setting(db, "logo_path", "")
+        logo_url = url_for("static", filename=logo_path) if logo_path else None
+        return render_template(
+            "reports/combined_panel.html",
+            panel_groups=groups, all_rows=[r for g in groups for r in g["rows"]], show_dept_headings=show_headings,
+            merged_title=cfg["merged_title"], logo_url=logo_url, from_other_lab=False,
+            layout_view=view, note_visit_id=None, prev_toggle_available=False, show_prev_values=show_prev,
+            report_layout={}, report_layout_has_patient_override=False,
+            visit_date="28/9/2026", sex="Male", age="45 Year",
+            patient_name="أحمد كريم جاسم", patient_name_en="Ahmed Kareem Jasim", patient_id="19010",
+            sample_no="19010023", sample_time="09:12", number_of="1", referring_doctor_name="د. سالم راضي",
+            show_exam_signature=False, is_design_preview=True, preview_test_id=None,
+            auto_flag_color_enabled=True, show_result_flag=show_result_flag,
+            AUTO_FLAG_COLORS={"High": flag_red, "Low": flag_red, "Critical": flag_red},
+            row_spacing_px=None, done_by_notes=[],
+            stamp_target_type="visit", stamp_target_id=0, digital_stamps=[], stamp_placements=[],
+        )
+    except Exception:  # noqa: BLE001 — المعاينة صفحة مدير فقط: نعرض سبب الخطأ بدل صفحة 500 فاضية
+        import traceback
+        tb = traceback.format_exc()
+        app.logger.error("result_style_preview failed:\n%s", tb)
+        return ("<meta charset='utf-8'><body style='font-family:Segoe UI,Tahoma;padding:14px;direction:rtl'>"
+                "<h3 style='color:#B91C1C'>تعذر عرض المعاينة</h3>"
+                "<p>صوّر هذا النص وابعثه للمطوّر:</p>"
+                "<pre dir='ltr' style='white-space:pre-wrap;background:#F8FAFC;border:1px solid #E2E8F0;padding:10px;font-size:12px'>"
+                + _html_escape(tb) + "</pre></body>"), 500
 
 
 @app.route("/management/report-designer/<int:test_definition_id>/start-generic-exam", methods=["GET", "POST"])

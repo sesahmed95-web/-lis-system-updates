@@ -1054,10 +1054,9 @@
 
   window.printCreatedVisitBarcode = function () {
     if (!lastCreatedVisitId) return;
-    // نحمّل صفحة طباعة الباركود داخل iframe مخفي بنفس الصفحة؛ الصفحة
-    // نفسها تستدعي window.print() عند تحميلها (onload)، فتطبع مباشرة
-    // بدون فتح نافذة أو تبويب متصفح جديد.
-    barcodePrintFrame.src = '/front-desk/visits/' + lastCreatedVisitId + '/print/barcode';
+    // كانت الطباعة تتم داخل iframe مخفي (window.print() من إطار مخفي)، وهذا يجمّد نافذة البرنامج (Edge app) لحد ما
+    // تغلق البرنامج. الآن نفتح صفحة الطباعة بتبويب/نافذة مثل ملصقات العينات والفاتورة — ثبت أنها تشتغل.
+    window.open('/front-desk/visits/' + lastCreatedVisitId + '/print/barcode', '_blank');
   };
 
   window.printCreatedSampleBarcodes = function () {

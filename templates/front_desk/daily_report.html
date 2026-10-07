@@ -11,6 +11,10 @@
   .report-table tfoot td { font-weight: 700; background: #F3F6F8; }
   /* اسم المريض: يكفي عرضه بسطر واحد بدون ما ينزل لسطر ثاني */
   .report-table td[data-col="name"] { white-space: nowrap; }
+  /* ت = تسلسل الصف (1،2،3...) عمود ضيّق */
+  .report-table th[data-col="reg"], .report-table td[data-col="reg"] { width: 40px; text-align: center; padding-left: 4px; padding-right: 4px; }
+  /* التحاليل: عرض مناسب، الأسماء جنب بعض وتنزل لسطر جديد عند الفاصلة فقط */
+  .report-table th[data-col="tests"], .report-table td[data-col="tests"] { min-width: 220px; width: 22%; white-space: normal; word-break: keep-all; overflow-wrap: normal; }
   .report-toolbar { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .report-toolbar a.pill { text-decoration:none; background:#F3F6F8; color:#205072; padding:6px 12px; border-radius:6px; font-size:12px; border:1px solid #E2E8F0; }
   .report-heading { font-size: 18px; color: #205072; margin-bottom: 2px; }
@@ -97,7 +101,7 @@
   <tbody>
     {% for r in rows %}
     <tr>
-      <td data-col="reg">{{ r.reg }}</td>
+      <td data-col="reg">{{ loop.index }}</td>
       <td data-col="name">{{ r.name }}</td>
       <td data-col="gender">{{ r.gender }}</td>
       <td data-col="age">{{ r.age }}</td>

@@ -2,59 +2,147 @@
 <html lang="{{ lang }}" dir="ltr">
 <head>
 <meta charset="UTF-8">
-<title>Barcode #{{ visit['registration_number'] }}</title>
+<title>Visit Barcode #{{ visit['registration_number'] }}</title>
+<style id="pageSizeStyle">@page { size: {{ vb_w }}mm {{ vb_h }}mm; margin: 0; }</style>
 <style>
   * { box-sizing: border-box; }
-  /* ملصق 50مم × 30مم — كل المحتوى يجب أن يبقى ضمن صفحة واحدة فقط */
-  @page { size: 50mm 30mm; margin: 0; }
-  html, body {
-    width: 50mm; height: 30mm; margin: 0; padding: 0;
-    font-family: "Segoe UI", Tahoma, Arial, sans-serif; overflow: hidden;
-  }
-  .label {
-    width: 50mm; height: 30mm; padding: 1mm 1.5mm;
-    display: flex; flex-direction: column; justify-content: flex-start;
-    direction: ltr; text-align: left; overflow: hidden;
-  }
-  .patient { font-size: 7.5pt; font-weight: 800; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tests { font-size: 6pt; font-weight: 700; color: #222; line-height: 1.15; max-height: 5.4mm; overflow: hidden; }
-  .meta-line { font-size: 6pt; color: #222; line-height: 1.15; white-space: nowrap; overflow: hidden; }
-  .barcode-block { text-align: center; margin-top: auto; line-height: 0; }
-  .barcode-block img { image-rendering: pixelated; width: 100%; max-height: 7mm; object-fit: contain; }
-  .print-btn { margin: 6mm auto 0; display: flex; gap: 10px; justify-content: center; }
-  .print-btn a, .print-btn button { text-decoration: none; }
-  @media print { .no-print { display: none; } }
-  @media screen {
-    body { width: auto; height: auto; padding: 24px; display: flex; flex-direction: column; align-items: center; }
-    .label { border: 1px dashed #999; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  body { margin: 0; font-family: "Segoe UI", Tahoma, Arial, sans-serif; background: #E5E7EB; }
+
+  /* شريط الإعدادات (لا يُطبع) */
+  .bar { background: #fff; border-bottom: 1px solid #CBD5E1; padding: 10px 14px; display: flex; gap: 16px;
+         flex-wrap: wrap; align-items: center; justify-content: center; direction: rtl; }
+  .bar label { font-size: 13px; color: #334155; display: flex; align-items: center; gap: 6px; }
+  .bar input[type=number] { width: 62px; padding: 5px 6px; border: 1px solid #CBD5E1; border-radius: 6px; }
+  .bar select { padding: 5px 6px; border: 1px solid #CBD5E1; border-radius: 6px; }
+  .bar .copies input { width: 72px; font-size: 16px; font-weight: 700; text-align: center; border-color: #26529C; }
+  .bar button { padding: 7px 16px; border-radius: 7px; border: 1px solid #26529C; background: #26529C;
+                color: #fff; font-size: 14px; cursor: pointer; }
+  .bar button.sec { background: #fff; color: #26529C; }
+  .saved { font-size: 12px; color: #16A34A; visibility: hidden; }
+
+  /* المعاينة على الشاشة: الملصقات جنب بعض */
+  .sheet { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px; justify-content: center; }
+  .label { background: #fff; width: {{ vb_w }}mm; height: {{ vb_h }}mm; padding: 1mm 1.5mm;
+           display: flex; flex-direction: column; overflow: hidden; color: #000;
+           box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+  .lab { font-size: 5.5pt; font-weight: 700; text-align: center; line-height: 1.1; direction: rtl; }
+  .pname { font-size: 8pt; font-weight: 800; line-height: 1.15; direction: auto; unicode-bidi: plaintext;
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { font-size: 6pt; line-height: 1.2; display: flex; justify-content: space-between; gap: 4px; }
+  .tests { font-size: 7pt; font-weight: 700; line-height: 1.15; margin: 0.8mm 0; flex: 1 1 auto;
+           min-height: 0; overflow: hidden; word-break: break-word; unicode-bidi: plaintext; }
+  .bc { flex: 0 0 auto; text-align: center; }
+  .bc img { height: 8mm; max-width: 100%; object-fit: fill; width: 92%; image-rendering: pixelated; }
+
+  @media print {
+    body { background: #fff; }
+    .no-print { display: none !important; }
+    .sheet { display: block; padding: 0; }
+    .label { box-shadow: none; page-break-after: always; break-after: page; margin: 0; }
+    .label:last-child { page-break-after: auto; break-after: auto; }
   }
 </style>
-<script>
-  (function () {
-    var savedTitle = null;
-    window.addEventListener("beforeprint", function () { savedTitle = document.title; document.title = ""; });
-    window.addEventListener("afterprint", function () { if (savedTitle !== null) document.title = savedTitle; });
-  })();
-</script>
 </head>
-<body onload="window.print()">
-  {% set draw_date = (draw_time.split(' ')[0] if draw_time and ' ' in draw_time else draw_time) or '' %}
-  {% set draw_hm = (draw_time.split(' ')[1][:5] if draw_time and ' ' in draw_time else '') %}
+<body>
+
+<div class="no-print bar">
+  <label class="copies">عدد الباركودات:
+    <input type="number" id="copies" min="1" max="50" value="{{ vb_copies }}">
+  </label>
+  <label>أسماء التحاليل:
+    <select id="namesMode">
+      <option value="full" {% if vb_names_mode == 'full' %}selected{% endif %}>الاسم الكامل</option>
+      <option value="short" {% if vb_names_mode == 'short' %}selected{% endif %}>مختصر</option>
+      <option value="none" {% if vb_names_mode == 'none' %}selected{% endif %}>بدون</option>
+    </select>
+  </label>
+  <label>حجم الملصق (مم):
+    <input type="number" id="lw" min="20" max="200" value="{{ vb_w }}" title="العرض">
+    ×
+    <input type="number" id="lh" min="15" max="200" value="{{ vb_h }}" title="الارتفاع">
+  </label>
+  <button type="button" id="printBtn">🖨️ طباعة</button>
+  <button type="button" class="sec" onclick="window.close()">إغلاق</button>
+  <span id="saved" class="saved">✓ تم الحفظ</span>
+</div>
+
+<div class="sheet" id="sheet"></div>
+
+{# قالب الملصق الواحد — يُنسخ حسب العدد المطلوب #}
+<template id="labelTpl">
   <div class="label">
-    <div class="patient">{{ visit['full_name'] }}</div>
-    {% if tests %}
-    <div class="tests">{{ tests|map(attribute='name')|join(', ') }}</div>
-    {% endif %}
-    <div class="meta-line">{{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['gender'] }}</div>
-    <div class="meta-line">{{ draw_date }}{% if draw_hm %} {{ draw_hm }}{% endif %}</div>
-    <div class="barcode-block">
-      <img src="{{ url_for('visit_barcode_code128', visit_id=visit['id']) }}" alt="barcode">
+    {% if lab_name_ar %}<div class="lab">{{ lab_name_ar }}</div>{% endif %}
+    <div class="pname">{{ visit['full_name'] }}</div>
+    <div class="meta">
+      <span>{% if visit['age'] %}{{ visit['age'] }} {{ visit['age_unit'] or '' }}{% endif %}{% if visit['gender'] %} · {{ visit['gender'] }}{% endif %}</span>
+      <span>{{ (draw_time or '')|string|replace('T', ' ')|truncate(16, True, '') }}</span>
     </div>
+    <div class="tests"
+         data-full="{{ tests|map(attribute='name')|join(', ') }}"
+         data-short="{% for t in tests %}{{ t['short_name'] or t['name'] }}{% if not loop.last %}, {% endif %}{% endfor %}"></div>
+    <div class="bc"><img alt="barcode" src="{{ url_for('visit_barcode_code128', visit_id=visit['id']) }}"></div>
   </div>
-  <div class="no-print print-btn">
-    <button onclick="window.print()">🖨 Print</button>
-    <a href="{{ url_for('visits_list') }}">🔙 الرجوع للزيارات</a>
-    <button onclick="window.close()">❌ إغلاق النافذة</button>
-  </div>
+</template>
+
+<script>
+(function () {
+  var sheet = document.getElementById('sheet');
+  var tpl = document.getElementById('labelTpl');
+  var $copies = document.getElementById('copies');
+  var $mode = document.getElementById('namesMode');
+  var $w = document.getElementById('lw'), $h = document.getElementById('lh');
+
+  function clamp(v, lo, hi, d) { v = parseInt(v, 10); if (!v) v = d; return Math.max(lo, Math.min(hi, v)); }
+
+  function fitText(el) {
+    // يصغّر خط أسماء التحاليل تلقائيًا حتى تتسع كلها بالملصق
+    var size = 7;
+    el.style.fontSize = size + 'pt';
+    while (el.scrollHeight > el.clientHeight + 1 && size > 4) { size -= 0.5; el.style.fontSize = size + 'pt'; }
+  }
+
+  function render() {
+    var n = clamp($copies.value, 1, 50, 1), mode = $mode.value;
+    var w = clamp($w.value, 20, 200, 50), h = clamp($h.value, 15, 200, 30);
+    document.getElementById('pageSizeStyle').textContent = '@page { size: ' + w + 'mm ' + h + 'mm; margin: 0; }';
+    sheet.innerHTML = '';
+    for (var i = 0; i < n; i++) {
+      var node = tpl.content.firstElementChild.cloneNode(true);
+      node.style.width = w + 'mm'; node.style.height = h + 'mm';
+      var t = node.querySelector('.tests');
+      if (mode === 'none') { t.style.display = 'none'; }
+      else { t.textContent = (mode === 'short' ? t.getAttribute('data-short') : t.getAttribute('data-full')); }
+      sheet.appendChild(node);
+    }
+    sheet.querySelectorAll('.tests').forEach(function (el) { if (el.style.display !== 'none') fitText(el); });
+  }
+
+  var timer = null;
+  function save(partial) {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      fetch('/api/settings/barcode-print-prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(partial) }).then(function (r) { return r.json(); }).then(function (res) {
+        var s = document.getElementById('saved');
+        if (res && res.ok) { s.style.visibility = 'visible'; setTimeout(function () { s.style.visibility = 'hidden'; }, 1200); }
+      }).catch(function () {});
+    }, 300);
+  }
+
+  function changed() {
+    render();
+    save({ vb_copies: clamp($copies.value, 1, 50, 1), vb_names_mode: $mode.value,
+           vb_w: clamp($w.value, 20, 200, 50), vb_h: clamp($h.value, 15, 200, 30) });
+  }
+  [$copies, $mode, $w, $h].forEach(function (el) { el.addEventListener('input', changed); el.addEventListener('change', changed); });
+
+  function doPrint() { render(); setTimeout(function () { window.print(); }, 150); }
+  document.getElementById('printBtn').addEventListener('click', doPrint);
+  $copies.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doPrint(); } });
+
+  render();
+  $copies.focus(); $copies.select();
+})();
+</script>
 </body>
 </html>

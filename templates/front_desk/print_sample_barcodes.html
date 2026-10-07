@@ -21,7 +21,7 @@
      السطر أصلاً (كامل/مختصر/بدون) قابل للتحكم من شريط الإعدادات أعلى
      الصفحة — راجع applyTestNamesMode() بالأسفل. */
   .sample-type { font-size: 14px; font-weight: 700; color: #1D4ED8; margin: 2px 0; }
-  .test-list { font-size: 10.5px; color: #64748B; margin: 3px 0 6px 0; line-height: 1.35; }
+  .test-list { font-size: 11.5px; font-weight: 600; color: #111; margin: 3px 0 6px 0; line-height: 1.35; }
   .test { font-size: 12px; color: #333; }
   img { image-rendering: pixelated; max-width: 100%; }
   .picker-label { display: flex; align-items: center; gap: 6px; text-align: start; width: auto;
@@ -157,23 +157,33 @@
 
   function onCopiesChanged() {
     savePrefs({ copies: getCopiesCount() });
+    refreshPreview();
   }
 
   function onTestNamesModeChanged() {
     var mode = document.getElementById('prefTestNamesMode').value;
-    applyTestNamesMode(mode);
     savePrefs({ test_names_mode: mode });
+    refreshPreview();
   }
 
   function printTubes() {
+    refreshPreview();
+    window.print();
+  }
+
+  // يجهّز المعاينة فقط (أسماء التحاليل + عدد النسخ) ولا يطبع تلقائيًا: المستخدم يحدد عدد النسخ ثم يضغط "طباعة".
+  function refreshPreview() {
     applyTestNamesMode(document.getElementById('prefTestNamesMode').value);
     duplicateTubeLabels(getCopiesCount());
-    window.print();
+    applyTestNamesMode(document.getElementById('prefTestNamesMode').value);
+    var n = document.querySelectorAll('.tube-grid .label').length;
+    var c = document.getElementById('labelsCount');
+    if (c) c.textContent = n;
   }
 
   function preparePrint() {
     originalTubeGridHTML = document.querySelector('.tube-grid').innerHTML;
-    printTubes();
+    refreshPreview();
   }
 </script>
 </head>
@@ -193,9 +203,11 @@
       </select>
     </label>
     <span id="prefsSaved" class="prefs-saved">✓ تم الحفظ</span>
+    <span style="font-size:12.5px;color:#334155;">عدد الملصقات: <b id="labelsCount">0</b></span>
+    <button type="button" onclick="printTubes()" style="padding:6px 16px;font-weight:700;">🖨 طباعة</button>
   </div>
 
-  <h2 class="section-heading no-print">🧪 باركودات الأنابيب (حسب نوع العينة) — تُطبع تلقائيًا</h2>
+  <h2 class="section-heading no-print">🧪 باركودات الأنابيب (حسب نوع العينة) — حدد عدد النسخ ثم اضغط طباعة</h2>
   <div class="grid tube-grid">
     {% for s in tube_samples %}
     <div class="label">
@@ -203,7 +215,7 @@
       <div class="patient">{{ visit['full_name'] }}</div>
       <div class="meta">{{ visit['created_at'] }}</div>
       <div class="sample-type">{{ s['sample_type'] }}</div>
-      {% if s['test_names']|length > 1 %}
+      {% if s['test_names']|length >= 1 %}
       <div class="test-list" data-full="{{ s['test_names']|join('، ') }}"
            data-short="{{ s['short_names']|join('، ') }}">{{ s['test_names']|join('، ') }}</div>
       {% endif %}
