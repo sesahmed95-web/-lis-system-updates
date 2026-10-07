@@ -1090,3 +1090,31 @@ Traceback (most recent call last):
     return obj[argument]
            ~~~^^^^^^^^^^
 jinja2.exceptions.UndefinedError: 'ot' is undefined
+2026-10-07 15:35:21,355 ERROR: result_style_preview failed:
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10633, in result_style_preview
+    return render_template(
+        "reports/combined_panel.html",
+    ...<11 lines>...
+        stamp_target_type="visit", stamp_target_id=0, digital_stamps=[], stamp_placements=[],
+    )
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\combined_panel.html", line 1, in top-level template code
+    {% extends "reports/base_report.html" %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 10, in top-level template code
+    <title>{{ ot['test_name'] }} - {{ patient_name }}</title>
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 471, in getitem
+    return obj[argument]
+           ~~~^^^^^^^^^^
+jinja2.exceptions.UndefinedError: 'ot' is undefined
+

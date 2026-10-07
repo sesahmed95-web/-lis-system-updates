@@ -10643,7 +10643,7 @@ def result_style_preview():
             auto_flag_color_enabled=True, show_result_flag=show_result_flag,
             AUTO_FLAG_COLORS={"High": flag_red, "Low": flag_red, "Critical": flag_red},
             row_spacing_px=None, done_by_notes=[],
-            stamp_target_type="visit", stamp_target_id=0, digital_stamps=[], stamp_placements=[],
+            ot={"test_name": "Report"}, stamp_target_type="visit", stamp_target_id=0, digital_stamps=[], stamp_placements=[],
         )
     except Exception:  # noqa: BLE001 — المعاينة صفحة مدير فقط: نعرض سبب الخطأ بدل صفحة 500 فاضية
         import traceback
