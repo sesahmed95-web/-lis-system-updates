@@ -1118,3 +1118,130 @@ Traceback (most recent call last):
            ~~~^^^^^^^^^^
 jinja2.exceptions.UndefinedError: 'ot' is undefined
 
+2026-10-07 17:00:26,812 ERROR: Exception on /front-desk/new-visit [POST]
+Traceback (most recent call last):
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1271, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2182, in new_visit
+    is_home_visit, home_visit_address, home_visit_fee, session.get("branch_id"), session["user_id"], now),
+                                                                                 ~~~~~~~^^^^^^^^^^^
+KeyError: 'user_id'
+2026-10-07 17:04:56,601 ERROR: Exception on /front-desk/notifications/check [GET]
+Traceback (most recent call last):
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 915, in full_dispatch_request
+    rv = self.preprocess_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1291, in preprocess_request
+    rv = self.ensure_sync(before_func)()
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1359, in enforce_license
+    lic = license_manager.check_license(db)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\license_manager.py", line 215, in check_license
+    db.execute(
+    ~~~~~~~~~~^
+        "UPDATE license_info SET last_ip=?, last_checked=? WHERE id=1",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (get_local_ip(), datetime.now().isoformat(timespec="seconds")),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+sqlite3.OperationalError: database is locked
+2026-10-07 17:05:56,606 ERROR: Exception on /front-desk/notifications/check [GET]
+Traceback (most recent call last):
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 915, in full_dispatch_request
+    rv = self.preprocess_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1291, in preprocess_request
+    rv = self.ensure_sync(before_func)()
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1359, in enforce_license
+    lic = license_manager.check_license(db)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\license_manager.py", line 215, in check_license
+    db.execute(
+    ~~~~~~~~~~^
+        "UPDATE license_info SET last_ip=?, last_checked=? WHERE id=1",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (get_local_ip(), datetime.now().isoformat(timespec="seconds")),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+sqlite3.OperationalError: database is locked
+2026-10-07 17:06:56,580 ERROR: Exception on /front-desk/notifications/check [GET]
+Traceback (most recent call last):
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 915, in full_dispatch_request
+    rv = self.preprocess_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1291, in preprocess_request
+    rv = self.ensure_sync(before_func)()
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1359, in enforce_license
+    lic = license_manager.check_license(db)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\license_manager.py", line 215, in check_license
+    db.execute(
+    ~~~~~~~~~~^
+        "UPDATE license_info SET last_ip=?, last_checked=? WHERE id=1",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (get_local_ip(), datetime.now().isoformat(timespec="seconds")),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+sqlite3.OperationalError: database is locked
+2026-10-07 17:07:56,609 ERROR: Exception on /front-desk/notifications/check [GET]
+Traceback (most recent call last):
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 915, in full_dispatch_request
+    rv = self.preprocess_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1291, in preprocess_request
+    rv = self.ensure_sync(before_func)()
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1359, in enforce_license
+    lic = license_manager.check_license(db)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\license_manager.py", line 215, in check_license
+    db.execute(
+    ~~~~~~~~~~^
+        "UPDATE license_info SET last_ip=?, last_checked=? WHERE id=1",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (get_local_ip(), datetime.now().isoformat(timespec="seconds")),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+sqlite3.OperationalError: database is locked
+2026-10-07 17:08:31,854 ERROR: Exception on /front-desk/notifications/check [GET]
+Traceback (most recent call last):
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 915, in full_dispatch_request
+    rv = self.preprocess_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1291, in preprocess_request
+    rv = self.ensure_sync(before_func)()
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1359, in enforce_license
+    lic = license_manager.check_license(db)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\license_manager.py", line 215, in check_license
+    db.execute(
+    ~~~~~~~~~~^
+        "UPDATE license_info SET last_ip=?, last_checked=? WHERE id=1",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (get_local_ip(), datetime.now().isoformat(timespec="seconds")),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+sqlite3.OperationalError: database is locked
