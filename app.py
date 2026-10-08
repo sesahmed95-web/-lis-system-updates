@@ -709,6 +709,28 @@ def resolve_value_align(param_row):
 
 app.jinja_env.globals["resolve_label"] = resolve_label
 app.jinja_env.globals["uses_order_style_report"] = uses_order_style_report
+
+
+def report_design(family):
+    """رقم التصميم (1..4) لعائلة تقارير: 'coag' (التخثر) أو 'exam' (GUE/GSE/SFA).
+    الأولوية لـ?design=N بالرابط (معاينة مؤقتة بدون حفظ)، ثم الإعداد المحفوظ
+    (الإدارة ← تصاميم التقارير)، وغيره 1 = التصميم الكلاسيكي الحالي."""
+    try:
+        q = request.args.get("design")
+        if q in ("1", "2", "3", "4"):
+            return q
+    except RuntimeError:
+        pass
+    try:
+        _db = get_db()
+        v = get_setting(_db, f"report_design_{family}", "1")
+        _db.close()
+    except Exception:
+        v = "1"
+    return v if v in ("1", "2", "3", "4") else "1"
+
+
+app.jinja_env.globals["report_design"] = report_design
 app.jinja_env.globals["RESULT_STYLE_CHOICES"] = [
     ("a1", "Style A — Labels Set 1"), ("a2", "Style A — Labels Set 2"),
     ("b_grid", "Style B — Matching Image 1"), ("b_compact", "Style B — Compact"),
@@ -8681,6 +8703,28 @@ def api_tests_active_list():
 
 
 # --------------------------------------------------------------- management
+@app.route("/management/report-designs", methods=["GET", "POST"])
+@roles_required("admin")
+def report_designs():
+    """اختيار تصميم (1..4) لتقارير التخثر ولتقارير GUE/GSE/SFA. الاختيار يُحفظ
+    بجدول settings ويسري على كل الطباعة؛ المعاينات هنا حيّة من نفس قوالب الطباعة."""
+    db = get_db()
+    if request.method == "POST":
+        for fam in ("coag", "exam"):
+            v = request.form.get(fam, "")
+            if v in ("1", "2", "3", "4"):
+                set_setting(db, f"report_design_{fam}", v)
+        db.commit()
+        flash("تم حفظ تصاميم التقارير.")
+        return redirect(url_for("report_designs"))
+    ids = {}
+    for key, code in (("coag", "COAG"), ("gue", "GUE"), ("gse", "GSE"), ("sfa", "SFA")):
+        r = db.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
+        ids[key] = r["id"] if r else None
+    cur = {fam: get_setting(db, f"report_design_{fam}", "1") for fam in ("coag", "exam")}
+    return render_template("management/report_designs.html", ids=ids, cur=cur)
+
+
 @app.route("/management/dashboard-look", methods=["GET", "POST"])
 @roles_required("admin")
 def dashboard_look():
@@ -10377,6 +10421,9 @@ def _preview_report_design_impl(test_definition_id):
     # وهمي) لكل باراميتر، بما فيها باراميترات "Other Results" الحرة.
     ranges = {p["name"]: {"range_text": "— إلى —", "low": None, "high": None} for p in parameters}
     results_by_name = {p["name"]: {"value_text": "—", "value_numeric": None, "flag": None} for p in parameters}
+    if test["code"] == "COAG":
+        # التخثر: المعاينة تعرض المدى الحقيقي المحفوظ (مريض افتراضي ذكر 30 سنة) بدل "— إلى —"
+        ranges = {p["name"]: find_reference_range(db, p["id"], "Male", 30, "Years") for p in parameters}
 
     # نفس منطق _print_report_impl بالضبط (راجع التعليق هناك) — القوالب
     # الجاهزة الحديثة (GUE/GSE/SFA وأي قالب مستقبلي بنفس نمط

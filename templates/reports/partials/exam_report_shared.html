@@ -148,6 +148,35 @@
   .result-row .rval { color: #1F3B7A; font-weight: 600; }
   .result-row .runit { color: #1a1a1a; font-size: 0.85em; margin-inline-start: 4px; font-weight: normal; }
   .result-row .rnorm { color: #1F3B7A; font-weight: 600; }
+  /* ===== إصلاح تراكب النتيجة مع المدى الطبيعي (اكتُشف بمعاينة حقيقية) =====
+     العمود الأول (18px) محجوز لمقبض السحب .row-drag-handle، لكنه display:none
+     خارج وضع التعديل وبالطباعة -- فتنزاح كل الأعمدة خطوة: الاسم يدخل عمود
+     الـ18px، والنتيجة تدخل عمود الـ18px الثاني، والمدى يدخل عمود الـ160px،
+     فيتراكب النص فوق بعضه. خارج وضع التعديل نشيل عمود المقبض من الـgrid. */
+  .report-page:not(.exam-editing) .result-row { grid-template-columns: 260px 14px 160px 1fr auto; }
+  .report-page:not(.exam-editing) .exam-column .result-row { grid-template-columns: 1fr 12px 1fr auto; }
+
+  /* ===== تصاميم GUE / GSE / SFA الأربعة (تُختار من الإدارة ← تصاميم التقارير،
+     أو مؤقتًا بإضافة ?design=1..4 لرابط الطباعة). 1 = الكلاسيكي الحالي. ===== */
+  /* 2) جدول رسمي: عناوين أقسام داكنة + خطوط فاصلة + تظليل متناوب */
+  .exam-design-2 .section-title { background:#14213D; color:#fff; border:none; padding:6px 12px; border-radius:3px; margin-top:14px; justify-content:center; letter-spacing:.6px; text-transform:uppercase; }
+  .exam-design-2 .result-row { border-bottom:1px solid #DDE3EA; padding:5px 10px; }
+  .exam-design-2 .exam-section .result-row:nth-child(4n+2) { background:#F3F6FA; }
+  .exam-design-2 .result-row .rname { font-weight:600; }
+  /* 3) مضغوط بعمودين: يوفّر ورق، مناسب لقوائم طويلة (SFA/GUE) */
+  .exam-design-3 .exam-section { column-count:2; column-gap:30px; }
+  .exam-design-3 .section-title { column-span:all; }
+  .exam-design-3 .result-row { break-inside:avoid; position:relative; font-size:.95em; }
+  .exam-design-3 .report-page:not(.exam-editing) .result-row { grid-template-columns:minmax(0,1fr) 10px auto; row-gap:0; }
+  .exam-design-3 .result-row .rnorm { grid-column:1 / -1; font-size:.78em; color:#64748B; font-weight:500; }
+  .exam-design-3 .result-row .row-tools { position:absolute; top:0; inset-inline-end:0; }
+  .exam-design-3 .inline-note { break-inside:avoid; }
+  /* 4) إكلينيكي ملوّن: شريط جانبي لكل قسم، النتيجة بارزة بلون مميّز */
+  .exam-design-4 .section-title { border-top:none; background:#F0FDFA; color:#0F766E; border-inline-start:5px solid #0F766E; padding:6px 10px; }
+  .exam-design-4 .result-row { border-bottom:1px dashed #CBD5E1; }
+  .exam-design-4 .result-row .rname { font-weight:700; color:#0F172A; }
+  .exam-design-4 .result-row .rval { color:#0F766E; font-size:1.1em; font-weight:700; }
+  .exam-design-4 .result-row .rnorm { color:#475569; font-weight:500; font-style:italic; }
   .row-tools { display: flex; gap: 2px; justify-self: end; }
   .row-tools button {
     opacity: 0; border: none; background: none; cursor: pointer; font-size: 12px; padding: 2px;

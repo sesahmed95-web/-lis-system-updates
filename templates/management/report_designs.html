@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block page_title %}تصاميم التقارير{% endblock %}
+{% block content %}
+<style>
+  .rd-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; margin-bottom:10px; }
+  .rd-card { border:2px solid var(--border); border-radius:10px; padding:8px; background:#fff; cursor:pointer; display:block; }
+  .rd-card:has(input:checked) { border-color:var(--primary); box-shadow:0 0 0 3px rgba(32,80,114,.18); }
+  .rd-card b { display:block; margin-bottom:6px; }
+  .rd-frame { width:1000px; height:620px; border:1px solid #E2E8F0; transform:scale(.3); transform-origin:0 0; pointer-events:none; background:#fff; }
+  .rd-wrap { width:300px; height:190px; overflow:hidden; }
+  .rd-tabs { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+</style>
+<form method="POST">
+  {% set groups = [
+    ('coag', 'تقارير التخثر (مجمّعة + كل تحليل منفرد، مع عمود Control لـ PT/PTT)', [('coag', ids.coag)]),
+    ('exam', 'تقارير GUE / GSE / SFA', [('GUE', ids.gue), ('GSE', ids.gse), ('SFA', ids.sfa)]),
+  ] %}
+  {% for fam, title, tests in groups %}
+  <div class="card">
+    <h3>{{ title }}</h3>
+    {% if tests|length > 1 %}<div class="rd-tabs">{% for nm, tid in tests %}<button type="button" class="pill-btn rd-tab{{ ' active' if loop.first }}" data-fam="{{ fam }}" data-tid="{{ tid }}">{{ nm }}</button>{% endfor %}</div>{% endif %}
+    <div class="rd-grid">
+      {% for n in ['1','2','3','4'] %}
+      <label class="rd-card">
+        <b><input type="radio" name="{{ fam }}" value="{{ n }}" {{ 'checked' if cur[fam] == n }}> تصميم {{ n }}{{ ' — الكلاسيكي' if n == '1' }}</b>
+        <div class="rd-wrap"><iframe class="rd-frame" data-fam="{{ fam }}" data-design="{{ n }}" loading="lazy"
+          src="{{ url_for('preview_report_design', test_definition_id=tests[0][1]) }}?design={{ n }}"></iframe></div>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+  <button class="btn" type="submit">💾 حفظ الاختيار</button>
+  <p class="muted">المعاينات بيانات وهمية للتوضيح. تقدر تجرّب أي تصميم على تقرير حقيقي دون حفظ بإضافة <span class="mono">?design=2</span> لرابط الطباعة.</p>
+</form>
+<script>
+  document.querySelectorAll('.rd-tab').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.rd-tab[data-fam="' + b.dataset.fam + '"]').forEach(function (x) { x.classList.toggle('active', x === b); });
+      document.querySelectorAll('.rd-frame[data-fam="' + b.dataset.fam + '"]').forEach(function (f) {
+        f.src = "{{ url_for('preview_report_design', test_definition_id=0) }}".replace(/0$/, b.dataset.tid) + '?design=' + f.dataset.design;
+      });
+    });
+  });
+</script>
+{% endblock %}

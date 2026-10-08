@@ -1,70 +1,110 @@
 {% extends "reports/base_report.html" %}
 {% block report_body %}
-<div class="report-heading">Coagulation Tests</div>
-
-{# المطلوب 4: عمود Control يظهر فقط لو المريض عنده PT أو PTT ضمن التحاليل
-   المطلوبة فعليًا. لو ماكو أي منهم، يُلغى العمود كليًا (هيدر + خلايا) من
-   Fibrinogen level, Bleeding Time, D.Dimer (وأيضًا PT/PTT نفسهم بديهيًا
-   غير موجودين أصلاً بهذي الحالة) — بدل ما يطلع عمود فاضي بـ "—" بلا فائدة. #}
+{#
+  تقرير التخثر — أربعة ستايلات تُختار من الإدارة ← تصاميم التقارير (أو مؤقتًا
+  بإضافة ?design=1..4 لرابط الطباعة). نفس البيانات والمنطق القديم بالضبط:
+  عمود Control يظهر فقط لو PT أو PTT ضمن التحاليل الفعلية، والصف لا يظهر إلا
+  لو له نتيجة، والمدى الطبيعي كما كان. يخدم تقرير التخثر المجمّع وأي تحليل منفرد
+  (D.Dimer / Fibrinogen / PT+INR / PTT / Bleeding time) بنفس القالب.
+#}
+{# المدى الطبيعي يُقرأ من قاعدة البيانات (Reference Range المحفوظ للتحليل حسب جنس/عمر المريض)،
+   مو من قيمة ثابتة بالقالب. لو ما فيه مدى معرّف للباراميتر يظهر الحقل فاضي. #}
+{% macro R(key) -%}
+{%- set r = ranges.get(key) if ranges else none -%}
+{%- if r and r['range_text'] -%}{%- for ln in r['range_text'].splitlines() -%}{{ ln }}{%- if not loop.last -%}<br>{%- endif -%}{%- endfor -%}
+{%- elif r and r['low'] is not none and r['high'] is not none -%}{{ '%g'|format(r['low']) }} - {{ '%g'|format(r['high']) }}
+{%- elif r and r['low'] is not none -%}&gt; {{ '%g'|format(r['low']) }}
+{%- elif r and r['high'] is not none -%}&lt; {{ '%g'|format(r['high']) }}
+{%- endif -%}
+{%- endmacro %}
+{% set design = report_design('coag') %}
 {% set has_pt_or_ptt = params.get('PT') or params.get('PTT') %}
+{% set coag_rows = [
+  ('PT', 'Prothrombin Time (PT):', 'Sec.', '( 11 - 15 )', 'PT Control'),
+  ('INR', 'INR:', '', '( 0.9 – 1.26 )', none),
+  ('PTT', 'Partial Thromboplastin Time (PTT):', 'Sec.', '( 27 – 40 )', 'PTT Control'),
+  ('Bleeding time', 'Bleeding Time:', 'Minute', '( 2 - 5 )', none),
+  ('Plasma fibrinogen con', 'Plasma Fibrinogen Con:', 'g/L', '( 2 – 4 )', none),
+  ('D. dimer', 'D. Dimer:', 'µg/L', '< 500', none),
+] %}
+<style>
+  .coag-wrap { direction:ltr; }
+  /* 2) جدول بترويسة داكنة وتظليل متناوب */
+  .cg2 { width:100%; border-collapse:collapse; text-align:center; }
+  .cg2 th { background:#14213D; color:#fff; padding:6px 8px; font-size:.95em; }
+  .cg2 td { padding:5px 8px; border-bottom:1px solid #DDE3EA; }
+  .cg2 tr:nth-child(even) td { background:#F3F6FA; }
+  .cg2 td.n { text-align:left; font-weight:700; }
+  .cg2 td.r { font-weight:700; color:#14213D; }
+  /* 3) بلوكات: كل تحليل ببلوك (Style B)، Result/Control بأعمدة والمدى تحتها */
+  .cg3-head, .cg3-main { display:grid; gap:8px; align-items:baseline; }
+  .cg3-head { border-bottom:1.5px solid #26529C; padding-bottom:4px; font-weight:700; text-align:center; }
+  .cg3-head div:first-child, .cg3-name { text-align:left; }
+  .cg3-block { border-bottom:1px dashed #CBD5E1; padding:8px 0; }
+  .cg3-name { font-weight:700; }
+  .cg3-val { text-align:center; white-space:nowrap; }
+  .cg3-val b { color:#1D4ED8; font-size:1.05em; }
+  .cg3-val .u { color:#475569; font-size:.85em; margin-inline-start:4px; }
+  .cg3-ref { margin-top:3px; font-size:.88em; color:#334155; }
+  .cg3-ref b { color:#475569; }
+  /* 4) ملوّن: ترويسة خضراء، أسماء بنفسجية، نتائج برتقالية */
+  .cg4 { width:100%; border-collapse:collapse; text-align:center; }
+  .cg4 th { color:#065F46; border-bottom:2px solid #065F46; padding:5px 8px; }
+  .cg4 td { padding:6px 8px; border-bottom:1px dashed #CBD5E1; }
+  .cg4 td.n { text-align:left; font-weight:700; color:#6D28D9; }
+  .cg4 td.r { font-weight:700; color:#C2410C; font-size:1.05em; }
+  .cg4 td.c { color:#475569; }
+  .cg4 td.g { color:#334155; }
+  .coag-prev { display:block; font-size:.78em; font-weight:400; color:#1D4ED8; }
+</style>
+<div class="report-heading">Coagulation Tests</div>
+<div class="coag-wrap coag-design-{{ design }}">
 
+{% if design == '2' or design == '4' %}
+<table class="{{ 'cg2' if design == '2' else 'cg4' }}">
+  <tr><th style="text-align:left;">Test</th><th>Result</th>{% if has_pt_or_ptt %}<th>Control</th>{% endif %}<th>Unit</th><th>Reference range</th></tr>
+  {% for key, label, unit_def, rng, ctl in coag_rows %}{% if params.get(key) %}
+  <tr>
+    <td class="n">{{ label }}</td>
+    <td class="r">{{ params.get(key, '') }}{% if show_prev_values and previous_values.get(key) %}<span class="coag-prev">Prev: {{ previous_values.get(key) }}</span>{% endif %}</td>
+    {% if has_pt_or_ptt %}<td class="c">{% if ctl %}{{ params.get(ctl, '') }}{% else %}—{% endif %}</td>{% endif %}
+    <td class="c">{{ units.get(key) or unit_def }}</td>
+    <td class="g">{{ R(key) }}</td>
+  </tr>
+  {% endif %}{% endfor %}
+</table>
+
+{% elif design == '3' %}
+{% set cols = '1fr 150px 170px' if has_pt_or_ptt else '1fr 190px' %}
+<div class="cg3-head" style="grid-template-columns:{{ cols }};"><div>Test Name</div><div>Result</div>{% if has_pt_or_ptt %}<div>Control</div>{% endif %}</div>
+{% for key, label, unit_def, rng, ctl in coag_rows %}{% if params.get(key) %}
+{% set u = units.get(key) or unit_def %}
+<div class="cg3-block">
+  <div class="cg3-main" style="grid-template-columns:{{ cols }};">
+    <div class="cg3-name">{{ label|replace(':','') }}</div>
+    <div class="cg3-val"><b>{{ params.get(key, '') }}</b>{% if u %}<span class="u">{{ u }}</span>{% endif %}</div>
+    {% if has_pt_or_ptt %}<div class="cg3-val">{% if ctl and params.get(ctl) %}<b>{{ params.get(ctl) }}</b>{% if u %}<span class="u">{{ u }}</span>{% endif %}{% else %}—{% endif %}</div>{% endif %}
+  </div>
+  <div class="cg3-ref"><b>Reference range</b> {{ R(key) }}</div>
+  {% if show_prev_values and previous_values.get(key) %}<div class="coag-prev">Previous: {{ previous_values.get(key) }}</div>{% endif %}
+</div>
+{% endif %}{% endfor %}
+
+{% else %}
 <table class="data-table" style="direction:ltr; text-align:center;">
   <tr>
     <th style="text-align:left;">Test</th><th>Result</th>{% if has_pt_or_ptt %}<th>Control</th>{% endif %}<th>Unit</th><th>Reference range</th>
   </tr>
-  {% if params.get('PT') %}
+  {% for key, label, unit_def, rng, ctl in coag_rows %}{% if params.get(key) %}
   <tr>
-    <td class="field-name" style="text-align:left;">Prothrombin Time (PT):</td>
-    <td class="pct-val">{{ params.get('PT', '') }}{% if show_prev_values and previous_values.get('PT') %}<br><span class="prev-inline">Prev: {{ previous_values.get('PT') }}</span>{% endif %}</td>
-    {% if has_pt_or_ptt %}<td class="pct-val">{{ params.get('PT Control', '') }}</td>{% endif %}
-    <td class="unit-val">{{ units.get('PT') or 'Sec.' }}</td>
-    <td>( 11 - 15 )</td>
+    <td class="field-name" style="text-align:left;">{{ label }}</td>
+    <td class="pct-val">{{ params.get(key, '') }}{% if show_prev_values and previous_values.get(key) %}<br><span class="prev-inline">Prev: {{ previous_values.get(key) }}</span>{% endif %}</td>
+    {% if has_pt_or_ptt %}<td class="pct-val">{% if ctl %}{{ params.get(ctl, '') }}{% else %}—{% endif %}</td>{% endif %}
+    <td class="unit-val">{{ units.get(key) or unit_def }}</td>
+    <td>{{ R(key) }}</td>
   </tr>
-  {% endif %}
-  {% if params.get('INR') %}
-  <tr>
-    <td class="field-name" style="text-align:left;">INR:</td>
-    <td class="pct-val">{{ params.get('INR', '') }}{% if show_prev_values and previous_values.get('INR') %}<br><span class="prev-inline">Prev: {{ previous_values.get('INR') }}</span>{% endif %}</td>
-    {% if has_pt_or_ptt %}<td class="pct-val">—</td>{% endif %}
-    <td class="unit-val">{{ units.get('INR') or '' }}</td>
-    <td>( 0.9 – 1.26 )</td>
-  </tr>
-  {% endif %}
-  {% if params.get('PTT') %}
-  <tr>
-    <td class="field-name" style="text-align:left;">Partial Thromboplastin Time (PTT):</td>
-    <td class="pct-val">{{ params.get('PTT', '') }}{% if show_prev_values and previous_values.get('PTT') %}<br><span class="prev-inline">Prev: {{ previous_values.get('PTT') }}</span>{% endif %}</td>
-    {% if has_pt_or_ptt %}<td class="pct-val">{{ params.get('PTT Control', '') }}</td>{% endif %}
-    <td class="unit-val">{{ units.get('PTT') or 'Sec.' }}</td>
-    <td>( 27 – 40 )</td>
-  </tr>
-  {% endif %}
-  {% if params.get('Bleeding time') %}
-  <tr>
-    <td class="field-name" style="text-align:left;">Bleeding Time:</td>
-    <td class="pct-val">{{ params.get('Bleeding time', '') }}{% if show_prev_values and previous_values.get('Bleeding time') %}<br><span class="prev-inline">Prev: {{ previous_values.get('Bleeding time') }}</span>{% endif %}</td>
-    {% if has_pt_or_ptt %}<td class="pct-val">—</td>{% endif %}
-    <td class="unit-val">{{ units.get('Bleeding time') or 'Minute' }}</td>
-    <td>( 2 - 5 )</td>
-  </tr>
-  {% endif %}
-  {% if params.get('Plasma fibrinogen con') %}
-  <tr>
-    <td class="field-name" style="text-align:left;">Plasma Fibrinogen Con:</td>
-    <td class="pct-val">{{ params.get('Plasma fibrinogen con', '') }}{% if show_prev_values and previous_values.get('Plasma fibrinogen con') %}<br><span class="prev-inline">Prev: {{ previous_values.get('Plasma fibrinogen con') }}</span>{% endif %}</td>
-    {% if has_pt_or_ptt %}<td class="pct-val">—</td>{% endif %}
-    <td class="unit-val">{{ units.get('Plasma fibrinogen con') or 'g/L' }}</td>
-    <td>( 2 – 4 )</td>
-  </tr>
-  {% endif %}
-  {% if params.get('D. dimer') %}
-  <tr>
-    <td class="field-name" style="text-align:left;">D. Dimer:</td>
-    <td class="pct-val">{{ params.get('D. dimer', '') }}{% if show_prev_values and previous_values.get('D. dimer') %}<br><span class="prev-inline">Prev: {{ previous_values.get('D. dimer') }}</span>{% endif %}</td>
-    {% if has_pt_or_ptt %}<td class="pct-val">—</td>{% endif %}
-    <td class="unit-val">{{ units.get('D. dimer') or 'µg/L' }}</td>
-    <td>&lt; 500</td>
-  </tr>
-  {% endif %}
+  {% endif %}{% endfor %}
 </table>
+{% endif %}
+</div>
 {% endblock %}

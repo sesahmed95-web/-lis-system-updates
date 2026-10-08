@@ -2512,7 +2512,7 @@ THEME_PRESETS = {
 # تحاليل ما تدخل التقرير الشامل (تُطابَق بكود التحليل أو اسمه، حروف صغيرة/كبيرة سواء)
 MERGED_EXCLUDE_DEFAULT = [
     "cbc", "blood film", "retic", "bma", "bmp", "bone marrow", "fluid",
-    "hb.h", "hb h", "hbh", "electroph",
+    "hb.h", "hb h", "hbh", "electroph", "sickl",
 ]
 
 

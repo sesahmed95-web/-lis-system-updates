@@ -23,6 +23,9 @@ __pycache__/
 # نسخ احتياطية يسويها البرنامج نفسه
 *.bak
 backups/
+
+# ملفات فيها مفاتيح/توكنات — لا تُرفع أبداً
 local_config.py
+*.env
 .env
 portal_public.db
