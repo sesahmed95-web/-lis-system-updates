@@ -6022,6 +6022,49 @@ def _fmt_hhmm(iso):
         return iso or ""
 
 
+def _coag_table_mode(db):
+    """تقارير التخثر المنفردة (D-Dimer / Fibrinogen / PT&INR / PTT / Bleeding time): هل تطبع
+    بأسلوب جدول النتائج (نفس الكيمياء والهرمونات: Style A/B + الألوان + الملاحظات + النتائج السابقة)؟
+    الافتراضي نعم. الخيار "1..4" القديم (قالب coagulation.html) يبقى متاحًا من بطاقة التصاميم.
+    ?design=table|1..4 بالرابط يغلب الإعداد المحفوظ (معاينة مؤقتة)."""
+    try:
+        q = request.args.get("design")
+        if q == "table":
+            return True
+        if q in ("1", "2", "3", "4"):
+            return False
+    except RuntimeError:
+        pass
+    return get_setting(db, "report_design_coag", "table") == "table"
+
+
+def _coag_view(view, is_coag):
+    """التخثر بأسلوب B Matching Image: عمود SI Units يُستبدل بعمود Normal Range (لا وحدات SI بالتخثر)."""
+    if view is not None and is_coag:
+        view["range_col3"] = True
+    return view
+
+
+def _coag_fold_control(rows):
+    """يدمج قيمة "PT Control"/"PTT Control" كعمود Control مع صف PT/PTT نفسه، ولا يطبعها كصف مستقل.
+    Control يظهر فقط لو PT أو PTT موجود (INR/BT/Fibrinogen/D-Dimer بلا Control)."""
+    ctl = {}
+    for r in rows:
+        nm = (r.get("param_name") or r.get("name") or "").strip()
+        if nm.lower().endswith("control"):
+            ctl[nm[:-7].strip().lower()] = r.get("result")
+    out = []
+    for r in rows:
+        nm = (r.get("param_name") or r.get("name") or "").strip()
+        if nm.lower().endswith("control"):
+            continue
+        key = nm.lower()
+        if key in ("pt", "ptt") and ctl.get(key) not in (None, ""):
+            r["control"] = ctl[key]
+        out.append(r)
+    return out
+
+
 def _auto_report_template(db, test_definition_id, test_name):
     """تصميم افتراضي تلقائي لتحليل ما له صف report_templates: يعرض كل باراميترات التحليل
     (بترتيبها) بالستايل المختار من "تصميم التقارير". هكذا تحليل واحد (مثل FBS) تكتب نتيجته
@@ -6074,6 +6117,9 @@ def _print_report_impl(order_test_id):
         db.commit()
 
     template_name = REPORT_TEMPLATE_MAP.get(ot["test_code"])
+    _coag_table = (ot["test_code"] == "COAG" and _coag_table_mode(db))
+    if _coag_table:
+        template_name = None
 
     sibling_ot = None
     if ot["test_code"] in BF_RETIC_LINK:
@@ -6326,6 +6372,7 @@ def _print_report_impl(order_test_id):
             _ex, _note, _nkey = _row_extras_and_note(row_ctx, ot["test_definition_id"], pname)
             _lbl = resolve_label(_prow, rd.get("label"))
             custom_rows.append({
+                "param_name": pname,
                 "name": _lbl, "value2": format_unit2_value(result_val, unit2_factor_by_name.get(pname)),
                 "range2": normal_range2, "show_blank": True,
                 "history": _history_with_unit2(hist_all.get(pname), unit2_factor_by_name.get(pname) if unit2_by_name.get(pname) else None),
@@ -6414,7 +6461,11 @@ def _print_report_impl(order_test_id):
                 })
                 _auto_x += (_s["default_width"] or 140) + 20
 
-    if auto_template:
+    if _coag_table and custom_rows is not None:
+        # التخثر بأسلوب الجدول: Control يندمج مع PT/PTT (لا يُطبع كصف مستقل)
+        _hasres = [_r for _r in custom_rows if _r["result"] not in (None, "")]
+        custom_rows = _coag_fold_control(_hasres)
+    elif auto_template:
         # تصميم تلقائي: نعرض فقط الباراميترات اللي انكتبت لها نتيجة حالية
         custom_rows = [_r for _r in custom_rows if _r["result"] not in (None, "")]
 
@@ -6428,8 +6479,8 @@ def _print_report_impl(order_test_id):
         # الأساليب الجديدة (Style A/B + قوائم الستايل/الألوان + النتائج السابقة + ملاحظات الصفوف) تُمرَّر فقط
         # للقالب الجديد custom_v2. باقي التقارير (GUE/GSE/SFA/التخثر/CBC/Blood film/BMA/...) تبقى بدون أي
         # عنصر إضافي بشريط الطباعة.
-        layout_view=(build_layout_view(db, style_override=request.args.get("style"), cfg=layout_cfg,
-                                       theme_override=request.args.get("theme"))
+        layout_view=(_coag_view(build_layout_view(db, style_override=request.args.get("style"), cfg=layout_cfg,
+                                                  theme_override=request.args.get("theme")), _coag_table)
                      if template_name == "reports/custom_v2.html" else None),
         note_visit_id=(ot["visit_id"] if template_name == "reports/custom_v2.html" else None),
         prev_toggle_available=(prev_toggle_available if template_name == "reports/custom_v2.html" else False),
@@ -8757,7 +8808,7 @@ def _report_designs_context(db):
     for key, code in (("coag", "COAG"), ("gue", "GUE"), ("gse", "GSE"), ("sfa", "SFA")):
         r = db.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
         ids[key] = r["id"] if r else None
-    cur = {fam: get_setting(db, f"report_design_{fam}", "1") for fam in ("coag", "exam")}
+    cur = {fam: get_setting(db, f"report_design_{fam}", "table" if fam == "coag" else "1") for fam in ("coag", "exam")}
     return {"design_ids": ids, "design_cur": cur}
 
 
@@ -8770,7 +8821,7 @@ def report_designs():
     if request.method == "POST":
         for fam in ("coag", "exam"):
             v = request.form.get(fam, "")
-            if v in ("1", "2", "3", "4"):
+            if v in ("1", "2", "3", "4") or (fam == "coag" and v == "table"):
                 set_setting(db, f"report_design_{fam}", v)
         db.commit()
         flash("تم حفظ التصاميم المختارة.")
@@ -10299,8 +10350,11 @@ def report_designer():
             "test": test,
             "has_builtin": has_builtin,
             "has_custom": bool(custom),
-            "needs_design": not has_builtin and not custom,
+            "needs_design": False,
+            "auto_ok": (not has_builtin and not custom and bool(db.execute(
+                "SELECT 1 FROM test_parameters WHERE test_definition_id=? LIMIT 1", (test["id"],)).fetchone())),
         })
+        tests_status[-1]["needs_design"] = not has_builtin and not custom and not tests_status[-1]["auto_ok"]
 
     selected_id = request.args.get("test_definition_id", type=int)
     selected_test = None
@@ -10410,11 +10464,17 @@ def _preview_report_design_impl(test_definition_id):
         return "Not found", 404
 
     template_name = REPORT_TEMPLATE_MAP.get(test["code"])
+    _coag_table = (test["code"] == "COAG" and _coag_table_mode(db))
+    if _coag_table:
+        template_name = None
     custom_template = None
     if not template_name and test["report_style"] == "generic_exam":
         template_name = "reports/generic_exam.html"
     if not template_name:
         custom_template = get_report_template(db, test_definition_id)
+        if not custom_template:
+            # بلا قالب محفوظ: نعاين التصميم التلقائي (نفس ما ستطبعه الطباعة الفعلية بأسلوب جدول النتائج)
+            custom_template = _auto_report_template(db, test_definition_id, test["name"])
         if not custom_template:
             flash("لا يوجد تصميم لهذا التحليل بعد لتتم معاينته. صممه أولاً بالأسفل.")
             return redirect(url_for("report_designer", test_definition_id=test_definition_id))
@@ -10462,6 +10522,7 @@ def _preview_report_design_impl(test_definition_id):
         custom_rows_align = custom_template["rows_align"] or "right"
         row_defs = json.loads(custom_template["rows_json"] or "[]")
         custom_rows = [{
+            "param_name": rd.get("param_name", ""),
             "name": resolve_label(params_by_name_row.get(rd.get("param_name", "")), rd.get("label")),
             "history": [], "extras": {}, "note": None, "note_key": None, "show_blank": True,
             "value2": None, "range2": None,
@@ -10494,6 +10555,27 @@ def _preview_report_design_impl(test_definition_id):
     if test["code"] == "COAG":
         # التخثر: المعاينة تعرض المدى الحقيقي المحفوظ (مريض افتراضي ذكر 30 سنة) بدل "— إلى —"
         ranges = {p["name"]: find_reference_range(db, p["id"], "Male", 30, "Years") for p in parameters}
+        if _coag_table and custom_rows is not None:
+            # أسلوب الجدول: قيم نموذجية + المدى الحقيقي + Control مدموج مع PT/PTT (بيانات وهمية للتوضيح)
+            _coag_samples = {"PT": "13.2", "PT Control": "12.8", "INR": "1.05", "PTT": "31", "PTT Control": "30",
+                             "Bleeding time": "3", "Plasma fibrinogen con": "320", "D. dimer": "250"}
+            for _r in custom_rows:
+                _pn = _r["param_name"]
+                _r["result"] = _coag_samples.get(_pn, "—")
+                _rg = ranges.get(_pn)
+                _txt = ""
+                if _rg:
+                    if _rg["range_text"]:
+                        _txt = _rg["range_text"]
+                    elif _rg["low"] is not None and _rg["high"] is not None:
+                        _txt = f"{_rg['low']} - {_rg['high']}"
+                    elif _rg["low"] is not None:
+                        _txt = f"> {_rg['low']}"
+                    elif _rg["high"] is not None:
+                        _txt = f"< {_rg['high']}"
+                _r["normal_range"] = _txt
+                _r["range_tiers"] = parse_range_tiers(_rg["range_text"]) if (_rg and _rg["range_text"]) else ([{"label": None, "value": _txt}] if _txt else [])
+            custom_rows = _coag_fold_control(custom_rows)
 
     # تقارير الفحص GUE/GSE/SFA: المعاينة بنفس شكل المعاينة المعتمدة (preview_3) —
     # قيم نموذجية واقعية + المدى الطبيعي الحقيقي المحفوظ (مريض نموذجي ذكر 34 سنة)
@@ -10529,7 +10611,7 @@ def _preview_report_design_impl(test_definition_id):
         ot={"test_name": test["name"], "test_code": test["code"]}, params=params, ranges=ranges, units=units_by_name, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
-        layout_view=build_layout_view(db), note_visit_id=None,
+        layout_view=_coag_view(build_layout_view(db, style_override=request.args.get("style")), _coag_table), note_visit_id=None,
         show_prev_values=show_prev_values, previous_visit_date=None, previous_values={},
         repeat_header_on_print=department_shows_previous_values(test["department"]),
         logo_url=logo_url, from_other_lab=False, font_size=14 if test["code"] == "CBC" else 16,

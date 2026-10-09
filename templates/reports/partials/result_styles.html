@@ -278,7 +278,7 @@
     {% for e in ex.test %}<div>{{ e.title }}</div>{% endfor %}
     <div>{{ L.conv }}</div>
     {% for e in ex.conv %}<div>{{ e.title }}</div>{% endfor %}
-    <div>{{ L.si }}</div>
+    <div>{{ L.normal_range if view.range_col3 else L.si }}</div>
     {% for e in ex.si %}<div>{{ e.title }}</div>{% endfor %}
   </div>
   {% for row in rows %}
@@ -292,13 +292,17 @@
         <div class="rs-unit">{{ row.unit or '' }}</div>
       </div>
       {% for e in ex.conv %}<div class="rs-bg-extra">{{ (row.extras or {}).get(e.id, '') }}</div>{% endfor %}
+      {% if view.range_col3 %}
+      <div class="rs-bg-rng">{% for t in row.range_tiers %}<div>{% if t.label %}<b>{{ t.label }}</b>: {% endif %}{{ t.value }}</div>{% endfor %}</div>
+      {% else %}
       <div class="rs-bg-val rs-cur">
         <div>{% if row.value2 not in (none, '') %}<span class="rs-num">{{ row.value2 }}</span>{% endif %}</div>
         <div class="rs-unit">{{ row.unit2 or '' }}</div>
       </div>
+      {% endif %}
       {% for e in ex.si %}<div class="rs-bg-extra">{{ (row.extras or {}).get(e.id, '') }}</div>{% endfor %}
     </div>
-    {% if row.range_tiers %}
+    {% if row.range_tiers and not view.range_col3 %}
       {% if row.range_tiers|length == 1 and not row.range_tiers[0].label %}
       <div class="rs-bg-row" style="{{ gt }}">
         <div class="rs-bg-lab">{{ L.normal_range }}</div>

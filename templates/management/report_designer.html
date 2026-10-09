@@ -2,6 +2,59 @@
 {% block page_title %}مصمم التقارير{% endblock %}
 {% block content %}
 
+{# ====== لوحة تصاميم التخثر (1..4) وGUE/GSE/SFA (1..4) — داخل مصمم التقارير ====== #}
+<details id="designs" open class="card" style="margin-bottom:14px; border:2px solid #26529C; background:#F0F6FF; padding:0;">
+  <summary style="cursor:pointer; padding:12px 16px; font-weight:700; font-size:1.05em;">🎨 تصاميم الطباعة: تقارير التخثر (4 أساليب مع عمود Control) وتقارير GUE / GSE / SFA (4 تصاميم) — اضغط للفتح والمعاينة</summary>
+  <div style="padding:6px 14px 14px 14px;">
+<style>
+  .rd-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; margin-bottom:10px; }
+  .rd-card { border:2px solid var(--border); border-radius:10px; padding:8px; background:#fff; cursor:pointer; display:block; }
+  .rd-card:has(input:checked) { border-color:var(--primary); box-shadow:0 0 0 3px rgba(32,80,114,.18); }
+  .rd-card b { display:block; margin-bottom:6px; }
+  .rd-frame { width:1000px; height:620px; border:1px solid #E2E8F0; transform:scale(.3); transform-origin:0 0; pointer-events:none; background:#fff; }
+  .rd-wrap { width:300px; height:190px; overflow:hidden; }
+  .rd-tabs { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+</style>
+<form method="POST" action="{{ url_for('report_designs') }}">
+  {% set groups = [
+    ('coag', 'تقارير التخثر (مجمّعة + كل تحليل منفرد، مع عمود Control لـ PT/PTT)', [('coag', design_ids.coag)]),
+    ('exam', 'تقارير GUE / GSE / SFA', [('GUE', design_ids.gue), ('GSE', design_ids.gse), ('SFA', design_ids.sfa)]),
+  ] %}
+  {% for fam, title, tests in groups %}
+  <div class="card">
+    <h3>{{ title }}</h3>
+    {% if tests|length > 1 %}<div class="rd-tabs">{% for nm, tid in tests %}<button type="button" class="pill-btn rd-tab{{ ' active' if loop.first }}" data-fam="{{ fam }}" data-tid="{{ tid }}">{{ nm }}</button>{% endfor %}</div>{% endif %}
+    <div class="rd-grid">
+      {% for n in (['table','1','2','3','4'] if fam == 'coag' else ['1','2','3','4']) %}
+      <label class="rd-card">
+        <b><input type="radio" name="{{ fam }}" value="{{ n }}" {{ 'checked' if design_cur[fam] == n }}> {% if n == 'table' %}أسلوب جدول النتائج — نفس الكيمياء (Style A/B + ألوان + ملاحظات + نتائج سابقة){% else %}تصميم {{ n }}{% endif %}{% if fam == 'exam' %}{{ {'1': ' — الكلاسيكي', '2': ' — جدول رسمي', '3': ' — إطار', '4': ' — إكلينيكي ملوّن'}.get(n, '') }}{% else %}{{ ' — الكلاسيكي' if n == '1' }}{% endif %}</b>
+        <div class="rd-wrap"><iframe class="rd-frame" data-fam="{{ fam }}" data-design="{{ n }}" loading="lazy"
+          src="{{ url_for('preview_report_design', test_definition_id=tests[0][1]) }}?design={{ n }}"></iframe></div>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+  <button class="btn" type="submit">💾 حفظ الاختيار</button>
+  <p class="muted">المعاينات بيانات وهمية للتوضيح. تقدر تجرّب أي تصميم على تقرير حقيقي دون حفظ بإضافة <span class="mono">?design=2</span> لرابط الطباعة.</p>
+</form>
+<script>
+  document.querySelectorAll('.rd-tab').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.rd-tab[data-fam="' + b.dataset.fam + '"]').forEach(function (x) { x.classList.toggle('active', x === b); });
+      document.querySelectorAll('.rd-frame[data-fam="' + b.dataset.fam + '"]').forEach(function (f) {
+        f.src = "{{ url_for('preview_report_design', test_definition_id=0) }}".replace(/0$/, b.dataset.tid) + '?design=' + f.dataset.design;
+      });
+    });
+  });
+</script>
+  </div>
+</details>
+<script>
+  // الرابط ...#designs (بعد الحفظ) يفتح اللوحة تلقائيًا
+  (function () { var d = document.getElementById('designs'); if (d && location.hash === '#designs') { d.open = true; d.scrollIntoView(); } })();
+</script>
+
 {# ====================== أسلوب جدول النتائج (عام لكل التقارير) ====================== #}
 {% set rl = result_layout %}
 <div class="card" id="resultStyleCard" style="margin-bottom:18px;">
@@ -569,12 +622,13 @@
         <td>
           {% if row.has_builtin %}<span>✅ تصميم مدمج جاهز</span>
           {% elif row.has_custom %}<span>🟢 مصمم من الأدمن</span>
-          {% else %}<span style="color:#C0392B;">⚠️ يحتاج تصميم</span>
+          {% elif row.auto_ok %}<span style="color:#15803D;">🟢 تلقائي — يتبع أسلوب جدول النتائج (A/B) المختار بالأعلى</span>
+          {% else %}<span style="color:#C0392B;">⚠️ يحتاج تصميم (بلا باراميترات)</span>
           {% endif %}
         </td>
         <td>
           <a class="btn" style="padding:4px 10px;" href="{{ url_for('report_designer', test_definition_id=row.test['id']) }}#designCard">فتح</a>
-          {% if row.has_builtin or row.has_custom %}
+          {% if row.has_builtin or row.has_custom or row.auto_ok %}
           <a class="btn" style="padding:4px 10px;" href="{{ url_for('preview_report_design', test_definition_id=row.test['id']) }}">👁️ معاينة</a>
           {% endif %}
         </td>

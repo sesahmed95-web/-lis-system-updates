@@ -205,7 +205,6 @@
         <a class="nav-link {{ 'active' if request.path == url_for('stamps_manage') else '' }}" href="{{ url_for('stamps_manage') }}">🖋️ الأختام والتواقيع</a>
         <a class="nav-link {{ 'active' if request.path == url_for('app_settings') else '' }}" href="{{ url_for('app_settings') }}">⚙️ {{ t('settings') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('dashboard_look') else '' }}" href="{{ url_for('dashboard_look') }}">🎨 مظهر الشاشة الرئيسية</a>
-        <a class="nav-link {{ 'active' if request.path == url_for('report_designs') else '' }}" href="{{ url_for('report_designs') }}">🎨 ستايلات الطباعة (تخثر / GUE·GSE·SFA)</a>
         <a class="nav-link {{ 'active' if request.path == url_for('backup_center') else '' }}" href="{{ url_for('backup_center') }}">💾 {{ 'نسخ احتياطي' if lang=='ar' else 'Backup' }}</a>
         </div>
       </div>
