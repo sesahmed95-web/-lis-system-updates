@@ -593,6 +593,48 @@ def format_age_display(age, age_unit):
 # Python لكل صف — نفس الدالة المستخدمة بجانب custom_rows/combined_panel.
 app.jinja_env.globals["parse_range_tiers"] = parse_range_tiers
 
+# عرض المدى الطبيعي بتقارير الفحص (GUE/GSE/SFA) مثل المعاينة المعتمدة:
+# أرقام موحّدة (1.005 - 1.030 / 5.0 - 8.0 / 15 - 30) + إلحاق وحدة /HPF وmL وmin
+# بالمدى الرقمي فقط. القيم تبقى من قاعدة البيانات (Reference Range) كما هي.
+_RANGE_UNIT_SUFFIX = {"/HPF", "mL", "min"}
+
+
+def _fmt_num_pair(*vals):
+    def decs(v):
+        s = repr(float(v))
+        frac = s.split(".")[1].rstrip("0") if "." in s else ""
+        return len(frac)
+    nums = [float(v) for v in vals]
+    d = max(decs(v) for v in nums)
+    if d == 0 and max(abs(v) for v in nums) >= 10:
+        return [str(int(v)) for v in nums]
+    d = max(d, 1)
+    return [f"{v:.{d}f}" for v in nums]
+
+
+def exam_range_display(range_row, unit=None):
+    if not range_row:
+        return ""
+    txt = (range_row["range_text"] or "").strip() if "range_text" in range_row.keys() else ""
+    low, high = range_row["low"], range_row["high"]
+    if txt:
+        out = txt
+    elif low is not None and high is not None:
+        a, b = _fmt_num_pair(low, high)
+        out = f"{a} - {b}"
+    elif low is not None:
+        out = "> " + _fmt_num_pair(low)[0]
+    elif high is not None:
+        out = "< " + _fmt_num_pair(high)[0]
+    else:
+        return ""
+    if unit and unit.strip() in _RANGE_UNIT_SUFFIX and "\n" not in out and re.fullmatch(r"[\d.\s\-–<>≥≤]+", out):
+        out = f"{out} {unit.strip()}"
+    return out
+
+
+app.jinja_env.globals["exam_range_display"] = exam_range_display
+
 
 # ألوان تلوين رقم النتيجة تلقائيًا حسب flag (المطلوب 2) — المستخدم صراحة
 # رفض أي قاعدة ألوان ثابتة بالكود وطلب يختار هو اللونين بنفسه من الإعدادات
@@ -6383,9 +6425,15 @@ def _print_report_impl(order_test_id):
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         show_prev_values=show_prev_values, previous_visit_date=previous_visit_date,
         previous_values=previous_values, repeat_header_on_print=repeat_header_on_print,
-        layout_view=build_layout_view(db, style_override=request.args.get("style"), cfg=layout_cfg,
-                                      theme_override=request.args.get("theme")), note_visit_id=ot["visit_id"],
-        prev_toggle_available=prev_toggle_available, prev_toggle_checked=result_show_prev,
+        # الأساليب الجديدة (Style A/B + قوائم الستايل/الألوان + النتائج السابقة + ملاحظات الصفوف) تُمرَّر فقط
+        # للقالب الجديد custom_v2. باقي التقارير (GUE/GSE/SFA/التخثر/CBC/Blood film/BMA/...) تبقى بدون أي
+        # عنصر إضافي بشريط الطباعة.
+        layout_view=(build_layout_view(db, style_override=request.args.get("style"), cfg=layout_cfg,
+                                       theme_override=request.args.get("theme"))
+                     if template_name == "reports/custom_v2.html" else None),
+        note_visit_id=(ot["visit_id"] if template_name == "reports/custom_v2.html" else None),
+        prev_toggle_available=(prev_toggle_available if template_name == "reports/custom_v2.html" else False),
+        prev_toggle_checked=result_show_prev,
         logo_url=logo_url, from_other_lab=from_other_lab, font_size=font_size,
         show_exam_signature=show_exam_signature,
         hide_signature_box=bool(ot["hide_signature_box"]),

@@ -145,9 +145,9 @@
     letter-spacing: 0.3px;
   }
   .result-row .rcolon { color: #1a1a1a; }
-  .result-row .rval { color: #1F3B7A; font-weight: 600; }
+  .result-row .rval { color: #1F3B7A; font-weight: 400; }
   .result-row .runit { color: #1a1a1a; font-size: 0.85em; margin-inline-start: 4px; font-weight: normal; }
-  .result-row .rnorm { color: #1F3B7A; font-weight: 600; }
+  .result-row .rnorm { color: #1F3B7A; font-weight: 400; }
   /* ===== إصلاح تراكب النتيجة مع المدى الطبيعي (اكتُشف بمعاينة حقيقية) =====
      العمود الأول (18px) محجوز لمقبض السحب .row-drag-handle، لكنه display:none
      خارج وضع التعديل وبالطباعة -- فتنزاح كل الأعمدة خطوة: الاسم يدخل عمود
@@ -163,14 +163,13 @@
   .exam-design-2 .result-row { border-bottom:1px solid #DDE3EA; padding:5px 10px; }
   .exam-design-2 .exam-section .result-row:nth-child(4n+2) { background:#F3F6FA; }
   .exam-design-2 .result-row .rname { font-weight:600; }
-  /* 3) مضغوط بعمودين: يوفّر ورق، مناسب لقوائم طويلة (SFA/GUE) */
-  .exam-design-3 .exam-section { column-count:2; column-gap:30px; }
-  .exam-design-3 .section-title { column-span:all; }
-  .exam-design-3 .result-row { break-inside:avoid; position:relative; font-size:.95em; }
-  .exam-design-3 .report-page:not(.exam-editing) .result-row { grid-template-columns:minmax(0,1fr) 10px auto; row-gap:0; }
-  .exam-design-3 .result-row .rnorm { grid-column:1 / -1; font-size:.78em; color:#64748B; font-weight:500; }
-  .exam-design-3 .result-row .row-tools { position:absolute; top:0; inset-inline-end:0; }
-  .exam-design-3 .inline-note { break-inside:avoid; }
+  /* 3) إطار: كل قسم داخل صندوق بإطار وعنوان فاتح — صفوف بسطر واحد (الاسم : النتيجة + الوحدة : المدى)
+     بنفس ترتيب التصميم الكلاسيكي. (التصميم القديم بعمودين والمدى تحت الاسم انشال.) */
+  .exam-design-3 .exam-section { border:1px solid #94A3B8; border-radius:4px; margin-top:14px; overflow:hidden; }
+  .exam-design-3 .section-title { background:#EAF0F8; color:#1E3A8A; border:none; border-bottom:1px solid #94A3B8; margin:0; padding:6px 12px; }
+  .exam-design-3 .result-row { padding:5px 12px; border-bottom:1px solid #E5E9F0; }
+  .exam-design-3 .result-row .rname { font-weight:600; }
+  .exam-design-3 .add-param-row { padding:4px 12px; }
   /* 4) إكلينيكي ملوّن: شريط جانبي لكل قسم، النتيجة بارزة بلون مميّز */
   .exam-design-4 .section-title { border-top:none; background:#F0FDFA; color:#0F766E; border-inline-start:5px solid #0F766E; padding:6px 10px; }
   .exam-design-4 .result-row { border-bottom:1px dashed #CBD5E1; }
@@ -429,18 +428,7 @@
 {% set note_info = note_info or {'text': '', 'label': '', 'visible': false} %}
 {% set style = style or {} %}
 {% set display_name = resolve_label(param, style.get('label')) %}
-{% set normal_range = '' %}
-{% if range_row %}
-  {% if range_row['range_text'] %}
-    {% set normal_range = range_row['range_text'] %}
-  {% elif range_row['low'] is not none and range_row['high'] is not none %}
-    {% set normal_range = (range_row['low']|string) ~ ' - ' ~ (range_row['high']|string) %}
-  {% elif range_row['low'] is not none %}
-    {% set normal_range = '> ' ~ (range_row['low']|string) %}
-  {% elif range_row['high'] is not none %}
-    {% set normal_range = '< ' ~ (range_row['high']|string) %}
-  {% endif %}
-{% endif %}
+{% set normal_range = exam_range_display(range_row, unit) %}
 {# مستويات نص حر متعدد الأسطر (المطلوب 4ب) — نفس منطق custom_rows/combined_panel،
    عبر parse_range_tiers المسجّلة كـ Jinja global بـapp.py. #}
 {% set range_tiers = parse_range_tiers(range_row['range_text']) if (range_row and range_row['range_text']) else ([{'label': none, 'value': normal_range}] if normal_range else []) %}

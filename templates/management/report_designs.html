@@ -23,7 +23,7 @@
     <div class="rd-grid">
       {% for n in ['1','2','3','4'] %}
       <label class="rd-card">
-        <b><input type="radio" name="{{ fam }}" value="{{ n }}" {{ 'checked' if cur[fam] == n }}> تصميم {{ n }}{{ ' — الكلاسيكي' if n == '1' }}</b>
+        <b><input type="radio" name="{{ fam }}" value="{{ n }}" {{ 'checked' if cur[fam] == n }}> تصميم {{ n }}{% if fam == 'exam' %}{{ {'1': ' — الكلاسيكي', '2': ' — جدول رسمي', '3': ' — إطار', '4': ' — إكلينيكي ملوّن'}.get(n, '') }}{% else %}{{ ' — الكلاسيكي' if n == '1' }}{% endif %}</b>
         <div class="rd-wrap"><iframe class="rd-frame" data-fam="{{ fam }}" data-design="{{ n }}" loading="lazy"
           src="{{ url_for('preview_report_design', test_definition_id=tests[0][1]) }}?design={{ n }}"></iframe></div>
       </label>
