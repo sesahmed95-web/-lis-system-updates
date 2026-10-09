@@ -2249,10 +2249,8 @@ def new_visit():
         # رقم العينة: من حقل "Sample No." بصفحة زيارة جديدة (يتسلسل من جديد حسب إعداد التصفير)
         db.execute("UPDATE visits SET sample_no=? WHERE id=?",
                    (resolve_visit_sample_no(db, request.form.get("sample_no")), visit_id))
-        # بوابة النتائج: رمز QR للمريض + دفع حالة "قيد التحضير" للسحابة (بالخلفية، ما يبطّئ الحفظ)
-        if cloud_sync.get_cfg(db)["enabled"]:
-            cloud_sync.ensure_token(db, visit_id)
-            cloud_sync.trigger()
+        # (بوابة النتائج: توليد الرمز + إيقاظ العامل صار بعد db.commit() النهائي تحت —
+        #  قبل كان يوقظ العامل الخلفي والزيارة لسا ما اكتملت فيتنافس معها على قفل القاعدة)
 
         order_cur = db.execute("INSERT INTO orders (visit_id, status, created_at) VALUES (?, 'Open', ?)",
                                 (visit_id, now))
@@ -2342,12 +2340,17 @@ def new_visit():
         )
         invoice_id = inv_cur.lastrowid
 
+        _payment_log_details = None
         if paid_amount > 0:
             db.execute(
                 "INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) VALUES (?, ?, 'Cash', ?, ?)",
                 (invoice_id, paid_amount, session["user_id"], now),
             )
-            log_action("Payment", "invoice", invoice_id, f"amount={paid_amount} (at registration)")
+            # مهم: log_action() تفتح اتصال قاعدة بيانات ثاني مستقل. استدعاؤها هنا (قبل db.commit)
+            # كان يخلي الاتصال الثاني ينتظر قفل الكتابة المحجوز من اتصال هذي الزيارة لين 5 ثواني
+            # ثم يفشل بـ"database is locked" (الزيارة تتأخر 5 ثواني وتطلع خطأ ويضيع الحفظ).
+            # لذلك نؤجل تسجيلها لما بعد الـcommit.
+            _payment_log_details = f"amount={paid_amount} (at registration)"
 
 
         if contact_method != "None":
@@ -2358,8 +2361,17 @@ def new_visit():
             )
 
         db.commit()
+        if _payment_log_details:
+            log_action("Payment", "invoice", invoice_id, _payment_log_details)
         log_action("Create", "visit", visit_id, f"reg#{reg_number}")
         log_action("Collect", "visit", visit_id, f"sample_collected_at_registration reg#{reg_number}")
+        # بوابة النتائج: رمز QR للمريض + دفع حالة "قيد التحضير" للسحابة (بالخلفية) — بعد اكتمال الحفظ
+        try:
+            if cloud_sync.get_cfg(db)["enabled"]:
+                cloud_sync.ensure_token(db, visit_id)
+                cloud_sync.trigger()
+        except Exception:
+            pass  # فشل البوابة ما لازم يفشّل حفظ الزيارة نفسها
         flash(f"Visit #{reg_number} created successfully.")
 
         # موافقة الموظف على دمج نتائج تحاليل قديمة (من آخر زيارة سابقة
@@ -6022,49 +6034,6 @@ def _fmt_hhmm(iso):
         return iso or ""
 
 
-def _coag_table_mode(db):
-    """تقارير التخثر المنفردة (D-Dimer / Fibrinogen / PT&INR / PTT / Bleeding time): هل تطبع
-    بأسلوب جدول النتائج (نفس الكيمياء والهرمونات: Style A/B + الألوان + الملاحظات + النتائج السابقة)؟
-    الافتراضي نعم. الخيار "1..4" القديم (قالب coagulation.html) يبقى متاحًا من بطاقة التصاميم.
-    ?design=table|1..4 بالرابط يغلب الإعداد المحفوظ (معاينة مؤقتة)."""
-    try:
-        q = request.args.get("design")
-        if q == "table":
-            return True
-        if q in ("1", "2", "3", "4"):
-            return False
-    except RuntimeError:
-        pass
-    return get_setting(db, "report_design_coag", "table") == "table"
-
-
-def _coag_view(view, is_coag):
-    """التخثر بأسلوب B Matching Image: عمود SI Units يُستبدل بعمود Normal Range (لا وحدات SI بالتخثر)."""
-    if view is not None and is_coag:
-        view["range_col3"] = True
-    return view
-
-
-def _coag_fold_control(rows):
-    """يدمج قيمة "PT Control"/"PTT Control" كعمود Control مع صف PT/PTT نفسه، ولا يطبعها كصف مستقل.
-    Control يظهر فقط لو PT أو PTT موجود (INR/BT/Fibrinogen/D-Dimer بلا Control)."""
-    ctl = {}
-    for r in rows:
-        nm = (r.get("param_name") or r.get("name") or "").strip()
-        if nm.lower().endswith("control"):
-            ctl[nm[:-7].strip().lower()] = r.get("result")
-    out = []
-    for r in rows:
-        nm = (r.get("param_name") or r.get("name") or "").strip()
-        if nm.lower().endswith("control"):
-            continue
-        key = nm.lower()
-        if key in ("pt", "ptt") and ctl.get(key) not in (None, ""):
-            r["control"] = ctl[key]
-        out.append(r)
-    return out
-
-
 def _auto_report_template(db, test_definition_id, test_name):
     """تصميم افتراضي تلقائي لتحليل ما له صف report_templates: يعرض كل باراميترات التحليل
     (بترتيبها) بالستايل المختار من "تصميم التقارير". هكذا تحليل واحد (مثل FBS) تكتب نتيجته
@@ -6117,9 +6086,6 @@ def _print_report_impl(order_test_id):
         db.commit()
 
     template_name = REPORT_TEMPLATE_MAP.get(ot["test_code"])
-    _coag_table = (ot["test_code"] == "COAG" and _coag_table_mode(db))
-    if _coag_table:
-        template_name = None
 
     sibling_ot = None
     if ot["test_code"] in BF_RETIC_LINK:
@@ -6372,7 +6338,6 @@ def _print_report_impl(order_test_id):
             _ex, _note, _nkey = _row_extras_and_note(row_ctx, ot["test_definition_id"], pname)
             _lbl = resolve_label(_prow, rd.get("label"))
             custom_rows.append({
-                "param_name": pname,
                 "name": _lbl, "value2": format_unit2_value(result_val, unit2_factor_by_name.get(pname)),
                 "range2": normal_range2, "show_blank": True,
                 "history": _history_with_unit2(hist_all.get(pname), unit2_factor_by_name.get(pname) if unit2_by_name.get(pname) else None),
@@ -6461,11 +6426,7 @@ def _print_report_impl(order_test_id):
                 })
                 _auto_x += (_s["default_width"] or 140) + 20
 
-    if _coag_table and custom_rows is not None:
-        # التخثر بأسلوب الجدول: Control يندمج مع PT/PTT (لا يُطبع كصف مستقل)
-        _hasres = [_r for _r in custom_rows if _r["result"] not in (None, "")]
-        custom_rows = _coag_fold_control(_hasres)
-    elif auto_template:
+    if auto_template:
         # تصميم تلقائي: نعرض فقط الباراميترات اللي انكتبت لها نتيجة حالية
         custom_rows = [_r for _r in custom_rows if _r["result"] not in (None, "")]
 
@@ -6479,8 +6440,8 @@ def _print_report_impl(order_test_id):
         # الأساليب الجديدة (Style A/B + قوائم الستايل/الألوان + النتائج السابقة + ملاحظات الصفوف) تُمرَّر فقط
         # للقالب الجديد custom_v2. باقي التقارير (GUE/GSE/SFA/التخثر/CBC/Blood film/BMA/...) تبقى بدون أي
         # عنصر إضافي بشريط الطباعة.
-        layout_view=(_coag_view(build_layout_view(db, style_override=request.args.get("style"), cfg=layout_cfg,
-                                                  theme_override=request.args.get("theme")), _coag_table)
+        layout_view=(build_layout_view(db, style_override=request.args.get("style"), cfg=layout_cfg,
+                                       theme_override=request.args.get("theme"))
                      if template_name == "reports/custom_v2.html" else None),
         note_visit_id=(ot["visit_id"] if template_name == "reports/custom_v2.html" else None),
         prev_toggle_available=(prev_toggle_available if template_name == "reports/custom_v2.html" else False),
@@ -8808,7 +8769,7 @@ def _report_designs_context(db):
     for key, code in (("coag", "COAG"), ("gue", "GUE"), ("gse", "GSE"), ("sfa", "SFA")):
         r = db.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
         ids[key] = r["id"] if r else None
-    cur = {fam: get_setting(db, f"report_design_{fam}", "table" if fam == "coag" else "1") for fam in ("coag", "exam")}
+    cur = {fam: get_setting(db, f"report_design_{fam}", "1") for fam in ("coag", "exam")}
     return {"design_ids": ids, "design_cur": cur}
 
 
@@ -8821,7 +8782,7 @@ def report_designs():
     if request.method == "POST":
         for fam in ("coag", "exam"):
             v = request.form.get(fam, "")
-            if v in ("1", "2", "3", "4") or (fam == "coag" and v == "table"):
+            if v in ("1", "2", "3", "4"):
                 set_setting(db, f"report_design_{fam}", v)
         db.commit()
         flash("تم حفظ التصاميم المختارة.")
@@ -10350,11 +10311,8 @@ def report_designer():
             "test": test,
             "has_builtin": has_builtin,
             "has_custom": bool(custom),
-            "needs_design": False,
-            "auto_ok": (not has_builtin and not custom and bool(db.execute(
-                "SELECT 1 FROM test_parameters WHERE test_definition_id=? LIMIT 1", (test["id"],)).fetchone())),
+            "needs_design": not has_builtin and not custom,
         })
-        tests_status[-1]["needs_design"] = not has_builtin and not custom and not tests_status[-1]["auto_ok"]
 
     selected_id = request.args.get("test_definition_id", type=int)
     selected_test = None
@@ -10434,23 +10392,6 @@ def preview_report_design(test_definition_id):
         ), 500
 
 
-# قيم نموذجية لمعاينة تقارير الفحص (نفس القيم الظاهرة بالمعاينة المعتمدة preview_3)
-EXAM_PREVIEW_SAMPLES = {
-    "GUE": {"Color": "Yellow", "Specific Gravity": "1.020", "Reaction (pH)": "6.0", "Glucose": "Negative",
-            "Protein": "Negative", "Ketone": "Negative", "Bile Pigment": "Negative", "Urobilinogen": "0.2",
-            "Nitrite": "Negative", "RBCs": "1-2", "PUS": "2-3", "PUS (WBCs)": "2-3", "Casts": "Nil",
-            "Epithelial Cells": "Few", "Amorphous": "Nil", "Mucus": "Nil", "Crystals": "Nil",
-            "Parasites": "Nil", "Parasites / Others": "Nil"},
-    "GSE": {"Color": "Brown", "Consistency": "Formed", "Mucus": "Nil", "Blood": "Nil", "Worms / Helminths": "Nil",
-            "Pus Cells": "0-1", "RBCs": "Nil", "Amoeba (E. histolytica)": "Not seen", "Giardia lamblia": "Not seen",
-            "Helminthes Ova": "Not seen", "Undigested Food Particles": "Nil", "Fungi / Yeast": "Nil"},
-    "SFA": {"Volume": "3.2", "Color / Appearance": "Grey-white", "Liquefaction Time": "25", "Viscosity": "Normal",
-            "pH": "7.9", "Sperm Count": "42", "Total Sperm Count": "134", "Active (Progressive)": "48",
-            "Sluggish (Non-progressive)": "22", "Immotile": "30", "Normal Forms": "6", "Abnormal Forms": "94",
-            "Pus Cells": "1-2", "RBCs": "Nil", "Agglutination": "Nil"},
-}
-
-
 def _preview_report_design_impl(test_definition_id):
     # Renders the exact same report template print_report() uses, but with
     # clearly-labeled sample data instead of a real order/patient — so the
@@ -10464,17 +10405,11 @@ def _preview_report_design_impl(test_definition_id):
         return "Not found", 404
 
     template_name = REPORT_TEMPLATE_MAP.get(test["code"])
-    _coag_table = (test["code"] == "COAG" and _coag_table_mode(db))
-    if _coag_table:
-        template_name = None
     custom_template = None
     if not template_name and test["report_style"] == "generic_exam":
         template_name = "reports/generic_exam.html"
     if not template_name:
         custom_template = get_report_template(db, test_definition_id)
-        if not custom_template:
-            # بلا قالب محفوظ: نعاين التصميم التلقائي (نفس ما ستطبعه الطباعة الفعلية بأسلوب جدول النتائج)
-            custom_template = _auto_report_template(db, test_definition_id, test["name"])
         if not custom_template:
             flash("لا يوجد تصميم لهذا التحليل بعد لتتم معاينته. صممه أولاً بالأسفل.")
             return redirect(url_for("report_designer", test_definition_id=test_definition_id))
@@ -10522,7 +10457,6 @@ def _preview_report_design_impl(test_definition_id):
         custom_rows_align = custom_template["rows_align"] or "right"
         row_defs = json.loads(custom_template["rows_json"] or "[]")
         custom_rows = [{
-            "param_name": rd.get("param_name", ""),
             "name": resolve_label(params_by_name_row.get(rd.get("param_name", "")), rd.get("label")),
             "history": [], "extras": {}, "note": None, "note_key": None, "show_blank": True,
             "value2": None, "range2": None,
@@ -10555,45 +10489,6 @@ def _preview_report_design_impl(test_definition_id):
     if test["code"] == "COAG":
         # التخثر: المعاينة تعرض المدى الحقيقي المحفوظ (مريض افتراضي ذكر 30 سنة) بدل "— إلى —"
         ranges = {p["name"]: find_reference_range(db, p["id"], "Male", 30, "Years") for p in parameters}
-        if _coag_table and custom_rows is not None:
-            # أسلوب الجدول: قيم نموذجية + المدى الحقيقي + Control مدموج مع PT/PTT (بيانات وهمية للتوضيح)
-            _coag_samples = {"PT": "13.2", "PT Control": "12.8", "INR": "1.05", "PTT": "31", "PTT Control": "30",
-                             "Bleeding time": "3", "Plasma fibrinogen con": "320", "D. dimer": "250"}
-            for _r in custom_rows:
-                _pn = _r["param_name"]
-                _r["result"] = _coag_samples.get(_pn, "—")
-                _rg = ranges.get(_pn)
-                _txt = ""
-                if _rg:
-                    if _rg["range_text"]:
-                        _txt = _rg["range_text"]
-                    elif _rg["low"] is not None and _rg["high"] is not None:
-                        _txt = f"{_rg['low']} - {_rg['high']}"
-                    elif _rg["low"] is not None:
-                        _txt = f"> {_rg['low']}"
-                    elif _rg["high"] is not None:
-                        _txt = f"< {_rg['high']}"
-                _r["normal_range"] = _txt
-                _r["range_tiers"] = parse_range_tiers(_rg["range_text"]) if (_rg and _rg["range_text"]) else ([{"label": None, "value": _txt}] if _txt else [])
-            custom_rows = _coag_fold_control(custom_rows)
-
-    # تقارير الفحص GUE/GSE/SFA: المعاينة بنفس شكل المعاينة المعتمدة (preview_3) —
-    # قيم نموذجية واقعية + المدى الطبيعي الحقيقي المحفوظ (مريض نموذجي ذكر 34 سنة)
-    # بدل "—" و"— إلى —"، وبيانات مريض نموذجية بدل الشرطات. بيانات وهمية للتوضيح فقط.
-    _exam_preview_patient = {}
-    if test["code"] in EXAM_PREVIEW_SAMPLES:
-        _samples = EXAM_PREVIEW_SAMPLES[test["code"]]
-        ranges = {p["name"]: find_reference_range(db, p["id"], "Male", 34, "Years") for p in parameters}
-        results_by_name = {
-            p["name"]: {"value_text": _samples.get(p["name"], ""), "value_numeric": None, "flag": None}
-            for p in parameters
-        }
-        _exam_preview_patient = {
-            "patient_name": "أحمد محمد علي", "patient_name_en": "Ahmed Mohammed Ali",
-            "age": "34 Year(s)", "sex": "Male", "referring_doctor_name": "Dr. Sarah Hussein",
-            "sample_no": "IQ26/0055901", "patient_id": "26/0025990",
-            "sample_time": "10:15 AM", "number_of": "1",
-        }
 
     # نفس منطق _print_report_impl بالضبط (راجع التعليق هناك) — القوالب
     # الجاهزة الحديثة (GUE/GSE/SFA وأي قالب مستقبلي بنفس نمط
@@ -10611,7 +10506,7 @@ def _preview_report_design_impl(test_definition_id):
         ot={"test_name": test["name"], "test_code": test["code"]}, params=params, ranges=ranges, units=units_by_name, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
-        layout_view=_coag_view(build_layout_view(db, style_override=request.args.get("style")), _coag_table), note_visit_id=None,
+        layout_view=build_layout_view(db), note_visit_id=None,
         show_prev_values=show_prev_values, previous_visit_date=None, previous_values={},
         repeat_header_on_print=department_shows_previous_values(test["department"]),
         logo_url=logo_url, from_other_lab=False, font_size=14 if test["code"] == "CBC" else 16,
@@ -10621,12 +10516,11 @@ def _preview_report_design_impl(test_definition_id):
         enable_stamp_widget=bool(test["enable_stamp_widget"]) if "enable_stamp_widget" in test.keys() else False,
         stamp_target_type="test_definition", stamp_target_id=test_definition_id,
         digital_stamps=[], stamp_placements=[],
-        visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}",
-        is_design_preview=True, preview_test_id=test_definition_id,
+        visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}", sex="—", age="—",
+        patient_name="اسم المريض — معاينة تصميم فقط", patient_id="0000",
+        referring_doctor_name="—", is_design_preview=True, preview_test_id=test_definition_id,
         test_definition_id=test_definition_id,
-        **{**dict(sex="—", age="—", patient_name="اسم المريض — معاينة تصميم فقط", patient_id="0000",
-                  referring_doctor_name="—", sample_no="—", sample_time="—", number_of="—",
-                  patient_name_en=""), **_exam_preview_patient},
+        sample_no="—", sample_time="—", number_of="—", patient_name_en="",
         order_test_id=0, results_by_name=results_by_name, param_notes={},
         auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag, AUTO_FLAG_COLORS=flag_color_map,
         row_spacing_px=row_spacing_px_value,
