@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block page_title %}النسخ الاحتياطي (Backup / Restore){% endblock %}
+{% block content %}
+
+<div class="card" style="max-width:760px;">
+  <h3>💾 نسخة احتياطية على USB أو CD</h3>
+  <p class="muted">
+    "تصدير نسخة احتياطية" ينزّل ملف ZIP واحد يحتوي على كل بيانات البرنامج
+    (كل المرضى والزيارات والنتائج والإعدادات) + صفحة بحث بسيطة تعمل مباشرة
+    من نفس الـUSB أو الـCD بدون تنصيب البرنامج. احفظ الملف اللي يتنزّل
+    مباشرة على الـUSB، أو انسخه بعدها على قرص CD.
+  </p>
+  {% if last_backup_at %}<p class="muted">آخر نسخة احتياطية: {{ last_backup_at }}</p>{% endif %}
+  <p class="muted">معرّف هذا الجهاز (Hardware ID): <code dir="ltr">{{ hardware_id }}</code></p>
+
+  {% if not gate_ready %}
+  <div class="flash" style="background:#FFF7E0;border-color:#F5D67B;">
+    ⚠️ ما ضبطت بعد يوزر/باسوورد خاصين بالنسخ الاحتياطي. هذا مطلوب حتى ما
+    ينقل أي شخص بيانات المرضى على USB بدون إذن. اضبطهم بالأسفل أولاً.
+  </div>
+  {% endif %}
+
+  <hr>
+  <h4>{{ 'ضبط' if not gate_ready else 'تغيير' }} يوزر/باسوورد النسخ الاحتياطي</h4>
+  <p class="muted">
+    {% if gate_ready %}
+    لازم تدخل اليوزر/الباسوورد الحاليين حتى تقدر تغيّرهم لجديدين.
+    {% else %}
+    أول ضبط: اكتب يوزر وباسوورد جديدين مباشرة بالأسفل (اتركك حقلي "الحالي" فاضيين).
+    {% endif %}
+  </p>
+  <form method="POST" action="{{ url_for('backup_set_gate') }}" class="form-grid">
+    <div class="form-field">
+      <label>اليوزر الحالي (اتركه فاضي أول مرة)</label>
+      <input type="text" name="current_username" dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>الباسوورد الحالي (اتركه فاضي أول مرة)</label>
+      <input type="password" name="current_password" dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>يوزر جديد</label>
+      <input type="text" name="new_username" dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>باسوورد جديد</label>
+      <input type="password" name="new_password" dir="ltr">
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">حفظ</button>
+    </div>
+  </form>
+
+  <hr>
+  <h4>📤 تصدير نسخة احتياطية الآن</h4>
+  <p class="muted">
+    ملاحظة: التصدير الآن يبني أيضًا تقرير كامل جاهز لكل زيارة عندها نتيجة
+    مكتملة، فقد يأخذ وقت أطول شوي من قبل كل ما زاد عدد المرضى المخزّنين —
+    هذا طبيعي، انتظر لين ينتهي التنزيل.
+  </p>
+  <form method="POST" action="{{ url_for('backup_export') }}" class="form-grid">
+    <div class="form-field">
+      <label>يوزر النسخ الاحتياطي</label>
+      <input type="text" name="username" required dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>باسوورد النسخ الاحتياطي</label>
+      <input type="password" name="password" required dir="ltr">
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">⬇️ تنزيل نسخة احتياطية (ZIP)</button>
+    </div>
+  </form>
+
+  <hr>
+  <h4>📥 استيراد (استعادة) نسخة احتياطية</h4>
+  <p class="muted" style="color:#c62828;">
+    ⚠️ هذا يستبدل كل بيانات البرنامج الحالية بمحتوى الملف اللي ترفعه. تُحفظ
+    نسخة احتياطية تلقائية من البيانات الحالية قبل الاستبدال لأي احتياط،
+    لكن الأفضل تتأكد إنك تريد فعلاً استعادة هذا الملف بالذات.
+  </p>
+  <form method="POST" action="{{ url_for('backup_import') }}" enctype="multipart/form-data" class="form-grid"
+        onsubmit="return confirm('متأكد تريد استبدال كل بيانات البرنامج الحالية بهذه النسخة الاحتياطية؟');">
+    <div class="form-field">
+      <label>يوزر النسخ الاحتياطي</label>
+      <input type="text" name="username" required dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>باسوورد النسخ الاحتياطي</label>
+      <input type="password" name="password" required dir="ltr">
+    </div>
+    <div class="form-field" style="grid-column: span 2;">
+      <label>ملف النسخة الاحتياطية (ZIP)</label>
+      <input type="file" name="backup_file" accept=".zip" required>
+    </div>
+    <div class="form-field">
+      <button class="btn danger" type="submit">📥 استيراد واستبدال البيانات الحالية</button>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <h3>🔍 البحث من الـUSB/CD مباشرة (بدون تنصيب البرنامج)</h3>
+  <p class="muted">
+    كل نسخة احتياطية تحتوي ملف <code dir="ltr">search_offline.html</code> —
+    افتحه مباشرة من الـUSB أو الـCD بأي متصفح (بدون انترنت وبدون تنصيب
+    البرنامج ولا حتى ترخيص) للبحث باسم المريض أو رقم التسجيل أو التاريخ.
+    كل مريض عنده نتيجة جاهزة (مكتملة) عنده زر "📄 عرض التقرير الكامل"
+    يفتح تقريره بنفس التصميم الحقيقي بالضبط بكل الأرقام والقيم المرجعية،
+    من نفس الملفات المحلية بدون أي اتصال. الزيارات اللي نتيجتها لسا ما
+    اكتملت تظهر بالفهرس بس بدون تقرير جاهز للعرض.
+  </p>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <h3>🖥️ تنصيب البرنامج على جهاز آخر</h3>
+  <p class="muted">
+    البرنامج مربوط بمعرّف كل جهاز (Hardware ID). لتنصيبه على حاسبة أخرى
+    وتفعيله بأرقام المرضى المستوردة، شغّل البرنامج بالجهاز الجديد وخذ
+    معرّف الجهاز اللي يظهر بشاشة التفعيل، وأرسله للمصمم ليولّد كود تفعيل
+    خاص بذلك الجهاز فقط (نفس آلية الترخيص المعتمدة أصلاً بالبرنامج).
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('enter_results') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ ot['test_name'] }} — {{ ot['patient_name'] }} <span class="muted mono">#{{ ot['registration_number'] }}</span></h3>
+  <p class="muted">{{ t('barcode') }}: <span class="mono">{{ ot['barcode'] }}</span> · {{ t('status') }}: <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span></p>
+  {% if ot['test_code'] in ('CBC', 'BF', 'WBCDIFF', 'FLUIDEXAM') and ot['status'] in ('Completed', 'Verified') %}
+  <p><a class="btn small" href="{{ url_for('print_report', order_test_id=ot['id']) }}">Print Report</a></p>
+  {% endif %}
+
+  {% if ot['status'] == 'Verified' %}
+    {% if current_role in ['supervisor', 'admin'] %}
+    <form method="POST" action="{{ url_for('unverify_result', order_test_id=ot['id']) }}" style="margin-bottom:14px; display:flex; gap:8px; align-items:center;"
+          onsubmit="return confirm('هذه النتيجة معتمدة فعلاً. فتحها للتعديل يتطلب اعتمادها من جديد بعد الحفظ. متأكد؟')">
+      <input type="text" name="reason" placeholder="سبب إعادة الفتح (اختياري)" style="max-width:260px;">
+      <button class="btn small secondary" type="submit">🔓 فتح للتعديل (إلغاء الاعتماد)</button>
+    </form>
+    {% else %}
+    <p class="muted">🔒 هذه النتيجة معتمدة ولا يمكن تعديلها. اطلب من المشرف فتحها للتعديل عند الحاجة.</p>
+    {% endif %}
+  {% endif %}
+
+  <form method="POST" onsubmit="return handleResultSaveSubmit(event, this, {{ (ot['status'] in ('Completed', 'Verified'))|tojson }});">
+    <div class="form-field" style="max-width:260px; margin-bottom:10px;">
+      <label style="font-size:0.85em;">الجهاز (Analyzer) — اختياري</label>
+      <input type="text" name="analyzer" value="{{ ot['analyzer'] if 'analyzer' in ot.keys() and ot['analyzer'] else '' }}"
+             placeholder="مثال: E411 / Pure" dir="ltr" style="width:100%;"
+             {% if ot['status'] == 'Verified' %}disabled{% endif %}>
+    </div>
+
+    <table>
+      <thead><tr>
+        <th>{{ t('parameter') }}</th><th>{{ t('unit') }}</th><th>{{ t('range') }}</th><th>{{ t('result') }}</th><th>{{ t('flag') }}</th>
+      </tr></thead>
+      <tbody>
+        {% for p in parameters %}
+        {% set existing = results_by_param.get(p['id']) %}
+        {% set rng = ranges.get(p['id']) %}
+        {% set sugg = suggestions_map.get(p['id'], []) %}
+        <tr>
+          <td>{{ p['name'] }}</td>
+          <td class="muted">{{ p['unit'] }}</td>
+          <td class="muted">
+            {% if rng %}
+              {% if rng['range_text'] %}{{ rng['range_text'] }}
+              {% elif rng['low'] is not none and rng['high'] is not none %}{{ rng['low'] }} - {{ rng['high'] }}{% endif %}
+            {% endif %}
+          </td>
+          <td>
+            {% if p['result_type'] == 'Text' %}
+            {% if p['name'] == 'Conclusion' %}
+            <div class="conclusion-toolbar" style="display:flex; gap:6px; margin-bottom:4px;">
+              <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#D40000; font-weight:bold;"
+                onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '★')"
+                title="إدراج نجمة حمراء عند موضع المؤشر">★</button>
+              <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '→')"
+                title="إدراج سهم عند موضع المؤشر">→</button>
+              <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '⇒')"
+                title="إدراج سهم عند موضع المؤشر">⇒</button>
+              <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '▶')"
+                title="إدراج سهم عند موضع المؤشر">▶</button>
+              <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#E67E22; font-weight:bold;"
+                onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '?')"
+                title="إدراج علامة استفهام عند موضع المؤشر">?</button>
+              <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#8E44AD; font-weight:bold;"
+                onclick="lisInsertConclusionMarker('param_{{ p['id'] }}', '!')"
+                title="إدراج علامة تعجب عند موضع المؤشر">!</button>
+            </div>
+            {% endif %}
+            <textarea id="param_{{ p['id'] }}" name="param_{{ p['id'] }}" dir="ltr" style="text-align:left; width:100%;"
+                      rows="2" class="lis-autoresize" data-param-name="{{ p['name'] }}" spellcheck="true"
+                      >{{ existing['value_text'] if existing else '' }}</textarea>
+            <label class="muted" style="display:flex; align-items:center; gap:4px; font-size:11px; margin-top:3px;">
+              <input type="checkbox" checked onchange="document.getElementById('param_{{ p['id'] }}').spellcheck = this.checked;">
+              🔤 تدقيق إملائي (اختياري)
+            </label>
+            <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
+              onclick="lisCleanupText(document.getElementById('param_{{ p['id'] }}'))"
+              title="يصحح فقط المسافات وحرف البداية وعلامة الترقيم — لا يترجم ولا يغيّر أي كلمة أو مصطلح طبي">✓ تدقيق الكتابة</button>
+            {% if p['name'] in NORMAL_CLICHE_TEXT %}
+            <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
+              data-target="param_{{ p['id'] }}" data-normal-text="{{ NORMAL_CLICHE_TEXT[p['name']] }}"
+              onclick="lisFillNormalText(this)"
+              title="يعبّي القيمة الطبيعية القياسية — يبقى الحقل قابلاً للتعديل الكامل بعدها">✓ Normal</button>
+            {% endif %}
+            {% else %}
+            <input type="text" id="param_{{ p['id'] }}" name="param_{{ p['id'] }}" dir="ltr" style="text-align:left;"
+                   data-param-name="{{ p['name'] }}"
+                   {% if p['name'] == 'Corrected Retic count' %}data-auto-filled="{{ '0' if existing else '1' }}"{% endif %}
+                   value="{{ existing['value_numeric'] if existing and existing['value_numeric'] is not none else (existing['value_text'] if existing else '') }}"
+                   >
+            {% if p['name'] == 'Corrected Retic count' %}
+            <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
+              onclick="lisForceRecalcCorrectedRetic(this)" title="يحسبها من Reticulocyte count وقيمة HCT لنفس الزيارة (رجال 45%، نساء 42%)">↻ إعادة الحساب التلقائي</button>
+            {% elif p['name'] in ('MCH', 'MCHC') %}
+            <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
+              onclick="lisForceRecalcMchMchc(this)" title="يعيد حسابها تلقائيًا من HGB وRBC/HCT لنفس التحليل">↻ إعادة الحساب التلقائي</button>
+            {% endif %}
+            {% endif %}
+            {% set hist = history_map.get(p['id']) %}
+            {% if hist and ot['status'] != 'Verified' %}
+            {% set prev_val = hist['prev_value_numeric'] if hist['prev_value_numeric'] is not none else hist['prev_value_text'] %}
+            <div class="muted" style="margin-top:4px; font-size:11.5px;">
+              القيمة السابقة: <span class="mono">{{ prev_val }}</span>
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px;"
+                onclick="document.getElementById('param_{{ p['id'] }}').value='{{ prev_val }}'">↩ استرجاع</button>
+            </div>
+            {% endif %}
+            {% if sugg %}
+            <div style="margin-top:4px;">
+              {% for s in sugg %}
+              <button type="button" class="btn small secondary" style="margin-inline-end:4px; margin-top:4px;"
+                onclick="document.getElementById('param_{{ p['id'] }}').value='{{ s }}'">{{ s }}</button>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </td>
+          <td>{% if existing %}<span class="badge badge-{{ existing['flag'] }}">{{ existing['flag'] }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div style="margin-top:16px; display:flex; gap:10px;">
+      <a class="btn secondary" href="{{ url_for('orders_list') }}">{{ t('back') }}</a>
+      {% if ot['status'] != 'Verified' %}
+      <button class="btn" type="submit">{{ t('save') }}</button>
+      <a class="btn secondary" href="{{ url_for('result_entry', order_test_id=ot['id']) }}" title="يلغي أي تعديل لم يُحفظ بعد ويعيد تحميل آخر نسخة محفوظة">↺ تراجع عن التعديلات غير المحفوظة</a>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if current_role in ['supervisor', 'admin'] and ot['status'] == 'Completed' %}
+  <form method="POST" action="{{ url_for('verify_result', order_test_id=ot['id']) }}" style="margin-top:10px;" onsubmit="return confirmVerify()">
+    <button class="btn success" type="submit">✔ {{ t('verify') }}</button>
+  </form>
+  {% endif %}
+</div>
+<script>
+  // ------------------------------------------------------------------
+  // تعديل نتيجة وصلت أصلاً لحالة "مكتملة" (Completed) -- يعني طُبعت
+  // وانحفظت -- محمي بنفس كلمة مرور ميزة "تحليل مجاني"، حتى من حساب
+  // الأدمن نفسه، بدون استثناء. أول إدخال (النتيجة لسا مو مكتملة) يبقى
+  // عادي بدون كلمة مرور. حالة "معتمدة" (Verified) أصلاً ما فيها زر حفظ
+  // إطلاقًا بهذي الصفحة (لازم فتحها للتعديل أولاً من المشرف/الأدمن).
+  // ------------------------------------------------------------------
+  function handleResultSaveSubmit(e, form, isCompleted) {
+    if (!isCompleted) return true;
+    if (!confirm('هذه النتيجة مكتملة فعلاً -- تعديلها محمي بكلمة مرور خاصة حتى لو كنت أدمن. متابعة؟')) {
+      return false;
+    }
+    const password = prompt('أدخل كلمة مرور الحماية (نفس كلمة مرور "تحليل مجاني") لتأكيد التعديل:');
+    if (password === null) return false;
+    const personName = prompt('اسمك (يُسجَّل فقط للمراجعة):') || '';
+    const pInput = document.createElement('input');
+    pInput.type = 'hidden'; pInput.name = 'gate_password'; pInput.value = password;
+    form.appendChild(pInput);
+    const nInput = document.createElement('input');
+    nInput.type = 'hidden'; nInput.name = 'gate_person_name'; nInput.value = personName;
+    form.appendChild(nInput);
+    return true;
+  }
+</script>
+<script>
+  window.LIS_PATIENT_HCT = {{ 'null' if patient_hct is none else patient_hct }};
+  window.LIS_PATIENT_GENDER = {{ ot['gender']|tojson }};
+
+  // ------------------------------------------------------------------
+  // حساب MCH وMCHC تلقائيًا من HGB وRBC وHCT (نفس تحليل CBC الحالي):
+  //   MCH  = HGB ÷ RBC × 10     (pg)
+  //   MCHC = HGB ÷ HCT × 100    (g/dL)
+  // يعتمد على data-param-name الموجودة أصلاً بكل حقل رقمي، فيشتغل بدون
+  // أي تعديل بقاعدة البيانات. الحقلين يبقيان قابلين للتعديل اليدوي — بمجرد
+  // ما يكتب المستخدم بأحدهما مباشرة، يتوقف التحديث التلقائي له حتى ما
+  // يضيع تعديله، مع زر "↻ إعادة الحساب التلقائي" لإرجاعه للحساب التلقائي.
+  // ------------------------------------------------------------------
+  function lisNumericField(paramName) {
+    return document.querySelector('[data-param-name="' + paramName + '"]');
+  }
+  function lisGetNum(paramName) {
+    var el = lisNumericField(paramName);
+    if (!el) return null;
+    var v = parseFloat(el.value);
+    return isNaN(v) ? null : v;
+  }
+  function lisRecalcMchMchc() {
+    var hgb = lisGetNum('HGB');
+    var rbc = lisGetNum('RBC');
+    var hct = lisGetNum('HCT');
+    var mchEl = lisNumericField('MCH');
+    var mchcEl = lisNumericField('MCHC');
+    if (mchEl && mchEl.dataset.userEdited !== '1' && hgb !== null && rbc) {
+      mchEl.value = ((hgb / rbc) * 10).toFixed(1);
+    }
+    if (mchcEl && mchcEl.dataset.userEdited !== '1' && hgb !== null && hct) {
+      mchcEl.value = ((hgb / hct) * 100).toFixed(1);
+    }
+  }
+  function lisForceRecalcMchMchc(btn) {
+    var wrap = btn.closest('td');
+    var input = wrap ? wrap.querySelector('input[data-param-name]') : null;
+    if (input) delete input.dataset.userEdited;
+    lisRecalcMchMchc();
+  }
+  ['HGB', 'RBC', 'HCT'].forEach(function (name) {
+    var el = lisNumericField(name);
+    if (el) el.addEventListener('input', lisRecalcMchMchc);
+  });
+  ['MCH', 'MCHC'].forEach(function (name) {
+    var el = lisNumericField(name);
+    if (el) el.addEventListener('input', function () { el.dataset.userEdited = '1'; });
+  });
+  document.addEventListener('DOMContentLoaded', lisRecalcMchMchc);
+</script>
+{% endblock %}

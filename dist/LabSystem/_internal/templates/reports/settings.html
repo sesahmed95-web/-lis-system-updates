@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('settings') }}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:640px;">
+  <h3>{{ t('branding') }}</h3>
+  <form method="POST" enctype="multipart/form-data">
+    <div class="form-field">
+      <label>{{ t('app_name_en_label') }}</label>
+      <input type="text" name="app_name" value="{{ current.app_name }}" placeholder="e.g. Al-Karama LIS">
+    </div>
+    <div class="form-field">
+      <label>{{ t('app_name_ar_label') }}</label>
+      <input type="text" name="app_name_ar" value="{{ current.app_name_ar }}" placeholder="مثال: نظام مختبر الكرامة">
+    </div>
+
+    <div class="form-field">
+      <label>عنوان المختبر</label>
+      <input type="text" name="lab_address" value="{{ current.lab_address }}" placeholder="مثال: بغداد - الكرادة - شارع كذا">
+    </div>
+    <div class="form-field">
+      <label>هاتف المختبر</label>
+      <input type="text" name="lab_phone" value="{{ current.lab_phone }}" placeholder="مثال: 07701234567" dir="ltr">
+    </div>
+
+    <div class="form-field">
+      <label>{{ t('current_logo') }}</label>
+      {% if logo_url %}
+        <img src="{{ logo_url }}" alt="logo" style="max-height:70px; max-width:200px; object-fit:contain; border:1px solid var(--border); border-radius:8px; padding:6px; background:#fff;">
+      {% else %}
+        <span class="muted">{{ t('no_logo') }}</span>
+      {% endif %}
+    </div>
+
+    <div class="form-field">
+      <label>{{ t('upload_logo') }}</label>
+      <input type="file" name="logo" accept=".png,.jpg,.jpeg,.gif,.svg,.webp">
+      <span class="muted">PNG / JPG / GIF / SVG / WEBP</span>
+    </div>
+
+    <div class="form-field">
+      <label>موضع الشعار بترويسة التقرير المطبوع</label>
+      <select name="logo_position">
+        <option value="right" {{ 'selected' if current.logo_position == 'right' }}>يمين (الافتراضي)</option>
+        <option value="center" {{ 'selected' if current.logo_position == 'center' }}>وسط</option>
+        <option value="left" {{ 'selected' if current.logo_position == 'left' }}>يسار</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>حجم الشعار (عرضه بالبكسل) — القيمة الافتراضية 100</label>
+      <input type="number" name="logo_width" min="30" max="300" value="{{ current.logo_width }}" style="width:120px;">
+    </div>
+
+    <div class="form-field">
+      <label>🖼️ خلفية شاشة الترحيب (Dashboard)</label>
+      <span class="muted" style="display:block; margin-bottom:8px;">
+        اختر أي صورة (مختبر، مبنى...) — البرنامج يظبطها تلقائياً (يقصّها لتملأ
+        الشاشة، يعتّمها، يموّهها بنفس الدرجة دائماً) حتى تنسجم مع تصميم
+        البرنامج بغض النظر عن حجمها أو ألوانها الأصلية. تظهر فقط بشاشة
+        الترحيب بعد تسجيل الدخول، مو خلف باقي الصفحات. اتركها فاضية للرجوع
+        للخلفية المتدرّجة الافتراضية.
+      </span>
+      {% if dashboard_bg_url %}
+        <img src="{{ dashboard_bg_url }}" alt="dashboard background preview"
+             style="max-height:90px; max-width:220px; object-fit:cover; border:1px solid var(--border); border-radius:8px; padding:4px; display:block; margin-bottom:8px;">
+        <label class="checkbox-item">
+          <input type="checkbox" name="remove_dashboard_bg" value="1">
+          إزالة الصورة الحالية والرجوع للخلفية الافتراضية
+        </label>
+      {% endif %}
+      <input type="file" name="dashboard_bg" accept=".png,.jpg,.jpeg,.webp" style="margin-top:8px;">
+      <span class="muted">PNG / JPG / WEBP</span>
+    </div>
+
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>دكتور المختبر الفاحص</h3>
+  <p class="muted">
+    إدارة أسماء دكاترة المختبر الفاحص، ألقابهم، شهاداتهم (عربي/انكليزي)، ترتيب ظهورهم
+    بترويسة كل تقرير مطبوع، وهل يظهر كل واحد منهم بالترويسة أصلاً أو فقط بقائمة اختيار
+    الفاحص عند تسجيل الزيارات.
+  </p>
+  <a class="btn" style="display:inline-block;" href="{{ url_for('examining_doctors_manage') }}">✏️ إدارة قائمة الدكاترة وشهاداتهم</a>
+  <a class="btn small secondary" style="margin-top:10px; display:inline-block;" href="{{ url_for('examining_doctor_rates_list') }}">💰 تحديد أجور دكتور المختبر الفاحص</a>
+  <p class="muted" style="margin-top:10px;">
+    ملاحظة: نفس هذي الشاشة تقدر تضيف فيها أي شخص إله ظهور بترويسة التقرير —
+    مو بالضرورة دكتور — مثلاً كيميائي اختصاصي أو بايولوجي ممارس. اكتب اسمه
+    باللقب المناسب (بدل "الدكتور") بحقل "اللقب"، وشهادته بحقلي الشهادة، وفعّل
+    "إظهار بترويسة التقرير المطبوع" — يظهر تلقائيًا بجانب باقي الأسماء بكل
+    التقارير، بغض النظر هل هو دكتور فاحص فعليًا أو لا.
+  </p>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🔤 تنسيق أسماء وشهادات الدكاترة بالترويسة</h3>
+  <p class="muted">
+    يتحكم هذا بحجم ونوع الخط لكل أسماء وألقاب وشهادات الدكاترة (والأشخاص
+    الآخرين المضافين لنفس الترويسة) بكل التقارير المطبوعة دفعة وحدة — إعداد
+    عام واحد ينطبق على الجميع.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>حجم الخط (بكسل) — القيمة الافتراضية 14</label>
+      <input type="number" name="letterhead_font_size" min="8" max="30" value="{{ current.letterhead_font_size }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>نوع الخط</label>
+      <select name="letterhead_font_family">
+        <option value="Segoe UI, Tahoma, Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Segoe UI, Tahoma, Arial, sans-serif' }}>Segoe UI (افتراضي)</option>
+        <option value="Tahoma, Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Tahoma, Arial, sans-serif' }}>Tahoma</option>
+        <option value="Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Arial, sans-serif' }}>Arial</option>
+        <option value="'Times New Roman', serif" {{ 'selected' if current.letterhead_font_family == "'Times New Roman', serif" }}>Times New Roman</option>
+        <option value="'Traditional Arabic', Tahoma, serif" {{ 'selected' if current.letterhead_font_family == "'Traditional Arabic', Tahoma, serif" }}>Traditional Arabic</option>
+      </select>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🔠 حجم خط أسماء التحاليل والنتائج</h3>
+  <p class="muted">
+    يتحكم هذا بحجم خط اسم كل تحليل (Test) وحجم خط النتيجة نفسها بكل التقارير
+    المطبوعة دفعة وحدة — منفصل تمامًا عن حجم خط ترويسة الدكاترة أعلاه.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>حجم خط اسم التحليل (بكسل) — القيمة الافتراضية 16</label>
+      <input type="number" name="test_name_font_size" min="8" max="30" value="{{ current.test_name_font_size }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>حجم خط النتيجة (بكسل) — القيمة الافتراضية 16</label>
+      <input type="number" name="result_value_font_size" min="8" max="30" value="{{ current.result_value_font_size }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>حجم جدول النتائج بالتقارير المطبوعة</h3>
+  <p class="muted">
+    يتحكم هذا بارتفاع صفوف جدول النتائج (Test / Result / Control / Unit...) وعرض أعمدته
+    بكل التقارير المطبوعة دفعة وحدة — قلّل الرقم لتصغير الجدول وتقريب الأعمدة من بعضها،
+    أو كبّره لتوسيعه. القيم بالبكسل.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ارتفاع الصف (بكسل) — القيمة الافتراضية 7</label>
+      <input type="number" name="report_row_pad" min="2" max="30" value="{{ current.report_row_pad }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>عرض العمود (بكسل) — القيمة الافتراضية 12</label>
+      <input type="number" name="report_col_pad" min="2" max="40" value="{{ current.report_col_pad }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>📏 تباعد صندوق معلومات المريض</h3>
+  <p class="muted">
+    يتحكم هذا بالمسافة بين ترويسة الدكاترة (أعلى الصفحة) وصندوق معلومات
+    المريض (Patient Name, Sample No...الخ)، وبمدى قرب قيمة كل حقل من
+    تسميته (مثلاً "Patient Name:" قريبة من الاسم بدل مسافة فاضية طويلة) —
+    بكل التقارير المطبوعة دفعة وحدة.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>المسافة فوق صندوق المعلومات (بكسل) — القيمة الافتراضية 4</label>
+      <input type="number" name="patient_info_top_gap" min="0" max="60" value="{{ current.patient_info_top_gap }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>عرض عمود تسمية الحقل (بكسل) — قلّله لتقريب القيمة من التسمية — القيمة الافتراضية 108</label>
+      <input type="number" name="patient_info_label_width" min="60" max="220" value="{{ current.patient_info_label_width }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🗂️ ترتيب أقسام اللوحة المجمّعة</h3>
+  <p class="muted">
+    لما تُطبع أكثر من تحليل سوا بورقة وحدة لنفس المريض، الأقسام (زي
+    Biochemical Test, Hormones, Vitamins...) تترتب أبجديًا افتراضيًا. اكتب
+    أسماء الأقسام هنا كل اسم بسطر مستقل بالترتيب اللي تريده — أي قسم غير
+    مذكور هنا يظهر بعدها بترتيبه الأبجدي الاعتيادي. اترك الحقل فاضي للرجوع
+    للترتيب الأبجدي بالكامل.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ترتيب الأقسام (سطر لكل قسم)</label>
+      <textarea name="combined_panel_group_order" rows="5" style="width:100%; direction:ltr;" placeholder="Hormones&#10;Vitamins&#10;Biochemical Test">{{ current.combined_panel_group_order }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🧪 ترتيب التحاليل بشاشة إدخال النتائج</h3>
+  <p class="muted">
+    شاشة "Results Entry" تعرض التحاليل حسب ترتيب طلبها بالزيارة افتراضيًا،
+    وهذا يختلف من زيارة لزيارة. اكتب هنا اسم كل تحليل بالضبط كما يظهر
+    بالشاشة (نفس النص اللي فوق كل بطاقة تحليل، مثلاً "HbA1c (BioChemstry)")،
+    كل اسم بسطر مستقل، بالترتيب الثابت اللي تريده — ينطبق على كل الزيارات
+    دايماً بغض النظر عن التحاليل المطلوبة أو ترتيب طلبها الفعلي. أي تحليل
+    بالزيارة غير مذكور بالقائمة هنا يظهر بعد كل المذكورين. اترك الحقل فاضي
+    للرجوع لترتيب الطلب الأصلي.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ترتيب التحاليل (سطر لكل تحليل، بنفس الاسم بالضبط)</label>
+      <textarea name="results_entry_test_order" rows="8" style="width:100%; direction:ltr;" placeholder="HbA1c (BioChemstry)&#10;Triglycerides (BioChemstry)&#10;Total PSA (Hormones)&#10;Vitamin D3 Total (Hormones)&#10;Erythrocyte Sedimentation Rate (ESR) (Hematology)">{{ current.results_entry_test_order }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>📱 إرسال النتائج عبر واتساب</h3>
+  <p class="muted">
+    كود الدولة يُستخدم لتحويل أرقام الهواتف المحلية (اللي تبدأ بصفر) لصيغة
+    دولية عند الإرسال عبر واتساب — مثلاً 964 للعراق. أول مرة استخدام
+    للإرسال تحتاج مسح رمز QR من نفس واتساب المختبر — راجع ملف الشرح
+    المرفق مع البرنامج.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>كود الدولة</label>
+      <input type="text" name="whatsapp_country_code" value="{{ current.whatsapp_country_code }}" style="width:120px;" dir="ltr">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🗄️ أرشيف PDF الدائم</h3>
+  <p class="muted">
+    مجلد ثابت على هذا الجهاز (أو مجلد مشترك بالشبكة) تُحفظ فيه تلقائيًا نسخة
+    PDF من نتائج كل زيارة فور اكتمالها، حتى تقدر ترجع لها لاحقًا من صفحة
+    "أرشيف PDF" أو تفتّش عنها يدويًا من خارج البرنامج. يكفي تحدده مرة وحدة —
+    إذا تركته فاضي، الأرشفة التلقائية تبقى معطّلة.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>مسار مجلد الأرشفة</label>
+      <input type="text" name="pdf_archive_dir" value="{{ current.pdf_archive_dir }}"
+             placeholder="مثال: D:\LabArchive\Reports" style="width:100%;" dir="ltr">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🔤 تصحيحات ترجمة أسماء المرضى (عربي → إنكليزي)</h3>
+  <p class="muted">
+    البرنامج يترجم الاسم العربي تلقائيًا (اقتراح أولي قابل للتعديل يدويًا
+    وقت التسجيل). العربي ما يكتب الحركات القصيرة (الفتحة/الضمة/الكسرة)،
+    فبعض الأسماء ممكن تطلع الترجمة التلقائية لها غير دقيقة رغم أن البرنامج
+    عنده قاموس جاهز لأشهر الأسماء. لو شفت اسم طلعت ترجمته غلط، أضيفه هنا
+    وراح تصير هي الترجمة الثابتة له من الحين — سطر لكل اسم بالضبط بصيغة
+    "الاسم بالعربي=الترجمة الصحيحة بالإنكليزي".
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>تصحيحات الأسماء (سطر لكل اسم)</label>
+      <textarea name="name_translit_overrides" rows="6" style="width:100%; direction:ltr;" placeholder="سمر=Samar&#10;نور=Noor&#10;زهراء=Zahraa">{{ current.name_translit_overrides }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+{% endblock %}

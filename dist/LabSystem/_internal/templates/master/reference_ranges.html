@@ -1,0 +1,371 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('reference_ranges') }}{% endblock %}
+{% block content %}
+<p class="muted" style="margin-bottom:14px;">
+  كل تحليل (باراميتر) بكارد مستقل — أضف له نسبة طبيعية واحدة أو أكثر
+  (تختلف حسب الجنس والفئة العمرية، وممكن كمان حسب حالة/طور فسيولوجي
+  معيّن مثل مراحل الدورة الشهرية). كل صف قابل للتعديل أو الحذف لحاله.
+</p>
+<datalist id="analyzerListRR">
+  {% for a in known_analyzers %}<option value="{{ a }}">{% endfor %}
+</datalist>
+<datalist id="unitListRR">
+  {% for u in known_units %}<option value="{{ u }}">{% endfor %}
+</datalist>
+
+<div class="card">
+  <h3>🆕 إضافة باراميتر جديد (اسم غير موجود إطلاقاً بالبرنامج) تحت أي عنوان تحليل</h3>
+  <p class="muted">
+    لإضافة باراميتر ما موجود أصلاً بأي تحليل — اختر تحت أي "عنوان" (تحليل)
+    يظهر، اكتب اسمه، واحفظ. يظهر فورًا بالقائمة تحت لإضافة نسبته الطبيعية،
+    وبصفحة "زيارة جديدة" وشاشة إدخال النتائج تلقائيًا ضمن نفس التحليل الذي
+    اخترته (يمكن اختيار أكثر من باراميتر تحت نفس العنوان بنفس الطريقة،
+    وحدة بوحدة).
+  </p>
+  <div class="form-grid">
+    <div class="form-field">
+      <label>تحت أي عنوان (تحليل)؟</label>
+      <select id="newParamTestDefId">
+        {% for td in all_test_definitions %}
+        <option value="{{ td['id'] }}">{{ td['name'] }}{% if td['department'] %} — {{ td['department'] }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label>اسم الباراميتر الجديد</label>
+      <input type="text" id="newParamName" placeholder="مثال: Vitamin B12" onkeydown="if(event.key==='Enter'){rrAddNewParam();}">
+    </div>
+    <div class="form-field" style="align-self:end;">
+      <button type="button" class="btn" onclick="rrAddNewParam()">إضافة</button>
+      <span id="newParamStatus" class="muted" style="margin-inline-start:8px;"></span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>➕ إضافة نسبة لباراميتر جديد (ما عنده أي نسبة بعد)</h3>
+  <form method="POST" action="{{ url_for('save_reference_range_tier') }}" class="form-grid rr-form">
+    <input type="hidden" name="range_id" value="">
+    <input type="hidden" name="original_label" value="">
+    <div class="form-field">
+      <label>{{ t('parameter') }}</label>
+      <select name="test_parameter_id" required>
+        {% for p in parameters %}
+        <option value="{{ p['id'] }}">{{ p['test_name'] }} — {{ p['name'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% set row = {} %}
+    {% include "master/_reference_range_tier_fields.html" with context %}
+    <div class="form-field" style="align-self:end;">
+      <button class="btn" type="submit">{{ t('create') }}</button>
+    </div>
+  </form>
+</div>
+
+{% for group in parameter_groups %}
+<div class="card">
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:6px;">
+    <h3 style="margin:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      {{ group.test_name }} — {{ group.name }}
+      {# المطلوب 6: "زر Unit" الوحيد المتبقي — وحدة القياس الفعلية لهذا
+         الباراميتر (مثل mg/dL)، قابلة للتغيير مباشرة من هنا أو اختيار
+         وحدة موجودة أصلاً بالبرنامج من نفس القائمة، بدل الذهاب لصفحة
+         "تعديل الوحدات" المنفصلة كل مرة (تبقى متوفرة كمان لمن يحتاج
+         تحويل رقمي فعلي للمديات المرجعية مع تغيير الوحدة). #}
+      <span class="unit-edit-box" style="display:flex; align-items:center; gap:4px; font-weight:normal;">
+        <input type="text" class="unit-edit-input" list="unitListRR" value="{{ group.unit }}"
+               data-param-id="{{ group.id }}" placeholder="الوحدة" style="width:110px; font-size:13px;">
+        <button type="button" class="btn small secondary unit-save-btn" onclick="rrSaveUnit(this)">حفظ</button>
+        <span class="unit-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+      </span>
+      {# المطلوب 3 (وصول أسرع): وحدة ثانية دائمة + معامل تحويل تلقائي —
+         نفس الآلية الموجودة أصلاً بصفحة "تعديل الوحدات" (unit2/unit2_factor)،
+         بس صارت متوفرة هنا كمان مباشرة بجانب وحدة كل باراميتر، بدون فتح
+         صفحة ثانية. فاضي = بدون وحدة ثانية لهذا الباراميتر. #}
+      <span class="dual-unit-box" style="display:flex; align-items:center; gap:4px; font-weight:normal; border-inline-start:1px solid #E2E8F0; padding-inline-start:8px;">
+        <span class="muted" style="font-size:12px;">🔁 وحدة ثانية:</span>
+        <input type="text" class="dual-unit-input" list="unitListRR" value="{{ group.unit2 or '' }}"
+               data-param-id="{{ group.id }}" placeholder="مثال: mmol/L" style="width:100px; font-size:13px;">
+        <span class="muted" style="font-size:12px;">× معامل</span>
+        <input type="number" step="any" class="dual-unit-factor-input" value="{{ group.unit2_factor if group.unit2_factor not in (None, '') else '' }}"
+               placeholder="0.0555" style="width:80px; font-size:13px;">
+        <button type="button" class="btn small secondary dual-unit-save-btn" onclick="rrSaveDualUnit(this)">حفظ</button>
+        <span class="dual-unit-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+      </span>
+      <a href="{{ url_for('unit_converter') }}" target="_blank" class="muted" style="font-size:12px;" title="تحويل رقمي فعلي للوحدة الأساسية (يحوّل كل المديات المرجعية معه) — صفحة تعديل الوحدات الكاملة">🔧 تعديل الوحدات (متقدّم)</a>
+    </h3>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+      <input type="checkbox" class="highlight-toggle" data-param-id="{{ group.id }}" {{ 'checked' if group.highlight }}>
+      تظليل أصفر على التقرير المطبوع
+      <span class="highlight-save-status" style="font-size:12px;color:#2e7d32;visibility:hidden">✓</span>
+    </label>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th>{{ t('gender') }}</th><th>{{ t('age') }}</th><th>الحالة / الملاحظة الطبية</th>
+      <th>{{ t('low') }}</th><th>{{ t('high') }}</th><th>🔬 الجهاز</th><th>👤 خاص بمريض</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for row in group.rows %}
+      {% set row_key = group.id ~ '_' ~ loop.index0 %}
+      <tr id="rr-view-{{ row_key }}">
+        <td>{{ t(row.gender|lower) if row.gender in ('Male','Female','Both') else row.gender }}</td>
+        <td>{{ row.age_from }} {{ t('unit_' ~ (row.age_from_unit or 'Years')|lower) }} - {{ row.age_to }} {{ t('unit_' ~ (row.age_to_unit or 'Years')|lower) }}</td>
+        <td>{{ row.label or '—' }}</td>
+        <td>{{ row.raw if row.raw else (row.low if row.low is not none else '') }}</td>
+        <td>{{ '' if row.raw else (row.high if row.high is not none else '') }}</td>
+        <td>{{ row.analyzer or '—' }}</td>
+        <td>
+          {% if row.patient_name %}
+          <span title="{{ row.range_label or '' }}">👤 {{ row.patient_name }}{% if row.range_label %} <span class="muted">({{ row.range_label }})</span>{% endif %}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td style="white-space:nowrap;">
+          <button type="button" class="btn small secondary" onclick="rrToggleEdit('{{ row_key }}')">{{ t('edit') }}</button>
+          <form method="POST" action="{{ url_for('delete_reference_range_tier') }}" style="display:inline"
+                onsubmit="return confirm('{{ t('confirm_delete_range') }}');">
+            <input type="hidden" name="range_id" value="{{ row.range_id }}">
+            <input type="hidden" name="label" value="{{ row.label or '' }}">
+            <button type="submit" class="btn small danger">{{ t('delete') }}</button>
+          </form>
+        </td>
+      </tr>
+      <tr id="rr-edit-{{ row_key }}" style="display:none">
+        <td colspan="8">
+          <form method="POST" action="{{ url_for('save_reference_range_tier') }}" class="form-grid rr-form" data-unit="{{ group.unit }}">
+            <input type="hidden" name="range_id" value="{{ row.range_id }}">
+            <input type="hidden" name="original_label" value="{{ row.label or '' }}">
+            <input type="hidden" name="test_parameter_id" value="{{ group.id }}">
+            {% include "master/_reference_range_tier_fields.html" with context %}
+            <div class="form-field" style="align-self:end; flex-direction:row; gap:8px;">
+              <button type="submit" class="btn small success">{{ t('save') }}</button>
+              <button type="button" class="btn small secondary" onclick="rrToggleEdit('{{ row_key }}')">{{ t('cancel') }}</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">ما فيه أي نسبة طبيعية مضافة لهذا الباراميتر بعد.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <button type="button" class="btn small secondary" style="margin-top:8px;" onclick="rrToggleEdit('new_{{ group.id }}')">+ إضافة حالة / نسبة جديدة</button>
+  <div id="rr-edit-new_{{ group.id }}-box" style="display:none; margin-top:8px;">
+    <form method="POST" action="{{ url_for('save_reference_range_tier') }}" class="form-grid rr-form" data-unit="{{ group.unit }}">
+      <input type="hidden" name="range_id" value="">
+      <input type="hidden" name="original_label" value="">
+      <input type="hidden" name="test_parameter_id" value="{{ group.id }}">
+      {% set row = {} %}
+      {% include "master/_reference_range_tier_fields.html" with context %}
+      <div class="form-field" style="align-self:end;">
+        <button type="submit" class="btn small success">{{ t('save') }}</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endfor %}
+
+<style>
+  .rr-preview { font-size:12.5px; color:#475569; margin-top:4px; grid-column: span 2; }
+  .rr-patient-results {
+    position:absolute; z-index:20; background:#fff; border:1px solid #E2E8F0; border-radius:6px;
+    max-height:180px; overflow-y:auto; width:100%; box-shadow:0 4px 14px rgba(0,0,0,0.12); display:none;
+  }
+  .rr-patient-results div { padding:6px 10px; cursor:pointer; font-size:13px; }
+  .rr-patient-results div:hover { background:#F1F5F9; }
+</style>
+<script>
+  // المطلوب 6: حفظ وحدة القياس مباشرة من بطاقة الباراميتر (فوق)، بدون
+  // فتح صفحة "تعديل الوحدات" المنفصلة — يعيد استخدام نفس مسار الحفظ
+  // الموجود أصلاً هناك (set-unit) مع ajax=1 حتى يرجّع JSON بدل صفحة كاملة.
+  function rrAddNewParam() {
+    var testDefId = document.getElementById('newParamTestDefId').value;
+    var nameInput = document.getElementById('newParamName');
+    var status = document.getElementById('newParamStatus');
+    var name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+    status.style.color = '#475569'; status.textContent = 'جارِ الإضافة...';
+    fetch('/api/test-parameters', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({test_definition_id: testDefId, name: name})
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) {
+          status.style.color = '#2e7d32';
+          status.textContent = '✓ تمت الإضافة — يُحدَّث الآن...';
+          setTimeout(function () { location.reload(); }, 600);
+        } else {
+          status.style.color = '#c62828';
+          status.textContent = '✕ ' + (data.error || 'صار خطأ');
+        }
+      })
+      .catch(function () {
+        status.style.color = '#c62828'; status.textContent = '✕ تعذّر الاتصال بالخادم';
+      });
+  }
+
+  function rrSaveDualUnit(btn) {
+    var box = btn.closest('.dual-unit-box');
+    var unitInput = box.querySelector('.dual-unit-input');
+    var factorInput = box.querySelector('.dual-unit-factor-input');
+    var status = box.querySelector('.dual-unit-save-status');
+    var paramId = unitInput.getAttribute('data-param-id');
+    var body = 'unit2=' + encodeURIComponent(unitInput.value.trim()) +
+      '&unit2_factor=' + encodeURIComponent(factorInput.value.trim()) + '&ajax=1';
+    fetch('/master/unit-converter/' + paramId + '/set-dual-unit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: body
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        status.style.visibility = 'visible';
+        status.style.color = data.ok ? '#2e7d32' : '#c62828';
+        status.textContent = data.ok ? '✓' : ('✕ ' + (data.error || ''));
+        setTimeout(function () { status.style.visibility = 'hidden'; status.textContent = '✓'; }, 2500);
+      })
+      .catch(function () {
+        status.style.visibility = 'visible'; status.style.color = '#c62828'; status.textContent = '✕';
+      });
+  }
+
+  function rrSaveUnit(btn) {
+    var box = btn.closest('.unit-edit-box');
+    var input = box.querySelector('.unit-edit-input');
+    var status = box.querySelector('.unit-save-status');
+    var paramId = input.getAttribute('data-param-id');
+    var newUnit = input.value.trim();
+    fetch('/master/unit-converter/' + paramId + '/set-unit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'unit=' + encodeURIComponent(newUnit) + '&ajax=1'
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        status.style.visibility = 'visible';
+        status.style.color = data.ok ? '#2e7d32' : '#c62828';
+        status.textContent = data.ok ? '✓' : '✕';
+        setTimeout(function () { status.style.visibility = 'hidden'; }, 1500);
+        if (data.ok) {
+          // يحدّث "data-unit" بكل فورمات هذا الكارد — rrBindPreview تحته
+          // تقرأ الوحدة من نفس الخاصية بكل مرة يتغيّر فيها أي حقل، فتظهر
+          // النص المطبوع الصحيح فورًا بدون تحديث الصفحة.
+          var card = box.closest('.card');
+          card.querySelectorAll('.rr-form').forEach(function (f) {
+            f.setAttribute('data-unit', newUnit);
+            var evt = f.querySelector('[name="low"]');
+            if (evt) evt.dispatchEvent(new Event('input'));
+          });
+        }
+      })
+      .catch(function () {
+        status.style.visibility = 'visible'; status.style.color = '#c62828'; status.textContent = '✕';
+      });
+  }
+
+  function rrToggleEdit(key) {
+    var editRow = document.getElementById('rr-edit-' + key);
+    var editBox = document.getElementById('rr-edit-' + key + '-box');
+    var viewRow = document.getElementById('rr-view-' + key);
+    if (editBox) {
+      editBox.style.display = (editBox.style.display === 'none') ? 'block' : 'none';
+      return;
+    }
+    if (!editRow) return;
+    var showing = editRow.style.display !== 'none';
+    editRow.style.display = showing ? 'none' : 'table-row';
+    if (viewRow) viewRow.style.display = showing ? 'table-row' : 'none';
+  }
+
+  // معاينة حية لشكل الطباعة أسفل كل فورم تيير — "Label: low - high unit"،
+  // نفس الصيغة اللي تطبعها parse_range_tiers فعليًا بالتقرير.
+  function rrBindPreview(scope) {
+    var label = scope.querySelector('[name="label"]');
+    var low = scope.querySelector('[name="low"]');
+    var high = scope.querySelector('[name="high"]');
+    var raw = scope.querySelector('[name="raw_text"]');
+    var out = scope.querySelector('.rr-preview-text');
+    if (!out) return;
+    function update() {
+      var unit = scope.getAttribute('data-unit') || '';
+      var value = (raw && raw.value.trim()) ? raw.value.trim()
+        : ((low && low.value !== '' ? low.value : '?') + ' - ' + (high && high.value !== '' ? high.value : '?'));
+      var text = (label && label.value.trim()) ? (label.value.trim() + ': ' + value) : value;
+      out.textContent = 'مثال شكل الطباعة: ' + text + (unit ? ' ' + unit : '');
+    }
+    [label, low, high, raw].forEach(function (el) { if (el) el.addEventListener('input', update); });
+    update();
+  }
+  document.querySelectorAll('.rr-form').forEach(rrBindPreview);
+
+  // نفس زر تظليل أصفر الموجود سابقًا — بس صار بهيدر كل كارد بدل جدول مسطّح.
+  document.querySelectorAll('.highlight-toggle').forEach(function (cb) {
+    cb.addEventListener('change', function () {
+      var paramId = cb.getAttribute('data-param-id');
+      var status = cb.closest('label').querySelector('.highlight-save-status');
+      fetch('/master/test-parameters/' + paramId + '/toggle-highlight', { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          status.style.visibility = 'visible';
+          status.style.color = data.ok ? '#2e7d32' : '#c62828';
+          status.textContent = data.ok ? '✓' : '✕';
+          setTimeout(function () { status.style.visibility = 'hidden'; }, 1500);
+        })
+        .catch(function () {
+          status.style.visibility = 'visible'; status.style.color = '#c62828'; status.textContent = '✕';
+        });
+    });
+  });
+
+  // بحث فوري باسم المريض — لربط نسبة بمريض واحد بالذات.
+  function rrBindPatientSearch(scope) {
+    var radios = scope.querySelectorAll('input[name="scope_type"]');
+    var box = scope.querySelector('.rr-patient-box');
+    var input = scope.querySelector('.rr-patient-query');
+    var hidden = scope.querySelector('input[name="patient_id"]');
+    var results = scope.querySelector('.rr-patient-results');
+    if (!radios.length || !box) return;
+    radios.forEach(function (r) {
+      r.addEventListener('change', function () {
+        box.style.display = (r.value === 'patient' && r.checked) ? 'block' : 'none';
+        if (r.value === 'all' && r.checked) hidden.value = '';
+      });
+    });
+    if (!input) return;
+    var timer = null;
+    input.addEventListener('input', function () {
+      hidden.value = '';
+      var q = input.value.trim();
+      clearTimeout(timer);
+      if (q.length < 2) { results.style.display = 'none'; return; }
+      timer = setTimeout(function () {
+        fetch('/api/patients/search?q=' + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (list) {
+            results.innerHTML = '';
+            if (!list.length) { results.style.display = 'none'; return; }
+            list.forEach(function (p) {
+              var row = document.createElement('div');
+              row.textContent = p.full_name + (p.age ? ' — ' + p.age + ' ' + (p.age_unit || '') : '') + (p.gender ? ' — ' + p.gender : '');
+              row.addEventListener('click', function () {
+                hidden.value = p.id; input.value = p.full_name; results.style.display = 'none';
+              });
+              results.appendChild(row);
+            });
+            results.style.display = 'block';
+          })
+          .catch(function () { results.style.display = 'none'; });
+      }, 250);
+    });
+    document.addEventListener('click', function (e) {
+      if (e.target !== input) results.style.display = 'none';
+    });
+  }
+  document.querySelectorAll('.rr-form').forEach(rrBindPatientSearch);
+</script>
+{% endblock %}

@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ 'rtl' if lang == 'ar' else 'ltr' }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ brand_name }}</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='icon/lab-icon.ico') }}">
+<link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='icon/lab-icon.ico') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>
+  /* ألوان الواجهة العامة (المطلوب: تغيير ألوان الخلفية بكل صفحات
+     البرنامج -- الشريط الجانبي، صفحة زيارة جديدة، وبقية الصفحات -- من
+     صفحة الإعدادات). هذا يعرّف متغيرين على مستوى الصفحة كلها؛ أي عنصر
+     بملف static/css/style.css أو بأي قالب يستخدم أصلاً var(--primary)
+     أو var(--page-bg) يتغيّر تلقائيًا. لون hex مكتوب مباشرة (ثابت) داخل
+     قالب معيّن بدل ما يستخدم أحد هذين المتغيرين ما يتأثر -- يحتاج
+     تحويله لمتغير لحاله أول (راجعني بالملف المحدد لو تحتاج هذا). */
+  :root {
+    --primary: {{ theme_primary_color|default('#205072') }};
+    --page-bg: {{ theme_page_bg_color|default('#F3F6F8') }};
+  }
+</style>
+<style>
+  /* القوائم المنسدلة بالشريط الجانبي (Front Desk, Workbench, Billing
+     Center, Master Definitions, Management) -- كل عنوان قائمة رئيسية
+     صار قابل للطي/الفتح بضغطة، مع سهم صغير يتقلّب حسب الحالة. مكان
+     السهم والقائمة نفسها يتبع اتجاه الصفحة تلقائيًا (يمين لو عربي بحكم
+     dir="rtl" على <html>، يسار لو انكليزي) بدون أي CSS إضافي مطلوب هنا
+     لأن dir موروث أصلاً من صفحة الـbody بالكامل. */
+  .nav-group-toggle { display:flex; align-items:center; justify-content:space-between;
+    cursor:pointer; user-select:none; }
+  .nav-group-arrow { display:inline-block; transition: transform .15s ease; font-size:11px; opacity:.7; }
+  .nav-group.collapsed .nav-group-arrow { transform: rotate(-90deg); }
+  .nav-group.collapsed .nav-group-links { display:none; }
+</style>
+<style>
+  /* إخفاء/إظهار القائمة الجانبية (زر ☰ بالشريط العلوي) -- الحالة تُحفظ بالمتصفح */
+  html.sidebar-hidden .sidebar { display: none !important; }
+  /* .app-shell عندك flex و .main فيها flex:1 (راجع style.css) فتتمدد تلقائيًا لما تختفي القائمة */
+  @media print { .sidebar-toggle-btn { display: none !important; } }
+</style>
+<script>
+  try { if (localStorage.getItem("lis-sidebar-hidden") === "1") document.documentElement.classList.add("sidebar-hidden"); } catch (e) {}
+  function toggleSidebar() {
+    var on = document.documentElement.classList.toggle("sidebar-hidden");
+    try { localStorage.setItem("lis-sidebar-hidden", on ? "1" : "0"); } catch (e) {}
+  }
+</script>
+<script>
+  // "⬅️ رجوع" بشريط العنوان العلوي (كل الصفحات ما عدا الرئيسية): يرجع
+  // لنفس الصفحة/القسم اللي جاي منه المستخدم (history.back())، وإذا ما
+  // كان فيه تاريخ تصفح حقيقي بنفس الموقع (مثلاً فتح الرابط مباشرة بتبويب
+  // جديد، أو جاي من موقع خارجي) يرجعه للرئيسية بدل ما يطلع بصفحة فاضية
+  // أو يطلع برّا الموقع بالغلط.
+  var DASHBOARD_URL = "{{ url_for('dashboard') }}";
+  function smartGoBack() {
+    var sameSiteReferrer = document.referrer && document.referrer.indexOf(window.location.origin) === 0;
+    if (sameSiteReferrer && window.history.length > 1) {
+      window.history.back();
+    } else {
+      window.location.href = DASHBOARD_URL;
+    }
+  }
+</script>
+<script>
+  // حتى لو نسى المستخدم يطفّي خيار "Headers and footers" بنافذة الطباعة،
+  // خلي عنوان التبويب (اللي يطلعه المتصفح بمنتصف رأس الطباعة) فاضي وقت
+  // الطباعة تحديداً، عشان ما يطلع اسم المختبر/الطبيب هناك بالإضافة لغيره
+  // من عناصر التصميم. يرجع العنوان لطبيعته بعد الطباعة مباشرة.
+  (function () {
+    var savedTitle = null;
+    window.addEventListener("beforeprint", function () {
+      savedTitle = document.title;
+      document.title = "";
+    });
+    window.addEventListener("afterprint", function () {
+      if (savedTitle !== null) document.title = savedTitle;
+    });
+  })();
+</script>
+</head>
+<body>
+<script>
+  if (localStorage.getItem("lis-theme") === "dark") document.documentElement.classList.add("dark");
+</script>
+{% if license_banner %}
+<div style="background:#fbbf24; color:#111827; text-align:center; padding:6px; font-weight:600;">
+  ⏳ {{ license_banner }}
+</div>
+{% endif %}
+{% if is_designer %}
+<a href="{{ url_for('designer_panel') }}" title="لوحة المصمم"
+   style="position:fixed; bottom:18px; {{ 'left:18px;' if lang=='ar' else 'right:18px;' }} z-index:9999;
+          width:48px; height:48px; border-radius:50%; background:#111827; color:#fbbf24;
+          display:flex; align-items:center; justify-content:center; font-size:22px;
+          box-shadow:0 4px 14px rgba(0,0,0,.35); text-decoration:none;">
+  🛠️
+</a>
+{% endif %}
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      {% if logo_url %}<img src="{{ logo_url }}" alt="logo" class="brand-logo">{% else %}🧪{% endif %}
+      <span>{{ brand_name }}</span>
+    </div>
+    <nav>
+      {# صلاحية روابط الحسابات: تتبع نفس منطق الباك-إند (roles_required = واجهة مختبر/الاثنين معًا،
+         وجلسة المصمم تتخطى الفحص). كانت تعتمد على current_role فقط، فلما يكون الدور "designer"
+         (أو فاضي) كل روابط الحسابات تختفي رغم إن الصفحات نفسها مسموحة. #}
+      {% set is_designer = session.get('designer_id') %}
+      {% set can_reports = is_designer or session.get('interface') in ('lab', 'both') or current_role in ['admin', 'accountant', 'supervisor'] and session.get('interface') is none %}
+      <div class="nav-group">
+        <a class="nav-link {{ 'active' if request.path == '/' else '' }}" href="{{ url_for('dashboard') }}">📊 {{ t('dashboard') }}</a>
+      </div>
+      {# المطلوب 3: Front Desk تظهر لو الواجهة استقبال أو "الاثنين معًا"
+         (أو ما اختار المستخدم واجهة بعد -- حسابات قديمة قبل هذي الميزة
+         تبقى تشتغل بدون أي تغيير). #}
+      {% if session.get('interface') in (None, 'reception', 'both') %}
+      <div class="nav-group">
+        <div class="nav-group-title nav-group-toggle" data-group="front_desk" onclick="lisToggleNavGroup(this)">
+          <span>{{ t('front_desk') }}</span><span class="nav-group-arrow">▾</span>
+        </div>
+        <div class="nav-group-links">
+        <a class="nav-link {{ 'active' if request.path == url_for('new_visit') else '' }}" href="{{ url_for('new_visit') }}">➕ {{ t('new_visit') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('visits_list') else '' }}" href="{{ url_for('visits_list') }}">📋 {{ t('visits') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('recent_visits_page') else '' }}" href="{{ url_for('recent_visits_page') }}">🕒 {{ 'آخر الزيارات' if lang=='ar' else 'Recent Visits' }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('patients_list') else '' }}" href="{{ url_for('patients_list') }}">🧑‍🤝‍🧑 {{ t('patients') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('results_list') else '' }}" href="{{ url_for('results_list') }}">📄 {{ t('results') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('pdf_archive') else '' }}" href="{{ url_for('pdf_archive') }}">🗄️ أرشيف PDF</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('followups_list') else '' }}" href="{{ url_for('followups_list') }}">📞 {{ t('patients_followup') }}</a>
+        {% if can_reports or current_role in ['supervisor', 'admin'] %}
+        <a class="nav-link {{ 'active' if request.path == url_for('whatsapp_queue') else '' }}" href="{{ url_for('whatsapp_queue') }}">📱 طابور واتساب</a>
+        {% endif %}
+        </div>
+      </div>
+      {% endif %}
+      {% if session.get('interface') in (None, 'lab', 'both') %}
+      <div class="nav-group">
+        <div class="nav-group-title nav-group-toggle" data-group="workbench" onclick="lisToggleNavGroup(this)">
+          <span>{{ t('workbench') }}</span><span class="nav-group-arrow">▾</span>
+        </div>
+        <div class="nav-group-links">
+        <a class="nav-link {{ 'active' if request.path == url_for('orders_list') else '' }}" href="{{ url_for('orders_list') }}">🧬 {{ t('orders') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('samples_collection') else '' }}" href="{{ url_for('samples_collection') }}">🩸 {{ t('samples_collection') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('samples_accession') else '' }}" href="{{ url_for('samples_accession') }}">📥 {{ t('samples_accession') }}</a>
+        </div>
+      </div>
+      {% endif %}
+      {% if session.get('interface') in (None, 'reception', 'both') or can_reports %}
+      <div class="nav-group">
+        <div class="nav-group-title nav-group-toggle" data-group="billing_center" onclick="lisToggleNavGroup(this)">
+          <span>{{ t('billing_center') }}</span><span class="nav-group-arrow">▾</span>
+        </div>
+        <div class="nav-group-links">
+        <a class="nav-link {{ 'active' if request.path == url_for('registers') else '' }}" href="{{ url_for('registers') }}">💳 {{ t('registers') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('invoices_list') else '' }}" href="{{ url_for('invoices_list') }}">🧮 {{ t('invoices') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('daily_report') else '' }}" href="{{ url_for('daily_report') }}">🗓️ {{ t('daily_report') }}</a>
+        {% if can_reports %}
+        <a class="nav-link {{ 'active' if request.path == url_for('monthly_report') else '' }}" href="{{ url_for('monthly_report') }}">📅 {{ t('monthly_report') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('quarter_report') else '' }}" href="{{ url_for('quarter_report') }}">📈 التقرير الربع سنوي</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('half_year_report') else '' }}" href="{{ url_for('half_year_report') }}">📆 {{ t('half_year_report') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('annual_report') else '' }}" href="{{ url_for('annual_report') }}">📊 {{ t('annual_report') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('accounts_hub') else '' }}" href="{{ url_for('accounts_hub') }}">🗂️ كل الحسابات</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('accounts_search') else '' }}" href="{{ url_for('accounts_search') }}">🔍 بحث وتصدير الحسابات</a>
+        {% endif %}
+        {% if can_reports %}
+        <a class="nav-link {{ 'active' if request.path == url_for('rates') else '' }}" href="{{ url_for('rates') }}">💲 {{ t('rates') }}</a>
+        {% endif %}
+        </div>
+      </div>
+      {% endif %}
+      {# المطلوب: Master Definitions وManagement تابعتين فعليًا لواجهة
+         "مختبر" أو "الاثنين معًا" بعد تحديث roles_required (بدل أي تمييز
+         فني/مسؤول قديم) — كانتا لسا معتمدتين هنا على current_role القديم،
+         وهذا كان سبب ظهورهم بالغلط لواجهة "استقبال" (لأن حساب الظل لكل
+         واجهة دوره الداخلي 'admin')، رغم إن الباك-إند يمنعها فعليًا لو
+         ضُغط عليها. صار الشرط هنا نفسه شرط قسم Workbench بالضبط. #}
+      {% if session.get('interface') in (None, 'lab', 'both') %}
+      <div class="nav-group">
+        <div class="nav-group-title nav-group-toggle" data-group="master_definitions" onclick="lisToggleNavGroup(this)">
+          <span>{{ t('master_definitions') }}</span><span class="nav-group-arrow">▾</span>
+        </div>
+        <div class="nav-group-links">
+        <a class="nav-link {{ 'active' if request.path == url_for('reference_ranges') else '' }}" href="{{ url_for('reference_ranges') }}">📐 {{ t('reference_ranges') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('packages_list') else '' }}" href="{{ url_for('packages_list') }}">📦 {{ t('packages') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('mapcodes_list') else '' }}" href="{{ url_for('mapcodes_list') }}">🔗 {{ t('mapcodes') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('quick_add_items') else '' }}" href="{{ url_for('quick_add_items') }}">⚡ {{ t('quick_add_items') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('suggestions_list') else '' }}" href="{{ url_for('suggestions_list') }}">💬 {{ t('suggestions') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('test_catalog') else '' }}" href="{{ url_for('test_catalog') }}">🧾 {{ t('test_catalog') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('parameter_order') else '' }}" href="{{ url_for('parameter_order') }}">🔢 ترتيب الباراميترات</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('unit_converter') else '' }}" href="{{ url_for('unit_converter') }}">📏 تعديل الوحدات</a>
+        </div>
+      </div>
+      {% endif %}
+      {% if session.get('interface') in (None, 'lab', 'both') %}
+      <div class="nav-group">
+        <div class="nav-group-title nav-group-toggle" data-group="management" onclick="lisToggleNavGroup(this)">
+          <span>{{ t('management') }}</span><span class="nav-group-arrow">▾</span>
+        </div>
+        <div class="nav-group-links">
+        <a class="nav-link {{ 'active' if request.path == url_for('doctors_list') else '' }}" href="{{ url_for('doctors_list') }}">🩺 {{ t('doctors') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('examining_doctor_rates_list') else '' }}" href="{{ url_for('examining_doctor_rates_list') }}">💰 أجور دكتور المختبر الفاحص</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('referral_labs_list') else '' }}" href="{{ url_for('referral_labs_list') }}">🧪 المختبرات المُرسِلة</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('report_designer') else '' }}" href="{{ url_for('report_designer') }}">🖨️ مصمم التقارير</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('stamps_manage') else '' }}" href="{{ url_for('stamps_manage') }}">🖋️ الأختام والتواقيع</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('app_settings') else '' }}" href="{{ url_for('app_settings') }}">⚙️ {{ t('settings') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('dashboard_look') else '' }}" href="{{ url_for('dashboard_look') }}">🎨 مظهر الشاشة الرئيسية</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('backup_center') else '' }}" href="{{ url_for('backup_center') }}">💾 {{ 'نسخ احتياطي' if lang=='ar' else 'Backup' }}</a>
+        </div>
+      </div>
+      {% endif %}
+    </nav>
+    <div class="sidebar-footer">
+      {{ current_user }}<br>
+      <span style="opacity:.8">{{ current_role }}</span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="title">
+        <button class="pill-btn sidebar-toggle-btn" type="button" onclick="toggleSidebar()"
+                title="إخفاء / إظهار القائمة الجانبية" style="margin-inline-end:8px;">☰</button>
+        {% if request.path != '/' %}
+        <button class="pill-btn" type="button" onclick="smartGoBack()" title="رجوع لنفس الصفحة/القسم السابق"
+                style="margin-inline-end:8px;">⬅️ رجوع</button>
+        <a class="pill-btn" href="{{ url_for('dashboard') }}" title="الرئيسية"
+           style="margin-inline-end:8px;">🏠 الرئيسية</a>
+        {% endif %}
+        {% block page_title %}{{ t('dashboard') }}{% endblock %}
+      </div>
+      <div class="topbar-search" style="position:relative; flex:1; max-width:340px; margin:0 14px;">
+        <input type="text" id="lisQuickSearchInput" autocomplete="off"
+               placeholder="🔎 بحث سريع عن أي نتيجة (اسم/رقم تسجيل/باركود)"
+               style="width:100%; padding:6px 10px; border-radius:8px; border:1px solid rgba(0,0,0,.15);">
+        <div id="lisQuickSearchResults" style="display:none; position:absolute; top:100%; inset-inline-start:0;
+             width:340px; max-width:90vw; background:#fff; color:#222; border-radius:8px; margin-top:4px;
+             box-shadow:0 10px 30px rgba(0,0,0,.25); max-height:360px; overflow-y:auto; z-index:9998;"></div>
+      </div>
+      <div class="controls">
+        <button class="pill-btn {{ 'active' if lang=='en' }}" onclick="location.href='{{ url_for('set_lang', lang='en') }}'">EN</button>
+        <button class="pill-btn {{ 'active' if lang=='ar' }}" onclick="location.href='{{ url_for('set_lang', lang='ar') }}'">AR</button>
+        <button class="pill-btn" onclick="toggleTheme()">🌓</button>
+        <span class="user-chip">{{ current_user }}</span>
+        <a class="pill-btn" href="{{ url_for('interface_choose') }}" title="تبديل الواجهة (استقبال/مختبر/الاثنين معًا)">🔀</a>
+        <a class="pill-btn" href="{{ url_for('logout') }}">{{ t('logout') }}</a>
+      </div>
+    </div>
+    <div class="content">
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+</div>
+<script>
+  // ------------------------------------------------------------------
+  // طي/فتح القوائم الرئيسية بالشريط الجانبي — حالة كل قائمة (مطوية أو
+  // لا) تُحفظ بـlocalStorage فتبقى كما تركها المستخدم بين الصفحات. أول
+  // مرة (ما فيه حالة محفوظة بعد) تُفتح تلقائيًا القائمة اللي فيها
+  // الصفحة الحالية (class="active")، والباقي تُطوى افتراضيًا.
+  // ------------------------------------------------------------------
+  function lisToggleNavGroup(titleEl) {
+    var group = titleEl.closest('.nav-group');
+    if (!group) return;
+    group.classList.toggle('collapsed');
+    var key = 'lis-nav-collapsed-' + titleEl.dataset.group;
+    localStorage.setItem(key, group.classList.contains('collapsed') ? '1' : '0');
+  }
+  document.querySelectorAll('.nav-group').forEach(function (group) {
+    var toggle = group.querySelector('.nav-group-toggle');
+    if (!toggle) return; // مجموعة "لوحة التحكم" المفردة بدون عنوان قابل للطي
+    var key = 'lis-nav-collapsed-' + toggle.dataset.group;
+    var saved = localStorage.getItem(key);
+    if (saved === null) {
+      var hasActive = group.querySelector('.nav-link.active') !== null;
+      group.classList.toggle('collapsed', !hasActive);
+    } else {
+      group.classList.toggle('collapsed', saved === '1');
+    }
+  });
+</script>
+<script>
+  // ------------------------------------------------------------------
+  // مربع البحث السريع العلوي (بشريط كل صفحة، كل الشاشات الثلاث) --
+  // المطلوب: الوصول السريع لأي نتيجة (اسم مريض/رقم تسجيل/باركود) من أي
+  // مكان بالبرنامج بدون المرور بصفحة Orders أو النتائج أول. يبحث عبر
+  // /api/results/quick-search (يحدّد الرابط المناسب لكل نتيجة حسب واجهة
+  // المستخدم الحالية من طرف السيرفر نفسه).
+  // ------------------------------------------------------------------
+  (function () {
+    var input = document.getElementById('lisQuickSearchInput');
+    var box = document.getElementById('lisQuickSearchResults');
+    if (!input || !box) return;
+    var debounceTimer = null;
+    function renderResults(items) {
+      if (!items.length) {
+        box.innerHTML = '<div style="padding:10px 12px; color:#777;">لا توجد نتائج مطابقة</div>';
+        box.style.display = 'block';
+        return;
+      }
+      box.innerHTML = items.map(function (it) {
+        var statusColor = (it.status === 'Verified') ? '#1d7a3e' : (it.status === 'Completed' ? '#2b6cb0' : '#888');
+        return '<a href="' + it.link + '" style="display:block; padding:8px 12px; text-decoration:none; ' +
+          'color:#222; border-bottom:1px solid #eee;">' +
+          '<div style="font-weight:700;">' + it.patient_name + ' <span class="mono" style="font-weight:400; color:#777;">#' + it.registration_number + '</span></div>' +
+          '<div style="font-size:12.5px; color:#555;">' + it.test_name +
+          ' — <span style="color:' + statusColor + ';">' + it.status + '</span></div>' +
+          '</a>';
+      }).join('');
+      box.style.display = 'block';
+    }
+    input.addEventListener('input', function () {
+      var q = input.value.trim();
+      clearTimeout(debounceTimer);
+      if (q.length < 2) {
+        box.style.display = 'none';
+        return;
+      }
+      debounceTimer = setTimeout(function () {
+        fetch('/api/results/quick-search?q=' + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (data) { renderResults(data.items || []); })
+          .catch(function () {});
+      }, 250);
+    });
+    document.addEventListener('click', function (e) {
+      if (!box.contains(e.target) && e.target !== input) box.style.display = 'none';
+    });
+    input.addEventListener('focus', function () {
+      if (box.innerHTML.trim()) box.style.display = 'block';
+    });
+  })();
+</script>
+{% if session.get('interface') in (None, 'reception', 'both') %}
+<div id="lisResultToast" onclick="lisDismissResultToast()"
+     style="display:none; position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:10000;
+            background:#1d7a3e; color:#fff; padding:14px 22px; border-radius:10px;
+            box-shadow:0 10px 30px rgba(0,0,0,.3); font-weight:700; cursor:pointer; max-width:90vw; text-align:center;">
+</div>
+<script>
+  // ------------------------------------------------------------------
+  // إشعار + رنة جرس بسيطة لشاشة الاستقبال (شغّال بكل صفحاتها، لأن هذا
+  // السكربت بملف base.html المشترك) عند وصول نتيجة مكتملة جديدة
+  // مُرسَلة من شاشة المختبر (📤 بصفحة Orders) -- فحص دوري كل 8 ثواني عبر
+  // /front-desk/notifications/check. الرنة تُولَّد بـWeb Audio مباشرة
+  // (بدون ملف صوت خارجي)، وبعد عرضها نعلّم هذي العناصر "مقروءة"
+  // (mark-seen) حتى ما تتكرر الرنة لنفس النتيجة بالفحص التالي -- تبقى
+  // النتيجة نفسها ظاهرة بصفحة النتائج لحد ما تُطبع فعليًا.
+  // ------------------------------------------------------------------
+  (function () {
+    var NOTIF_URL = "{{ url_for('front_desk_notifications_check') }}";
+    var SEEN_URL = "{{ url_for('front_desk_notifications_mark_seen') }}";
+    function playBell() {
+      try {
+        var ctx = new (window.AudioContext || window.webkitAudioContext)();
+        [880, 1320].forEach(function (freq, i) {
+          var osc = ctx.createOscillator();
+          var gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          var t0 = ctx.currentTime + i * 0.18;
+          gain.gain.setValueAtTime(0.0001, t0);
+          gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.start(t0); osc.stop(t0 + 0.4);
+        });
+      } catch (e) { /* المتصفح ما يدعم الصوت -- الإشعار المرئي يبقى يشتغل لحاله */ }
+    }
+    function checkNotifications() {
+      fetch(NOTIF_URL).then(function (r) { return r.json(); }).then(function (data) {
+        if (data.count > 0) {
+          var toast = document.getElementById('lisResultToast');
+          var names = data.items.slice(0, 3).map(function (it) {
+            return it.patient_name + ' — ' + it.test_name;
+          }).join('، ');
+          toast.textContent = '🔔 نتيجة مكتملة وصلت للطباعة (' + data.count + '): ' + names +
+            (data.count > 3 ? ' ...' : '') + '  — اضغط للإخفاء';
+          toast.style.display = 'block';
+          playBell();
+          fetch(SEEN_URL, { method: 'POST' });
+        }
+      }).catch(function () {});
+    }
+    window.lisDismissResultToast = function () {
+      document.getElementById('lisResultToast').style.display = 'none';
+    };
+    checkNotifications();
+    setInterval(checkNotifications, 8000);
+  })();
+</script>
+{% endif %}
+<script>
+  // تاريخ حقول <input type="date"> بكل صفحات البرنامج: المتصفح (Chrome/Edge)
+  // يعرض شهر/يوم الأسبوع بلغة إعدادات نظام التشغيل الإقليمية إذا ما حدّدنا
+  // نحن لغة العنصر صراحة -- وهذا سبب ظهورها أحيانًا بلغة غير متوقعة (مثلاً
+  // لو الويندوز مضبوط بلغة إقليمية كردية) حتى لو واجهة البرنامج نفسها
+  // عربي/إنكليزي. إضافة lang هنا تجبر عرض التاريخ بنفس لغة الواجهة الحالية
+  // بغض النظر عن إعدادات نظام التشغيل.
+  (function () {
+    var pageLang = document.documentElement.getAttribute('lang') || 'ar';
+    document.querySelectorAll('input[type="date"], input[type="datetime-local"], input[type="time"]')
+      .forEach(function (el) { el.setAttribute('lang', pageLang); });
+  })();
+</script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<a href="{{ url_for('designer_login') }}" title="⚙"
+   style="position:fixed; bottom:10px; inset-inline-end:10px; opacity:.25; font-size:18px;
+          text-decoration:none; z-index:999; color: var(--text, #333);">⚙</a>
+</body>
+</html>

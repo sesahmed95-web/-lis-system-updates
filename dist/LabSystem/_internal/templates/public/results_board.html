@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="3600">
+<title>نتائج جاهزة</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: linear-gradient(160deg, #0B1220 0%, #0F1B33 100%);
+    color: #F1F5F9; font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    overflow: hidden;
+  }
+  .board-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 28px 48px; border-bottom: 2px solid rgba(255,255,255,0.12);
+  }
+  .board-header h1 { font-size: 2.4em; margin: 0; font-weight: 800; }
+  .board-header .brand { display: flex; align-items: center; gap: 16px; }
+  .board-header .brand img { height: 64px; }
+  .board-header .clock { font-size: 1.8em; font-weight: 700; color: #93C5FD; direction: ltr; }
+  table.board-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  table.board-table th {
+    text-align: start; font-size: 1.3em; color: #93C5FD; padding: 14px 48px;
+    border-bottom: 2px solid rgba(255,255,255,0.15); font-weight: 700;
+  }
+  table.board-table td { padding: 18px 48px; font-size: 1.9em; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  table.board-table tbody tr:first-child td {
+    /* المطلوب: سطر جديد يضاف تلقائيًا للقائمة بدون صوت — تمييز بصري خفيف
+       بس لآخر إضافة (لون مختلف شوي)، بدون أي وميض أو حركة. */
+    color: #86EFAC; font-weight: 700;
+  }
+  .patient-name { font-weight: 700; }
+  .test-name { color: #CBD5E1; }
+  .completed-time { color: #94A3B8; font-size: 0.7em; direction: ltr; text-align: end; }
+  .empty-state { text-align: center; padding: 100px 20px; font-size: 1.6em; color: #64748B; }
+</style>
+</head>
+<body>
+  <div class="board-header">
+    <div class="brand">
+      {% if logo_url %}<img src="{{ logo_url }}" alt="logo">{% endif %}
+      <h1>✅ نتائج جاهزة اليوم</h1>
+    </div>
+    <div class="clock" id="clockEl">--:--:--</div>
+  </div>
+
+  <table class="board-table">
+    <thead>
+      <tr>
+        <th>اسم المريض</th>
+        <th>التحليل</th>
+        <th style="text-align:end;">وقت الإنجاز</th>
+      </tr>
+    </thead>
+    <tbody id="boardBody">
+      <tr><td colspan="3" class="empty-state">جارِ التحميل...</td></tr>
+    </tbody>
+  </table>
+
+<script>
+  function updateClock() {
+    var el = document.getElementById('clockEl');
+    var now = new Date();
+    el.textContent = now.toLocaleTimeString('en-GB');
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  function formatTime(iso) {
+    if (!iso) return '';
+    var d = new Date(iso.replace(' ', 'T'));
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
+  }
+
+  function loadBoard() {
+    fetch('/api/public/completed-today')
+      .then(function (r) { return r.json(); })
+      .then(function (list) {
+        var body = document.getElementById('boardBody');
+        if (!list.length) {
+          body.innerHTML = '<tr><td colspan="3" class="empty-state">ما فيه نتائج جاهزة لحد الآن اليوم</td></tr>';
+          return;
+        }
+        var html = '';
+        list.forEach(function (row) {
+          html += '<tr>' +
+            '<td class="patient-name">' + row.patient_name + '</td>' +
+            '<td class="test-name">' + row.test_name + '</td>' +
+            '<td class="completed-time">' + formatTime(row.completed_at) + '</td>' +
+            '</tr>';
+        });
+        body.innerHTML = html;
+      })
+      .catch(function () { /* تجاهل فشل التحديث المؤقت، يعيد المحاولة بالدورة الجاية */ });
+  }
+
+  loadBoard();
+  // المطلوب: تحديث تلقائي كل دقيقة بالضبط.
+  setInterval(loadBoard, 60000);
+</script>
+</body>
+</html>

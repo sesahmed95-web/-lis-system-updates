@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('patients_followup') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <form class="filters" method="GET">
+    <div class="form-field">
+      <label>{{ t('status') }}</label>
+      <select name="status" onchange="this.form.submit()">
+        <option value="">{{ t('all_statuses') }}</option>
+        {% for s in ['Pending', 'Contacted', 'No Answer', 'Done'] %}
+        <option value="{{ s }}" {{ 'selected' if status_filter == s else '' }}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
+  <table>
+    <thead><tr>
+      <th>{{ t('phone') }}</th><th>{{ t('name') }}</th><th>{{ t('no_col') }}</th>
+      <th>{{ t('status') }}</th><th>{{ t('notes') }}</th><th>{{ t('date') }}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="mono">
+          <a href="tel:{{ r['phone'] }}">📞</a> {{ r['phone'] }}
+        </td>
+        <td>{{ r['full_name'] }}</td>
+        <td class="mono">{{ r['registration_number'] }}</td>
+        <td><span class="badge badge-{{ r['status']|replace(' ', '-') }}">{{ r['status'] }}</span></td>
+        <td class="muted">{{ r['notes'] or '' }}</td>
+        <td class="muted">{{ r['followup_date'] }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('followup_update', followup_id=r['id']) }}" style="display:flex; gap:6px;">
+            <select name="status">
+              {% for s in ['Pending', 'Contacted', 'No Answer', 'Done'] %}
+              <option value="{{ s }}" {{ 'selected' if r['status'] == s else '' }}>{{ s }}</option>
+              {% endfor %}
+            </select>
+            <input type="text" name="notes" value="{{ r['notes'] or '' }}" placeholder="{{ t('notes') }}" style="width:130px">
+            <button class="btn small" type="submit">{{ t('save') }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

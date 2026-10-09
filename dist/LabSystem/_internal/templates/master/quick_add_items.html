@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('quick_add_items') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ t('add_to_quick_add') }}</h3>
+  <form method="POST" style="display:flex; gap:10px; align-items:end;">
+    <div class="form-field" style="min-width:260px;">
+      <label>{{ t('test') }}</label>
+      <select name="test_definition_id" required>
+        {% for test in all_tests %}
+        <option value="{{ test['id'] }}">{{ test['name'] }} ({{ test['department'] }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn" type="submit">{{ t('create') }}</button>
+  </form>
+  <p class="muted">هذه التحاليل ستظهر كأزرار سريعة في أعلى نموذج "زيارة جديدة" لتسريع تسجيل التحاليل الأكثر طلبًا.</p>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>{{ t('test') }}</th><th>{{ t('department') }}</th><th></th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r['test_name'] }}</td>
+        <td>{{ r['department'] }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('quick_add_item_remove', item_id=r['id']) }}">
+            <button class="btn small danger" type="submit">{{ t('remove') }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

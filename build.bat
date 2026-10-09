@@ -15,7 +15,7 @@ if exist VERSION copy /y VERSION dist\LabSystem\VERSION >nul
 echo ==== 3/4  Staging data folders (without customer uploads) ====
 mkdir build_tmp
 set ADD=
-for %%D in (templates icon fonts) do (
+for %%D in (templates fonts) do (
     if exist "%%D" set ADD=!ADD! --add-data "%%D;%%D"
 )
 if exist static (
@@ -24,7 +24,7 @@ if exist static (
 )
 
 echo ==== 4/4  Building LabSystem.exe with PyInstaller ====
-python -m PyInstaller --noconfirm --clean --onedir --name LabSystem --icon "icon\lab-icon.ico" !ADD! app.py
+python -m PyInstaller --noconfirm --clean --onedir --name LabSystem --icon "static\icon\lab-icon.ico" !ADD! app.py
 if errorlevel 1 (
     echo.
     echo BUILD FAILED - read the errors above.

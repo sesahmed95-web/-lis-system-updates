@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block page_title %}المختبرات المُرسِلة{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>إضافة مختبر مُرسِل جديد</h3>
+  <p class="muted">هذه المختبرات تظهر بقائمة "نموذج وارد من مختبر آخر؟" عند تسجيل زيارة جديدة — اسم المختبر ما ينطبع أبدًا بأي تقرير نتيجة، ويُستخدم فقط لحساب المختبر يوميًا وشهريًا وإرسال كشف الحساب له.</p>
+  <form method="POST" class="form-grid">
+    <div class="form-field">
+      <label>اسم المختبر</label>
+      <input type="text" name="name" required placeholder="مثال: مختبر القمة">
+    </div>
+    <div class="form-field">
+      <label>رقم واتساب مدير المختبر</label>
+      <input type="text" name="phone" placeholder="مثال: 07701234567">
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">إضافة</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>اسم المختبر</th><th>رقم واتساب</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for lab in labs %}
+      <tr>
+        <td>{{ lab['name'] }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('referral_lab_update_phone', center_id=lab['id']) }}" style="display:flex; gap:6px; align-items:center;">
+            <input type="text" name="phone" value="{{ lab['phone'] or '' }}" placeholder="رقم واتساب" class="mono" style="width:160px;">
+            <button class="btn small secondary" type="submit">حفظ</button>
+          </form>
+        </td>
+        <td>
+          <a class="btn small secondary" href="{{ url_for('referral_lab_statement', center_id=lab['id']) }}">كشف الحساب</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">لا يوجد مختبرات مُرسِلة مضافة بعد.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

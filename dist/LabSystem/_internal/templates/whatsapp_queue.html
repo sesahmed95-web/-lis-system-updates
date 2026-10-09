@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block page_title %}طابور إرسال واتساب{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted">
+    سجلّ كل محاولات إرسال النتائج عبر واتساب. العناصر <b>pending</b> أو
+    <b>failed</b> يعيد البرنامج محاولتها تلقائيًا كل 3 دقائق عند توفر
+    الإنترنت، أو تقدر تضغط "إعادة المحاولة" الآن يدويًا.
+  </p>
+  <table>
+    <thead><tr>
+      <th>المريض</th><th>النتيجة/التقرير</th><th>الهاتف</th><th>الحالة</th>
+      <th>عدد المحاولات</th><th>آخر خطأ</th><th>التاريخ</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r['patient_name'] }}</td>
+        <td>{{ r['label'] }}</td>
+        <td class="mono">{{ r['phone'] }}</td>
+        <td>
+          {% if r['status'] == 'sent' %}
+          <span class="badge badge-Verified">✅ تم الإرسال</span>
+          {% elif r['status'] == 'failed' %}
+          <span class="badge badge-Pending">❌ فشلت</span>
+          {% else %}
+          <span class="badge badge-Collected">⏳ بالانتظار</span>
+          {% endif %}
+        </td>
+        <td>{{ r['attempts'] }}</td>
+        <td class="muted" style="max-width:260px;">{{ r['error'] or '' }}</td>
+        <td class="muted">{{ r['sent_at'] or r['created_at'] }}</td>
+        <td>
+          {% if r['status'] != 'sent' %}
+          <form method="POST" action="{{ url_for('whatsapp_retry', send_id=r['id']) }}">
+            <button class="btn small secondary" type="submit">🔁 إعادة المحاولة</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

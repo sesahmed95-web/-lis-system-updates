@@ -1,0 +1,32 @@
+{% extends "reports/base_report.html" %}
+{% from "reports/partials/result_styles.html" import styles, render_results, note_script with context %}
+{% block report_body %}
+{# الجدول صار يُرسم عبر القالب المشترك result_styles.html (نفس شكل معاينة المصمم بالضبط) #}
+{{ styles(layout_view) }}
+<style>
+  .panel-dept-heading {
+    font-weight: bold; font-size: 1.05em; color: #26529C; text-align: center;
+    text-transform: uppercase; letter-spacing: 0.5px; margin: 16px 0 6px 0;
+  }
+  .panel-dept-heading:first-child { margin-top: 0; }
+</style>
+{% if merged_title %}<div class="report-heading" style="text-align:center;">{{ merged_title }}</div>{% endif %}
+{% if show_dept_headings %}
+{% for group in panel_groups %}
+{% if layout_view.style in ('a1', 'a2') %}
+{{ render_results(group.rows, layout_view, group_title=group.department) }}
+{% else %}
+<div class="panel-dept-heading">{{ group.department }}</div>
+{{ render_results(group.rows, layout_view) }}
+{% endif %}
+{% else %}
+<p class="muted" style="text-align:center;">لا توجد نتائج مكتملة بعد لأي تحليل ضمن هذي اللوحة.</p>
+{% endfor %}
+{% elif all_rows %}
+{# تقرير شامل بدون عناوين أقسام: كل التحاليل بجدول واحد #}
+{{ render_results(all_rows, layout_view) }}
+{% else %}
+<p class="muted" style="text-align:center;">لا توجد نتائج مكتملة بعد لأي تحليل ضمن هذي اللوحة.</p>
+{% endif %}
+{{ note_script() }}
+{% endblock %}

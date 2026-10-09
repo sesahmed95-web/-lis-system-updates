@@ -1,0 +1,1369 @@
+{# =============================================================================
+   reports/partials/exam_report_shared.html
+   =============================================================================
+   يستورده كل من: reports/urine_exam.html (GUE), reports/stool_exam.html (GSE),
+   reports/seminal_fluid.html (SFA) — وأي تقرير "فحص" مستقبلي بنفس النمط.
+
+   يُستورد بـ "with context" إلزاميًا من القالب المستدعي:
+       {% import "reports/partials/exam_report_shared.html" as shared with context %}
+
+   نظام تخصيص المظهر (report_layout): يُبنى بـ app.py عبر get_report_layout()
+   (دمج مستوى التحليل scope='test' + استثناء المريض scope='order_test')
+   ويُمرَّر كمتغيّر Jinja "report_layout" (dict) لكل قوالب هذا النمط دائمًا
+   — راجع _print_report_impl. الشكل المتوقع لمحتواه:
+     {
+       "section_order": ["macro","micro"],           # اختياري
+       "sections": {"macro": [...names...], "micro": [...]},  # اختياري
+       "hidden_params": ["Crystals"],                 # اختياري
+       "param_overrides": {"Urobilinogen": {"label":"...", "color":"#C0392B", "font_size":15}},
+       "page_offset_px": 14,
+       "font_family_ar": "'Segoe UI', Tahoma, Arial, sans-serif",
+       "font_family_en": "Georgia, 'Times New Roman', serif"
+     }
+   كل مفتاح اختياري تمامًا — غيابه يرجّع نفس السلوك الافتراضي القديم بالضبط.
+============================================================================= #}
+
+{% macro styles() %}
+{% set rl = report_layout|default({}) %}
+<style>
+  :root {
+    --exam-font-ar: {{ rl.get('font_family_ar') or "'Segoe UI', Tahoma, Arial, sans-serif" }};
+    --exam-font-en: {{ rl.get('font_family_en') or "Georgia, 'Times New Roman', serif" }};
+  }
+
+  .report-page { direction: ltr; text-align: left; font-family: var(--exam-font-en); }
+
+  /* ============== ترويسة بيانات المريض/العينة (patient_meta_v2) ============== */
+  {% set _col_gap = (patient_info_col_gap|default(36))|int %}
+  {% set _row_gap = (patient_info_row_gap|default(3))|int %}
+  .patient-info-v2 {
+    /* المسافة يمين/يسار بين العمودين: margin-inline-end على العمود الأول
+       بدل flex "gap" — لأن معيار CSS يرفض قيمة سالبة لـgap فتُتجاهل كاملة
+       (والإعدادات تسمح بقيمة سالبة، راجع settings.html)، بينما margin
+       يقبلها بلا مشاكل (يقرّب العمودين أكثر من الحد الافتراضي صفر). */
+    display: flex; justify-content: space-between;
+    margin: {{ patient_info_top_gap|default(4) }}px 0 14px 0; direction: ltr;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 13.5px;
+  }
+  .info-col { flex: 1; }
+  .info-col:first-child { margin-inline-end: {{ _col_gap }}px; }
+  /* المسافة بين أسطر كل عمود: نفس سلوك padding القديم بالضبط للقيم >= 0
+     (حتى ما تنكسر أي إعدادات محفوظة سابقًا)، وmargin-top سالب فقط للقيم
+     السالبة الجديدة — padding لا يقبل قيمة سالبة، وmargin-top مفرد
+     (بدون margin-bottom) يقرّب السطر من السطر اللي قبله مباشرة بدون
+     تعقيد "انهيار الهوامش" بين عناصر متتالية. */
+  .info-row {
+    display: grid; grid-template-columns: {{ patient_info_label_width|default(108) }}px 12px 1fr;
+    padding: {{ _row_gap if _row_gap > 0 else 0 }}px 0;
+    margin-top: {{ _row_gap if _row_gap < 0 else 0 }}px;
+    align-items: baseline;
+  }
+  .info-label { font-weight: 700; color: #111; }
+  .info-colon { color: #111; }
+  .info-val { color: #1E3A8A; font-weight: 600; }
+  .info-val.ar-name {
+    /* المطلوب 6: كانت text-align:right تدفع القيمة لأقصى يمين خلية الـ1fr
+       (بعيدة عن ":" وPatient Name)؛ صارت left فتظهر مباشرة بجانب الكلمة
+       تمامًا مثل صف الاسم الإنكليزي تحتها. direction:rtl باقية كما هي
+       فقط لرسم الحروف العربية نفسها صحيح (اتجاه الكتابة الداخلي). */
+    color: #7A1F1F; direction: rtl; unicode-bidi: isolate; text-align: left;
+    font-family: var(--exam-font-ar);
+  }
+  /* اسم المريض بالعربي: سطر مستقل بالوسط فوق صندوق معلومات المريض، مو
+     بصف "Patient Name:" العادي — هذا السطر خاص بالإنكليزي بس (طلب
+     المستخدم). القلم يشتغل بنفس آلية meta_field الاعتيادية. */
+  .patient-name-ar-standalone {
+    text-align: center; font-size: 1.15em; font-weight: 700; color: #7A1F1F;
+    direction: rtl; unicode-bidi: isolate; font-family: var(--exam-font-ar);
+    margin-bottom: 6px; position: relative;
+  }
+  .patient-name-ar-standalone .meta-edit-btn { opacity: 0; font-size: 0.6em; margin-inline-start: 6px; cursor: pointer; }
+  .patient-name-ar-standalone:hover .meta-edit-btn { opacity: 0.55; }
+  .patient-name-ar-standalone .meta-edit-btn:hover { opacity: 1; }
+  @media print { .patient-name-ar-standalone .meta-edit-btn { display: none !important; } }
+
+  /* ============== عنوان التحليل + عناوين الأقسام ============== */
+  .report-title {
+    text-align: center; font-size: 1.19em; font-weight: 700; font-style: italic;
+    {% if report_underline_style|default('solid') == 'none' %}
+    text-decoration: none;
+    {% else %}
+    text-decoration: underline; text-underline-offset: 4px;
+    text-decoration-style: {{ 'dashed' if report_underline_style|default('solid') == 'dashed' else 'solid' }};
+    {% endif %}
+    /* نفس تصحيح base_report.html — يمنع تقطّع الخط تحت الحروف المائلة
+       (نقاط بمنتصف الكلمة) بمعاينة التصميم وبالتقرير المطبوع الفعلي. */
+    text-decoration-skip-ink: none;
+    margin: 6px 0 2px 0;
+    color: #14213D;
+  }
+  .exam-section { position: relative; }
+  .report-title-wrap + .exam-section .section-title { margin-top: 0; }
+  .section-title {
+    font-weight: 700; font-size: 0.9375em; color: #111;
+    border-top: 1px solid #AEBBCB; padding-top: 9px; margin-top: 16px; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .report-page.exam-editing .exam-section { outline: 1px dashed transparent; border-radius: 4px; }
+  .report-page.exam-editing .exam-section:hover { outline-color: #AEBBCB; cursor: grab; }
+
+  /* ============== ثلاث أعمدة ثابتة داخل قسم واحد (المطلوب 1) ==============
+     تظهر فقط لو باراميتر واحد على الأقل بهذا القسم اختير له "يسار" أو
+     "يمين" صراحة من نافذة 🎨 — وإلا يبقى عمود واحد بعرض الصفحة كاملة كما
+     كان دائماً (صفر أثر على أي تصميم قديم لم يُخصَّص). نفس فكرة
+     custom_v2.html بالضبط لكن على مستوى القسم الواحد بدل التقرير كامل،
+     حتى يبقى عنوان كل قسم مفصولاً وواضحاً فوق أعمدته الثلاث. */
+  .exam-columns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 20px; align-items: start; }
+  .exam-column { min-width: 0; }
+  .exam-column .result-row { grid-template-columns: 14px 1fr 12px 1fr auto; font-size: 0.9em; }
+  @media print { .exam-columns { break-inside: avoid; } .exam-column { break-inside: avoid; } }
+
+  /* ============== صف نتيجة مفردة ============== */
+  .result-row {
+    display: grid; grid-template-columns: 18px 210px 26px 180px 1fr auto;
+    /* start (مو center) — لأن عمود القيمة (rval) قد يلف النتيجة + الوحدة
+       على سطرين لو ما وسعوا (160px)، ووقتها align-items:center كان
+       يحط عمود المدى الطبيعي (rnorm) بمنتصف الارتفاع، أي بين سطر
+       النتيجة وسطر الوحدة، فيظهر متراكب فوق الاثنين بصريًا. start يخلي
+       كل الأعمدة تبدأ من أعلى الصف دائمًا، بغض النظر عن أي عمود لف
+       سطرين — يحل التراكب لأي تحليل عنده وحدة طويلة (mg/dL، uIU/mL...). */
+    align-items: baseline; padding: var(--exam-row-pad, 5px) 0; font-size: 0.9375em; gap: 2px;
+  }
+  .result-row .rname {
+    color: #1a1a1a;
+    /* nowrap لحاله بدون overflow:hidden/text-overflow:ellipsis — تجربة
+       سابقة بالقطع (ellipsis) طلعت تقصّ الاسم لحرف وحد بالطباعة الفعلية
+       بمتصفح المستخدم بدل قص لطيف، فرجّعناها overflow ظاهر (السلوك
+       الافتراضي) حتى ما يضيع أي جزء من الاسم أبداً — أسوأ حالة اسم طويل
+       جدًا يتمدد بصريًا فوق العمود المجاور بدل ما ينكسر سطرين أو يُقتطع.
+    */
+    white-space: nowrap;
+    /* تأكيد صريح إنه بدون إمالة (رغم تأكدنا من DevTools إنه ماكو أي قاعدة
+       text-decoration مطبّقة) + مسافة حروف بسيطة جدًا — تحصين ضد تراكب
+       بصري بين حرفين متلاصقين بخط Times New Roman بحجوم معيّنة (زي D
+       متبوعة بـL بكلمات HDL/LDL/VLDL) واللي يبين وكأنه خط يقطع الكلمة. */
+    font-style: normal;
+    letter-spacing: 0.3px;
+  }
+  .result-row .rcolon { color: #1a1a1a; }
+  .result-row .rval { color: #0B3D91; font-weight: 400; }
+  .result-row .runit { color: #1a1a1a; font-size: 0.867em; margin-inline-start: 4px; font-weight: normal; }
+  .result-row .rnorm { color: #0B3D91; font-weight: 400; }
+  /* ===== إصلاح تراكب النتيجة مع المدى الطبيعي (اكتُشف بمعاينة حقيقية) =====
+     العمود الأول (18px) محجوز لمقبض السحب .row-drag-handle، لكنه display:none
+     خارج وضع التعديل وبالطباعة -- فتنزاح كل الأعمدة خطوة: الاسم يدخل عمود
+     الـ18px، والنتيجة تدخل عمود الـ18px الثاني، والمدى يدخل عمود الـ160px،
+     فيتراكب النص فوق بعضه. خارج وضع التعديل نشيل عمود المقبض من الـgrid. */
+  .report-page:not(.exam-editing) .result-row { grid-template-columns: 210px 26px 180px 1fr auto; }
+  .report-page:not(.exam-editing) .exam-column .result-row { grid-template-columns: 1fr 12px 1fr auto; }
+  .report-page.exam-editing .exam-column .result-row { grid-template-columns: 14px 1fr 12px 1fr 1fr auto; }
+
+  /* ===== تصاميم GUE / GSE / SFA الأربعة (تُختار من الإدارة ← تصاميم التقارير،
+     أو مؤقتًا بإضافة ?design=1..4 لرابط الطباعة). 1 = الكلاسيكي الحالي. ===== */
+  /* 2) جدول رسمي: عناوين أقسام داكنة + خطوط فاصلة + تظليل متناوب */
+  .exam-design-2 .section-title { background:#14213D; color:#fff; border:none; padding:6px 12px; border-radius:3px; margin-top:14px; justify-content:center; letter-spacing:.6px; text-transform:uppercase; }
+  .exam-design-2 .result-row { border-bottom:1px solid #DDE3EA; padding:5px 10px; }
+  .exam-design-2 .exam-section .result-row:nth-child(4n+2) { background:#F3F6FA; }
+  .exam-design-2 .result-row .rname { font-weight:600; }
+  /* 3) إطار: كل قسم داخل صندوق بإطار وعنوان فاتح — صفوف بسطر واحد (الاسم : النتيجة + الوحدة : المدى)
+     بنفس ترتيب التصميم الكلاسيكي. (التصميم القديم بعمودين والمدى تحت الاسم انشال.) */
+  .exam-design-3 .exam-section { border:1px solid #94A3B8; border-radius:4px; margin-top:14px; overflow:hidden; }
+  .exam-design-3 .section-title { background:#EAF0F8; color:#1E3A8A; border:none; border-bottom:1px solid #94A3B8; margin:0; padding:6px 12px; }
+  .exam-design-3 .result-row { padding:5px 12px; border-bottom:1px solid #E5E9F0; }
+  .exam-design-3 .result-row .rname { font-weight:600; }
+  .exam-design-3 .add-param-row { padding:4px 12px; }
+  /* 4) إكلينيكي ملوّن: شريط جانبي لكل قسم، النتيجة بارزة بلون مميّز */
+  .exam-design-4 .section-title { border-top:none; background:#F0FDFA; color:#0F766E; border-inline-start:5px solid #0F766E; padding:6px 10px; }
+  .exam-design-4 .result-row { border-bottom:1px dashed #CBD5E1; }
+  .exam-design-4 .result-row .rname { font-weight:700; color:#0F172A; }
+  .exam-design-4 .result-row .rval { color:#0F766E; font-size:1.1em; font-weight:700; }
+  .exam-design-4 .result-row .rnorm { color:#475569; font-weight:500; font-style:italic; }
+  .row-tools { display: flex; gap: 2px; justify-self: end; }
+  .row-tools button {
+    opacity: 0; border: none; background: none; cursor: pointer; font-size: 12px; padding: 2px;
+  }
+  .result-row:hover .row-tools button.rnote-btn { opacity: 0.55; }
+  .row-tools button.rnote-btn:hover { opacity: 1; }
+  @media print { .row-tools, .row-drag-handle, .section-drag-handle { display: none !important; } }
+
+  .row-drag-handle, .section-drag-handle { display: none; cursor: grab; color: #94A3B8; font-size: 12px; user-select: none; }
+  /* row-style-btn (🎨) و row-hide-btn (🗑️/👁️) و row-delete-btn (❌): تشتغل
+     فورًا بدون الحاجة لتفعيل وضع التعديل الشامل أولاً (نفس سلوك rnote-btn
+     📝 أصلاً) — تظهر بمجرد الاقتراب/الهوفر فوق الصف، بغض النظر عن
+     exam-editing. row-delete-btn تحديداً حذف نهائي حقيقي (مختلف عن
+     row-hide-btn اللي يخفي بس) — راجع examDeleteParam أدناه. */
+  .row-style-btn, .row-hide-btn, .row-delete-btn { display: inline-flex; opacity: 0; }
+  .result-row:hover .row-style-btn, .result-row:hover .row-hide-btn, .result-row:hover .row-delete-btn { opacity: 0.55; }
+  .row-style-btn:hover, .row-hide-btn:hover { opacity: 1; }
+  .row-delete-btn:hover { opacity: 1; filter: saturate(1.4); }
+  .report-page.exam-editing .row-drag-handle,
+  .report-page.exam-editing .section-drag-handle { display: inline-flex; opacity: 0.6; }
+  .report-page.exam-editing .row-drag-handle:hover,
+  .report-page.exam-editing .section-drag-handle:hover { opacity: 1; }
+
+  .result-row.exam-row-hidden { display: none; }
+  .report-page.exam-editing .result-row.exam-row-hidden { display: grid; opacity: 0.4; background: #FEF2F2; }
+  @media print { .result-row.exam-row-hidden { display: none !important; } }
+
+  .inline-note {
+    grid-column: 1 / -1; font-size: 12px; color: #92650A; background: #FEF9E7;
+    border: 1px dashed #F4D06F; border-radius: 4px; padding: 4px 8px; margin: 2px 0 4px 0;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  }
+  .inline-note textarea {
+    width: 100%; min-height: 30px; font-family: inherit; font-size: 12px;
+    border: none; background: transparent; resize: vertical;
+  }
+
+  .add-param-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 0;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 12.5px;
+  }
+  .add-param-row input.add-param-input {
+    display: none; border: 1px solid #E2E8F0; border-radius: 5px; padding: 4px 8px; font-size: 12px;
+    font-family: inherit; min-width: 160px;
+  }
+  .add-param-row.open input.add-param-input { display: inline-block; }
+  .add-param-row button {
+    border: 1px dashed #26529C; color: #26529C; background: #fff; border-radius: 5px;
+    padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  @media print { .add-param-row { display: none; } }
+
+  /* ============== شريط أدوات التعديل ============== */
+  .exam-toolbar {
+    position: fixed; top: 8px; left: 6px; z-index: 500;
+    background: #14213D; color: #fff; border-radius: 10px; padding: 8px 10px;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 12.5px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25); display: flex; flex-direction: column; gap: 6px;
+    max-width: 230px;
+  }
+  .exam-toolbar > button { align-self: flex-start; }
+  .exam-toolbar .exam-tb-lbl { display: none; }
+  .exam-toolbar.is-open .exam-tb-lbl { display: inline; }
+  .exam-toolbar button {
+    background: #26529C; color: #fff; border: none; border-radius: 6px;
+    padding: 6px 10px; cursor: pointer; font-size: 12px; font-family: inherit;
+  }
+  .exam-toolbar button:hover { background: #2F63B8; }
+  .exam-toolbar-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .exam-toolbar-group label { font-size: 11px; opacity: 0.85; }
+  .exam-toolbar-group select { font-size: 11px; border-radius: 4px; border: none; padding: 2px 4px; }
+  #examEditControls { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #334; padding-top: 6px; }
+  .exam-save-btn { background: #15803D !important; }
+  .exam-save-btn:hover { background: #16974A !important; }
+
+  /* ============== نافذة اختيار نطاق الحفظ ============== */
+  .exam-scope-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 600;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .exam-scope-box {
+    background: #fff; border-radius: 10px; padding: 20px 24px; min-width: 280px;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; text-align: center; direction: rtl;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  }
+  .exam-scope-box p { margin: 0 0 14px 0; font-weight: 600; color: #14213D; }
+  .exam-scope-box button {
+    display: block; width: 100%; margin-bottom: 8px; padding: 9px 12px; border-radius: 6px;
+    border: 1px solid #E2E8F0; background: #F8FAFC; color: #14213D; cursor: pointer; font-size: 13px;
+  }
+  .exam-scope-box button.primary { background: #26529C; color: #fff; border-color: #26529C; }
+
+  /* ============== نافذة تخصيص صف (لون/حجم/تسمية) ============== */
+  .exam-style-popover {
+    position: absolute; z-index: 550; background: #fff; border: 1px solid #E2E8F0;
+    border-radius: 8px; padding: 10px 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 12.5px; direction: rtl;
+    min-width: 190px;
+  }
+  .exam-style-popover label { display: block; margin-bottom: 6px; color: #334155; }
+  .exam-style-popover input[type="text"], .exam-style-popover input[type="number"] {
+    width: 100%; padding: 4px 6px; border: 1px solid #E2E8F0; border-radius: 4px; margin-top: 2px;
+  }
+  .exam-style-popover input[type="color"] { width: 100%; height: 28px; margin-top: 2px; border: 1px solid #E2E8F0; border-radius: 4px; }
+  .exam-style-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .exam-style-actions button {
+    flex: 1; border: none; border-radius: 5px; padding: 6px 4px; font-size: 11.5px; cursor: pointer;
+  }
+  .exam-style-actions button.apply { background: #26529C; color: #fff; }
+  .exam-style-actions button.clear { background: #FEE2E2; color: #991B1B; }
+  .exam-style-actions button.close { background: #F1F5F9; color: #334155; }
+
+  /* ============== زر + نافذة إدارة دكاترة الترويسة ============== */
+  .doctors-manage-btn {
+    border: 1px dashed #94A3B8; color: #475569; background: #fff; border-radius: 6px;
+    padding: 3px 9px; font-size: 11.5px; cursor: pointer; font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    margin: 2px 0 8px 0;
+  }
+  .doctors-manage-btn:hover { background: #F1F5F9; }
+  .doctors-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .doctors-modal-box {
+    background: #fff; border-radius: 10px; padding: 18px 20px; width: 460px; max-width: 92vw;
+    max-height: 85vh; overflow-y: auto; font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    direction: rtl; box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  }
+  .doctors-modal-box h3 { margin: 0 0 12px 0; color: #14213D; font-size: 15px; }
+  .doc-row {
+    display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid #F1F5F9;
+    font-size: 12.5px;
+  }
+  .doc-row .doc-row-name { flex: 1; font-weight: 600; color: #14213D; }
+  .doc-row .doc-row-degree { flex: 1; color: #64748B; font-size: 11.5px; }
+  .doc-row button { border: none; background: none; cursor: pointer; font-size: 13px; padding: 2px 5px; }
+  .doc-form { margin-top: 12px; border-top: 1px dashed #E2E8F0; padding-top: 12px; }
+  .doc-form label { display: block; font-size: 11.5px; color: #334155; margin-top: 6px; }
+  .doc-form input[type="text"], .doc-form textarea {
+    width: 100%; padding: 5px 7px; border: 1px solid #E2E8F0; border-radius: 5px; margin-top: 2px;
+    font-family: inherit; font-size: 12.5px;
+  }
+  .doc-form textarea { min-height: 40px; resize: vertical; }
+  .doc-form-row { display: flex; gap: 8px; }
+  .doc-form-row > div { flex: 1; }
+  .doc-form-checkbox { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; }
+  .doc-form-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .doc-form-actions button {
+    flex: 1; border: none; border-radius: 6px; padding: 8px; font-size: 12.5px; cursor: pointer;
+  }
+  .doc-save-btn { background: #26529C; color: #fff; }
+  .doc-cancel-btn { background: #F1F5F9; color: #334155; }
+  .doctors-modal-close { display: block; margin-top: 12px; width: 100%; border: none; background: #F1F5F9;
+    color: #334155; border-radius: 6px; padding: 8px; cursor: pointer; font-size: 12.5px; }
+
+  @media print { .exam-toolbar, .exam-scope-modal, .exam-style-popover, .doctors-manage-btn, .doctors-modal { display: none !important; } }
+
+  /* ============== تعديل مباشر (Inline) لعنوان التحليل/الأقسام/حقول
+     ترويسة المريض — أيقونة ✏️ صغيرة تظهر بالهوفر فقط، والنقر عليها يفعّل
+     التحرير المباشر بمكانه (بدون الحاجة لتفعيل وضع "تعديل التصميم" أولاً).
+     عنوان التحليل وعناوين الأقسام تُحفظ ضمن report_layout (نفس نطاق
+     الحفظ: هذا المريض/كل التحليل) — حقول ترويسة المريض (الاسم الإنكليزي
+     وغيرها) تُحفظ بنفس الطريقة كـ"نص مطبوع مخصص" (تصحيح عرض فقط، ما
+     يغيّر بيانات المريض الحقيقية بجداول أخرى). ============== */
+  .report-title-wrap { display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .editable-meta-row { position: relative; }
+  /* القلم يطفو خارج الشبكة (كان يلفّ لسطر ثانٍ ويضاعف ارتفاع كل سطر بمعلومات المريض) */
+  .editable-meta-row .meta-edit-btn { position: absolute; inset-inline-end: 0; top: 50%; transform: translateY(-50%); }
+  .title-edit-btn, .meta-edit-btn {
+    opacity: 0; cursor: pointer; font-size: 11px; user-select: none; flex-shrink: 0;
+  }
+  .report-title-wrap:hover .title-edit-btn,
+  .editable-meta-row:hover .meta-edit-btn,
+  .section-title:hover .title-edit-btn,
+  /* المطلوب 1 (تعميم القلم): نفس زر ✏️ يشتغل الآن أيضًا فوق عنوان أي
+     تقرير عادي (.report-heading — Coagulation/Lipid/CBC...الخ) وفوق أي
+     خانة اسم باراميتر (td.field-name) بكل تلك التقارير، دون الحاجة
+     لتعديل كل قالب تقرير على حدة (شوف examApplyGenericPencils أسفل). */
+  .report-heading:hover .title-edit-btn,
+  table.data-table td.field-name:hover .title-edit-btn,
+  table.data-table td.unit-val:hover .title-edit-btn,
+  table.data-table th:hover .title-edit-btn { opacity: 0.55; }
+  .title-edit-btn:hover, .meta-edit-btn:hover { opacity: 1; }
+  [contenteditable="true"] {
+    outline: 1px dashed #26529C; background: #EFF6FF; border-radius: 3px;
+    padding: 0 3px; min-width: 24px; display: inline-block;
+  }
+  @media print { .title-edit-btn, .meta-edit-btn { display: none !important; } }
+</style>
+{% endmacro %}
+
+
+{# ============== ترويسة بيانات المريض/العينة — نسخة v2 ==============
+   كل حقل قابل للتعديل المباشر (✏️ يظهر بالهوفر) — التعديل يُخزَّن كنص
+   مطبوع بديل ضمن report_layout.patient_meta_overrides (بنفس نطاق حفظ
+   بقية التصميم: هذا المريض فقط أو كل مرضى هذا التحليل)، ولا يغيّر أي
+   بيانات حقيقية بجداول patients/visits — تصحيح عرض بالتقرير فقط. #}
+{% macro meta_field(key, label, real_value, pmo, extra_class='') %}
+{% set val = pmo.get(key, real_value) %}
+<div class="info-row editable-meta-row">
+  <span class="info-label">{{ label }}</span><span class="info-colon">:</span>
+  <span class="info-val {{ extra_class }}" data-meta-key="{{ key }}">{{ '' if val is none else val }}</span>
+  <span class="meta-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل">✏️</span>
+</div>
+{% endmacro %}
+
+{% macro patient_meta_v2() %}
+{% set rl = report_layout|default({}) %}
+{% set pmo = rl.get('patient_meta_overrides', {}) %}
+<div class="patient-info-v2">
+  <div class="info-col">
+    {# صفّا اسم المريض (عربي ثم إنكليزي) — صفوف عادية بتسمية "Patient Name"
+       فوق العمر مباشرة بكل التقارير. الإنكليزي يظهر دائمًا (حتى لو فاضي)
+       حتى يبقى ترتيب الترويسة ثابت ولا تختفي التسمية بالمعاينة أو بمريض
+       ما انسجل اسمه الإنكليزي بعد. نفس مفاتيح الحفظ القديمة (name_ar /
+       name_en) فما ينكسر أي تعديل سابق محفوظ. #}
+    {{ meta_field('name_ar', 'Patient Name', patient_name|default(''), pmo, 'ar-name') }}
+    {{ meta_field('name_en', 'Patient Name', patient_name_en|default(''), pmo) }}
+    {{ meta_field('age', 'Age', age|default(''), pmo) }}
+    {{ meta_field('sex', 'Sex', sex|default(''), pmo) }}
+    {{ meta_field('consultant', 'Consultant', referring_doctor_name|default(''), pmo) }}
+  </div>
+  <div class="info-col">
+    {{ meta_field('sample_no', 'Sample No.', sample_no|default(''), pmo) }}
+    {{ meta_field('patient_no', 'Patient No.', patient_id|default(''), pmo) }}
+    {{ meta_field('sample_date', 'Sample Date', visit_date|default(''), pmo) }}
+    {{ meta_field('sample_time', 'Sample Time', sample_time|default(''), pmo) }}
+    {{ meta_field('number_of', 'Number Of', number_of|default(''), pmo) }}
+  </div>
+</div>
+{% endmacro %}
+
+
+{# أي نتيجة عددية بأي تحليل (شامل أنواع الفلم الدموي WBC differential:
+   Neutrophils, Lymphocytes... الخ) تُعرض بدون ".0" الزائدة لو كانت رقماً
+   صحيحاً -- 1 بدل 1.0، 33 بدل 33.0 -- بينما أي رقم فيه كسر فعلي (مثلاً
+   12.5) يبقى يظهر بكسره كما هو، بكل مكان بدون استثناء. #}
+{% macro resolve_value(row, param_name=none) -%}
+{%- if row -%}
+  {%- if row['value_text'] not in (none, '') -%}{{ row['value_text'] }}
+  {%- elif row['value_numeric'] is not none -%}
+    {%- set v = row['value_numeric'] -%}
+    {%- if v == v|int -%}{{ v|int }}
+    {%- else -%}{{ v }}
+    {%- endif -%}
+  {%- endif -%}
+{%- endif -%}
+{%- endmacro %}
+
+
+{# ============== صف نتيجة مفردة ==============
+   style: dict اختياري {label, color, font_size} من report_layout.param_overrides.
+   is_hidden: بول — لو True يُطبع الصف مخفي (display:none) خارج وضع التعديل. #}
+{% macro exam_row(param, range_row, unit, result_value, note_info, order_test_id, style=none, is_hidden=false, flag=none) %}
+{% set note_info = note_info or {'text': '', 'label': '', 'visible': false} %}
+{% set style = style or {} %}
+{% set display_name = resolve_label(param, style.get('label')) %}
+{% if exam_range_display is defined %}
+  {% set normal_range = exam_range_display(range_row, unit) %}
+{% else %}
+  {# احتياط: لو اننسخ هذا القالب بدون app.py الجديد — نفس المنطق القديم بدل ما ينكسر التقرير #}
+  {% set normal_range = '' %}
+  {% if range_row %}
+    {% if range_row['range_text'] %}{% set normal_range = range_row['range_text'] %}
+    {% elif range_row['low'] is not none and range_row['high'] is not none %}{% set normal_range = (range_row['low']|string) ~ ' - ' ~ (range_row['high']|string) %}
+    {% elif range_row['low'] is not none %}{% set normal_range = '> ' ~ (range_row['low']|string) %}
+    {% elif range_row['high'] is not none %}{% set normal_range = '< ' ~ (range_row['high']|string) %}
+    {% endif %}
+  {% endif %}
+{% endif %}
+{# مستويات نص حر متعدد الأسطر (المطلوب 4ب) — نفس منطق custom_rows/combined_panel،
+   عبر parse_range_tiers المسجّلة كـ Jinja global بـapp.py. #}
+{% set range_tiers = parse_range_tiers(range_row['range_text']) if (range_row and range_row['range_text']) else ([{'label': none, 'value': normal_range}] if normal_range else []) %}
+{# تلوين تلقائي لرقم النتيجة حسب flag (المطلوب 2) — فقط لو ما فيه لون يدوي
+   مضبوط مسبقًا لهذا الصف (style.get('color') يبقى له الأسبقية دائمًا)،
+   وفقط لو الإعداد auto_flag_color_enabled مفعّل. #}
+{% set auto_color = AUTO_FLAG_COLORS.get(flag) if (auto_flag_color_enabled is defined and auto_flag_color_enabled and not style.get('color') and flag) else none %}
+<div class="result-row{% if is_hidden %} exam-row-hidden{% endif %}"
+     data-param-name="{{ param['name'] }}"
+     data-param-id="{{ param['id'] }}"
+     data-hidden="{{ '1' if is_hidden else '0' }}"
+     {% if style.get('color') %}data-color="{{ style.get('color') }}"{% endif %}
+     {% if style.get('font_size') %}data-font-size="{{ style.get('font_size') }}"{% endif %}
+     {% if style.get('label') %}data-label="{{ style.get('label') }}"{% endif %}
+     {% if style.get('align') %}data-align="{{ style.get('align') }}"{% endif %}
+     {% if style.get('column') %}data-column="{{ style.get('column') }}"{% endif %}
+     {% if style.get('font_size') %}style="font-size:{{ style.get('font_size') }}px;"{% endif %}>
+  <span class="row-drag-handle" title="اسحب لتغيير ترتيب هذا الصف">⋮⋮</span>
+  <span class="rname">{{ display_name }}</span>
+  <span class="rcolon">:</span>
+  {% set _val_align = VALUE_ALIGN_CSS.get(style.get('align')) or resolve_value_align(param) %}
+  <span class="rval"{% if _val_align %} style="text-align:{{ _val_align }};"{% endif %}>{% if result_value not in (none, '') %}<span class="rval-num" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% elif auto_color %}style="color:{{ auto_color }};"{% endif %}>{{ result_value }}</span>{% if show_result_flag is defined and show_result_flag and flag and flag != 'Normal' %}<span class="flag-badge" style="font-size:0.75em; font-weight:bold; margin-inline-start:4px;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ flag }}</span>{% endif %}{% if unit %}{% if unit|trim == '%' %}<span class="runit" style="margin-inline-start:0;">%</span>{% else %} <span class="runit">{{ unit }}</span>{% endif %}{% endif %}{% endif %}</span>
+  <span class="rnorm">
+    {% if range_tiers|length > 1 %}
+      {% for tier in range_tiers %}<div class="exam-range-tier">{% if tier.label %}<b>{{ tier.label }}</b>: {% endif %}{{ tier.value }}</div>{% endfor %}
+    {% else %}
+      {{ normal_range }}
+    {% endif %}
+  </span>
+  <span class="row-tools">
+    <button type="button" class="row-style-btn" onclick="examOpenStylePopover(event, this)" title="لون / حجم / تسمية العرض">🎨</button>
+    <button type="button" class="row-hide-btn" onclick="examToggleHidden(this)" title="إخفاء/إظهار هذا الصف بالتقرير">{{ '👁️' if is_hidden else '🗑️' }}</button>
+    <button type="button" class="rnote-btn" onclick="examEditNote({{ param['id'] }}, {{ order_test_id }})" title="كتابة/تعديل نص الملاحظة (تسمية اختيارية + نص حر)">📝</button>
+    <button type="button" class="rnote-toggle-btn" data-param-id="{{ param['id'] }}"
+            onclick="examToggleNoteVisible({{ param['id'] }}, {{ order_test_id }}, this)"
+            title="إظهار/إخفاء هذه الملاحظة بالتقرير المطبوع — الكتابة لا تُظهرها تلقائيًا"
+            style="{{ '' if note_info.text else 'display:none;' }}">{{ '🙈 إخفاء الملاحظة' if note_info.visible else '👁 إظهار الملاحظة' }}</button>
+    <button type="button" class="row-delete-btn" onclick="examDeleteParam({{ param['id'] }}, {{ param['name']|tojson }}, this)" title="حذف هذا الباراميتر نهائيًا من التحليل (مختلف عن الإخفاء)">❌</button>
+  </span>
+</div>
+<div class="inline-note" id="exam-note-{{ param['id'] }}"
+     data-raw-text="{{ note_info.text }}" data-raw-label="{{ note_info.label }}"
+     data-visible="{{ '1' if note_info.visible else '0' }}"
+     style="{{ '' if (note_info.text and note_info.visible) else 'display:none;' }}">
+  {% if note_info.text %}{% if note_info.label %}<b>{{ note_info.label }}:</b> {% endif %}{{ note_info.text }}{% endif %}
+</div>
+{% endmacro %}
+
+
+{#
+  render_section_rows: يرسم صفوف قسم واحد (names) — إما عمود واحد بعرض
+  الصفحة كاملة كما كان دائماً (لو ما فيه أي باراميتر بهذا القسم اختار له
+  المستخدم "يسار" أو "يمين" صراحة من نافذة 🎨)، أو ثلاث أعمدة ثابتة (يسار/
+  وسط/يمين) بمجرد ما أي باراميتر واحد بهذا القسم يُضبط له موضع غير الوسط —
+  بنفس منطق custom_v2.html بالضبط (المطلوب 1)، بحيث القسم نفسه (عنوانه)
+  يبقى مفصولاً وواضحاً عن باقي الأقسام، والأعمدة الثلاث داخل حدود هذا
+  القسم فقط.
+#}
+{% macro render_section_rows(names, params_by_name, ranges, units, results_by_name, param_notes, order_test_id, hidden, param_overrides) %}
+{% set has_custom_column = false %}
+{% for name in names %}{% if param_overrides.get(name, {}).get('column') in ('left', 'right') %}{% set has_custom_column = true %}{% endif %}{% endfor %}
+{% if not has_custom_column %}
+  {% for name in names %}
+    {% if name in params_by_name %}
+      {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name), name), param_notes.get(name), order_test_id, param_overrides.get(name), name in hidden, (results_by_name.get(name)['flag'] if results_by_name.get(name) else none)) }}
+    {% endif %}
+  {% endfor %}
+{% else %}
+  <div class="exam-columns">
+    {% for col in ['left', 'center', 'right'] %}
+    <div class="exam-column">
+      {% for name in names %}
+        {% if name in params_by_name and (param_overrides.get(name, {}).get('column') or 'center') == col %}
+          {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name), name), param_notes.get(name), order_test_id, param_overrides.get(name), name in hidden, (results_by_name.get(name)['flag'] if results_by_name.get(name) else none)) }}
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endmacro %}
+
+
+{% macro add_param_row(section_id, order_test_id, test_definition_id) %}
+<div class="add-param-row" data-section-key="{{ section_id }}">
+  <input type="text" class="add-param-input" placeholder="اسم باراميتر جديد..." onkeydown="if(event.key==='Enter'){examAddParam(this, {{ test_definition_id }});}">
+  <button type="button" onclick="var r=this.parentNode;if(!r.classList.contains('open')){r.classList.add('open');this.previousElementSibling.focus();}else{examAddParam(this.previousElementSibling, {{ test_definition_id }});}">+ إضافة باراميتر جديد لهذا القسم</button>
+</div>
+{% endmacro %}
+
+
+{# ============== جسم التقرير كامل — مبني ديناميكيًا من report_layout ==============
+   report_title: نص عنوان التحليل بالمنتصف.
+   sections_def: قائمة tuples (section_key, section_title, default_param_names).
+   test_definition_id / order_test_id: تُكتب كـ data-* على .report-page، يقرأها الـ JS
+   وقت الحفظ لمعرفة scope_id لكل خيار (تحليل كامل / هذا المريض فقط). #}
+{% macro render_report_body(report_title, sections_def, params, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) %}
+{% set rl = report_layout|default({}) %}
+{% set params_by_name = {} %}
+{% for p in params %}{% set _ = params_by_name.update({p['name']: p}) %}{% endfor %}
+{% set hidden = rl.get('hidden_params', []) %}
+{% set param_overrides = rl.get('param_overrides', {}) %}
+{% set section_labels = rl.get('section_labels', {}) %}
+{% set layout_sections = rl.get('sections') %}
+{% set section_order = rl.get('section_order') %}
+{% if not section_order %}
+  {% set section_order = [] %}
+  {% for key, title, default_names in sections_def %}{% set _ = section_order.append(key) %}{% endfor %}
+{% endif %}
+{% set shown = [] %}
+
+<div class="report-page" data-test-definition-id="{{ test_definition_id }}" data-order-test-id="{{ order_test_id }}"
+     style="{% if rl.get('page_offset_px') %}margin-top:{{ rl.get('page_offset_px') }}px;{% endif %}{% if row_spacing_px is defined and row_spacing_px %}--exam-row-pad:{{ row_spacing_px }}px;{% endif %}">
+
+  <div class="report-title-wrap">
+    <span class="report-title" data-editable="report_title">{{ rl.get('report_title') or report_title }}</span>
+    <span class="title-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل عنوان التحليل">✏️</span>
+  </div>
+
+  {% set sections_def_map = {} %}
+  {% for k2, t2, d2 in sections_def %}{% set _ = sections_def_map.update({k2: (t2, d2)}) %}{% endfor %}
+
+  {% for key in section_order %}
+    {% set default_title = sections_def_map.get(key, ('', []))[0] %}
+    {% set title = section_labels.get(key) or default_title %}
+    {% set default_names = sections_def_map.get(key, ('', []))[1] %}
+    {% set names = (layout_sections.get(key) if layout_sections else none) %}
+    {% if names is none %}{% set names = default_names %}{% endif %}
+    <div class="exam-section" data-section-key="{{ key }}">
+      <div class="section-title">
+        <span class="section-drag-handle" title="اسحب لتحريك هذا القسم كامل">⋮⋮</span>
+        <span class="section-title-text" data-editable="section_title">{{ title }}</span>
+        <span class="title-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل عنوان القسم">✏️</span>
+      </div>
+      {% for name in names %}{% if name in params_by_name %}{% set _ = shown.append(name) %}{% endif %}{% endfor %}
+      {{ render_section_rows(names, params_by_name, ranges, units, results_by_name, param_notes, order_test_id, hidden, param_overrides) }}
+      {{ add_param_row(key, order_test_id, test_definition_id) }}
+    </div>
+  {% endfor %}
+
+  {% set leftover_names = [] %}
+  {% for p in params %}
+    {% if p['name'] not in shown %}{% set _ = leftover_names.append(p['name']) %}{% endif %}
+  {% endfor %}
+  {% if leftover_names %}
+    <div class="exam-section" data-section-key="_leftover">
+      <div class="section-title">
+        <span class="section-drag-handle" title="اسحب لتحريك هذا القسم كامل">⋮⋮</span>
+        <span class="section-title-text" data-editable="section_title">{{ section_labels.get('_leftover') or 'Other Results' }}</span>
+        <span class="title-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل عنوان القسم">✏️</span>
+      </div>
+      {{ render_section_rows(leftover_names, params_by_name, ranges, units, results_by_name, param_notes, order_test_id, hidden, param_overrides) }}
+      {{ add_param_row('_leftover', order_test_id, test_definition_id) }}
+    </div>
+  {% endif %}
+
+  <!-- بلوك bottom-note (الملاحظة العامة أسفل التقرير) أُلغي نهائيًا
+       (المطلوب 1) — ما يظهر أبدًا بلا استثناء. -->
+
+</div>
+
+{# base_report.html يرسم الشريط/النوافذ للأدمن — منع تكرارها (كان يظهر شريطان فوق بعض بنفس الـid فيتعطّل زر التعديل) #}
+{% if session.get('role') != 'admin' %}
+{{ edit_toolbar() }}
+{{ style_popover() }}
+{{ scope_modal() }}
+{% endif %}
+{% endmacro %}
+
+
+{% macro edit_toolbar() %}
+{% set rl = report_layout|default({}) %}
+<div class="exam-toolbar no-print">
+  <button type="button" id="examEditToggleBtn" onclick="examToggleEditMode()" title="تعديل التصميم">✏️<span class="exam-tb-lbl"> تعديل التصميم</span></button>
+  <div id="examEditControls" style="display:none;">
+    <div class="exam-toolbar-group">
+      <span>موضع التقرير:</span>
+      <button type="button" onclick="examShiftPage(-4)" title="ارفع التقرير لأعلى">▲</button>
+      <button type="button" onclick="examShiftPage(4)" title="أنزل التقرير لأسفل">▼</button>
+    </div>
+    <div class="exam-toolbar-group">
+      <label>خط عربي
+        <select id="examFontAr" onchange="examSetFont('ar', this.value)">
+          <option value="">افتراضي</option>
+          <option value="Tahoma">Tahoma</option>
+          <option value="'Traditional Arabic'">Traditional Arabic</option>
+          <option value="'Simplified Arabic'">Simplified Arabic</option>
+          <option value="'Segoe UI'">Segoe UI</option>
+          <option value="'Sakkal Majalla'">Sakkal Majalla</option>
+        </select>
+      </label>
+    </div>
+    <div class="exam-toolbar-group">
+      <label>English font
+        <select id="examFontEn" onchange="examSetFont('en', this.value)">
+          <option value="">Default</option>
+          <option value="Georgia">Georgia</option>
+          <option value="'Times New Roman'">Times New Roman</option>
+          <option value="Arial">Arial</option>
+          <option value="'Segoe UI'">Segoe UI</option>
+          <option value="Calibri">Calibri</option>
+          <option value="'Courier New'">Courier New</option>
+        </select>
+      </label>
+    </div>
+    <button type="button" class="exam-save-btn" onclick="examSaveLayout()">💾 حفظ التعديلات</button>
+    <button type="button" onclick="examDiscardChanges()">✖ تراجع عن التعديلات</button>
+    {% if report_layout_has_patient_override|default(false) %}
+    <button type="button" onclick="examResetPatientLayout()">↩ إرجاع لتصميم افتراضي (هذا المريض)</button>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+
+{% macro style_popover() %}
+<div id="examStylePopover" class="exam-style-popover" style="display:none;">
+  <label>تسمية العرض (اسم الباراميتر بهذا التقرير)
+    <input type="text" id="examStyleLabel">
+  </label>
+  <label>اللون
+    <input type="color" id="examStyleColor">
+  </label>
+  <label>حجم الخط (px)
+    <input type="number" id="examStyleSize" min="8" max="40">
+  </label>
+  <label>موضع رقم النتيجة
+    <select id="examStyleAlign">
+      <option value="">افتراضي (كما هو مضبوط بمصمم التقارير)</option>
+      <option value="near_name">قريب من الاسم</option>
+      <option value="center">بالوسط</option>
+      <option value="near_unit">قريب من الوحدة</option>
+    </select>
+  </label>
+  <label>الموضع بعرض التقرير
+    <select id="examStyleColumn">
+      <option value="center">وسط (افتراضي)</option>
+      <option value="left">يسار</option>
+      <option value="right">يمين</option>
+    </select>
+  </label>
+  <div class="exam-style-actions">
+    <button type="button" class="apply" onclick="examApplyStyle()">تطبيق</button>
+    <button type="button" class="clear" onclick="examClearStyle()">إزالة</button>
+    <button type="button" class="close" onclick="examCloseStylePopover()">إغلاق</button>
+  </div>
+</div>
+{% endmacro %}
+
+
+{% macro scope_modal() %}
+<div id="examScopeModal" class="exam-scope-modal" style="display:none;">
+  <div class="exam-scope-box">
+    <p>حفظ هذا التعديل لـ:</p>
+    <button type="button" class="primary" onclick="examConfirmSave('order_test')">هذا المريض فقط</button>
+    <button type="button" onclick="examConfirmSave('test')">كل مرضى هذا التحليل</button>
+    <button type="button" onclick="document.getElementById('examScopeModal').style.display='none'">إلغاء</button>
+  </div>
+</div>
+{% endmacro %}
+
+
+{% macro doctors_manager_button_and_modal() %}
+<button type="button" class="doctors-manage-btn no-print" onclick="docsOpenModal()">✏️ إدارة الدكاترة</button>
+<div id="docsModal" class="doctors-modal" style="display:none;">
+  <div class="doctors-modal-box">
+    <h3>دكاترة ترويسة التقرير</h3>
+    <div id="docsList">جاري التحميل...</div>
+    <div class="doc-form">
+      <input type="hidden" id="docEditId" value="">
+      <label>الاسم
+        <input type="text" id="docName" placeholder="اسم الدكتور">
+      </label>
+      <div class="doc-form-row">
+        <div>
+          <label>اللقب
+            <input type="text" id="docTitle" placeholder="الدكتور" value="الدكتور">
+          </label>
+        </div>
+        <div>
+          <label>حجم الخط (px، اختياري)
+            <input type="text" id="docFontSize" placeholder="افتراضي">
+          </label>
+        </div>
+      </div>
+      <label>الشهادة (عربي)
+        <textarea id="docDegreeAr" placeholder="مثلاً: بورد أمراض الدم"></textarea>
+      </label>
+      <label>الشهادة (إنكليزي)
+        <textarea id="docDegreeEn" placeholder="e.g. Board of Hematology"></textarea>
+      </label>
+      <div class="doc-form-checkbox">
+        <input type="checkbox" id="docShowOnLetterhead" checked>
+        <label for="docShowOnLetterhead" style="margin:0;">إظهار بترويسة التقرير</label>
+      </div>
+      <div class="doc-form-actions">
+        <button type="button" class="doc-save-btn" onclick="docsSave()">حفظ</button>
+        <button type="button" class="doc-cancel-btn" onclick="docsResetForm()">جديد / إلغاء التعديل</button>
+      </div>
+    </div>
+    <button type="button" class="doctors-modal-close" onclick="docsCloseModal()">إغلاق</button>
+  </div>
+</div>
+<script>
+function docsOpenModal() {
+  document.getElementById('docsModal').style.display = 'flex';
+  docsRefreshList();
+}
+function docsCloseModal() {
+  document.getElementById('docsModal').style.display = 'none';
+}
+function docsResetForm() {
+  document.getElementById('docEditId').value = '';
+  document.getElementById('docName').value = '';
+  document.getElementById('docTitle').value = 'الدكتور';
+  document.getElementById('docFontSize').value = '';
+  document.getElementById('docDegreeAr').value = '';
+  document.getElementById('docDegreeEn').value = '';
+  document.getElementById('docShowOnLetterhead').checked = true;
+}
+function docsRefreshList() {
+  fetch('/api/examining-doctors').then(function (r) { return r.json(); }).then(function (res) {
+    var list = document.getElementById('docsList');
+    list.innerHTML = '';
+    (res.doctors || []).forEach(function (d) {
+      var row = document.createElement('div');
+      row.className = 'doc-row';
+      row.innerHTML =
+        '<span class="doc-row-name">' + (d.show_on_letterhead ? '👁️ ' : '🚫 ') + d.name + '</span>' +
+        '<span class="doc-row-degree">' + (d.degree_ar || d.degree_en || '') + '</span>' +
+        '<button type="button" title="تعديل" onclick="docsEdit(' + d.id + ')">✏️</button>' +
+        '<button type="button" title="حذف" onclick="docsDelete(' + d.id + ')">🗑️</button>';
+      row.dataset.doctor = JSON.stringify(d);
+      list.appendChild(row);
+    });
+    window._docsCache = res.doctors || [];
+  });
+}
+function docsEdit(id) {
+  var d = (window._docsCache || []).find(function (x) { return x.id === id; });
+  if (!d) return;
+  document.getElementById('docEditId').value = d.id;
+  document.getElementById('docName').value = d.name || '';
+  document.getElementById('docTitle').value = d.title || 'الدكتور';
+  document.getElementById('docFontSize').value = d.font_size || '';
+  document.getElementById('docDegreeAr').value = d.degree_ar || '';
+  document.getElementById('docDegreeEn').value = d.degree_en || '';
+  document.getElementById('docShowOnLetterhead').checked = !!d.show_on_letterhead;
+}
+function docsDelete(id) {
+  if (!confirm('حذف هذا الدكتور نهائيًا من ترويسة كل التقارير؟')) return;
+  fetch('/api/examining-doctors/' + id + '/delete', {method: 'POST'})
+    .then(function (r) { return r.json(); })
+    .then(function () { docsRefreshList(); location.reload(); });
+}
+function docsSave() {
+  var id = document.getElementById('docEditId').value;
+  var payload = {
+    name: document.getElementById('docName').value.trim(),
+    title: document.getElementById('docTitle').value.trim(),
+    font_size: document.getElementById('docFontSize').value.trim(),
+    degree_ar: document.getElementById('docDegreeAr').value.trim(),
+    degree_en: document.getElementById('docDegreeEn').value.trim(),
+    show_on_letterhead: document.getElementById('docShowOnLetterhead').checked,
+  };
+  if (!payload.name) { alert('اكتب اسم الدكتور أولاً.'); return; }
+  var url = id ? ('/api/examining-doctors/' + id) : '/api/examining-doctors';
+  fetch(url, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    if (res.error) { alert('صار خطأ: ' + res.error); return; }
+    docsResetForm();
+    location.reload();
+  }).catch(function () { alert('تعذّر الاتصال — تأكد أن البرنامج شغّال.'); });
+}
+</script>
+{% endmacro %}
+
+
+{% macro editor_script(order_test_id) %}
+<script>
+// ============== ملاحظة/تعليق حر تحت باراميتر — نص + تسمية اختيارية،
+// والإظهار بالتقرير المطبوع خطوة منفصلة عن الكتابة (زر 👁/🙈 لحاله) ==========
+function examRenderNoteBox(box, text, label, visible) {
+  box.innerHTML = text ? ((label ? '<b>' + label + ':</b> ' : '') + text) : '';
+  box.style.display = (text && visible) ? 'block' : 'none';
+}
+
+function examEditNote(paramId, orderTestId) {
+  var box = document.getElementById('exam-note-' + paramId);
+  if (!box || box.dataset.editing === '1') return;
+  var currentText = box.dataset.rawText || '';
+  var currentLabel = box.dataset.rawLabel || '';
+  box.dataset.editing = '1';
+  box.style.display = 'block';
+  box.innerHTML = '';
+  var labelInput = document.createElement('input');
+  labelInput.type = 'text';
+  labelInput.className = 'inline-note-label-input';
+  labelInput.placeholder = 'تسمية اختيارية (مثلاً Comment) — اتركها فاضية بدون أي عنوان';
+  labelInput.value = currentLabel;
+  var ta = document.createElement('textarea');
+  ta.value = currentText;
+  ta.placeholder = 'نص الملاحظة...';
+  box.appendChild(labelInput);
+  box.appendChild(ta);
+  ta.focus();
+  function save() {
+    if (document.activeElement === labelInput || document.activeElement === ta) return;
+    var note = ta.value.trim();
+    var label = labelInput.value.trim();
+    fetch('/order-tests/' + orderTestId + '/param-note', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'test_parameter_id=' + encodeURIComponent(paramId) + '&note=' + encodeURIComponent(note) + '&note_label=' + encodeURIComponent(label)
+    });
+    box.dataset.editing = '0';
+    box.dataset.rawText = note;
+    box.dataset.rawLabel = label;
+    var toggleBtn = document.querySelector('.rnote-toggle-btn[data-param-id="' + paramId + '"]');
+    if (toggleBtn) toggleBtn.style.display = note ? '' : 'none';
+    if (!note) { box.dataset.visible = '0'; if (toggleBtn) toggleBtn.textContent = '👁 إظهار الملاحظة'; }
+    examRenderNoteBox(box, note, label, box.dataset.visible === '1');
+  }
+  labelInput.addEventListener('blur', function () { setTimeout(save, 120); });
+  ta.addEventListener('blur', function () { setTimeout(save, 120); });
+}
+
+function examToggleNoteVisible(paramId, orderTestId, btn) {
+  var box = document.getElementById('exam-note-' + paramId);
+  if (!box || !(box.dataset.rawText || '').trim()) return;
+  var newVisible = box.dataset.visible !== '1';
+  fetch('/order-tests/' + orderTestId + '/param-note-visibility', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'test_parameter_id=' + encodeURIComponent(paramId) + '&visible=' + (newVisible ? '1' : '0')
+  });
+  box.dataset.visible = newVisible ? '1' : '0';
+  examRenderNoteBox(box, box.dataset.rawText || '', box.dataset.rawLabel || '', newVisible);
+  btn.textContent = newVisible ? '🙈 إخفاء الملاحظة' : '👁 إظهار الملاحظة';
+}
+
+// ============== المطلوب 1: قلم ✏️ عام لكل تقرير بدون استثناء ==============
+// المشكلة: قوالب التقارير "العادية" (Coagulation, Lipid, CBC, وغيرها) ما
+// عندها بنية .exam-section/.result-row أصلاً (تلك خاصة بقوالب الفحص
+// GUE/GSE/SFA فقط) — فبدل ما نضطر نعدّل كل قالب تقرير لحاله (عشرات
+// الملفات)، هذا الكود يفحص أي صفحة تقرير تلقائيًا ويضيف نفس أسلوب ✏️
+// لعنصرين موجودين بكل التقارير العادية بلا استثناء (نفس الكلاسات
+// المستخدمة فعليًا بكل قوالب التقارير حسب اتفاقية الكود الموحّدة):
+//   1) .report-heading  → عنوان التحليل (مثل "Coagulation Tests")
+//   2) table.data-table td.field-name → اسم كل باراميتر/سطر بجدول النتائج
+// يُخزَّن أي تعديل بنفس بنية report_layout.param_overrides الموجودة
+// أصلاً (المفتاح = النص الأصلي الحرفي للباراميتر بدل اسمه الداخلي، لأن
+// هذي القوالب ما عندها معرّف باراميتر بالـDOM) وبنفس report_layout.report_title
+// للعنوان — فيُحفَظ ويُسترجَع عبر نفس /api/reports/layout الموجود بدون
+// أي تعديل بالخادم. يشتغل تلقائيًا، فورًا، بدون شرط دخول "وضع تعديل
+// التصميم" (نفس سلوك بقية أزرار ✏️).
+var __examReportLayout = {{ (report_layout|default({}))|tojson }};
+
+function examEscapeHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function examApplyGenericPencils() {
+  var overrides = (__examReportLayout && __examReportLayout.param_overrides) || {};
+
+  // دالة عامة: تحوّل أي خلية/عنصر نصي ثابت لعنصر قابل للتعديل بقلم ✏️ —
+  // تُستخدم لكل أنواع المحتوى الثابت بالتقرير (عنوان، اسم باراميتر،
+  // وحدة، عنوان عمود بالجدول...الخ) بنفس الآلية، حتى تغطي "كل محتويات
+  // التقرير بدون استثناء" بدل تعداد كل نوع لحاله بكود منفصل.
+  function makeEditable(el, hint) {
+    if (!el || el.dataset.genericDone) return;
+    el.dataset.genericDone = '1';
+    var original = el.textContent.trim();
+    if (!original) return;
+    var ov = overrides[original];
+    var shown = (ov && ov.label) ? ov.label : original;
+    el.innerHTML =
+      '<span data-editable="field_label" data-original-key="' + examEscapeHtml(original) + '">' + examEscapeHtml(shown) + '</span>' +
+      '<span class="title-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="' + examEscapeHtml(hint) + '">✏️</span>';
+  }
+
+  // 1) عنوان التقرير العام (كل تقرير غير قوالب الفحص، اللي عندها أصلاً
+  //    .report-title-wrap ومعالجة خاصة بيها — نتفادى الازدواج بالتأكد إن
+  //    ما فيه .report-title-wrap بنفس الصفحة أصلاً).
+  if (!document.querySelector('.report-title-wrap')) {
+    var heading = document.querySelector('.report-heading');
+    if (heading && !heading.dataset.genericDone) {
+      heading.dataset.genericDone = '1';
+      var titleShown = (__examReportLayout && __examReportLayout.report_title) || heading.textContent.trim();
+      heading.innerHTML =
+        '<span data-editable="report_title">' + examEscapeHtml(titleShown) + '</span>' +
+        '<span class="title-edit-btn" onclick="examEditInline(this.previousElementSibling)" title="تعديل عنوان التحليل">✏️</span>';
+    }
+  }
+
+  // 2) اسم كل باراميتر/سطر بجدول النتائج.
+  document.querySelectorAll('table.data-table td.field-name').forEach(function (td) {
+    makeEditable(td, 'تعديل اسم هذا الباراميتر بالطباعة (يطبَّق على كل تقارير هذا التحليل)');
+  });
+
+  // 3) وحدة كل باراميتر (المطلوب: القلم يغطي حتى الوحدات، مو بس الاسم).
+  document.querySelectorAll('table.data-table td.unit-val').forEach(function (td) {
+    makeEditable(td, 'تعديل نص هذه الوحدة بالطباعة');
+  });
+
+  // 4) عناوين أعمدة الجدول (Test / Result / Control / Unit / Reference range...).
+  document.querySelectorAll('table.data-table th').forEach(function (th) {
+    makeEditable(th, 'تعديل نص هذا العمود بالطباعة');
+  });
+
+  // 5) تسمية الصناديق تحت الجدول (RBC:/WBC:/Platelets:/Conclusion:...
+  //    بـblood_film.html ومشابهاتها) — العنصر <b> نفسه بس (تسميته)، أبداً
+  //    مو القيمة/الوصف جنبه، حتى ما نلمس بيانات المريض الفعلية بالغلط.
+  document.querySelectorAll('.box-field b').forEach(function (b) {
+    makeEditable(b, 'تعديل تسمية هذا الحقل بالطباعة');
+  });
+
+  // 5.1) علامة محايدة بدون أي تنسيق بصري خاص بيها (.editable-label) —
+  //      تُستخدم بقوالب معيّنة (مثل عمود اسم التحليل بـCBC) لخلايا مو
+  //      عليها class="field-name" أصلاً (لتفادي فرض تنسيق field-name
+  //      البصري — إمالة/لون/حجم مختلف — على مكان ما يحتاجه)، بس نحتاج
+  //      قلم ✏️ عليها. أضف class="editable-label" لأي خلية جديدة تحتاجها
+  //      بأي قالب دون التأثير على شكلها.
+  document.querySelectorAll('.editable-label').forEach(function (el) {
+    makeEditable(el, 'تعديل هذا النص بالطباعة');
+  });
+
+  // 5.2) ⚠️ حرج: وحدة كل باراميتر بتقارير الفحص (GUE/GSE/SFA/Blood Film
+  //      وأي تقرير مبني على exam_row) — .runit مختلفة جذريًا عن
+  //      .field-name/.unit-val: نصّها مو مكتوب بالقالب، يجيها من عمود
+  //      test_parameters.unit بقاعدة البيانات مباشرة (نفس القيمة اللي
+  //      يعدّلها زر "Unit" بصفحة Reference Range). فتعديلها من هنا **لازم**
+  //      يحفظ بنفس المكان مباشرة (مسار /set-unit) مو بنظام param_overrides/
+  //      text_overrides — غير هيك التعديل ينعرض مؤقتًا بس يرجع لقيمته
+  //      الأصلية أول ما تنفتح الصفحة من جديد (سبب مشكلة رجوع وحدة NRBC
+  //      اللي انصلحت سابقًا — لا تشيل هذا الجزء عند أي دمج مستقبلي لهذا
+  //      الملف، حتى لو صار نظام تعديل نصوص عام جديد لاحقًا).
+  document.querySelectorAll('.result-row .runit').forEach(function (span) {
+    if (span.dataset.genericDone) return;
+    span.dataset.genericDone = '1';
+    var row = span.closest('.result-row');
+    var paramId = row ? row.dataset.paramId : null;
+    if (!paramId) return;
+    var original = span.textContent.trim();
+    span.innerHTML =
+      '<span data-unit-text>' + examEscapeHtml(original) + '</span>' +
+      '<span class="title-edit-btn" onclick="examEditUnit(' + paramId + ', this)" title="تعديل وحدة هذا الباراميتر (يُحفظ فورًا، نفس زر Unit بصفحة Reference Range)">✏️</span>';
+  });
+}
+
+// تعديل مباشر لوحدة باراميتر من داخل التقرير نفسه — يحفظ فورًا بقاعدة
+// البيانات (test_parameters.unit) عبر نفس مسار صفحة Reference Range، بدل
+// أي نظام تفضيلات محفوظة بالتقرير (راجع الشرح الحرج بالأعلى).
+function examEditUnit(paramId, btn) {
+  var span = btn.previousElementSibling;
+  var current = span.textContent.trim();
+  var newUnit = prompt('الوحدة الجديدة لهذا الباراميتر:', current);
+  if (newUnit === null) return;
+  var trimmed = newUnit.trim();
+  if (trimmed === current) return;
+  fetch('/master/unit-converter/' + paramId + '/set-unit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'unit=' + encodeURIComponent(trimmed) + '&ajax=1'
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.ok) span.textContent = trimmed;
+      else alert(data.error || 'تعذّر حفظ الوحدة');
+    })
+    .catch(function () { alert('تعذّر الاتصال بالخادم'); });
+}
+
+var examDndAttached = false;
+var examStyleTargetRow = null;
+
+function examToggleEditMode() {
+  var page = examContainer();
+  var controls = document.getElementById('examEditControls');
+  var editing = page.classList.toggle('exam-editing');
+  controls.style.display = editing ? 'flex' : 'none';
+  var _tb = document.querySelector('.exam-toolbar'); if (_tb) _tb.classList.toggle('is-open', editing);
+  if (editing) {
+    document.querySelectorAll('.result-row').forEach(function (r) { r.draggable = true; });
+    document.querySelectorAll('.exam-section').forEach(function (s) { s.draggable = true; });
+    if (!examDndAttached) { examAttachDnD(); examDndAttached = true; }
+  } else {
+    document.querySelectorAll('.result-row').forEach(function (r) { r.draggable = false; });
+    document.querySelectorAll('.exam-section').forEach(function (s) { s.draggable = false; });
+  }
+}
+
+function examDiscardChanges() {
+  location.reload();
+}
+
+// ============== تعديل مباشر لعنوان التحليل/الأقسام/حقول ترويسة المريض ==============
+// يشتغل فورًا بمجرد الضغط على ✏️ (بدون الحاجة لتفعيل وضع "تعديل التصميم"
+// الشامل أولاً) — التعديل يبقى محليًا بالمتصفح لحد ما تضغط "💾 حفظ
+// التعديلات" (نفس زر حفظ باقي التصميم)، فيُلتقط تلقائيًا مع بقية
+// التعديلات عبر examSerializeLayout() أدناه.
+function examEditInline(span) {
+  if (!span || span.isContentEditable) return;
+  if (!document.querySelector('.exam-toolbar')) {
+    alert('التعديل المباشر غير متوفر بهذه الصفحة (نظام حفظ التصميم غير محمَّل) — التعديل بيضيع لو حدّثت الصفحة.');
+    return;
+  }
+  span.contentEditable = 'true';
+  span.focus();
+  var range = document.createRange();
+  range.selectNodeContents(span);
+  var sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(range);
+  function onBlur() {
+    span.contentEditable = 'false';
+    span.removeEventListener('blur', onBlur);
+  }
+  span.addEventListener('blur', onBlur);
+  span.addEventListener('keydown', function onKey(e) {
+    if (e.key === 'Enter') { e.preventDefault(); span.blur(); span.removeEventListener('keydown', onKey); }
+  });
+}
+
+// ============== إضافة باراميتر جديد فعليًا (بدل رسالة placeholder) ==============
+// يُنشئ صف test_parameters حقيقي لهذا التحليل (اسم فقط، بلا وحدة/مدى
+// طبيعي — تُضاف لاحقًا من كتالوج التحاليل لو يحتاجها)، وينزل تلقائيًا
+// بقسم "Other Results" لحد ما تسحبه للمكان المطلوب وتحفظ.
+function examAddParam(inputEl, testDefinitionId) {
+  var name = (inputEl.value || '').trim();
+  if (!name) { alert('اكتب اسم الباراميتر أولاً.'); return; }
+  fetch('/api/test-parameters', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({test_definition_id: testDefinitionId, name: name})
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    if (res.error) { alert('صار خطأ: ' + res.error); return; }
+    location.reload();
+  }).catch(function () { alert('تعذّر الاتصال — تأكد أن البرنامج شغّال.'); });
+}
+
+// ---- سحب/إفلات: صف نتيجة داخل/بين الأقسام، وقسم كامل ضمن الصفحة ----
+var examDragEl = null;
+
+function examAttachDnD() {
+  document.querySelectorAll('.result-row').forEach(function (row) {
+    row.addEventListener('dragstart', function (e) {
+      examDragEl = row; e.stopPropagation();
+      e.dataTransfer.effectAllowed = 'move';
+    });
+  });
+  document.querySelectorAll('.exam-section').forEach(function (sec) {
+    sec.addEventListener('dragstart', function (e) {
+      if (examDragEl && examDragEl.classList.contains('result-row')) return;
+      examDragEl = sec; e.dataTransfer.effectAllowed = 'move';
+    });
+    sec.addEventListener('dragover', function (e) {
+      if (!examDragEl || !examDragEl.classList.contains('result-row')) return;
+      e.preventDefault();
+      var rows = Array.prototype.slice.call(sec.querySelectorAll('.result-row'));
+      var after = rows.find(function (r) {
+        var rect = r.getBoundingClientRect();
+        return e.clientY < rect.top + rect.height / 2;
+      });
+      var noteBoxAfter = after ? document.getElementById('exam-note-' + after.dataset.paramId) : null;
+      if (after) sec.insertBefore(examDragEl, after);
+      else { var footer = sec.querySelector('.add-param-row'); sec.insertBefore(examDragEl, footer); }
+      // يحرّك صندوق الملاحظة (لو موجود) مع صفه دائمًا
+      var myNote = document.getElementById('exam-note-' + examDragEl.dataset.paramId);
+      if (myNote) sec.insertBefore(myNote, examDragEl.nextSibling);
+    });
+  });
+  var container = examContainer();
+  container.addEventListener('dragover', function (e) {
+    if (!examDragEl || !examDragEl.classList.contains('exam-section')) return;
+    e.preventDefault();
+    var secs = Array.prototype.slice.call(container.querySelectorAll('.exam-section'));
+    var after = secs.find(function (s) {
+      var rect = s.getBoundingClientRect();
+      return e.clientY < rect.top + rect.height / 2;
+    });
+    // bottom-note أُلغي (المطلوب 1) — نضيف بآخر الحاوية مباشرة (appendChild)
+    // بدل الإدراج قبل مرجع بلوك ما عاد موجود.
+    if (after) container.insertBefore(examDragEl, after);
+    else container.appendChild(examDragEl);
+  });
+  document.addEventListener('dragend', function () { examDragEl = null; });
+}
+
+// ---- إخفاء/إظهار صف ----
+function examToggleHidden(btn) {
+  var row = btn.closest('.result-row');
+  var hidden = row.classList.toggle('exam-row-hidden');
+  row.dataset.hidden = hidden ? '1' : '0';
+  btn.textContent = hidden ? '👁️' : '🗑️';
+}
+
+// ---- حذف باراميتر نهائيًا (مختلف عن الإخفاء) ----
+// يحذف صف test_parameters فعليًا من قاعدة البيانات — الخادم يرفض الحذف لو
+// فيه نتائج محفوظة سابقًا لهذا الباراميتر (أي مريض) ويرجّع رسالة واضحة
+// بدلها. لا حاجة لأي تنظيف يدوي بعدها؛ الصف يختفي تلقائيًا من كل تقرير
+// قادم بمجرد الحذف (راجع شرح كامل عند /api/test-parameters/<id> بـapp.py).
+function examDeleteParam(paramId, paramName, btn) {
+  if (!confirm('حذف "' + paramName + '" نهائيًا من هذا التحليل؟ هذا الإجراء لا يُلغى.\n\n(لو بس تريد تخفيه مؤقتًا بدون حذف، استخدم زر 🗑️/👁️ بدل هذا)')) return;
+  fetch('/api/test-parameters/' + paramId, { method: 'DELETE' })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (res.error) { alert('تعذّر الحذف: ' + res.error); return; }
+      location.reload();
+    })
+    .catch(function () { alert('تعذّر الاتصال — تأكد أن البرنامج شغّال.'); });
+}
+
+// ---- تخصيص لون/حجم/تسمية صف ----
+function examOpenStylePopover(event, btn) {
+  event.stopPropagation();
+  var row = btn.closest('.result-row');
+  examStyleTargetRow = row;
+  var pop = document.getElementById('examStylePopover');
+  document.getElementById('examStyleLabel').value = row.dataset.label || '';
+  document.getElementById('examStyleColor').value = row.dataset.color || '#1f3b7a';
+  document.getElementById('examStyleSize').value = row.dataset.fontSize || '';
+  document.getElementById('examStyleAlign').value = row.dataset.align || '';
+  document.getElementById('examStyleColumn').value = row.dataset.column || 'center';
+  var rect = btn.getBoundingClientRect();
+  pop.style.top = (window.scrollY + rect.bottom + 4) + 'px';
+  pop.style.left = (window.scrollX + rect.left - 150) + 'px';
+  pop.style.display = 'block';
+}
+function examCloseStylePopover() {
+  document.getElementById('examStylePopover').style.display = 'none';
+  examStyleTargetRow = null;
+}
+function examApplyStyle() {
+  if (!examStyleTargetRow) return;
+  var row = examStyleTargetRow;
+  var label = document.getElementById('examStyleLabel').value.trim();
+  var color = document.getElementById('examStyleColor').value;
+  var size = document.getElementById('examStyleSize').value;
+  var align = document.getElementById('examStyleAlign').value;
+  var column = document.getElementById('examStyleColumn').value;
+  var nameEl = row.querySelector('.rname');
+  var valEl = row.querySelector('.rval-num') || row.querySelector('.rval');
+  var valBoxEl = row.querySelector('.rval');
+  if (label) { nameEl.textContent = label; row.dataset.label = label; }
+  if (color) { valEl.style.color = color; row.dataset.color = color; }
+  if (size) { row.style.fontSize = size + 'px'; row.dataset.fontSize = size; }
+  if (align) { valBoxEl.style.textAlign = align === 'near_name' ? 'left' : (align === 'center' ? 'center' : 'right'); row.dataset.align = align; }
+  else { valBoxEl.style.textAlign = ''; delete row.dataset.align; }
+  // الموضع بعرض التقرير (يسار/وسط/يمين، المطلوب 1): يُسجَّل فقط بـdata-*
+  // هنا — إعادة الترتيب الفعلي لثلاث أعمدة تصير بالسيرفر بعد الحفظ (الصفحة
+  // تُعاد تحميلها تلقائياً بعد أي حفظ ناجح، راجع examConfirmSave) بنفس
+  // منطق custom_v2.html بالضبط.
+  if (column && column !== 'center') { row.dataset.column = column; }
+  else { delete row.dataset.column; }
+  examCloseStylePopover();
+}
+function examClearStyle() {
+  if (!examStyleTargetRow) return;
+  var row = examStyleTargetRow;
+  var nameEl = row.querySelector('.rname');
+  nameEl.textContent = row.dataset.paramName;
+  var valEl = row.querySelector('.rval-num') || row.querySelector('.rval');
+  var valBoxEl = row.querySelector('.rval');
+  valEl.style.color = '';
+  valBoxEl.style.textAlign = '';
+  row.style.fontSize = '';
+  delete row.dataset.label; delete row.dataset.color; delete row.dataset.fontSize; delete row.dataset.align; delete row.dataset.column;
+  examCloseStylePopover();
+}
+
+// ---- الحاوية العامة: .report-page لقوالب الفحص القديمة (فيها سحب/إفلات
+// وإزاحة صفحة)، أو .sheet لأي تقرير ثاني (CBC، كيمياء...) ما عنده هذا
+// العنصر أصلاً — أضيفت هذي الدالة لما صار شريط التعديل يشتغل على كل
+// التقارير، مو بس قوالب الفحص، حتى ما ينهار السكريبت بأول تحميل. ----
+function examContainer() {
+  return document.querySelector('.report-page') || document.querySelector('.sheet');
+}
+
+// ---- إزاحة الصفحة عموديًا ----
+var examPageOffset = parseInt(((examContainer() || {}).style || {}).marginTop || '0', 10) || 0;
+function examShiftPage(delta) {
+  examPageOffset += delta;
+  var c = examContainer();
+  if (c) c.style.marginTop = examPageOffset + 'px';
+}
+
+// ---- خطوط عربي/إنكليزي (تُطبَّق فورًا عبر متغيّرات CSS على مستوى الصفحة) ----
+function examSetFont(kind, value) {
+  document.documentElement.style.setProperty('--exam-font-' + kind, value || '');
+}
+
+// ---- الحفظ: يفتح نافذة اختيار النطاق، ثم يبني JSON من DOM الحالي ----
+function examSaveLayout() {
+  document.getElementById('examScopeModal').style.display = 'flex';
+}
+
+// ---- إخفاء/إظهار كامل منطقة الختم والتوقيع (الصندوق + أي صورة ختم/توقيع
+// مُلصقة فيها) بضغطة وحدة — يُخفى بصريًا فورًا، ثم يفتح نافذة اختيار النطاق
+// المعتادة (هذا المريض فقط / كل مرضى هذا التحليل) ليُحفظ القرار بنفس آلية
+// حفظ أي تعديل تصميم آخر (examConfirmSave → report_layout.hide_signature).
+function examToggleSignature() {
+  var wrap = document.querySelector('.signature-area-wrap');
+  if (!wrap) return;
+  var willHide = wrap.dataset.hidden !== '1';
+  wrap.dataset.hidden = willHide ? '1' : '0';
+  wrap.style.display = willHide ? 'none' : '';
+  var btn = document.getElementById('examSignatureToggleBtn');
+  if (btn) btn.textContent = willHide ? '👁️ إظهار منطقة التوقيع والختم' : '🙈 إخفاء منطقة التوقيع والختم';
+  examSaveLayout();
+}
+function examSerializeLayout() {
+  var container = examContainer();
+  var sectionEls = Array.prototype.slice.call(container.querySelectorAll('.exam-section'));
+  var section_order = sectionEls.map(function (s) { return s.dataset.sectionKey; });
+  var sections = {}; var hidden_params = []; var param_overrides = {}; var section_labels = {};
+  sectionEls.forEach(function (s) {
+    var key = s.dataset.sectionKey;
+    var titleEl = s.querySelector('.section-title-text');
+    if (titleEl) section_labels[key] = titleEl.textContent.trim();
+    var rows = Array.prototype.slice.call(s.querySelectorAll('.result-row'));
+    sections[key] = rows.map(function (r) { return r.dataset.paramName; });
+    rows.forEach(function (r) {
+      if (r.dataset.hidden === '1') hidden_params.push(r.dataset.paramName);
+      var ov = {};
+      if (r.dataset.color) ov.color = r.dataset.color;
+      if (r.dataset.fontSize) ov.font_size = parseInt(r.dataset.fontSize, 10);
+      if (r.dataset.label) ov.label = r.dataset.label;
+      if (r.dataset.align) ov.align = r.dataset.align;
+      if (r.dataset.column) ov.column = r.dataset.column;
+      if (Object.keys(ov).length) param_overrides[r.dataset.paramName] = ov;
+    });
+  });
+  var fontAr = document.getElementById('examFontAr').value;
+  var fontEn = document.getElementById('examFontEn').value;
+  // المطلوب 1: نلتقط هنا أيضًا تعديلات القلم العام (عنوان التقرير العادي
+  // + أسماء الباراميترات بجداول data-table) اللي زادها examApplyGenericPencils
+  // أعلاه — بنفس param_overrides/report_title، حتى تُحفَظ سوا بضغطة
+  // "حفظ" وحدة، بغض النظر هل التقرير من نمط الفحص أو تقرير عادي.
+  var genericTitle = document.querySelector('[data-editable="report_title"]');
+  var reportTitleOverride = genericTitle ? genericTitle.textContent.trim() : '';
+  document.querySelectorAll('[data-editable="field_label"]').forEach(function (span) {
+    var key = span.dataset.originalKey;
+    var newText = span.textContent.trim();
+    if (!key) return;
+    if (newText && newText !== key) {
+      param_overrides[key] = param_overrides[key] || {};
+      param_overrides[key].label = newText;
+    } else if (param_overrides[key]) {
+      delete param_overrides[key].label;
+    }
+  });
+  var layout = { section_order: section_order, sections: sections, hidden_params: hidden_params,
+                 param_overrides: param_overrides, section_labels: section_labels, page_offset_px: examPageOffset };
+  if (fontAr) layout.font_family_ar = fontAr;
+  if (fontEn) layout.font_family_en = fontEn;
+  // منطقة الختم والتوقيع: نحافظ على حالة الإخفاء الحالية عند أي حفظ آخر
+  // (تعديل لون/تسمية...الخ) حتى لا ترجع تظهر بالغلط، وتتحدّث فورًا لو هذا
+  // الحفظ بالذات جاي من زر إخفاء/إظهار التوقيع نفسه (examToggleSignature).
+  var sigWrap = document.querySelector('.signature-area-wrap');
+  if (sigWrap) layout.hide_signature = sigWrap.dataset.hidden === '1';
+  var titleEl = document.querySelector('.report-title[data-editable="report_title"]');
+  if (titleEl) layout.report_title = titleEl.textContent.trim();
+  else if (reportTitleOverride) layout.report_title = reportTitleOverride;
+  var pmo = {};
+  document.querySelectorAll('.info-val[data-meta-key]').forEach(function (span) {
+    pmo[span.dataset.metaKey] = span.textContent.trim();
+  });
+  if (Object.keys(pmo).length) layout.patient_meta_overrides = pmo;
+  // نص قابل للتعديل بأي مكان (نظام etext() بـblood_film.html وأمثاله —
+  // عنوان، تسمية صندوق، وحدة...) — مفتاح ثابت data-edit-key بدل الاعتماد
+  // على النص الأصلي نفسه كمفتاح، فيبقى التعديل صحيح حتى لو تغيّر النص
+  // الافتراضي لاحقًا. يُحفظ بـreport_layout.text_overrides.
+  var text_overrides = {};
+  document.querySelectorAll('[data-edit-key]').forEach(function (span) {
+    var key = span.dataset.editKey;
+    var def = span.dataset.editDefault;
+    var newText = span.textContent.trim();
+    if (!key) return;
+    if (newText && newText !== def) {
+      text_overrides[key] = newText;
+    }
+  });
+  if (Object.keys(text_overrides).length) layout.text_overrides = text_overrides;
+  return layout;
+}
+function examConfirmSave(scope) {
+  document.getElementById('examScopeModal').style.display = 'none';
+  var container = examContainer();
+  var scopeId = scope === 'test' ? container.dataset.testDefinitionId : container.dataset.orderTestId;
+  var layout = examSerializeLayout();
+  fetch('/api/reports/layout', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({scope: scope, scope_id: scopeId, layout: layout})
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    if (res.ok) location.reload();
+    else alert('صار خطأ: ' + (res.error || ''));
+  }).catch(function () { alert('تعذّر الاتصال — تأكد أن البرنامج شغّال.'); });
+}
+function examResetPatientLayout() {
+  if (!confirm('متأكد تريد ترجّع هذا التقرير لتصميمه الافتراضي (يمسح استثناء هذا المريض فقط)؟')) return;
+  var container = examContainer();
+  fetch('/api/reports/layout/reset', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({scope: 'order_test', scope_id: container.dataset.orderTestId})
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    if (res.ok) location.reload();
+    else alert('صار خطأ: ' + (res.error || ''));
+  });
+}
+
+// يشتغل فورًا وقت تحميل هذا السكريبت (بعد جسم التقرير بالـHTML مباشرة)
+// حتى تظهر أقلام ✏️ العامة وتُطبَّق أي أسماء معدَّلة سابقًا بلا أي تأخير.
+examApplyGenericPencils();
+</script>
+{% endmacro %}

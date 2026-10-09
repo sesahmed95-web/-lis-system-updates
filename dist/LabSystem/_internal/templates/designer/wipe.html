@@ -1,0 +1,25 @@
+{% extends "designer/layout.html" %}
+{% block dcontent %}
+<div class="card" style="padding:18px;">
+  <h2 style="margin-top:0;">🧹 تفريغ البرنامج قبل تسليمه للعميل</h2>
+  <p class="muted">يمسح بيانات التشغيل المحددة فقط، ويُبقي: الإعدادات، التحاليل والباراميترات، النسب الطبيعية، تصاميم التقارير، الأختام، المستخدمين، الأطباء، وترخيص الجهاز.
+     قبل المسح يؤخذ تلقائيًا نسخة كاملة من القاعدة بمجلد البرنامج باسم <span class="mono">lis_before_wipe_التاريخ.db</span>.</p>
+  {% with msgs = get_flashed_messages() %}{% for m in msgs %}<div class="flash" style="background:#ECFDF5;border:1px solid #10B981;border-radius:8px;padding:8px 12px;margin:8px 0;">{{ m }}</div>{% endfor %}{% endwith %}
+  <form method="POST" onsubmit="return confirm('متأكد؟ سيتم مسح البيانات المحددة (مع نسخة احتياطية تلقائية).');">
+    <table style="width:100%; border-collapse:collapse; margin:10px 0;">
+      {% for g in groups %}
+      <tr style="border-bottom:1px solid #E2E8F0;">
+        <td style="padding:8px; width:34px;"><input type="checkbox" name="groups" value="{{ g.key }}" id="g_{{ g.key }}" class="wipe-g"></td>
+        <td style="padding:8px;"><label for="g_{{ g.key }}">{{ g.label }}</label></td>
+        <td style="padding:8px; text-align:center; white-space:nowrap;"><b>{{ g.count }}</b> سجل</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <p class="muted" style="font-size:12.5px;">ملاحظة: اختيار «الزيارات» يمسح «النتائج» معها، واختيار «المرضى» يمسح «الزيارات» و«النتائج» معه (لأنها مرتبطة).</p>
+    <label>اكتب كلمة <b>تفريغ</b> للتأكيد:</label>
+    <input type="text" name="confirm" autocomplete="off" style="max-width:200px;">
+    <button class="btn" type="submit" style="background:#B91C1C;">🗑️ تفريغ المحدد</button>
+    <button type="button" class="btn secondary" onclick="document.querySelectorAll('.wipe-g').forEach(function(c){c.checked=true;})">تحديد الكل</button>
+  </form>
+</div>
+{% endblock %}

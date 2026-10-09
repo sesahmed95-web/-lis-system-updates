@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+{#
+  front_desk/print_accounts_search.html
+  =============================================================================
+  قالب مستقل (بدون extends base.html) بنفس نمط print_referral_lab_statement.html
+  الموجود أصلاً — يُمرَّر كنص HTML كامل لـpdf_export.html_to_pdf(). راجع
+  accounts_search_export_pdf() بapp.py.
+#}
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 13px; color: #14213D; margin: 24px; }
+  h2 { text-align:center; margin-bottom:4px; }
+  .sub { text-align:center; color:#475569; margin-bottom:18px; }
+  table { width:100%; border-collapse: collapse; margin-bottom: 18px; }
+  th, td { border: 1px solid #CBD5E1; padding: 5px 8px; text-align: center; }
+  th { background: #205072; color: #fff; }
+  tfoot td { font-weight: 700; background:#F1F5F9; }
+  .grand-total { text-align:center; font-weight:700; font-size:1.05em; margin-top:10px; }
+  .waived { color:#94A3B8; }
+</style>
+</head>
+<body>
+{% if kind == 'doctor' %}
+  <h2>كشف حساب الطبيب الفاحص — {{ result.doctor_name }}</h2>
+  <div class="sub">الفترة من {{ date_from|ddmmyyyy }} إلى {{ date_to|ddmmyyyy }}</div>
+
+  {% if detail == 'short' %}
+  <table>
+    <thead><tr><th>التحليل</th><th>العدد</th><th>أجر التحليل الواحد</th><th>المجموع</th></tr></thead>
+    <tbody>
+      {% for r in result.by_test_total %}
+      <tr><td>{{ r.test_name }}</td><td>{{ r.count }}</td><td>{{ '%.0f'|format(r.rate) }}</td><td>{{ '%.0f'|format(r.subtotal) }}</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><td colspan="3">المجموع الكلي</td><td>{{ '%.0f'|format(result.total) }}</td></tr></tfoot>
+  </table>
+  {% else %}
+  <table>
+    <thead><tr><th>المريض</th><th>التحليل</th><th>التاريخ</th><th>الأجر</th></tr></thead>
+    <tbody>
+      {% for r in result.patient_rows %}
+      <tr class="{{ 'waived' if r.fee_waived }}">
+        <td>{{ r.patient_name }}</td><td>{{ r.test_name }}</td><td>{{ r.date|ddmmyyyy }}</td>
+        <td>{{ 'مجاني' if r.fee_waived else '%.0f'|format(r.rate) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><td colspan="3">المجموع الكلي</td><td>{{ '%.0f'|format(result.total) }}</td></tr></tfoot>
+  </table>
+  {% endif %}
+
+  <div class="grand-total">
+    المجموع الكلي للفترة من {{ date_from|ddmmyyyy }} إلى {{ date_to|ddmmyyyy }} للدكتور {{ result.doctor_name }}
+    = {{ '%.0f'|format(result.total) }}
+  </div>
+
+{% elif kind == 'lab' %}
+  <h2>كشف تحاليل مُرسَلة — {{ result.lab_name }}</h2>
+  <div class="sub">الفترة من {{ date_from|ddmmyyyy }} إلى {{ date_to|ddmmyyyy }}</div>
+  <table>
+    <thead><tr><th>المريض</th><th>التحليل</th><th>التاريخ</th><th>الكلفة</th></tr></thead>
+    <tbody>
+      {% for r in result.rows %}
+      <tr><td>{{ r.patient_name }}</td><td>{{ r.test_name }}</td><td>{{ r.date|ddmmyyyy }}</td><td>{{ '%.0f'|format(r.cost) }}</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><td colspan="3">المجموع الكلي (العدد: {{ result.total_count }})</td><td>{{ '%.0f'|format(result.total_cost) }}</td></tr></tfoot>
+  </table>
+  <div class="grand-total">
+    عدد التحاليل المُرسَلة لمختبر {{ result.lab_name }} خلال الفترة = {{ result.total_count }}،
+    ومجموع كلفتها = {{ '%.0f'|format(result.total_cost) }}
+  </div>
+
+{% elif kind == 'referral' %}
+  <h2>{{ 'كشف إحالات الدكتور — ' + result.doctor_filter if result.doctor_filter else 'تقسيم مصادر الإحالة' }}</h2>
+  <div class="sub">الفترة من {{ date_from|ddmmyyyy }} إلى {{ date_to|ddmmyyyy }}</div>
+  {% set source_type_ar = {'doctor': 'طبيب مُرسِل', 'center': 'مختبر آخر', 'direct': 'مباشر'} %}
+  <table>
+    <thead><tr><th>المصدر</th><th>الاسم</th><th>عدد المرضى</th><th>عدد مرات التحليل</th><th>المبلغ المُستحصَل</th></tr></thead>
+    <tbody>
+      {% for r in result.rows %}
+      <tr>
+        <td>{{ source_type_ar[r.source_type] }}</td><td>{{ r.source_name }}</td>
+        <td>{{ r.patient_count }}</td><td>{{ r.visit_test_count }}</td><td>{{ '%.0f'|format(r.revenue) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="2">الإجمالي</td><td>{{ result.total_patient_count }}</td>
+          <td>{{ result.total_visit_test_count }}</td><td>{{ '%.0f'|format(result.total_revenue) }}</td></tr>
+    </tfoot>
+  </table>
+  <div class="grand-total">
+    إجمالي عدد المرضى = {{ result.total_patient_count }}، والمبلغ المُستحصَل الكلي = {{ '%.0f'|format(result.total_revenue) }}
+  </div>
+
+{% else %}
+  <h2>نتائج بحث الحسابات</h2>
+  <div class="sub">الفترة من {{ date_from|ddmmyyyy }} إلى {{ date_to|ddmmyyyy }}</div>
+
+  {% if result.mode == 'counts' %}
+  <table>
+    <thead><tr><th>التحليل</th><th>التاريخ</th><th>العدد</th></tr></thead>
+    <tbody>
+      {% for r in result.rows %}
+      <tr><td>{{ r.test_name }}</td><td>{{ r.date|ddmmyyyy }}</td><td>{{ r.count }}</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><td colspan="2">المجموع الكلي</td><td>{{ result.total_count }}</td></tr></tfoot>
+  </table>
+  {% else %}
+  <table>
+    <thead><tr><th>المريض</th><th>التحليل</th><th>التاريخ</th><th>السعر</th></tr></thead>
+    <tbody>
+      {% for r in result.rows %}
+      <tr class="{{ 'waived' if r.fee_waived }}">
+        <td>{{ r.patient_name }}</td><td>{{ r.test_name }}</td><td>{{ r.date|ddmmyyyy }}</td>
+        <td>{{ 'مجاني' if r.fee_waived else '%.0f'|format(r.price) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><td colspan="3">المجموع الكلي</td><td>{{ '%.0f'|format(result.total_price) }}</td></tr></tfoot>
+  </table>
+  {% endif %}
+{% endif %}
+</body>
+</html>

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block page_title %}كشف حساب — {{ doctor_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <form method="GET" style="display:flex; gap:10px; align-items:center;">
+    <label>الشهر:</label>
+    <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()">
+  </form>
+</div>
+<div class="card">
+  <h3>{{ doctor_name }} — {{ month }}</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>رقم الزيارة</th>
+        <th>اسم المريض</th>
+        <th>التاريخ</th>
+        <th>الأجر</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r['registration_number'] }}</td>
+        <td>{{ r['full_name'] }}</td>
+        <td>{{ r['created_at'][:10] }}</td>
+        <td>{{ "%.0f"|format(r['examining_doctor_fee'] or 0) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">لا يوجد زيارات محسوبة لهذا الدكتور بهذا الشهر.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="3" style="font-weight:700;">الإجمالي</td><td style="font-weight:700;">{{ "%.0f"|format(total) }}</td></tr>
+    </tfoot>
+  </table>
+</div>
+{% endblock %}

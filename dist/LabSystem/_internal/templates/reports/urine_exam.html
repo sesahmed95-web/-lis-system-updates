@@ -1,0 +1,28 @@
+{% extends "reports/base_report.html" %}
+{% import "reports/partials/exam_report_shared.html" as shared with context %}
+
+{# ============================================================================
+   يعتمد على base_report.html المُحدَّث + exam_report_shared.html (نظام
+   تخصيص المظهر report_layout — راجع شرح كامل بأعلى ذاك الملف). محتوى
+   التقرير كله يُبنى الآن عبر shared.render_report_body() بدل حلقات يدوية،
+   حتى يدعم السحب/الإخفاء/التلوين/الخطوط تلقائيًا بلا أي كود إضافي هنا.
+============================================================================ #}
+
+{% block report_styles %}
+  {{ super() if self.report_styles is defined else '' }}
+  {{ shared.styles() }}
+{% endblock %}
+
+{% block patient_meta %}{{ shared.patient_meta_v2() }}{% endblock %}
+
+{% block report_body %}
+{% set sections_def = [
+  ("macro", "Macroscopic Examination", ["Color","Specific Gravity","Reaction (pH)","Glucose","Protein","Ketone","Bile Pigment","Urobilinogen","Nitrite"]),
+  ("micro", "Microscopic Examination", ["RBCs","PUS","Casts","Epithelial Cells","Amorphous","Mucus","Crystals","Parasites","Parasites / Others"]),
+] %}
+<div class="exam-design-wrap exam-design-{{ report_design('exam') }}">
+{{ shared.render_report_body("General Urine Examination", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+</div>
+
+{{ shared.editor_script(order_test_id) }}
+{% endblock %}

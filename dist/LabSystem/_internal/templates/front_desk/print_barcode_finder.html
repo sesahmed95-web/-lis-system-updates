@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block page_title %}🏷️ طباعة باركود{% endblock %}
+{% block content %}
+<div class="card" style="max-width:720px;">
+  <h3>ابحث باسم المريض</h3>
+  <p class="muted">
+    مفيدة لو تلف باركود أصلي أو ضاع وتحتاج تعيد طباعته بسرعة — اكتب اسم
+    المريض، اختر الزيارة، واطبع باركوداتها (كل الأنابيب أو تحليل وحيد بس)
+    من نفس صفحة الطباعة المعتادة.
+  </p>
+  <div class="form-field" style="position:relative; max-width:420px;">
+    <label>اسم المريض</label>
+    <input type="text" id="pbfQuery" autocomplete="off" placeholder="اكتب اسم المريض..." style="width:100%;">
+    <div id="pbfResults" class="pbf-results"></div>
+  </div>
+</div>
+
+<div class="card" id="pbfVisitsCard" style="max-width:720px; display:none;">
+  <h3 id="pbfPatientName"></h3>
+  <table>
+    <thead><tr><th>رقم التسجيل</th><th>التاريخ</th><th>التحاليل</th><th></th></tr></thead>
+    <tbody id="pbfVisitsBody"></tbody>
+  </table>
+</div>
+
+<style>
+  .pbf-results {
+    position:absolute; z-index:20; background:#fff; border:1px solid #E2E8F0; border-radius:6px;
+    max-height:220px; overflow-y:auto; width:100%; box-shadow:0 4px 14px rgba(0,0,0,0.12); display:none;
+  }
+  .pbf-results div { padding:8px 10px; cursor:pointer; font-size:13.5px; border-bottom:1px solid #F1F5F9; }
+  .pbf-results div:last-child { border-bottom:none; }
+  .pbf-results div:hover { background:#F1F5F9; }
+  .pbf-results .pbf-sub { color:#64748B; font-size:11.5px; }
+</style>
+<script>
+  var pbfInput = document.getElementById('pbfQuery');
+  var pbfResults = document.getElementById('pbfResults');
+  var pbfTimer = null;
+
+  pbfInput.addEventListener('input', function () {
+    var q = pbfInput.value.trim();
+    clearTimeout(pbfTimer);
+    if (q.length < 2) { pbfResults.style.display = 'none'; return; }
+    pbfTimer = setTimeout(function () {
+      fetch('/api/patients/search?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(function (list) {
+          pbfResults.innerHTML = '';
+          if (!list.length) { pbfResults.style.display = 'none'; return; }
+          list.forEach(function (p) {
+            var row = document.createElement('div');
+            var sub = (p.age ? p.age + ' ' + (p.age_unit || '') : '') + (p.gender ? ' — ' + p.gender : '');
+            row.innerHTML = p.full_name + '<div class="pbf-sub">' + sub + '</div>';
+            row.addEventListener('click', function () {
+              pbfResults.style.display = 'none';
+              pbfInput.value = p.full_name;
+              loadVisits(p.id, p.full_name);
+            });
+            pbfResults.appendChild(row);
+          });
+          pbfResults.style.display = 'block';
+        })
+        .catch(function () { pbfResults.style.display = 'none'; });
+    }, 250);
+  });
+
+  document.addEventListener('click', function (e) {
+    if (e.target !== pbfInput) pbfResults.style.display = 'none';
+  });
+
+  function loadVisits(patientId, patientName) {
+    fetch('/api/patients/' + patientId + '/recent-visits')
+      .then(function (r) { return r.json(); })
+      .then(function (visits) {
+        document.getElementById('pbfPatientName').textContent = 'زيارات ' + patientName;
+        var body = document.getElementById('pbfVisitsBody');
+        body.innerHTML = '';
+        if (!visits.length) {
+          body.innerHTML = '<tr><td colspan="4" class="muted">ما فيه زيارات مسجّلة لهذا المريض.</td></tr>';
+        }
+        visits.forEach(function (v) {
+          var tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td class="mono">' + v.registration_number + '</td>' +
+            '<td class="muted">' + (v.created_at || '') + '</td>' +
+            '<td>' + v.tests.join('، ') + '</td>' +
+            '<td><a class="btn small" href="/front-desk/visits/' + v.visit_id + '/print/samples" target="_blank">🖨 طباعة الباركود</a></td>';
+          body.appendChild(tr);
+        });
+        document.getElementById('pbfVisitsCard').style.display = 'block';
+      });
+  }
+</script>
+{% endblock %}

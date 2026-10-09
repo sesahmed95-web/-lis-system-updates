@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ 'rtl' if lang == 'ar' else 'ltr' }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ t('license_activation_title') }} - {{ brand_name }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>
+  .hw-box { font-family: monospace; font-size: 20px; background:#1f2937; color:#34d399; padding:12px 16px;
+    border-radius:8px; letter-spacing:1px; display:inline-block; direction:ltr; user-select:all; }
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-lang-toggle">
+    <a class="pill-btn light {{ 'active' if lang=='en' }}" href="{{ url_for('set_lang', lang='en') }}">EN</a>
+    <a class="pill-btn light {{ 'active' if lang=='ar' }}" href="{{ url_for('set_lang', lang='ar') }}">AR</a>
+  </div>
+  <div class="login-card-wide" style="grid-template-columns: 1fr;">
+    <div class="login-form-side">
+      {% if lic.status == 'pending' %}
+        <h1 class="login-title">{{ t('license_pending_title') }}</h1>
+        <p class="muted">{{ t('license_pending_body') }}</p>
+      {% elif lic.status == 'hardware_mismatch' %}
+        <h1 class="login-title">{{ t('license_hw_mismatch_title') }}</h1>
+        <p class="muted">{{ t('license_hw_mismatch_body') }}</p>
+      {% elif lic.status == 'revoked' %}
+        <h1 class="login-title">{{ t('license_revoked_title') }}</h1>
+        <p class="muted">{{ t('license_revoked_body') }}{% if lic.revoked_reason %} {{ t('license_revoked_reason_label') }} {{ lic.revoked_reason }}{% endif %} {{ t('license_revoked_body2') }}</p>
+      {% else %}
+        <h1 class="login-title">{{ t('license_expired_title') }}</h1>
+        <p class="muted">{{ t('license_expired_body') }}</p>
+      {% endif %}
+
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}{% for m in messages %}<div class="login-error">{{ m }}</div>{% endfor %}{% endif %}
+      {% endwith %}
+
+      <p style="margin-top:18px;">{{ t('license_send_hwid') }}</p>
+      <div class="hw-box">{{ lic.hardware_id }}</div>
+
+      <h3 style="margin-top:28px;">{{ t('license_activate_heading') }}</h3>
+      <p class="muted">{{ t('license_activate_instructions') }}</p>
+      <form method="POST" action="{{ url_for('license_activate') }}">
+        <div class="form-field">
+          <input type="text" name="username" placeholder="{{ t('username') }}" required autofocus>
+        </div>
+        <div class="form-field">
+          <input type="text" name="code" placeholder="{{ t('license_activation_code') }}" required style="direction:ltr; font-family:monospace;">
+        </div>
+        <button class="btn login-submit" type="submit">{{ t('license_activate_button') }}</button>
+      </form>
+
+      <div class="demo-users">
+        <a href="{{ url_for('designer_login') }}">{{ t('designer_login_link') }}</a>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>إنشاء حساب المصمم</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card-wide" style="grid-template-columns: 1fr;">
+    <div class="login-form-side">
+      <h1 class="login-title">🔧 إنشاء حساب المصمم (مرة واحدة فقط)</h1>
+      <p class="muted">
+        هذه الصفحة تظهر مرة واحدة فقط عند أول تشغيل للبرنامج على أي جهاز.
+        اختر اسم مستخدم وكلمة مرور خاصين بك أنت (المصمم) فقط — لا تشاركهما مع
+        أي عميل. بعد إنشاء الحساب لن تظهر هذه الصفحة مرة أخرى، وستحتاج
+        لتسجيل الدخول من صفحة دخول المصمم في كل مرة.
+      </p>
+      {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+      <form method="POST">
+        <div class="form-field">
+          <input type="text" name="username" placeholder="اسم مستخدم المصمم" required autofocus>
+        </div>
+        <div class="form-field">
+          <input type="password" name="password" placeholder="كلمة مرور المصمم (6 أحرف فأكثر)" required>
+        </div>
+        <div class="form-field">
+          <input type="password" name="confirm" placeholder="تأكيد كلمة المرور" required>
+        </div>
+        <button class="btn login-submit" type="submit">إنشاء الحساب</button>
+      </form>
+    </div>
+  </div>
+</div>
+</body>
+</html>

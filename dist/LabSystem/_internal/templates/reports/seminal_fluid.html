@@ -1,0 +1,21 @@
+{% extends "reports/base_report.html" %}
+{% import "reports/partials/exam_report_shared.html" as shared with context %}
+
+{% block report_styles %}
+  {{ super() if self.report_styles is defined else '' }}
+  {{ shared.styles() }}
+{% endblock %}
+
+{% block patient_meta %}{{ shared.patient_meta_v2() }}{% endblock %}
+
+{% block report_body %}
+{% set sections_def = [
+  ("macro", "Macroscopic Examination", ["Volume","Color","Color / Appearance","Liquefaction Time","Viscosity","pH"]),
+  ("micro", "Microscopic Examination & Sperm Kinetics", ["Sperm Count","Total Sperm Count","Active","Active (Progressive)","Sluggish","Sluggish (Non-progressive)","Immotile","Normal Forms","Abnormal Forms","Pus Cells","RBCs","Agglutination"]),
+] %}
+<div class="exam-design-wrap exam-design-{{ report_design('exam') }}">
+{{ shared.render_report_body("Seminal Fluid Analysis", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+</div>
+
+{{ shared.editor_script(order_test_id) }}
+{% endblock %}

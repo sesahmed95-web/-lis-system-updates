@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block page_title %}مظهر الشاشة الرئيسية{% endblock %}
+{% block content %}
+<style>
+  .dl-tabs { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .dl-tab { padding:8px 18px; border-radius:8px; border:1px solid #CBD5E1; background:#fff; cursor:pointer; font-weight:600; }
+  .dl-tab.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+  .dl-panel { display:none; }
+  .dl-panel.active { display:grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 420px); gap:18px; align-items:start; }
+  @media (max-width: 900px) { .dl-panel.active { grid-template-columns: 1fr; } }
+  .dl-field { margin-bottom:12px; }
+  .dl-field label { display:block; font-size:13px; margin-bottom:4px; font-weight:600; }
+  .dl-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .dl-hint { color:#64748B; font-size:12px; }
+  .dl-preview { position:relative; height:240px; border-radius:14px; overflow:hidden; background:#1e293b; border:1px solid #CBD5E1; }
+  .dl-preview .bg { position:absolute; inset:-20px; background-repeat:no-repeat; }
+  .dl-preview .ov { position:absolute; inset:0; background:#0f172a; }
+  .dl-preview .txt { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-shadow:0 1px 6px rgba(0,0,0,.25); }
+  .dl-colors { display:flex; gap:10px; margin-top:10px; }
+  .dl-swatch { flex:1; height:56px; border-radius:10px; border:1px solid #CBD5E1; display:flex; align-items:center; justify-content:center; font-size:12px; }
+</style>
+
+<div class="dl-tabs">
+  {% for c in cards %}
+  <button type="button" class="dl-tab {{ 'active' if c.iface == active_tab else '' }}" data-tab="{{ c.iface }}">{{ c.label }}</button>
+  {% endfor %}
+</div>
+<p class="dl-hint">كل واجهة لها إعداداتها الخاصة. أي حقل تتركه على "وراثة" يستخدم الإعداد العام من صفحة الإعدادات. التعديل يظهر عند دخول تلك الواجهة.</p>
+
+{% for c in cards %}
+<form method="POST" enctype="multipart/form-data" class="dl-panel card {{ 'active' if c.iface == active_tab else '' }}" id="panel_{{ c.iface }}" data-iface="{{ c.iface }}">
+  <input type="hidden" name="iface" value="{{ c.iface }}">
+  <div>
+    <h3 style="margin-top:0;">واجهة {{ c.label }}</h3>
+
+    <div class="dl-field">
+      <label>صورة الخلفية</label>
+      <div class="dl-row">
+        <label><input type="radio" name="bg_mode" value="keep" checked> إبقاء الحالي ({{ {'own':'صورة خاصة بهذي الواجهة','none':'بدون صورة','inherit':'الصورة العامة'}[c.bg_state] }})</label>
+        <label><input type="radio" name="bg_mode" value="none"> بدون صورة</label>
+        <label><input type="radio" name="bg_mode" value="inherit"> وراثة الصورة العامة</label>
+      </div>
+      <input type="file" name="bg_file" accept=".png,.jpg,.jpeg,.webp" class="dl-bgfile" style="margin-top:6px;">
+      <div class="dl-hint">ارفع صورة جديدة لتستبدل الحالية (PNG / JPG / WEBP).</div>
+    </div>
+
+    <div class="dl-field">
+      <label>التعتيم فوق الصورة: <b class="v-op">{{ c.eff.dashboard_bg_overlay_opacity }}</b>%  <span class="dl-hint">(0 = الصورة واضحة تماماً، 100 = مغطاة بالكامل)</span></label>
+      <input type="range" min="0" max="100" name="dashboard_bg_overlay_opacity" value="{{ c.eff.dashboard_bg_overlay_opacity }}" class="in-op" style="width:100%;">
+    </div>
+
+    <div class="dl-field">
+      <label>الضبابية (Blur): <b class="v-blur">{{ c.eff.dashboard_bg_blur }}</b>px  <span class="dl-hint">(0 = صورة حادة وواضحة)</span></label>
+      <input type="range" min="0" max="20" name="dashboard_bg_blur" value="{{ c.eff.dashboard_bg_blur }}" class="in-blur" style="width:100%;">
+    </div>
+
+    <div class="dl-field">
+      <label>سطوع الصورة: <b class="v-br">{{ c.eff.dashboard_bg_brightness }}</b>%  <span class="dl-hint">(100 = الأصلي، أقل = أغمق، أكثر = أفتح)</span></label>
+      <input type="range" min="20" max="200" name="dashboard_bg_brightness" value="{{ c.eff.dashboard_bg_brightness }}" class="in-br" style="width:100%;">
+    </div>
+
+    <div class="dl-field dl-row">
+      <div>
+        <label>لون طبقة التعتيم (غامقة / فاتحة)</label>
+        <input type="color" name="dashboard_overlay_color" value="{{ c.eff.dashboard_overlay_color }}" class="in-ovcolor">
+        <label style="font-weight:400;"><input type="checkbox" name="dashboard_overlay_color_inherit" value="1" {{ 'checked' if not c.own.dashboard_overlay_color }}> وراثة العام</label>
+      </div>
+      <div>
+        <label>لون نص الترحيب والساعة</label>
+        <input type="color" name="dashboard_hero_text_color" value="{{ c.eff.dashboard_hero_text_color }}" class="in-txtcolor">
+        <label style="font-weight:400;"><input type="checkbox" name="dashboard_hero_text_color_inherit" value="1" {{ 'checked' if not c.own.dashboard_hero_text_color }}> وراثة العام</label>
+      </div>
+    </div>
+    <div class="dl-hint" style="margin-bottom:10px;">لصورة فاتحة: اختر لون طبقة أبيض أو فاتح ونص غامق. لصورة غامقة: العكس.</div>
+
+    <div class="dl-field dl-row">
+      <div>
+        <label>موضع الصورة</label>
+        <select name="dashboard_bg_position" class="in-pos">
+          {% for v, l in [('top','أعلى'),('center','وسط'),('bottom','أسفل')] %}
+          <option value="{{ v }}" {{ 'selected' if c.eff.dashboard_bg_position == v }}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>حجم الصورة</label>
+        <select name="dashboard_bg_size_mode" class="in-mode">
+          {% for v, l in [('cover','تملأ الشاشة (قص)'),('contain','كاملة بدون قص'),('custom','نسبة مخصصة')] %}
+          <option value="{{ v }}" {{ 'selected' if c.eff.dashboard_bg_size_mode == v }}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>النسبة %</label>
+        <input type="number" min="5" max="400" name="dashboard_bg_size_percent" value="{{ c.eff.dashboard_bg_size_percent }}" class="in-pct" style="width:80px;">
+      </div>
+    </div>
+
+    <div class="dl-field dl-row">
+      <div>
+        <label>لون الواجهة (القائمة والأزرار)</label>
+        <input type="color" name="theme_primary_color" value="{{ c.eff.theme_primary_color }}" class="in-primary">
+        <label style="font-weight:400;"><input type="checkbox" name="theme_primary_color_inherit" value="1" {{ 'checked' if not c.own.theme_primary_color }}> وراثة العام</label>
+      </div>
+      <div>
+        <label>لون خلفية الصفحات (فاتح / غامق)</label>
+        <input type="color" name="theme_page_bg_color" value="{{ c.eff.theme_page_bg_color }}" class="in-pagebg">
+        <label style="font-weight:400;"><input type="checkbox" name="theme_page_bg_color_inherit" value="1" {{ 'checked' if not c.own.theme_page_bg_color }}> وراثة العام</label>
+      </div>
+    </div>
+    <div class="dl-hint">ملاحظة: لو غيّرت لون أو حرّكت المؤشر، يُلغى خيار "وراثة" تلقائياً لذاك اللون عند الحفظ.</div>
+
+    <div class="dl-row" style="margin-top:14px;">
+      <button class="btn" type="submit">💾 حفظ واجهة {{ c.label }}</button>
+      <button class="btn secondary" type="submit" name="action" value="reset"
+              onclick="return confirm('إعادة واجهة {{ c.label }} للإعدادات العامة وحذف صورتها الخاصة؟');">↺ إعادة للعام</button>
+    </div>
+  </div>
+
+  <div>
+    <b>معاينة تقريبية</b>
+    <div class="dl-preview" style="margin-top:6px;">
+      <div class="bg" style="{% if c.bg_url %}background-image:url('{{ c.bg_url }}');{% endif %}"></div>
+      <div class="ov"></div>
+      <div class="txt"><div style="font-size:26px;">Welcome</div><div style="font-size:34px; font-weight:700;">01:19 PM</div></div>
+    </div>
+    <div class="dl-colors">
+      <div class="dl-swatch sw-primary" style="color:#fff;">لون الواجهة</div>
+      <div class="dl-swatch sw-pagebg">خلفية الصفحات</div>
+    </div>
+  </div>
+</form>
+{% endfor %}
+
+<script>
+  document.querySelectorAll('.dl-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      document.querySelectorAll('.dl-tab').forEach(function (t) { t.classList.toggle('active', t === tab); });
+      document.querySelectorAll('.dl-panel').forEach(function (p) { p.classList.toggle('active', p.dataset.iface === tab.dataset.tab); });
+    });
+  });
+  document.querySelectorAll('.dl-panel').forEach(function (panel) {
+    var bg = panel.querySelector('.dl-preview .bg'), ov = panel.querySelector('.dl-preview .ov');
+    function q(s) { return panel.querySelector(s); }
+    function refresh() {
+      var op = q('.in-op').value, blur = q('.in-blur').value, mode = q('.in-mode').value, pos = q('.in-pos').value;
+      q('.v-op').textContent = op; q('.v-blur').textContent = blur;
+      var br = q('.in-br').value; q('.v-br').textContent = br;
+      ov.style.opacity = op / 100;
+      ov.style.background = q('.in-ovcolor').value;
+      panel.querySelector('.dl-preview .txt').style.color = q('.in-txtcolor').value;
+      bg.style.filter = 'blur(' + blur + 'px) brightness(' + br + '%)';
+      bg.style.backgroundPosition = 'center ' + pos;
+      bg.style.backgroundSize = mode === 'custom' ? (q('.in-pct').value + '% auto') : mode;
+      q('.sw-primary').style.background = q('.in-primary').value;
+      q('.sw-pagebg').style.background = q('.in-pagebg').value;
+    }
+    panel.addEventListener('input', function (e) {
+      if (e.target.classList.contains('in-primary')) panel.querySelector('[name=theme_primary_color_inherit]').checked = false;
+      if (e.target.classList.contains('in-pagebg')) panel.querySelector('[name=theme_page_bg_color_inherit]').checked = false;
+      if (e.target.classList.contains('in-ovcolor')) panel.querySelector('[name=dashboard_overlay_color_inherit]').checked = false;
+      if (e.target.classList.contains('in-txtcolor')) panel.querySelector('[name=dashboard_hero_text_color_inherit]').checked = false;
+      refresh();
+    });
+    q('.dl-bgfile').addEventListener('change', function () {
+      var f = this.files[0]; if (!f) return;
+      bg.style.backgroundImage = "url('" + URL.createObjectURL(f) + "')";
+    });
+    refresh();
+  });
+</script>
+{% endblock %}

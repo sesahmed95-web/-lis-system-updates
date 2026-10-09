@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('doctors') }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ t('add_doctor') }}</h3>
+  <form method="POST" class="form-grid">
+    <div class="form-field">
+      <label>{{ t('name') }}</label>
+      <input type="text" name="full_name" required>
+    </div>
+    <div class="form-field">
+      <label>{{ t('specialty') }}</label>
+      <input type="text" name="specialty">
+    </div>
+    <div class="form-field">
+      <label>{{ t('phone') }}</label>
+      <input type="text" name="phone">
+    </div>
+    <div class="form-field">
+      <label>Email</label>
+      <input type="text" name="email">
+    </div>
+    <div class="form-field">
+      <label>{{ t('commission') }}</label>
+      <input type="number" step="0.01" name="commission_percent" value="0">
+    </div>
+    <div class="form-field">
+      <button class="btn" type="submit">{{ t('create') }}</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>{{ t('name') }}</th><th>{{ t('specialty') }}</th><th>{{ t('phone') }}</th><th>{{ t('commission') }}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for d in doctors %}
+      <tr>
+        <td>{{ d['full_name'] }}</td>
+        <td>{{ d['specialty'] }}</td>
+        <td class="mono">{{ d['phone'] }}</td>
+        <td>{{ d['commission_percent'] }}%</td>
+        <td>
+          <a class="btn small secondary" href="{{ url_for('doctor_statement', doctor_id=d['id']) }}">{{ t('monthly_statement') }}</a>
+          <a class="btn small secondary" href="{{ url_for('doctor_rates', doctor_id=d['id']) }}">{{ t('doctor_rates') }}</a>
+          <form method="POST" action="{{ url_for('delete_doctor', doctor_id=d['id']) }}" style="display:inline"
+                onsubmit="return confirm('متأكد من حذف الدكتور {{ d['full_name'] }}؟ هذا الإجراء لا يمكن التراجع عنه. إذا كان مرتبطاً بزيارات لن يُحذف.');">
+            <button class="btn small danger" type="submit">🗑 حذف</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

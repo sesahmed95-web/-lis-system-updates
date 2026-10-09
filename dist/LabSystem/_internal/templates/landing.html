@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ landing_title }}</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='icon/lab-icon.ico') }}">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    background: linear-gradient(135deg, {{ landing_gradient_color1 }} 0%, {{ landing_gradient_color2 }} 100%);
+    color: #f8fafc; padding: 24px; position: relative; overflow-x: hidden;
+  }
+  {# صورة خلفية/بانر الشاشة الرئيسية (اختيارية من الإعدادات) -- لو ما
+     انرفعت صورة (landing_bg_image فاضي)، ما ينرسم أي شيء هنا وتبقى
+     الخلفية تدرّج الألوان القديم زي ما كانت بالضبط. فيها وضعين:
+     "background" (تغطي كامل الشاشة خلف كل شيء -- الافتراضي)، أو
+     "banner" (صورة بحجم محدد فوق البطاقات، مو خلفية كاملة). #}
+  {% if landing_bg_image and landing_bg_position != 'banner' %}
+  .landing-bg-photo {
+    position: absolute; inset: 0; z-index: 0;
+    background-image: url('{{ landing_bg_image }}');
+    background-size: cover; background-position: center; background-repeat: no-repeat;
+  }
+  .landing-bg-overlay {
+    position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(180deg,
+      rgba(8,14,26,{{ ((landing_bg_overlay_opacity|default(55)|int) / 100) * 0.85 }}) 0%,
+      rgba(8,14,26,{{ ((landing_bg_overlay_opacity|default(55)|int) / 100) }}) 100%);
+  }
+  .landing-wrap { position: relative; z-index: 2; }
+  {% endif %}
+  {# وضع "بانر": صورة بحجم وشكل محدَّدين تترسم فوق البطاقات (مو خلفية
+     كاملة للشاشة) -- الخلفية تبقى تدرّج الألوان العادي بهذا الوضع. #}
+  {% if landing_bg_image and landing_bg_position == 'banner' %}
+  .landing-banner-img {
+    display: block; margin: 0 auto 28px; object-fit: cover;
+    height: {{ landing_bg_banner_size|default(160)|int }}px;
+    {% if landing_bg_shape == 'circle' %}
+    width: {{ landing_bg_banner_size|default(160)|int }}px; border-radius: 50%;
+    {% elif landing_bg_shape == 'square' %}
+    width: {{ landing_bg_banner_size|default(160)|int }}px; border-radius: 14px;
+    {% else %}
+    width: auto; max-width: 90%; border-radius: 14px;
+    {% endif %}
+    box-shadow: 0 6px 24px rgba(0,0,0,.35);
+  }
+  {% endif %}
+  {# شعار المختبر (اختياري ومستقل تمامًا عن صورة الخلفية/البانر والعنوان)
+     -- يظهر فوق العنوان لو انرفع، بغض النظر عن باقي إعدادات هذي الشاشة. #}
+  {% if landing_bg_logo_image %}
+  .landing-logo-img {
+    display: block; margin: 0 auto 18px; object-fit: contain;
+    max-height: {{ landing_bg_logo_size|default(90)|int }}px; max-width: 260px;
+  }
+  {% endif %}
+  .landing-wrap { width: 100%; max-width: 960px; text-align: center; }
+  .landing-title { font-size: clamp(24px, 4vw, 36px); font-weight: 700; margin-bottom: 42px; letter-spacing: .5px; }
+  .landing-title.has-en { margin-bottom: 8px; }
+  {# عنوان فرعي انكليزي اختياري تحت العنوان العربي -- ما يظهر إطلاقًا إذا
+     الإعداد فاضي (landing_title_en). #}
+  .landing-title-en { font-size: clamp(13px, 2vw, 17px); font-weight: 400; color: rgba(248,250,252,.75);
+    letter-spacing: .4px; margin-bottom: 42px; direction: ltr; }
+  .landing-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  @media (max-width: 720px) { .landing-cards { grid-template-columns: 1fr; } }
+  .landing-card {
+    background: rgba(255,255,255,.06); border: 1.5px solid rgba(255,255,255,.15);
+    border-radius: 16px; padding: 28px 18px; cursor: pointer;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease;
+    position: relative; overflow: hidden;
+  }
+  .landing-card:hover { transform: translateY(-4px); background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.35); }
+  .landing-card-img { width: 84px; height: 84px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; }
+  .landing-card-img img { max-width: 100%; max-height: 100%; object-fit: cover; opacity: {{ (landing_image_opacity|default(100)|int) / 100 }}; }
+  .landing-card-img .fallback-icon { font-size: 52px; }
+  .landing-card-label { font-size: 17px; font-weight: 600; position: relative; z-index: 2; }
+  {# شكل الصورة: دائرية/مربعة/مستطيلة -- المطلوب: التحكم به من الإعدادات
+     (بطاقة "🌈 الشاشة الرئيسية"). يُطبَّق نفس الشكل على الثلاث بطاقات. #}
+  {% if landing_image_shape == 'circle' %}
+  .landing-card-img { border-radius: 50%; overflow: hidden; }
+  {% elif landing_image_shape == 'rectangle' %}
+  .landing-card-img { width: 140px; height: 84px; border-radius: 10px; overflow: hidden; }
+  {% else %}
+  .landing-card-img { border-radius: 10px; overflow: hidden; }
+  {% endif %}
+  {# موضع الصورة بالنسبة للبطاقة: أعلى البطاقة (الافتراضي)، خلفية كاملة
+     للبطاقة، أو جنب النص بشكل أفقي. #}
+  {% if landing_image_position == 'background' %}
+  .landing-card { padding: 0; }
+  .landing-card-img { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border-radius: 16px; z-index: 0; }
+  .landing-card-img img { width: 100%; height: 100%; object-fit: cover; }
+  .landing-card::after {
+    content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 16px;
+    background: linear-gradient(180deg, rgba(15,23,42,.15) 0%, rgba(15,23,42,.75) 100%);
+  }
+  .landing-card-label { position: absolute; bottom: 18px; inset-inline-start: 0; inset-inline-end: 0; }
+  {% elif landing_image_position == 'side' %}
+  .landing-card { display: flex; align-items: center; gap: 16px; text-align: start; }
+  .landing-card-img { margin: 0; flex-shrink: 0; }
+  {% endif %}
+  .landing-designer-link {
+    position: fixed; bottom: 14px; inset-inline-end: 14px; opacity: .35; font-size: 20px;
+    text-decoration: none; color: #fff; transition: opacity .15s ease;
+  }
+  .landing-designer-link:hover { opacity: .9; }
+</style>
+</head>
+<body>
+  {% if landing_bg_image and landing_bg_position != 'banner' %}
+  <div class="landing-bg-photo"></div>
+  <div class="landing-bg-overlay"></div>
+  {% endif %}
+  <a class="landing-designer-link" href="{{ url_for('designer_login') }}" title="⚙">⚙</a>
+  <div class="landing-wrap">
+    {% if landing_bg_image and landing_bg_position == 'banner' %}
+    <img class="landing-banner-img" src="{{ landing_bg_image }}" alt="">
+    {% endif %}
+    {% if landing_bg_logo_image %}
+    <img class="landing-logo-img" src="{{ landing_bg_logo_image }}" alt="شعار المختبر">
+    {% endif %}
+    <div class="landing-title{{ ' has-en' if landing_title_en else '' }}">{{ landing_title }}</div>
+    {% if landing_title_en %}<div class="landing-title-en">{{ landing_title_en }}</div>{% endif %}
+    <div class="landing-cards">
+      <div class="landing-card" onclick="enterInterface('reception', {{ reception_needs_password|default(false)|tojson }})">
+        <div class="landing-card-img">
+          {% if landing_reception_image %}<img src="{{ landing_reception_image }}" alt="Reception">{% else %}<span class="fallback-icon">🖥️</span>{% endif %}
+        </div>
+        <div class="landing-card-label">Reception</div>
+      </div>
+      <div class="landing-card" onclick="enterInterface('lab', {{ lab_needs_password|default(false)|tojson }})">
+        <div class="landing-card-img">
+          {% if landing_lab_image %}<img src="{{ landing_lab_image }}" alt="Laboratory">{% else %}<span class="fallback-icon">🧪</span>{% endif %}
+        </div>
+        <div class="landing-card-label">Laboratory</div>
+      </div>
+      <div class="landing-card" onclick="enterInterface('both', false)">
+        <div class="landing-card-img">
+          {% if landing_together_image %}<img src="{{ landing_together_image }}" alt="Together">{% else %}<span class="fallback-icon">🔀</span>{% endif %}
+        </div>
+        <div class="landing-card-label">To-Gather</div>
+      </div>
+    </div>
+  </div>
+
+  <form id="enterForm" method="POST" style="display:none;">
+    <input type="hidden" name="password" id="enterPasswordInput">
+    <input type="hidden" name="operator_name" id="enterNameInput">
+  </form>
+
+  <script>
+    function enterInterface(choice, needsPassword) {
+      var pwd = '';
+      if (needsPassword) {
+        pwd = prompt('أدخل كلمة مرور واجهة "' + (choice === 'reception' ? 'الاستقبال' : 'المختبر') + '":');
+        if (pwd === null) return;
+      }
+      var name = prompt('اسمك (اختياري -- يُسجَّل فقط لمعرفة مين سوى شنو):') || '';
+      var form = document.getElementById('enterForm');
+      form.action = '/enter/' + choice;
+      document.getElementById('enterPasswordInput').value = pwd;
+      document.getElementById('enterNameInput').value = name;
+      form.submit();
+    }
+  </script>
+</body>
+</html>

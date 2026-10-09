@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block page_title %}إرسال تحليل لمختبر آخر — {{ ot['test_name'] }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>{{ ot['test_name'] }}</h3>
+  <p class="muted">
+    المريض: {{ ot['patient_name'] }} — زيارة #{{ ot['registration_number'] }}
+    {% if ot['barcode'] %} — باركود: {{ ot['barcode'] }}{% endif %}
+  </p>
+  <p class="muted">
+    استخدم هذي الصفحة فقط إذا عيّنة هذا التحليل بالذات ما تُنفَّذ فعليًا بمختبرك
+    وانرسلت لمختبر ثاني لإجرائها (مثال: البرولاكتين يُرسل لمختبر القمة). الكلفة
+    المُدخلة هنا تُحسب تلقائيًا ضمن صرفيات هذي الزيارة بكل التقارير (اليومي،
+    الشهري، نصف السنوي، السنوي) — بدون أي حاجة لإدخالها يدويًا بحقل الصرفيات
+    العام. التقرير المطبوع لهذا المريض لا يتغيّر إطلاقًا ويبقى يُطبع بقالب
+    مختبرك نفسه، بغض النظر عن مكان الإرسال الفعلي.
+  </p>
+</div>
+
+<div class="card">
+  <form method="POST">
+    <label>اسم المختبر المُرسَل إليه</label>
+    <input type="text" name="forwarded_lab_name" value="{{ ot['forwarded_lab_name'] or '' }}"
+           placeholder="مثال: مختبر القمة">
+
+    <label>الكلفة</label>
+    <input type="number" step="0.01" name="forwarded_cost" value="{{ ot['forwarded_cost'] or 0 }}">
+
+    <div style="margin-top:12px; display:flex; gap:10px;">
+      <button class="btn" type="submit">حفظ</button>
+      {% if ot['forwarded_lab_name'] %}
+      <span class="badge">مُرسَل حاليًا إلى: {{ ot['forwarded_lab_name'] }} — {{ "%.0f"|format(ot['forwarded_cost'] or 0) }}</span>
+      {% endif %}
+    </div>
+    <p class="muted" style="margin-top:8px;">
+      اترك اسم المختبر فاضي واحفظ حتى تلغي الإرسال (يرجع هذا التحليل يُحسب
+      وكأنه يُنفَّذ بمختبرك عادي، بدون أي صرفيات إضافية).
+    </p>
+  </form>
+</div>
+
+<a class="btn secondary" href="{{ request.referrer or url_for('samples_collection') }}">{{ t('back') }}</a>
+{% endblock %}

@@ -1,0 +1,745 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('enter_results') }} — {{ visit['patient_name'] }}{% endblock %}
+{% block content %}
+<div class="card" style="margin-bottom:14px;">
+  <h3>{{ visit['patient_name'] }} <span class="muted mono">#{{ visit['registration_number'] }}</span></h3>
+  <p class="muted">{{ visit['gender'] }} · {{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['created_at'] }}</p>
+  <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
+  <button type="button" class="btn small secondary print-link" id="printAllLink"
+     onclick="lisSaveThenPrint('{{ url_for('print_visit_results_bundle', visit_id=visit['id']) }}', 'طباعة كل النتائج المكتملة')">🖨 طباعة كل النتائج المكتملة</button>
+  <button type="button" class="btn small secondary"
+     onclick="lisSaveThenPrint('{{ url_for('print_combined_panel', visit_id=visit['id']) }}', 'اللوحة المجمّعة')"
+     title="يجمع تحاليل الكيمياء/الفايروسات/الهرمونات/الفيتامينات وأي قسم آخر بورقة A4 وحدة، مرتّبة حسب القسم">🧾 طباعة اللوحة المجمّعة</button>
+  <button type="button" class="btn small secondary"
+     onclick="lisSaveThenPrint('{{ url_for('print_combined_panel', visit_id=visit['id']) }}?headings=0', 'التقرير الشامل')"
+     title="كل تحاليل الكيمياء والهرمونات والفيتامينات والفايروسات والدلائل الورمية والتخثر بتقرير واحد بدون عناوين أقسام (ما عدا CBC وBlood film وRetic وBMA وBMP وFluid وHb.H وElectrophoresis)">📄 التقرير الشامل (بدون أقسام)</button>
+  <a class="btn small secondary" target="_blank" href="{{ url_for('print_visit_portal_qr', visit_id=visit['id']) }}"
+     title="طباعة QR يمسحه المريض بموبايله لمشاهدة نتائجه (غير باركود القناني)">📱 QR المريض</a>
+  <label style="margin-inline-start:10px; display:inline-flex; align-items:center; gap:4px; font-weight:normal;"
+         title="عدد الزيارات السابقة لنفس المريض ونفس التحليل اللي تظهر نتائجها بالتقرير — 0 = لا تظهر. الترتيب من الإعدادات (تصميم التقارير).">
+    الزيارات السابقة:
+    <select id="prevVisitsCount" onchange="lisSavePrevCount(this.value)">
+      {% for n in range(0, 7) %}<option value="{{ n }}" {{ 'selected' if n == prev_visits_count }}>{{ 'بدون' if n == 0 else n }}</option>{% endfor %}
+    </select>
+    <span id="prevVisitsCountMsg" class="muted" style="font-size:11px;"></span>
+  </label>
+  <script>
+    function lisSavePrevCount(v) {
+      var fd = new FormData(); fd.append('count', v);
+      fetch("{{ url_for('api_set_visit_prev_count', visit_id=visit['id']) }}", {method: 'POST', body: fd})
+        .then(function (r) { return r.json(); })
+        .then(function (d) { document.getElementById('prevVisitsCountMsg').textContent = d.ok ? '✓ تم' : (d.error || 'تعذر الحفظ'); });
+    }
+  </script>
+  {% if visit['phone'] %}
+  <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id']) }}"
+        style="display:inline;" onsubmit="return confirm('إرسال كل النتائج المكتملة لهذه الزيارة بملف PDF واحد مجمّع عبر واتساب لرقم المريض؟');">
+    <input type="hidden" name="mode" value="combined">
+    <button class="btn small" type="submit">📱 إرسال الكل واتساب (ملف واحد)</button>
+  </form>
+  <form method="POST" action="{{ url_for('whatsapp_send_visit', visit_id=visit['id']) }}"
+        style="display:inline;" onsubmit="return confirm('إرسال كل النتائج المكتملة لهذه الزيارة — كل تحليل بملف PDF منفصل — عبر واتساب لرقم المريض؟');">
+    <input type="hidden" name="mode" value="separate">
+    <button class="btn small secondary" type="submit">📱 إرسال الكل واتساب (ملفات منفصلة)</button>
+  </form>
+  {% else %}
+  <span class="muted" style="margin-inline-start:8px;">لا يوجد رقم واتساب مسجّل لهذا المريض</span>
+  {% endif %}
+  <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=visit['id']) }}" title="تعديل كل معلومات المريض والزيارة (الاسم، الهاتف، العمر، التحاليل المطلوبة...)">✏️ تعديل معلومات المريض</a>
+  <label class="checkbox-item" style="margin-inline-start:10px; display:inline-flex; align-items:center; gap:4px;">
+    <input type="checkbox" id="showPrevToggle" checked onchange="lisApplyShowPrev()">
+    إظهار النتيجة السابقة بالتقارير المطبوعة (لتحاليل الكيمياء/التخثر)
+  </label>
+</div>
+
+<!-- نافذة الطباعة المنبثقة (modal) — نفس النمط المستخدم بصفحتي
+     results.html وprint_results_bundle.html بالضبط: تعرض أي تقرير
+     بداخل iframe فوق نفس صفحة البرنامج، بدل ما تفتح نافذة تطبيق منفصلة
+     كاملة (بقائمتها الجانبية) فوق النافذة الأصلية. -->
+<div id="reportModalOverlay" class="report-modal-overlay" style="display:none;">
+  <div class="report-modal-box">
+    <div class="report-modal-bar">
+      <span class="report-modal-title" id="reportModalTitle">🖨 معاينة الطباعة</span>
+      <div class="report-modal-actions">
+        <button type="button" class="btn small" onclick="printReportModalFrame()">🖨 طباعة</button>
+        <button type="button" class="btn small secondary" onclick="closeReportModal()">✖ إغلاق</button>
+      </div>
+    </div>
+    <iframe id="reportModalFrame" class="report-modal-frame" src="about:blank"></iframe>
+  </div>
+</div>
+
+<style>
+  .report-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
+    z-index: 9999; display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .report-modal-box {
+    background: #fff; width: min(900px, 96vw); height: min(92vh, 1100px);
+    border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  }
+  .report-modal-bar {
+    background: #205072; color: #fff; padding: 10px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .report-modal-title { font-weight: 700; font-size: 14px; }
+  .report-modal-actions { display: flex; gap: 8px; }
+  .report-modal-actions .btn.secondary { background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.3); }
+  .report-modal-frame { flex: 1; border: 0; width: 100%; background: #fff; }
+</style>
+
+<script>
+  function openReportModal(url, title) {
+    // cache-buster: حتى بحالة "hasProtected" (تحت) اللي ما تسوي حفظ صامت
+    // قبل الفتح، نضمن الطلب يوصل طازج للسيرفر دائماً بدل ما يرجّع
+    // المتصفح نسخة iframe مخزّنة قديمة لنفس الرابط.
+    var bust = url + (url.indexOf('?') === -1 ? '?' : '&') + '_ts=' + Date.now();
+    document.getElementById('reportModalFrame').src = bust;
+    document.getElementById('reportModalTitle').textContent = title ? ('🖨 ' + title) : '🖨 معاينة الطباعة';
+    document.getElementById('reportModalOverlay').style.display = 'flex';
+  }
+  function closeReportModal() {
+    document.getElementById('reportModalOverlay').style.display = 'none';
+    document.getElementById('reportModalFrame').src = 'about:blank';
+  }
+  function printReportModalFrame() {
+    var frame = document.getElementById('reportModalFrame');
+    if (frame && frame.contentWindow) frame.contentWindow.print();
+  }
+  document.getElementById('reportModalOverlay').addEventListener('click', function (e) {
+    if (e.target === this) closeReportModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeReportModal();
+  });
+</script>
+
+<script>
+  // ------------------------------------------------------------------
+  // المطلوب 5: الطباعة تستخدم دائماً آخر قيم مدخلة بالنموذج، حتى لو ما
+  // ضُغط زر "💾 حفظ" أصلاً — بدل ما تفتح المعاينة على طول (وتطلع فارغة
+  // لأن النتائج لسا ما انحفظت بقاعدة البيانات)، أي زر طباعة بهذي الصفحة
+  // (المفرد 🖨️ لكل بطاقة، أو الزرين أعلى الصفحة) يحفظ أولاً بصمت
+  // (fetch بالخلفية لنفس رابط الصفحة، بدون أي تنقّل/إعادة تحميل)، وبعد ما
+  // يخلص الحفظ فعلياً يفتح نافذة المعاينة.
+  //
+  // استثناء واحد فقط: لو فيه نتيجة مكتملة/معتمدة أصلاً بالصفحة (نفس شرط
+  // hasProtected بالسكربت تحت)، الحفظ الصامت يحتاج بوابة يوزر/باسورد
+  // (نفس حماية زر 💾 العادي) وما نقدر نسويها عبر fetch بالخلفية — بهذي
+  // الحالة فقط نفتح المعاينة مباشرة بدون حفظ صامت (نفس السلوك القديم).
+  //
+  // تنبيه عدم الحفظ عند إغلاق الصفحة: أي تغيير بأي حقل نتيجة يفعّل علم
+  // "تعديل غير محفوظ" (lisDirty)، فيطلع تحذير المتصفح القياسي لو حاول
+  // المستخدم يسكّر التبويب/يغادر الصفحة قبل ما يضغط "💾 حفظ" (أو قبل ما
+  // ينجح الحفظ الصامت هذا).
+  // ------------------------------------------------------------------
+  var lisDirty = false;
+  (function () {
+    var form = document.getElementById('visitResultsForm');
+    if (!form) return;
+    form.addEventListener('input', function () { lisDirty = true; });
+    form.addEventListener('change', function () { lisDirty = true; });
+    form.addEventListener('submit', function () {
+      // الحفظ العادي (زر 💾) قد يتوقف مؤقتاً ببوابة يوزر/باسورد (راجع
+      // السكربت أسفل الصفحة) قبل ما ينجح فعلياً؛ بأي الحالتين هذا تنقّل
+      // حقيقي للصفحة فينعدم داعي لتحذير "إغلاق بدون حفظ" لحظتها.
+      lisDirty = false;
+    });
+  })();
+  window.addEventListener('beforeunload', function (e) {
+    if (!lisDirty) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+
+  // ---- طباعة + حفظ تلقائي (متاحة لكل الواجهات: استقبال/مختبر/الاثنين) ----
+  // السيرفر هو اللي يقرر: لو ما تغيّرت أي قيمة بنتيجة مكتملة → يطبع مباشرة بدون
+  // كلمة مرور. لو فيه تعديل فعلي على نتيجة مكتملة/معتمدة → يطلب يوزر/باسورد
+  // مسؤول أو مشرف (نفس الحساب) ثم يحفظ ويطبع. كل حفظ يجدّد ملف PDF بالأرشيف.
+  function lisAskGate() {
+    var u = prompt('تعديل نتيجة مكتملة/معتمدة — اسم مستخدم مسؤول/مشرف المختبر:');
+    if (u === null || u === '') return null;
+    var p = prompt('كلمة مرور نفس الحساب:');
+    if (p === null) return null;
+    return { u: u, p: p };
+  }
+  function lisPostJson(postUrl, form, gate) {
+    var fd = new FormData(form);
+    if (gate) { fd.set('gate_username', gate.u); fd.set('gate_password', gate.p); }
+    return fetch(postUrl, { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) { return r.json(); });
+  }
+  function lisWithAuto(url) {
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'auto=1';
+  }
+  function lisWithShowPrev(url) {
+    var tg = document.getElementById('showPrevToggle');
+    if (!tg) return url;
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'show_prev=' + (tg.checked ? '1' : '0');
+  }
+  function lisRunSaveAndPrint(postUrl, form, getUrl, title) {
+    function attempt(gate) {
+      return lisPostJson(postUrl, form, gate).then(function (data) {
+        if (data.ok) {
+          lisDirty = false;
+          openReportModal(lisWithAuto(lisWithShowPrev(getUrl(data))), title);
+          return;
+        }
+        if (data.needs_gate) {
+          var g = lisAskGate();
+          if (!g) return;
+          return attempt(g);
+        }
+        alert(data.error || 'تعذّر حفظ/طباعة النتيجة');
+      });
+    }
+    return attempt(null).catch(function (e) { alert('خطأ بالاتصال: ' + e); });
+  }
+  // زر 🖨️ داخل بطاقة تحليل واحد
+  function lisPrintOne(otId) {
+    var form = document.getElementById('visitResultsForm');
+    if (!form) return;
+    lisRunSaveAndPrint('/reports/print-and-save/' + otId, form,
+      function (d) { return d.print_url; }, null);
+  }
+  // أزرار أعلى الصفحة (كل النتائج / اللوحة المجمّعة)
+  function lisSaveThenPrint(url, title) {
+    var form = document.getElementById('visitResultsForm');
+    if (!form) { openReportModal(url, title); return; }
+    lisRunSaveAndPrint(window.location.href, form, function () { return url; }, title);
+  }
+
+  // بعد إعادة تحميل الصفحة (تبع الحفظ المحمي أعلاه)، لو فيه طباعة معلّقة
+  // محفوظة بـsessionStorage، افتحها تلقائيًا مرة وحدة ثم امسحها.
+  document.addEventListener('DOMContentLoaded', function () {
+    var pending = sessionStorage.getItem('lisPendingPrint');
+    if (!pending) return;
+    sessionStorage.removeItem('lisPendingPrint');
+    try {
+      var data = JSON.parse(pending);
+      openReportModal(data.url, data.title);
+    } catch (e) { /* تجاهل أي بيانات تالفة */ }
+  });
+</script>
+
+<script>
+  window.LIS_PATIENT_HCT = {{ 'null' if patient_hct is none else patient_hct }};
+  window.LIS_PATIENT_GENDER = {{ visit['gender']|tojson }};
+  window.LIS_HCT_NORMAL = {{ 'null' if patient_hct_normal is none else patient_hct_normal }};
+</script>
+
+<script>
+  // ------------------------------------------------------------------
+  // حساب MCH وMCHC تلقائيًا من HGB وRBC وHCT — بنفس منطق شاشة الإدخال
+  // المفردة، بس هنا كل صندوق تحليل (rb-box) يُفحص لحاله (لأن هذي الصفحة
+  // تعرض كل تحاليل الزيارة معًا، وقد يتكرر اسم معيار بأكثر من صندوق):
+  //   MCH  = HGB ÷ RBC × 10     (pg)
+  //   MCHC = HGB ÷ HCT × 100    (g/dL)
+  // الحقلين يبقيان قابلين للتعديل اليدوي — بمجرد ما يكتب المستخدم بأحدهما
+  // مباشرة يتوقف التحديث التلقائي له، مع زر "↻ إعادة الحساب التلقائي".
+  // ------------------------------------------------------------------
+  document.addEventListener('DOMContentLoaded', function () {
+    function fieldIn(box, paramName) {
+      return box.querySelector('[data-param-name="' + paramName + '"]');
+    }
+    function numIn(box, paramName) {
+      var el = fieldIn(box, paramName);
+      if (!el) return null;
+      var v = parseFloat(el.value);
+      return isNaN(v) ? null : v;
+    }
+    document.querySelectorAll('.rb-box').forEach(function (box) {
+      var hasCbcFields = fieldIn(box, 'HGB') && (fieldIn(box, 'MCH') || fieldIn(box, 'MCHC'));
+      if (!hasCbcFields) return;
+      function recalc() {
+        var hgb = numIn(box, 'HGB');
+        var rbc = numIn(box, 'RBC');
+        var hct = numIn(box, 'HCT');
+        var mchEl = fieldIn(box, 'MCH');
+        var mchcEl = fieldIn(box, 'MCHC');
+        if (mchEl && mchEl.dataset.userEdited !== '1' && hgb !== null && rbc) {
+          mchEl.value = ((hgb / rbc) * 10).toFixed(1);
+        }
+        if (mchcEl && mchcEl.dataset.userEdited !== '1' && hgb !== null && hct) {
+          mchcEl.value = ((hgb / hct) * 100).toFixed(1);
+        }
+      }
+      window.lisForceRecalcMchMchc = function (btn) {
+        var wrap = btn.closest('td');
+        var input = wrap ? wrap.querySelector('input[data-param-name]') : null;
+        if (input) delete input.dataset.userEdited;
+        recalc();
+      };
+      ['HGB', 'RBC', 'HCT'].forEach(function (name) {
+        var el = fieldIn(box, name);
+        if (el) el.addEventListener('input', recalc);
+      });
+      ['MCH', 'MCHC'].forEach(function (name) {
+        var el = fieldIn(box, name);
+        if (el) el.addEventListener('input', function () { el.dataset.userEdited = '1'; });
+      });
+      recalc();
+    });
+  });
+</script>
+
+<script>
+  // ------------------------------------------------------------------
+  // تعبئة "PT Control" و"PTT Control" تلقائيًا من نتيجة PT / PTT لنفس
+  // صندوق تحليل Coagulation Tests — نفس فلسفة MCH/MCHC فوق بالضبط: تعبئة
+  // تلقائية بمجرد كتابة النتيجة، تتوقف بمجرد ما المستخدم يكتب بحقل
+  // الكونترول يدويًا بنفسه، مع زر "↻ إعادة الحساب التلقائي" لإرجاعها تلقائية
+  // من جديد.
+  //
+  //   PT:  لو النتيجة بين 11-15 (ضمن الطبيعي) → الكونترول = نفس نتيجة PT
+  //        غير هيچ (أي نتيجة غير طبيعية) → الكونترول ثابت = 13
+  //   PTT: لو النتيجة بين 30-36 → الكونترول = نفس نتيجة PTT
+  //        غير هيچ → الكونترول ثابت = 33
+  // ------------------------------------------------------------------
+  document.addEventListener('DOMContentLoaded', function () {
+    function fieldIn(box, paramName) {
+      return box.querySelector('[data-param-name="' + paramName + '"]');
+    }
+    function numIn(box, paramName) {
+      var el = fieldIn(box, paramName);
+      if (!el) return null;
+      var v = parseFloat(el.value);
+      return isNaN(v) ? null : v;
+    }
+    document.querySelectorAll('.rb-box').forEach(function (box) {
+      var hasPt = fieldIn(box, 'PT') && fieldIn(box, 'PT Control');
+      var hasPtt = fieldIn(box, 'PTT') && fieldIn(box, 'PTT Control');
+      if (!hasPt && !hasPtt) return;
+
+      function applyControl(sourceParam, controlParam, normalMin, normalMax, fixedValue) {
+        var controlEl = fieldIn(box, controlParam);
+        if (!controlEl || controlEl.dataset.userEdited === '1') return;
+        var val = numIn(box, sourceParam);
+        if (val === null) return;
+        controlEl.value = (val >= normalMin && val <= normalMax) ? val.toFixed(1) : fixedValue.toFixed(1);
+      }
+      function recalcPt() { applyControl('PT', 'PT Control', 11, 15, 13); }
+      function recalcPtt() { applyControl('PTT', 'PTT Control', 30, 36, 33); }
+
+      window.lisForceRecalcCoagControl = function (btn) {
+        var wrap = btn.closest('td');
+        var input = wrap ? wrap.querySelector('input[data-param-name]') : null;
+        if (input) delete input.dataset.userEdited;
+        recalcPt();
+        recalcPtt();
+      };
+
+      if (hasPt) {
+        fieldIn(box, 'PT').addEventListener('input', recalcPt);
+        fieldIn(box, 'PT Control').addEventListener('input', function () {
+          this.dataset.userEdited = '1';
+        });
+        recalcPt();
+      }
+      if (hasPtt) {
+        fieldIn(box, 'PTT').addEventListener('input', recalcPtt);
+        fieldIn(box, 'PTT Control').addEventListener('input', function () {
+          this.dataset.userEdited = '1';
+        });
+        recalcPtt();
+      }
+    });
+  });
+</script>
+
+<script>
+  // يطبّق اختيار "إظهار النتيجة السابقة" على كل روابط الطباعة بالصفحة عبر
+  // إضافة show_prev=1/0 بالرابط قبل ما المستخدم يضغط عليه — القسم الطبي
+  // (كيمياء/تخثر) هو الوحيد المتأثر أصلاً بهذا الخيار بالتقرير نفسه.
+  function lisApplyShowPrev() {
+    var checked = document.getElementById('showPrevToggle').checked ? '1' : '0';
+    document.querySelectorAll('a.print-link').forEach(function (a) {
+      var url = new URL(a.href, window.location.origin);
+      url.searchParams.set('show_prev', checked);
+      a.href = url.toString();
+    });
+  }
+  document.addEventListener('DOMContentLoaded', lisApplyShowPrev);
+</script>
+
+<form method="POST" id="visitResultsForm">
+  <div class="rb-grid">
+    {% for box in boxes %}
+    {% set ot = box.ot %}
+    <div class="card rb-box" id="rbox_{{ ot['id'] }}">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+        <h4 style="margin:0;">{{ ot['test_name'] }}</h4>
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+          <button type="submit" class="btn small" title="حفظ كل نتائج هذه الصفحة (كل التحاليل الظاهرة، مو هذا التحليل بس)">💾 {{ t('save') }}</button>
+          <button type="button" class="btn small secondary" onclick="lisPrintOne({{ ot['id'] }})" title="طباعة تقرير هذا التحليل (يحفظ النتيجة تلقائياً + نسخة PDF بالأرشيف). تعديل نتيجة مكتملة يحتاج مسؤول/مشرف، أما الطباعة بدون تعديل فمتاحة للجميع">🖨️</button>
+          <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span>
+        </div>
+      </div>
+      <p class="muted" style="margin:4px 0 10px;">{{ t('barcode') }}: <span class="mono">{{ ot['barcode'] }}</span></p>
+
+      <div class="form-field" style="max-width:260px; margin-bottom:10px;">
+        <label style="font-size:0.85em;">الجهاز (Analyzer) — اختياري</label>
+        <input type="text" name="ot{{ ot['id'] }}_analyzer" value="{{ ot['analyzer'] if 'analyzer' in ot.keys() and ot['analyzer'] else '' }}"
+               placeholder="مثال: E411 / Pure" dir="ltr" style="width:100%;">
+      </div>
+
+      {% if ot['status'] == 'Verified' %}
+        {% if current_role in ['supervisor', 'admin'] %}
+        <form method="POST" action="{{ url_for('unverify_result', order_test_id=ot['id']) }}"
+              style="margin-bottom:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
+              onsubmit="return confirm('هذه النتيجة معتمدة فعلاً. فتحها للتعديل يتطلب اعتمادها من جديد بعد الحفظ. متأكد؟')">
+          <input type="hidden" name="next_visit_id" value="{{ visit['id'] }}">
+          <input type="text" name="reason" placeholder="سبب إعادة الفتح (اختياري)" style="max-width:220px;">
+          <button class="btn small secondary" type="submit">🔓 فتح للتعديل</button>
+        </form>
+        {% else %}
+        <p class="muted">🔒 معتمدة — لا يمكن تعديلها إلا بواسطة المشرف.</p>
+        {% endif %}
+      {% endif %}
+
+      <table>
+        <thead><tr>
+          <th>{{ t('parameter') }}</th><th>{{ t('unit') }}</th><th>{{ t('range') }}</th><th>{{ t('result') }}</th><th>{{ t('flag') }}</th>
+        </tr></thead>
+        <tbody>
+          {% for p in box.parameters %}
+          {% set existing = box.results_by_param.get(p['id']) %}
+          {% set rng = box.ranges.get(p['id']) %}
+          {% set sugg = box.suggestions_map.get(p['id'], []) %}
+          {% set fid = 'p_' ~ ot['id'] ~ '_' ~ p['id'] %}
+          <tr>
+            <td>{{ p['name'] }}</td>
+            <td class="muted">{{ p['unit'] }}</td>
+            <td class="muted">
+              {% if rng %}
+                {% if rng['range_text'] %}{{ rng['range_text'] }}
+                {% elif rng['low'] is not none and rng['high'] is not none %}{{ rng['low'] }} - {{ rng['high'] }}{% endif %}
+              {% endif %}
+            </td>
+            <td>
+              {% if p['result_type'] == 'Text' %}
+              {% if p['name'] == 'Conclusion' %}
+              <div class="conclusion-toolbar" style="display:flex; gap:6px; margin-bottom:4px;">
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#D40000; font-weight:bold;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '★')"
+                  title="إدراج نجمة حمراء عند موضع المؤشر">★</button>
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '→')"
+                  title="إدراج سهم عند موضع المؤشر">→</button>
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '⇒')"
+                  title="إدراج سهم عند موضع المؤشر">⇒</button>
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '▶')"
+                  title="إدراج سهم عند موضع المؤشر">▶</button>
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#E67E22; font-weight:bold;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '?')"
+                  title="إدراج علامة استفهام عند موضع المؤشر">?</button>
+                <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#8E44AD; font-weight:bold;"
+                  onclick="lisInsertConclusionMarker('{{ fid }}', '!')"
+                  title="إدراج علامة تعجب عند موضع المؤشر">!</button>
+              </div>
+              {% endif %}
+              <textarea id="{{ fid }}" name="ot{{ ot['id'] }}_param_{{ p['id'] }}" dir="ltr" style="text-align:left; width:100%;"
+                        rows="2" class="lis-autoresize" data-param-name="{{ p['name'] }}" spellcheck="true"
+                        >{{ existing['value_text'] if existing else '' }}</textarea>
+              <label class="muted" style="display:flex; align-items:center; gap:4px; font-size:11px; margin-top:3px;">
+                <input type="checkbox" checked onchange="document.getElementById('{{ fid }}').spellcheck = this.checked;">
+                🔤 تدقيق إملائي (اختياري)
+              </label>
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
+                onclick="lisCleanupText(document.getElementById('{{ fid }}'))"
+                title="يصحح فقط المسافات وحرف البداية وعلامة الترقيم — لا يترجم ولا يغيّر أي كلمة أو مصطلح طبي">✓ تدقيق الكتابة</button>
+              {% if p['name'] in NORMAL_CLICHE_TEXT %}
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
+                data-target="{{ fid }}" data-normal-text="{{ NORMAL_CLICHE_TEXT[p['name']] }}"
+                onclick="lisFillNormalText(this)"
+                title="يعبّي القيمة الطبيعية القياسية — يبقى الحقل قابلاً للتعديل الكامل بعدها">✓ Normal</button>
+              {% endif %}
+              {% else %}
+              <input type="text" id="{{ fid }}" name="ot{{ ot['id'] }}_param_{{ p['id'] }}" dir="ltr" style="text-align:left;"
+                     data-param-name="{{ p['name'] }}"
+                     {% if p['name'] == 'Corrected Retic count' %}data-auto-filled="{{ '0' if existing else '1' }}"{% endif %}
+                     value="{{ existing['value_numeric'] if existing and existing['value_numeric'] is not none else (existing['value_text'] if existing else '') }}"
+                     >
+              {% if p['name'] == 'Corrected Retic count' %}
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
+                onclick="lisForceRecalcCorrectedRetic(this)" title="يحسبها من Reticulocyte count وقيمة HCT لنفس الزيارة (رجال 45%، نساء 42%)">↻ إعادة الحساب التلقائي</button>
+              {% elif p['name'] in ('MCH', 'MCHC') %}
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
+                onclick="lisForceRecalcMchMchc(this)" title="يعيد حسابها تلقائيًا من HGB وRBC/HCT لنفس التحليل">↻ إعادة الحساب التلقائي</button>
+              {% elif p['name'] in ('PT Control', 'PTT Control') %}
+              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:4px;"
+                onclick="lisForceRecalcCoagControl(this)" title="يعيد حسابها تلقائيًا من نتيجة {{ 'PT' if p['name'] == 'PT Control' else 'PTT' }} لنفس التحليل">↻ إعادة الحساب التلقائي</button>
+              {% endif %}
+              {% endif %}
+              {% set hist = box.history_map.get(p['id']) %}
+              {% if hist and ot['status'] != 'Verified' %}
+              {% set prev_val = hist['prev_value_numeric'] if hist['prev_value_numeric'] is not none else hist['prev_value_text'] %}
+              <div class="muted" style="margin-top:4px; font-size:11.5px;">
+                القيمة السابقة: <span class="mono">{{ prev_val }}</span>
+                <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px;"
+                  onclick="document.getElementById('{{ fid }}').value='{{ prev_val }}'">↩ استرجاع</button>
+              </div>
+              {% endif %}
+              {% if sugg %}
+              <div style="margin-top:4px;">
+                {% for s in sugg %}
+                <button type="button" class="btn small secondary" style="margin-inline-end:4px; margin-top:4px;"
+                  onclick="document.getElementById('{{ fid }}').value='{{ s }}'">{{ s }}</button>
+                {% endfor %}
+              </div>
+              {% endif %}
+            </td>
+            <td>{% if existing %}<span class="badge badge-{{ existing['flag'] }}">{{ existing['flag'] }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="btn small secondary print-link" href="{{ url_for('print_report', order_test_id=ot['id']) }}">🖨 طباعة التقرير</a>
+        {% if visit['phone'] and ot['status'] in ['Completed', 'Verified'] %}
+        <form method="POST" action="{{ url_for('whatsapp_send_result', order_test_id=ot['id']) }}" style="display:inline;"
+              onsubmit="return confirm('إرسال نتيجة {{ ot['test_name'] }} فقط عبر واتساب لرقم المريض؟');">
+          <button class="btn small" type="submit">📱 إرسال هذه النتيجة واتساب</button>
+        </form>
+        {% endif %}
+        {% if current_role in ['supervisor', 'admin'] and ot['status'] == 'Completed' %}
+        <form method="POST" action="{{ url_for('verify_result', order_test_id=ot['id']) }}" onsubmit="return confirm('اعتماد هذه النتيجة؟')">
+          <input type="hidden" name="next_visit_id" value="{{ visit['id'] }}">
+          <button class="btn small success" type="submit">✔ {{ t('verify') }}</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</form>
+
+<style>
+  /* كانت .rb-grid تستخدم CSS Grid (grid-template-columns) — وهذا يخلي كل
+     صناديق نفس الصف بنفس الارتفاع إجباريًا (يتحدد بأطول صندوق بالصف)، فلو
+     تحليل قصير (متل FBS بسطر وحدة) جنب تحليل طويل (متل Blood Film)، يضل
+     فراغ فاضي كبير تحت القصير، والتحليل اللي بعده (متل CBC) ينزل تحت هذا
+     الفراغ بدل ما يعبيه. أعمدة CSS (columns) تحل هذا: كل صندوق يتدفق
+     لأقصر عمود فعليًا (توزيع متوازن بالارتفاع الحقيقي)، بدون فراغات.
+     break-inside: avoid يمنع تقطيع أي صندوق نصين بين عمودين. */
+  .rb-grid { columns: 2 380px; column-gap: 14px; }
+  .rb-box { break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid;
+            display: inline-block; width: 100%; margin-bottom: 14px; }
+  @media (max-width: 900px) {
+    .rb-grid { columns: 1; }
+  }
+  .diff-panel {
+    display:flex; gap:14px; flex-wrap:wrap; align-items:center;
+    background:#F3F6F8; border:1px solid #E2E8F0; border-radius:6px;
+    padding:6px 10px; margin:8px 0; font-size:12.5px;
+  }
+  .diff-panel label { display:flex; align-items:center; gap:5px; cursor:pointer; }
+  .diff-sum-badge { font-weight:bold; font-family:monospace; }
+  .diff-sum-badge.ok { color:#15803D; }
+  .diff-sum-badge.bad { color:#C0392B; }
+</style>
+
+<script>
+// ------------------------------------------------------------------
+// التحقق من فحوصات التفريق (WBC Differential / فلم الدم):
+// مجموع خلايا الفحص (Neutrophils, Lymphocytes, Monocytes, Eosinophils,
+// Basophils, Band, Promyelocytes, Myelocytes, Metamyelocytes, Blast)
+// لازم يكون بالضبط 100 خلية قبل الحفظ.
+// - NRBC ما تدخل بمجموع الـ100 أبداً؛ فقط سؤال اختياري "عدّها؟" يتحكم
+//   بتفعيل/تعطيل حقلها.
+// - Atypical Lymphocyte و Reactive lymphocytes أحياناً تدخل ضمن الـ100
+//   وأحياناً لا، فكل وحدة منهم بشرط (checkbox) يتحكم بيه المستخدم لكل فحص.
+// ------------------------------------------------------------------
+(function () {
+  var CORE_PATTERNS = [
+    "metamyelocyte", "promyelocyte", "myelocyte", "neutrophil",
+    "lymphocyte", "monocyte", "eosinophil", "basophil", "band", "blast",
+  ];
+  // أسماء CBC المختصرة لنسب التفريق الخمسة (NE/Ly/MO/EO/BA) — تحليل CBC
+  // يخزّنها بهذا الشكل المختصر بالضبط (مو "Neutrophils" الكاملة زي فحوصات
+  // الـDifferential الثانية)، فهذا التطابق منفصل وبمطابقة تامة (exact) وليس
+  // "يحتوي على" — حتى ما يطابق غلط أعمدة الأعداد المطلقة NE#/LY#/MO#/EO#/BA#
+  // الموجودة بنفس الجدول (تلك ما تدخل بمجموع الـ100).
+  var CBC_ABBR_CORE = ["ne", "ly", "mo", "eo", "ba"];
+
+  function classifyName(rawName) {
+    var name = rawName.trim().toLowerCase();
+    if (name.indexOf("nrbc") !== -1 || name.indexOf("n.r.b.c") !== -1) return "nrbc";
+    if (name.indexOf("atypical") !== -1) return "atypical";
+    if (name.indexOf("reactive") !== -1) return "reactive";
+    if (CBC_ABBR_CORE.indexOf(name) !== -1) return "core";
+    for (var i = 0; i < CORE_PATTERNS.length; i++) {
+      if (name.indexOf(CORE_PATTERNS[i]) !== -1) return "core";
+    }
+    return null;
+  }
+
+  var diffBoxes = []; // { box, coreInputs:[], nrbcInput, atypicalInput, atypicalCheck, reactiveInput, reactiveCheck, sumEl }
+
+  document.querySelectorAll(".rb-box").forEach(function (box) {
+    var coreInputs = [], nrbcInput = null, atypicalInput = null, reactiveInput = null;
+    box.querySelectorAll("table tbody tr").forEach(function (tr) {
+      var firstCell = tr.querySelector("td");
+      var input = tr.querySelector("input[type=text]");
+      if (!firstCell || !input) return;
+      var kind = classifyName(firstCell.textContent);
+      if (kind === "core") coreInputs.push(input);
+      else if (kind === "nrbc") nrbcInput = input;
+      else if (kind === "atypical") atypicalInput = input;
+      else if (kind === "reactive") reactiveInput = input;
+    });
+
+    // ما نعتبره فحص تفريق إلا إذا لكيت 3 خلايا أساسية وأكثر
+    if (coreInputs.length < 3) return;
+
+    var readOnly = coreInputs[0].hasAttribute("readonly");
+    var panel = document.createElement("div");
+    panel.className = "diff-panel";
+
+    var sumEl = document.createElement("span");
+    sumEl.className = "diff-sum-badge";
+    sumEl.textContent = "المجموع: 0 / 100";
+    panel.appendChild(sumEl);
+
+    var nrbcCheck = null;
+    if (nrbcInput) {
+      var nrbcLabel = document.createElement("label");
+      nrbcCheck = document.createElement("input");
+      nrbcCheck.type = "checkbox";
+      nrbcCheck.checked = !!nrbcInput.value;
+      nrbcCheck.disabled = readOnly;
+      nrbcLabel.appendChild(nrbcCheck);
+      nrbcLabel.appendChild(document.createTextNode("عدّ NRBC؟ (لا تدخل ضمن مجموع الـ100 خلية)"));
+      panel.appendChild(nrbcLabel);
+      nrbcInput.disabled = !nrbcCheck.checked;
+      nrbcCheck.addEventListener("change", function () {
+        nrbcInput.disabled = !nrbcCheck.checked;
+        if (!nrbcCheck.checked) nrbcInput.value = "";
+      });
+    }
+
+    var atypicalCheck = null;
+    if (atypicalInput) {
+      var atLabel = document.createElement("label");
+      atypicalCheck = document.createElement("input");
+      atypicalCheck.type = "checkbox";
+      atypicalCheck.checked = true;
+      atypicalCheck.disabled = readOnly;
+      atLabel.appendChild(atypicalCheck);
+      atLabel.appendChild(document.createTextNode("تضمين Atypical Lymphocyte ضمن الـ100 خلية؟"));
+      panel.appendChild(atLabel);
+    }
+
+    var reactiveCheck = null;
+    if (reactiveInput) {
+      var reLabel = document.createElement("label");
+      reactiveCheck = document.createElement("input");
+      reactiveCheck.type = "checkbox";
+      reactiveCheck.checked = true;
+      reactiveCheck.disabled = readOnly;
+      reLabel.appendChild(reactiveCheck);
+      reLabel.appendChild(document.createTextNode("تضمين Reactive lymphocytes ضمن الـ100 خلية؟"));
+      panel.appendChild(reLabel);
+    }
+
+    var table = box.querySelector("table");
+    table.parentNode.insertBefore(panel, table);
+
+    function recompute() {
+      var sum = 0;
+      coreInputs.forEach(function (inp) { sum += parseFloat(inp.value) || 0; });
+      if (atypicalInput && atypicalCheck && atypicalCheck.checked) {
+        sum += parseFloat(atypicalInput.value) || 0;
+      }
+      if (reactiveInput && reactiveCheck && reactiveCheck.checked) {
+        sum += parseFloat(reactiveInput.value) || 0;
+      }
+      sumEl.textContent = "المجموع: " + sum + " / 100";
+      sumEl.className = "diff-sum-badge " + (sum === 100 ? "ok" : "bad");
+      return sum;
+    }
+
+    coreInputs.forEach(function (inp) { inp.addEventListener("input", recompute); });
+    if (atypicalInput) atypicalInput.addEventListener("input", recompute);
+    if (atypicalCheck) atypicalCheck.addEventListener("change", recompute);
+    if (reactiveInput) reactiveInput.addEventListener("input", recompute);
+    if (reactiveCheck) reactiveCheck.addEventListener("change", recompute);
+    recompute();
+
+    diffBoxes.push({
+      box: box, testName: box.querySelector("h4").textContent.trim(),
+      coreInputs: coreInputs, atypicalInput: atypicalInput, atypicalCheck: atypicalCheck,
+      reactiveInput: reactiveInput, reactiveCheck: reactiveCheck,
+      recompute: recompute, readOnly: readOnly,
+    });
+  });
+
+  var form = document.getElementById("visitResultsForm");
+  if (form) {
+    form.addEventListener("submit", function (e) {
+      for (var i = 0; i < diffBoxes.length; i++) {
+        var d = diffBoxes[i];
+        if (d.readOnly) continue;
+        var anyFilled = d.coreInputs.some(function (inp) { return inp.value.trim() !== ""; });
+        if (!anyFilled) continue; // الفحص ما زال فاضي، تجاوزه
+        var sum = d.recompute();
+        if (sum !== 100) {
+          e.preventDefault();
+          alert("⚠️ فحص \"" + d.testName + "\": مجموع خلايا التفريق حالياً " + sum +
+                " وليس 100. أكمل/صحّح النسب قبل الحفظ.\n(NRBC لا تحسب ضمن الـ100، وAtypical Lymphocyte وReactive lymphocytes حسب الخيار المحدد أعلى الجدول.)");
+          d.box.scrollIntoView({ behavior: "smooth", block: "center" });
+          return false;
+        }
+      }
+    });
+  }
+})();
+</script>
+
+<script>
+  // المطلوب 2: حماية تعديل نتيجة مكتملة/معتمدة بكلمة مرور -- نفس فكرة
+  // handleResultSaveSubmit بصفحة النتيجة المفردة (result_entry.html)، لكن
+  // هنا لأي زر "💾 حفظ" بأي بطاقة ضمن هذي الصفحة المجمّعة، لأنها كلها
+  // نفس الفورم الواحد (#visitResultsForm). نستخدم useCapture=true حتى
+  // يشتغل هذا المستمع قبل مستمع فحص WBC differential الموجود أعلاه، ونستخدم
+  // requestSubmit() (لا submit() العادية) عند إعادة الإرسال حتى يبقى حدث
+  // submit يشتغل من جديد ويوصل لفحص الـWBC diff بعده بشكل طبيعي.
+  (function () {
+    var form = document.getElementById('visitResultsForm');
+    if (!form) return;
+    var gateHandled = false;
+    form.addEventListener('submit', function (e) {
+      if (gateHandled) return;
+      var hasProtected = form.querySelectorAll('.badge-Completed, .badge-Verified').length > 0;
+      if (!hasProtected) return;
+      if (!lisDirty) return; // ما تغيّر شي بالحقول → ما نطلب كلمة مرور (السيرفر يتحقق أيضاً)
+      // لو زر الطباعة (lisSaveThenPrint فوق) هو اللي سوّى requestSubmit
+      // بعد ما جمع اسم المستخدم/كلمة المرور مسبقًا وحطّهم كحقول مخفية،
+      // ما نطلبهم مرة ثانية هون -- نخلي الإرسال يكمل عادي بنفس القيم.
+      var existingUser = form.querySelector('input[name="gate_username"]');
+      if (existingUser && existingUser.value) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!confirm('توجد نتيجة مكتملة أو معتمدة ضمن هذي الزيارة -- تعديلها يحتاج دخول مسؤول/مشرف المختبر حتى لو كنت أدمن. متابعة؟')) return;
+      var username = prompt('اسم مستخدم حساب مسؤول/مشرف المختبر لتأكيد التعديل:');
+      if (username === null) return;
+      var password = prompt('كلمة مرور نفس الحساب:');
+      if (password === null) return;
+      var uInput = document.createElement('input');
+      uInput.type = 'hidden'; uInput.name = 'gate_username'; uInput.value = username;
+      form.appendChild(uInput);
+      var pInput = document.createElement('input');
+      pInput.type = 'hidden'; pInput.name = 'gate_password'; pInput.value = password;
+      form.appendChild(pInput);
+      gateHandled = true;
+      if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
+    }, true);
+  })();
+</script>
+{% endblock %}

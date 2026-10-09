@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block page_title %}سجل زيارات المريض — {{ patient['full_name'] }}{% endblock %}
+{% block content %}
+
+<!-- بطاقة معلومات المريض الكاملة -- كل الحقول المتوفرة فعليًا بجدول
+     patients (نتجاهل أي حقل فاضي حتى ما تصير البطاقة مزدحمة بعناوين
+     بدون قيم). -->
+<div class="card">
+  <h3>{{ patient['full_name'] }}</h3>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px 20px; margin-top:8px;">
+    {% if patient['gender'] %}<div><span class="muted">الجنس:</span> {{ patient['gender'] }}</div>{% endif %}
+    {% if patient['age'] %}<div><span class="muted">العمر:</span> {{ patient['age'] }} {{ patient['age_unit'] or '' }}</div>{% endif %}
+    {% if patient['phone'] %}<div><span class="muted">الهاتف:</span> {{ patient['phone'] }}</div>{% endif %}
+    {% if patient['email'] %}<div><span class="muted">الإيميل:</span> {{ patient['email'] }}</div>{% endif %}
+    {% if patient['national_id'] %}<div><span class="muted">رقم الهوية:</span> {{ patient['national_id'] }}</div>{% endif %}
+    {% if patient['passport_number'] %}<div><span class="muted">رقم الجواز:</span> {{ patient['passport_number'] }}</div>{% endif %}
+    {% if patient['lab_card_number'] %}<div><span class="muted">رقم بطاقة المختبر:</span> {{ patient['lab_card_number'] }}</div>{% endif %}
+    {% if patient['address'] %}<div><span class="muted">العنوان:</span> {{ patient['address'] }}</div>{% endif %}
+  </div>
+</div>
+
+{% if not visit_data %}
+<div class="card"><p class="muted">لا توجد زيارات سابقة لهذا المريض بعد.</p></div>
+{% else %}
+<form method="POST">
+  {% if current_role == 'admin' %}
+  <div class="card" style="position:sticky; top:0; z-index:5;">
+    <p class="muted">حدّد أي نتيجة (أو أكثر) من أي زيارة سابقة أدناه (بقسم "التفاصيل الخام" تحت كل زيارة)، ثم اضغط الزر لنسخها إلى أحدث زيارة حالية للمريض (وليس الزيارة القديمة كاملة).</p>
+    <button class="btn" type="submit">📋 نسخ النتائج المحددة إلى الزيارة الحالية</button>
+  </div>
+  {% endif %}
+
+  {# ===== جدول ملخص كل زيارات المريض: الأحدث أولاً. الضغط على أي خانة يفتح التقرير PDF للطباعة ===== #}
+  {% set sorted_visits = visit_data|sort(attribute='visit.created_at', reverse=true) %}
+  <div class="card">
+    <h3 style="margin-top:0;">📑 ملخص الزيارات والتحاليل <span class="muted" style="font-size:13px;">(اضغط على أي سطر لفتح النتيجة للطباعة)</span></h3>
+    <div style="overflow-x:auto;">
+    <table class="hist-summary">
+      <thead><tr>
+        <th>التاريخ</th><th>رقم الزيارة</th><th>المريض</th><th>العمر</th>
+        <th>الطبيب المرسل</th><th>التحاليل</th><th>الحالة</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for vd in sorted_visits %}
+        {% set total = vd.tests|length %}
+        {% set pending = vd.tests|rejectattr('order_test.status', 'in', ['Completed','Verified'])|list|length %}
+        {% set report_url = url_for('print_visit_full_report', visit_id=vd.visit['id']) %}
+        {% set doctor = vd.visit['referring_doctor'] or '—' %}
+        <tr class="hist-row" data-href="{{ report_url }}" style="cursor:pointer;">
+          <td>{{ vd.visit['created_at'][:10] if vd.visit['created_at'] else '' }}</td>
+          <td>#{{ vd.visit['registration_number'] }}</td>
+          <td>{{ patient['full_name'] }}</td>
+          <td>{{ patient['age'] if patient['age'] else '' }} {{ patient['age_unit'] or '' }}</td>
+          <td>{{ doctor }}</td>
+          <td>
+            {% for tw in vd.tests %}
+              <span class="badge" style="margin:1px;">{{ tw.order_test['test_name'] }}{% if tw.order_test['status'] not in ['Completed','Verified'] %} ⏳{% endif %}</span>{% if can_edit_results %}<a href="{{ url_for('result_entry', order_test_id=tw.order_test['id']) }}" title="تعديل النتيجة" style="text-decoration:none;">✏️</a>{% endif %}
+            {% else %}<span class="muted">—</span>{% endfor %}
+          </td>
+          <td>
+            {% if total and pending == 0 %}<span class="badge badge-normal">✅ مكتمل</span>
+            {% elif total %}<span class="badge badge-critical">⏳ غير مكتمل ({{ pending }}/{{ total }})</span>
+            {% else %}<span class="badge">{{ vd.visit['status'] }}</span>{% endif %}
+          </td>
+          <td><a class="btn small" target="_blank" rel="noopener" href="{{ report_url }}">🖨️ طباعة</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  <style>
+    .hist-row:hover { background: rgba(148,163,184,.15); }
+  </style>
+  <script>
+    document.querySelectorAll('.hist-row').forEach(function (tr) {
+      tr.addEventListener('click', function (e) {
+        if (e.target.closest('a')) return;
+        window.open(tr.dataset.href, '_blank', 'noopener');
+      });
+    });
+  </script>
+
+  {% for vd in sorted_visits %}
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+      <h3 style="margin:0;">زيارة #{{ vd.visit['registration_number'] }} — {{ vd.visit['created_at'][:10] if vd.visit['created_at'] else '' }}
+        <span class="badge">{{ vd.visit['status'] }}</span>
+      </h3>
+      <div style="display:flex; gap:8px;">
+        <a class="btn small" target="_blank" rel="noopener"
+           href="{{ url_for('print_visit_full_report', visit_id=vd.visit['id']) }}">🖨️ عرض/طباعة التقرير الكامل</a>
+        {% if session.get('interface') == 'both' or session.get('designer_id') %}
+        <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=vd.visit['id']) }}">✏️ تعديل هذه الزيارة</a>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if not vd.tests %}
+    <p class="muted" style="margin-top:10px;">لا توجد فحوصات مسجّلة بهذه الزيارة.</p>
+    {% else %}
+    <!-- التفاصيل الخام: جدول واحد نظيف يجمع كل تحاليل هذي الزيارة (بدل
+         جدول منفصل برأس مكرر لكل تحليل زي السابق) -- يُستخدم بالدرجة
+         الأولى لميزة "نسخ نتيجة قديمة" الخاصة بالأدمن؛ التقرير الحقيقي
+         الجاهز للطباعة موجود بزر "عرض/طباعة التقرير الكامل" أعلاه. -->
+    <details style="margin-top:10px;">
+      <summary style="cursor:pointer; color:#205072; font-weight:600;">📋 التفاصيل الخام لكل قيمة (لأغراض المراجعة أو نسخ نتيجة قديمة)</summary>
+      <table style="margin-top:10px;">
+        <thead><tr>
+          {% if current_role == 'admin' %}<th style="width:40px;"></th>{% endif %}
+          <th>التحليل</th><th>المؤشر</th><th>القيمة</th><th>الوحدة</th><th>الحالة</th>
+        </tr></thead>
+        <tbody>
+          {% for tw in vd.tests %}
+            {% for r in tw.results %}
+            <tr>
+              {% if current_role == 'admin' %}
+              <td><input type="checkbox" name="copy_result" value="{{ r['id'] }}"></td>
+              {% endif %}
+              <td>{{ tw.order_test['test_name'] }}</td>
+              <td>{{ r['param_name'] }}</td>
+              <td>{{ r['value_numeric'] if r['value_numeric'] is not none else r['value_text'] }}</td>
+              <td>{{ r['unit'] or '' }}</td>
+              <td><span class="badge badge-{{ r['flag'] }}">{{ r['flag'] }}</span></td>
+            </tr>
+            {% else %}
+            <tr>
+              {% if current_role == 'admin' %}<td></td>{% endif %}
+              <td>{{ tw.order_test['test_name'] }}</td>
+              <td colspan="4" class="muted">لا توجد نتيجة مُدخلة بعد لهذا التحليل.</td>
+            </tr>
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+</form>
+{% endif %}
+
+<a class="btn secondary" href="{{ url_for('patients_list') }}">{{ t('back') }}</a>
+{% endblock %}

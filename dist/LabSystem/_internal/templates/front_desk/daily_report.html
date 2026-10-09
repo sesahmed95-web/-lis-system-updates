@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('daily_report') }}{% endblock %}
+{% block content %}
+<style>
+  /* اتجاه التقرير دائمًا من اليمين لليسار (ت بأقصى اليمين) حتى لو واجهة البرنامج EN */
+  .report-rtl { direction: rtl; text-align: right; }
+  .report-rtl .report-table { direction: rtl; }
+  .report-table { width: 100%; border-collapse: collapse; }
+  .report-table th, .report-table td { border: 1px solid #E2E8F0; padding: 8px 10px; text-align: right; font-size: 13px; }
+  .report-table th { background: #205072; color: #fff; }
+  .report-table tfoot td { font-weight: 700; background: #F3F6F8; }
+  /* اسم المريض: يكفي عرضه بسطر واحد بدون ما ينزل لسطر ثاني */
+  .report-table td[data-col="name"] { white-space: nowrap; }
+  /* ت = تسلسل الصف (1،2،3...) عمود ضيّق */
+  .report-table th[data-col="reg"], .report-table td[data-col="reg"] { width: 40px; text-align: center; padding-left: 4px; padding-right: 4px; }
+  /* التحاليل: عرض مناسب، الأسماء جنب بعض وتنزل لسطر جديد عند الفاصلة فقط */
+  .report-table th[data-col="tests"], .report-table td[data-col="tests"] { min-width: 220px; width: 22%; white-space: normal; word-break: keep-all; overflow-wrap: normal; }
+  .report-toolbar { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .report-toolbar a.pill { text-decoration:none; background:#F3F6F8; color:#205072; padding:6px 12px; border-radius:6px; font-size:12px; border:1px solid #E2E8F0; }
+  .report-heading { font-size: 18px; color: #205072; margin-bottom: 2px; }
+  .report-sub { color: #64748B; font-size: 13px; margin-bottom: 16px; }
+  /* اختيار الأعمدة المطبوعة/المعروضة (إضافة أو حذف عمود) -- كل عمود
+     بعتمد data-col على th/td المطابقة، والمربع يطابقها بنفس الاسم.
+     الأعمدة الأساسية (checked افتراضيًا) هي بالضبط الترتيب المطلوب؛
+     أي عمود إضافي (مثل "الباقي") متروك غير مفعّل افتراضيًا -- يقدر
+     المستخدم يفعّله (إضافة عمود) أو يلغي أي عمود أساسي (حذف عمود)
+     بنفس الشريط، والاختيار يُحفظ بالمتصفح. */
+  .cols-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 12.5px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 12px; margin-bottom: 14px; }
+  .cols-toolbar label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .cols-toolbar .extra-col { color: #64748B; }
+  @media print {
+    .report-toolbar, .cols-toolbar { display: none; }
+  }
+  /* اتجاه الطباعة (عمودي/أفقي) -- افتراضيًا "أفقي" لأن أعمدة هذا
+     التقرير كثيرة وما تكفيها A4 عمودية بكامل الأعمدة. */
+  #printOrientationStyle { display: none; }
+</style>
+<style id="printOrientationStyle">@page { size: A4 landscape; margin: 10mm; }</style>
+
+<div class="report-rtl" dir="rtl">
+<div class="report-toolbar">
+  <form method="GET">
+    <label>التاريخ: </label>
+    <input type="date" name="date" value="{{ report_date }}" onchange="this.form.submit()">
+  </form>
+  <button class="btn" onclick="window.print()">🖨 طباعة / حفظ PDF</button>
+  <button class="btn small secondary" type="button" id="orientationBtn" onclick="toggleOrientation()">📄 اتجاه الطباعة: أفقي</button>
+  <a class="pill" href="{{ url_for('monthly_report', month=report_date[:7]) }}">📅 الحسابات الشهرية</a>
+  <a class="pill" href="{{ url_for('half_year_report') }}">📆 الحسابات نصف السنوية</a>
+  <a class="pill" href="{{ url_for('annual_report') }}">📊 الحسابات السنوية</a>
+  <a class="pill" href="{{ url_for('dashboard') }}" style="margin-inline-start:auto;">🔙 الرجوع للرئيسية</a>
+</div>
+
+{#
+  ترتيب الأعمدة أدناه هو بالضبط الترتيب المطلوب، من اليمين لليسار (أول
+  عمود بالـmarkup = أقصى اليمين بصفحة RTL):
+  ت، الاسم الثلاثي، الجنس، العمر، الطبيب المرسل، التحاليل،
+  دكتور المختبر الفاحص + اجوره، الفحوصات المرسلة لمختبرات اخرى + اجورها،
+  الصرفيات العامة، الوارد الكلي، صافي الوارد الكلي، الملاحظات.
+  "الباقي" (المبلغ غير المحصَّل) عمود إضافي اختياري -- مو من الأساسيات
+  المطلوبة، لكن متروك هنا معطّل افتراضيًا كمثال حي على "إضافة عمود".
+#}
+<div class="cols-toolbar" id="colsToolbar">
+  <b>الأعمدة المعروضة/المطبوعة:</b>
+  <label><input type="checkbox" data-col-toggle="reg" checked> ت</label>
+  <label><input type="checkbox" data-col-toggle="name" checked> الاسم الثلاثي</label>
+  <label><input type="checkbox" data-col-toggle="gender" checked> الجنس</label>
+  <label><input type="checkbox" data-col-toggle="age" checked> العمر</label>
+  <label><input type="checkbox" data-col-toggle="referring_doctor" checked> الطبيب المرسل</label>
+  <label><input type="checkbox" data-col-toggle="tests" checked> التحاليل</label>
+  <label><input type="checkbox" data-col-toggle="examining_doctor" checked> دكتور المختبر الفاحص + اجوره</label>
+  <label><input type="checkbox" data-col-toggle="forwarded" checked> الفحوصات المرسلة لمختبرات اخرى + اجورها</label>
+  <label><input type="checkbox" data-col-toggle="general_expenses" checked> الصرفيات العامة</label>
+  <label><input type="checkbox" data-col-toggle="total" checked> الوارد الكلي</label>
+  <label><input type="checkbox" data-col-toggle="net" checked> صافي الوارد الكلي</label>
+  <label><input type="checkbox" data-col-toggle="notes" checked> الملاحظات</label>
+  <label class="extra-col"><input type="checkbox" data-col-toggle="remaining"> الباقي (غير المحصَّل) — عمود إضافي</label>
+</div>
+
+<div class="report-heading">{{ brand_name }} — التقرير اليومي</div>
+<div class="report-sub">التاريخ: {{ report_date }}</div>
+
+<table class="report-table" id="dailyTable">
+  <thead>
+    <tr>
+      <th data-col="reg">ت</th>
+      <th data-col="name">الاسم الثلاثي</th>
+      <th data-col="gender">الجنس</th>
+      <th data-col="age">العمر</th>
+      <th data-col="referring_doctor">الطبيب المرسل</th>
+      <th data-col="tests">التحاليل</th>
+      <th data-col="examining_doctor">دكتور المختبر الفاحص + اجوره</th>
+      <th data-col="forwarded">الفحوصات المرسلة لمختبرات اخرى + اجورها</th>
+      <th data-col="general_expenses">الصرفيات العامة</th>
+      <th data-col="total">الوارد الكلي</th>
+      <th data-col="net">صافي الوارد الكلي</th>
+      <th data-col="notes">الملاحظات</th>
+      <th data-col="remaining" style="display:none;">الباقي</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td data-col="reg">{{ loop.index }}</td>
+      <td data-col="name">{{ r.name }}</td>
+      <td data-col="gender">{{ r.gender }}</td>
+      <td data-col="age">{{ r.age }}</td>
+      <td data-col="referring_doctor">{{ r.referring_doctor }}</td>
+      <td data-col="tests">{{ r.tests }}</td>
+      <td data-col="examining_doctor">{{ r.examining_doctor }}{% if r.examining_fee %} — {{ "%.0f"|format(r.examining_fee) }}{% endif %}</td>
+      <td data-col="forwarded">{{ r.forwarded_display }}{% if r.forwarded_total %}{% if r.forwarded_display %} — {% endif %}الإجمالي: {{ "%.0f"|format(r.forwarded_total) }}{% endif %}</td>
+      <td data-col="general_expenses">{{ "%.0f"|format(r.general_expenses) }}</td>
+      <td data-col="total">{{ "%.0f"|format(r.total) }}</td>
+      <td data-col="net">{{ "%.0f"|format(r.net) }}</td>
+      <td data-col="notes">{{ r.notes }}</td>
+      <td data-col="remaining" style="display:none;">{{ "%.0f"|format(r.remaining) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr><td class="footer-label">الإجمالي الكلي (الوارد)</td><td data-col="total">{{ "%.0f"|format(grand_total) }}</td><td class="footer-spacer"></td></tr>
+    <tr><td class="footer-label">إجمالي الصرفيات العامة</td><td data-col="general_expenses">{{ "%.0f"|format(grand_general_expenses) }}</td><td class="footer-spacer"></td></tr>
+    <tr><td class="footer-label">إجمالي كلفة الفحوصات المرسلة لمختبرات اخرى</td><td data-col="forwarded">{{ "%.0f"|format(grand_forwarded_total) }}</td><td class="footer-spacer"></td></tr>
+    <tr><td class="footer-label">إجمالي أجور دكتور المختبر الفاحص</td><td data-col="examining_doctor">{{ "%.0f"|format(grand_examining_fees) }}</td><td class="footer-spacer"></td></tr>
+    <tr><td class="footer-label">صافي الوارد الكلي (بعد خصم الصرفيات العامة وكلفة الإرسال وأجور الفاحص)</td><td data-col="net">{{ "%.0f"|format(grand_net) }}</td><td class="footer-spacer"></td></tr>
+    <tr><td class="footer-label">إجمالي المبلغ المتبقي (غير المحصَّل)</td><td data-col="remaining" style="display:none;">{{ "%.0f"|format(grand_remaining) }}</td><td class="footer-spacer"></td></tr>
+  </tfoot>
+</table>
+</div>
+
+<script>
+  // اتجاه الطباعة (عمودي/أفقي)
+  function applyOrientation(landscape) {
+    document.getElementById('printOrientationStyle').textContent =
+      '@page { size: A4 ' + (landscape ? 'landscape' : 'portrait') + '; margin: 10mm; }';
+    document.getElementById('orientationBtn').textContent = '📄 اتجاه الطباعة: ' + (landscape ? 'أفقي' : 'عمودي');
+    localStorage.setItem('daily_report_landscape', landscape ? '1' : '0');
+  }
+  function toggleOrientation() {
+    var current = localStorage.getItem('daily_report_landscape') !== '0';
+    applyOrientation(!current);
+  }
+  applyOrientation(localStorage.getItem('daily_report_landscape') !== '0');
+
+  // اختيار الأعمدة المعروضة/المطبوعة (إضافة أو حذف عمود): إخفاء/إظهار
+  // كل عمود (ترويسة + كل خلاياه بالجدول، بما فيها صفوف الإجمالي
+  // بالأسفل)، مع حفظ الاختيار بالمتصفح. صفوف التذييل تصحّح colspan خلية
+  // "التسمية" تلقائيًا حسب عدد الأعمدة الظاهرة فعليًا قبل عمود القيمة،
+  // حتى تبقى الإجماليات مصطفة صح مهما كان أي عمود مخفي أو مُضاف.
+  var COLUMN_ORDER = ['reg', 'name', 'gender', 'age', 'referring_doctor', 'tests', 'examining_doctor',
+                      'forwarded', 'general_expenses', 'total', 'net', 'notes', 'remaining'];
+
+  function applyColumnVisibility() {
+    var visibility = {};
+    document.querySelectorAll('#colsToolbar input[data-col-toggle]').forEach(function (chk) {
+      var col = chk.getAttribute('data-col-toggle');
+      visibility[col] = chk.checked;
+      localStorage.setItem('daily_report_col_v2_' + col, chk.checked ? '1' : '0');
+      document.querySelectorAll('#dailyTable thead [data-col="' + col + '"], #dailyTable tbody [data-col="' + col + '"]')
+        .forEach(function (cell) { cell.style.display = chk.checked ? '' : 'none'; });
+    });
+
+    document.querySelectorAll('#dailyTable tfoot tr').forEach(function (tr) {
+      var valueCell = tr.querySelector('td[data-col]');
+      if (!valueCell) return;
+      var valueCol = valueCell.getAttribute('data-col');
+      var idx = COLUMN_ORDER.indexOf(valueCol);
+      var before = COLUMN_ORDER.slice(0, idx).filter(function (c) { return visibility[c]; }).length;
+      var after = COLUMN_ORDER.slice(idx + 1).filter(function (c) { return visibility[c]; }).length;
+      var labelCell = tr.querySelector('.footer-label');
+      if (labelCell) labelCell.colSpan = Math.max(before, 1);
+      valueCell.style.display = visibility[valueCol] ? '' : 'none';
+      var spacerCell = tr.querySelector('.footer-spacer');
+      if (spacerCell) {
+        spacerCell.colSpan = Math.max(after, 1);
+        spacerCell.style.display = after > 0 ? '' : 'none';
+      }
+    });
+  }
+  document.querySelectorAll('#colsToolbar input[data-col-toggle]').forEach(function (chk) {
+    var saved = localStorage.getItem('daily_report_col_v2_' + chk.getAttribute('data-col-toggle'));
+    if (saved !== null) chk.checked = saved === '1';
+  });
+  document.getElementById('colsToolbar').addEventListener('change', applyColumnVisibility);
+  applyColumnVisibility();
+</script>
+{% endblock %}

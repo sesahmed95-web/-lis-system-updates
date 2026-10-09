@@ -1,0 +1,14 @@
+{% extends "reports/base_report.html" %}
+{% from "reports/partials/result_styles.html" import styles, render_results, note_script with context %}
+{% block report_body %}
+{#
+  reports/custom_v2.html — التقرير المفرد (تحليل واحد).
+  صار يعرض الجدول عبر القالب المشترك reports/partials/result_styles.html بحسب
+  الأسلوب المختار من "تصميم التقارير" (Style A set1/set2، Style B image1، Style B compact)،
+  بنفس الشكل بالضبط الموجود بمعاينة المصمم. ترويسة معلومات المريض ما تغيّرت إطلاقًا.
+#}
+{{ styles(layout_view) }}
+<div class="report-heading" style="text-align: {{ custom_heading_align|default('center') }};">{{ custom_heading }}</div>
+{{ render_results(custom_rows, layout_view) }}
+{{ note_script() }}
+{% endblock %}

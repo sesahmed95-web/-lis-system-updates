@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block page_title %}دكتور المختبر الفاحص{% endblock %}
+{% block content %}
+<div class="card" style="max-width:760px;">
+  <h3>➕ إضافة دكتور فحص جديد</h3>
+  <p class="muted">
+    الاسم يظهر بقائمة اختيار "دكتور المختبر الفاحص" عند تسجيل الزيارات. اللقب والشهادة
+    (عربي/انكليزي) واختيار "إظهار بترويسة التقرير" تتحكم بشكل ظهور اسمه بترويسة كل تقرير
+    مطبوع — الشهادة تقدر تكتبها بأكثر من سطر (كل سطر يطبع بسطر منفصل تحت الاسم).
+  </p>
+  <form method="POST" action="{{ url_for('examining_doctor_add') }}">
+    <div class="form-grid">
+      <div class="form-field">
+        <label>الاسم *</label>
+        <input type="text" name="name" required placeholder="مثال: خليل حمود عبد السادة">
+      </div>
+      <div class="form-field">
+        <label>اللقب</label>
+        <input type="text" name="title" value="الدكتور" placeholder="مثال: الدكتور">
+      </div>
+      <div class="form-field">
+        <label>الشهادة (عربي)</label>
+        <textarea name="degree_ar" rows="3" placeholder="مثال: بكالوريوس طب وجراحة عامة&#10;طبيب ممارس امراض الدم التشخيصي&#10;M.B.Ch.B"></textarea>
+      </div>
+      <div class="form-field">
+        <label>الشهادة (انكليزي)</label>
+        <textarea name="degree_en" rows="3" placeholder="Example: M.B.Ch.B&#10;Hematopathologist"></textarea>
+      </div>
+      <div class="form-field" style="grid-column: span 2;">
+        <label class="checkbox-item" style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+          <input type="checkbox" name="show_on_letterhead" checked>
+          إظهار بترويسة التقرير المطبوع
+        </label>
+      </div>
+      <div class="form-field">
+        <label>حجم خط مخصص لهذا الدكتور بالترويسة (بكسل)</label>
+        <input type="number" name="font_size" min="8" max="30" placeholder="اتركه فاضي ليستخدم الحجم العام">
+        <small class="muted">اختياري — إذا تركته فاضي يُستخدم الحجم العام من الإعدادات.</small>
+      </div>
+    </div>
+    <button class="btn" type="submit">إضافة</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <h3>قائمة الدكاترة الحاليين</h3>
+  {% if not doctors %}
+  <p class="muted">لا يوجد أي دكتور فحص مُضاف بعد.</p>
+  {% endif %}
+  {% for d in doctors %}
+  <div style="border:1px solid var(--border, #E2E8F0); border-radius:8px; padding:12px 14px; margin-bottom:12px;">
+    <form method="POST" action="{{ url_for('examining_doctor_update', doctor_id=d['id']) }}">
+      <div class="form-grid">
+        <div class="form-field">
+          <label>الاسم *</label>
+          <input type="text" name="name" value="{{ d['name'] }}" required>
+        </div>
+        <div class="form-field">
+          <label>اللقب</label>
+          <input type="text" name="title" value="{{ d['title'] or 'الدكتور' }}">
+        </div>
+        <div class="form-field">
+          <label>الشهادة (عربي)</label>
+          <textarea name="degree_ar" rows="3">{{ d['degree_ar'] or '' }}</textarea>
+        </div>
+        <div class="form-field">
+          <label>الشهادة (انكليزي)</label>
+          <textarea name="degree_en" rows="3">{{ d['degree_en'] or '' }}</textarea>
+        </div>
+        <div class="form-field" style="grid-column: span 2;">
+          <label class="checkbox-item" style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+            <input type="checkbox" name="show_on_letterhead" {{ 'checked' if d['show_on_letterhead'] }}>
+            إظهار بترويسة التقرير المطبوع
+          </label>
+        </div>
+        <div class="form-field">
+          <label>حجم خط مخصص لهذا الدكتور بالترويسة (بكسل)</label>
+          <input type="number" name="font_size" min="8" max="30" value="{{ d['font_size'] or '' }}" placeholder="اتركه فاضي ليستخدم الحجم العام">
+          <small class="muted">اختياري — إذا تركته فاضي يُستخدم الحجم العام من الإعدادات.</small>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
+        <button class="btn small" type="submit">💾 حفظ التعديلات</button>
+      </div>
+    </form>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; border-top:1px solid var(--border, #E2E8F0); padding-top:10px;">
+      <form method="POST" action="{{ url_for('examining_doctor_move', doctor_id=d['id']) }}">
+        <input type="hidden" name="direction" value="up">
+        <button class="btn small secondary" type="submit" title="نقل لأعلى">⬆️ أعلى</button>
+      </form>
+      <form method="POST" action="{{ url_for('examining_doctor_move', doctor_id=d['id']) }}">
+        <input type="hidden" name="direction" value="down">
+        <button class="btn small secondary" type="submit" title="نقل لأسفل">⬇️ أسفل</button>
+      </form>
+      <form method="POST" action="{{ url_for('examining_doctor_delete', doctor_id=d['id']) }}"
+            onsubmit="return confirm('حذف {{ d['name'] }} نهائيًا؟');">
+        <button class="btn small" type="submit" style="background:#DC2626; color:#fff;">🗑️ حذف</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
