@@ -29,3 +29,15 @@ local_config.py
 *.env
 .env
 portal_public.db
+
+# ================= ملفات بوابة النتائج (تتولّد وتتغيّر تلقائيًا أثناء التشغيل) =================
+# portal_pdf_cache/ = نسخ PDF لنتائج المرضى (بيانات مرضى حقيقية!) تتولّد كل ما تكتمل نتيجة،
+# وportal_public.db = قاعدة البوابة العامة. ما لازم تنرفع على GitHub أبدًا.
+portal_pdf_cache/
+portal_public.db
+portal_public.db-*
+portal_pdf_cache/*
+
+# أرشيف PDF ونسخ الواتساب المولّدة
+static/whatsapp_pdfs/*
+!static/whatsapp_pdfs/.keep

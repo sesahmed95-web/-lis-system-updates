@@ -2801,6 +2801,62 @@ def api_next_sample_no():
     return jsonify({"sample_no": peek_next_sample_no(get_db())})
 
 
+def _visit_balance(db, visit_id):
+    """الإجمالي/الواصل/الباقي لزيارة — نفس منطق عمودي \"الواصل\" و\"الباقي\" بقائمة الزيارات:
+    الباقي = إجمالي الفاتورة - الواصل (ما فيه فاتورة = لا باقي)."""
+    inv = db.execute("SELECT id, total_amount, paid_amount FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+    if not inv:
+        return {"has_invoice": False, "total": 0.0, "paid": 0.0, "remaining": 0.0}
+    total = float(inv["total_amount"] or 0)
+    paid = float(inv["paid_amount"] or 0)
+    return {"has_invoice": True, "total": total, "paid": paid, "remaining": max(0.0, total - paid)}
+
+
+@app.route("/api/visits/<int:visit_id>/balance")
+@login_required
+def api_visit_balance(visit_id):
+    """يُستدعى من شاشة إدخال النتائج قبل الطباعة: هل المريض مسدّد كامل أجور التحاليل؟"""
+    db = get_db()
+    row = db.execute(
+        "SELECT p.full_name FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.id=?", (visit_id,)
+    ).fetchone()
+    if not row:
+        return jsonify({"ok": False, "error": "الزيارة غير موجودة"}), 404
+    out = _visit_balance(db, visit_id)
+    out.update({"ok": True, "patient_name": row["full_name"],
+                "can_override": session.get("role") in ("admin", "supervisor")})
+    return jsonify(out)
+
+
+@app.route("/api/visits/<int:visit_id>/pay", methods=["POST"])
+@login_required
+def api_visit_pay(visit_id):
+    """تسجيل دفعة إضافية للمريض من نفس شاشة النتائج/الطباعة (بدون الذهاب لصفحة الفواتير)."""
+    db = get_db()
+    inv = db.execute("SELECT * FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+    if not inv:
+        return jsonify({"ok": False, "error": "ما توجد فاتورة لهذي الزيارة"}), 404
+    if inv["is_locked"]:
+        return jsonify({"ok": False, "error": "الفاتورة مقفلة — افتحها أولًا من صفحة الفواتير"}), 403
+    try:
+        amount = float((request.form.get("amount") or "0").replace(",", "").strip())
+    except ValueError:
+        return jsonify({"ok": False, "error": "المبلغ غير صالح"}), 400
+    if amount <= 0:
+        return jsonify({"ok": False, "error": "أدخل مبلغًا أكبر من صفر"}), 400
+    now = datetime.now().isoformat(timespec="seconds")
+    new_paid = float(inv["paid_amount"] or 0) + amount
+    status = "Paid" if new_paid >= float(inv["total_amount"] or 0) else "Partial"
+    db.execute("INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) VALUES (?, ?, 'Cash', ?, ?)",
+               (inv["id"], amount, session["user_id"], now))
+    db.execute("UPDATE invoices SET paid_amount=?, status=? WHERE id=?", (new_paid, status, inv["id"]))
+    db.commit()
+    log_action("Payment", "invoice", inv["id"], f"amount={amount} (from results/print screen)")
+    out = _visit_balance(db, visit_id)
+    out["ok"] = True
+    return jsonify(out)
+
+
 @app.route("/api/visits/<int:visit_id>/prev-count", methods=["POST"])
 @login_required
 def api_set_visit_prev_count(visit_id):
@@ -3901,6 +3957,30 @@ def print_visit_barcode(visit_id):
         lab_name_ar=lab_name_ar,
         vb_copies=_int("vb_copies", 1, 1, 50), vb_w=_int("vb_w", 50, 20, 200),
         vb_h=_int("vb_h", 30, 15, 200), vb_names_mode=mode,
+    )
+
+
+@app.route("/front-desk/visits/<int:visit_id>/print/balance-slip")
+@login_required
+def print_balance_slip(visit_id):
+    """ورقة صغيرة (بحجم ملصق الباركود) بالمبلغ المتبقي على المريض: الاسم + التاريخ والوقت + المتبقي + الواصل فقط."""
+    db = get_db()
+    row = db.execute(
+        "SELECT v.id, v.registration_number, v.created_at, p.full_name FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.id=?",
+        (visit_id,)).fetchone()
+    if not row:
+        return "Not found", 404
+    bal = _visit_balance(db, visit_id)
+
+    def _int(key, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(get_setting(db, key, str(default)))))
+        except (TypeError, ValueError):
+            return default
+    return render_template(
+        "front_desk/print_balance_slip.html", visit=row, bal=bal,
+        printed_at=str(row["created_at"] or "").replace("T", " ")[:16],  # تاريخ ووقت الزيارة (مو وقت الطباعة)
+        vb_w=_int("vb_w", 50, 20, 200), vb_h=_int("vb_h", 30, 15, 200),
     )
 
 
@@ -5595,7 +5675,8 @@ def visit_results_entry(visit_id):
                             # هل كل تحاليل هذي الزيارة مكتملة/معتمدة؟ — يُستخدم لإظهار
                             # زر "إرسال عبر واتساب" لكل نتائج الزيارة دفعة وحدة بجانب
                             # زر إدخال النتائج (راجع partials/whatsapp_send_button.html).
-                            all_completed=all(ot["status"] in ("Completed", "Verified") for ot in order_tests))
+                            all_completed=all(ot["status"] in ("Completed", "Verified") for ot in order_tests),
+                            balance=_visit_balance(db, visit_id))
 
 
 # ------------------------------------------------------------------------
