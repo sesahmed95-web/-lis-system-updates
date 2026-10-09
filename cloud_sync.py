@@ -123,6 +123,14 @@ def ensure_token(db, visit_id):
 # ------------------------------------------------------------------ بناء الحمولة
 def _eta_text(cfg, data):
     """الوقت المتوقع = أطول وقت بين التحاليل غير الجاهزة (أو كلها لو ما اكتمل شي)، منسوبًا لوقت التسجيل."""
+    # وقت يحدده الاستقبال يدويًا بصفحة زيارة جديدة (اختياري) — يغلب التقدير التلقائي
+    _exp = (data.get("expected_ready_at") or "").strip()
+    if _exp:
+        try:
+            _dt = datetime.fromisoformat(_exp)
+            return "الوقت المتوقع: " + _dt.strftime("%Y-%m-%d") + " الساعة " + _dt.strftime("%H:%M")
+        except (TypeError, ValueError):
+            pass
     pending = [t for t in data["tests"] if not _is_ready(cfg, t["status"])] or data["tests"]
     hours = 0.0
     for t in pending:
@@ -499,3 +507,61 @@ def start_worker():
         except Exception:  # noqa: BLE001
             pass
         threading.Thread(target=_loop, name="portal-sync", daemon=True).start()
+
+
+# ------------------------------------------------------------------ تشخيص "ليش الـQR ما يطلّع النتائج؟"
+def diagnose(db, visit_id):
+    """يفحص سلسلة الـQR كاملة ويرجّع قائمة (مستوى, نص): ok / warn / bad. للقراءة فقط (ما يغيّر شي)."""
+    import urllib.parse
+    out = []
+    cfg = get_cfg(db)
+    if not cfg["enabled"]:
+        out.append(("bad", "المزامنة غير مفعّلة: الإعدادات ← 📱 بوابة النتائج ← فعّل."))
+    url = cfg["url"]
+    if not url:
+        out.append(("bad", "رابط البوابة العام فاضي: الصق رابط النفق (https://...) بالإعدادات ← بوابة النتائج."))
+    else:
+        host = (urllib.parse.urlparse(url).hostname or "").lower()
+        private = (host in ("localhost", "127.0.0.1", "0.0.0.0") or host.startswith("192.168.") or host.startswith("10.")
+                   or (host.startswith("172.") and host.split(".")[1:2] and host.split(".")[1].isdigit() and 16 <= int(host.split(".")[1]) <= 31)
+                   or host.endswith(".local"))
+        if private:
+            out.append(("bad", f"الرابط ({host}) محلي/شبكة داخلية — موبايل المريض ما يقدر يوصله. لازم رابط عام https من Tailscale Funnel أو Cloudflare Tunnel."))
+        elif not url.startswith("https://"):
+            out.append(("warn", "الرابط ما يبدأ بـ https:// — بعض الموبايلات ما تفتحه. استخدم رابط https."))
+        else:
+            out.append(("ok", f"الرابط العام: {url}"))
+    if cfg.get("mode") == "local":
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:9091/healthz", timeout=4) as r:
+                ok = b"lis-portal-ok" in r.read(200)
+            out.append(("ok", "بوابة البرنامج المحلية (9091) شغّالة.") if ok else ("bad", "المنفذ 9091 يرد لكن مو بوابة البرنامج."))
+        except Exception as e:  # noqa: BLE001
+            out.append(("bad", f"بوابة البرنامج المحلية (9091) ما تشتغل ({type(e).__name__}) — أعد تشغيل البرنامج."))
+        if url and url.startswith("https://"):
+            ok, msg = test_connection(cfg)
+            out.append(("ok" if ok else "bad", "الرابط العام من هذا الجهاز: " + msg.replace("✅ ", "").replace("❌ ", "")))
+    row = db.execute("SELECT portal_token FROM visits WHERE id=?", (visit_id,)).fetchone()
+    tok = row["portal_token"] if row else None
+    if not tok:
+        out.append(("bad", "هذي الزيارة ما لها رمز QR بعد (سجّلت قبل تفعيل المزامنة؟). افتح ورقة الـQR مرة ثانية لتوليده."))
+    st = db.execute("SELECT * FROM portal_state WHERE visit_id=?", (visit_id,)).fetchone()
+    if tok and not st:
+        out.append(("warn", "الزيارة لم تُدفع للبوابة بعد (انتظر نصف دقيقة أو اضغط 🔄 مزامنة)."))
+    if st and st["last_error"]:
+        out.append(("bad", "آخر خطأ مزامنة: " + str(st["last_error"])))
+    if st and st["last_status"]:
+        if st["last_status"] == "ready":
+            out.append(("ok", "حالة الزيارة بالبوابة: جاهزة — النتائج تظهر للمريض."))
+        else:
+            out.append(("warn", "حالة الزيارة بالبوابة: «قيد التحضير» — النتائج لا تظهر إلا بعد اكتمال كل تحاليل الزيارة."))
+    sts = db.execute(
+        "SELECT td.name, ot.status FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+        "JOIN test_definitions td ON td.id=ot.test_definition_id WHERE o.visit_id=?", (visit_id,)).fetchall()
+    pend = [r["name"] for r in sts if not _is_ready(cfg, r["status"])]
+    if pend:
+        need = "Verified (معتمدة)" if cfg["ready_when"] == "verified" else "Completed (مكتملة)"
+        out.append(("warn", f"تحاليل غير {need} بعد: " + "، ".join(pend[:8]) + " — لذلك تبقى الصفحة «قيد التحضير»."))
+    elif sts:
+        out.append(("ok", "كل تحاليل الزيارة مكتملة."))
+    return out

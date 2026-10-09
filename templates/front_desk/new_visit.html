@@ -180,7 +180,7 @@
             <p class="pvm-info-text" id="pvmInfoText"></p>
           </div>
         </div>
-        <div class="nv-row nv-row-3">
+        <div class="nv-row nv-row-4 nv-row-age">
           <div class="form-field">
             <label>{{ t('gender') }}</label>
             <select name="gender" id="gender_select">
@@ -201,6 +201,16 @@
               <option value="Months">{{ t('unit_months') }}</option>
               <option value="Years" selected>{{ t('unit_years') }}</option>
             </select>
+          </div>
+          <div class="form-field">
+            <label>{{ 'تاريخ الميلاد' if lang=='ar' else 'Birth date' }} <small class="muted">({{ 'اختياري' if lang=='ar' else 'optional' }})</small></label>
+            <input type="date" name="birth_date" id="birth_date_input" max="{{ today_iso|default('') }}" dir="ltr" title="اكتب تاريخ الميلاد ويُحسب العمر تلقائيًا">
+          </div>
+        </div>
+        <div class="nv-row nv-row-3">
+          <div class="form-field">
+            <label>{{ 'وقت ظهور النتائج المتوقع' if lang=='ar' else 'Expected results time' }} <small class="muted">({{ 'اختياري' if lang=='ar' else 'optional' }})</small></label>
+            <input type="datetime-local" name="expected_ready_at" id="expected_ready_input" dir="ltr" title="اختياري: يظهر للمريض بورقة الـQR">
           </div>
         </div>
         <div class="nv-row nv-row-contact">
@@ -281,6 +291,67 @@
       </div>
     </div>
 
+    </div>
+
+    <div class="nv-right">
+
+
+  <div class="card nv-orders-card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3>{{ t('orders_section') }}</h3>
+      {% if current_role in ('admin', 'supervisor') %}
+      <button type="button" class="btn small secondary" onclick="openTestManageModal()">+ Add Test</button>
+      {% endif %}
+    </div>
+    {% if quick_items %}
+    <div style="margin-bottom:10px;">
+      <span class="muted">⚡ {{ t('quick_add_items') }}:</span>
+      {% for qi in quick_items %}
+      <button type="button" class="btn small secondary" style="margin:4px;"
+        onclick="document.getElementById('test_{{ qi['id'] }}').checked = true; refreshPrices();">{{ qi['name'] }}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div id="customTestRow">
+      <div class="form-field" style="flex:2; min-width:180px;">
+        <label style="font-size:12px;">تحليل غير موجود بالقائمة؟ اكتب اسمه هنا</label>
+        <input type="text" id="customTestName" placeholder="اسم التحليل" autocomplete="off">
+      </div>
+      <div class="form-field" style="width:110px;">
+        <label style="font-size:12px;">السعر</label>
+        <input type="number" id="customTestPrice" step="any" min="0" placeholder="0">
+      </div>
+      <button type="button" class="btn small" onclick="addCustomTest()">+ إضافة وتحديد</button>
+    </div>
+    <small class="muted" id="customTestError" style="display:none; color:#DC2626; display:none;"></small>
+
+    <div class="checkbox-grid nv-checkbox-grid">
+      {% for test in tests %}
+      <span class="checkbox-item-wrap" id="test_item_{{ test['id'] }}">
+      <label class="checkbox-item">
+        <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}"
+               data-exam="{{ '1' if test['id'] in examining_test_ids else '0' }}">
+        <span id="test_label_{{ test['id'] }}">{{ test['name'] }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
+      </label>
+      {# سهم اختيار بارامترات معيّنة بس من هذا التحليل بدل طلبه كامل —
+         يفتح لائحة تشيك بوكسات (paramPanel_<id>) تتحمّل مرة وحدة عبر
+         /api/test-definitions/<id>/parameters. selected_params_<id> هو
+         الحقل الحقيقي اللي يوصل السيرفر: فاضي = كل التحليل (كالسابق
+         تماماً)، وإلا = بس معرّفات البارامترات المحددة. #}
+      <button type="button" class="nv-param-arrow" title="اختيار بارامترات معيّنة بس من هذا التحليل"
+              onclick="nvToggleParamPanel('{{ test['id'] }}')">▾</button>
+      <button type="button" class="nv-param-arrow" title="تعديل اسم هذا التحليل"
+              onclick="nvRenameTest('{{ test['id'] }}')">✏️</button>
+      <input type="hidden" id="selected_params_{{ test['id'] }}" name="selected_params_{{ test['id'] }}" value="">
+      <div class="nv-param-panel" id="paramPanel_{{ test['id'] }}" style="display:none;"></div>
+      </span>
+      {% endfor %}
+    </div>
+    <p style="margin-top:10px; font-weight:600;">{{ t('grand_total') }}: <span id="grandTotal">0</span></p>
+  </div>
+
+  <div id="nvRefOther">
     <div class="card">
       <h3>{{ t('reference_information') }}</h3>
       <div class="form-grid">
@@ -388,64 +459,6 @@
         </div>
       </div>
     </div>
-    </div>
-
-    <div class="nv-right">
-
-
-  <div class="card nv-orders-card">
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-      <h3>{{ t('orders_section') }}</h3>
-      {% if current_role in ('admin', 'supervisor') %}
-      <button type="button" class="btn small secondary" onclick="openTestManageModal()">+ Add Test</button>
-      {% endif %}
-    </div>
-    {% if quick_items %}
-    <div style="margin-bottom:10px;">
-      <span class="muted">⚡ {{ t('quick_add_items') }}:</span>
-      {% for qi in quick_items %}
-      <button type="button" class="btn small secondary" style="margin:4px;"
-        onclick="document.getElementById('test_{{ qi['id'] }}').checked = true; refreshPrices();">{{ qi['name'] }}</button>
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    <div id="customTestRow">
-      <div class="form-field" style="flex:2; min-width:180px;">
-        <label style="font-size:12px;">تحليل غير موجود بالقائمة؟ اكتب اسمه هنا</label>
-        <input type="text" id="customTestName" placeholder="اسم التحليل" autocomplete="off">
-      </div>
-      <div class="form-field" style="width:110px;">
-        <label style="font-size:12px;">السعر</label>
-        <input type="number" id="customTestPrice" step="any" min="0" placeholder="0">
-      </div>
-      <button type="button" class="btn small" onclick="addCustomTest()">+ إضافة وتحديد</button>
-    </div>
-    <small class="muted" id="customTestError" style="display:none; color:#DC2626; display:none;"></small>
-
-    <div class="checkbox-grid nv-checkbox-grid">
-      {% for test in tests %}
-      <span class="checkbox-item-wrap" id="test_item_{{ test['id'] }}">
-      <label class="checkbox-item">
-        <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}"
-               data-exam="{{ '1' if test['id'] in examining_test_ids else '0' }}">
-        <span id="test_label_{{ test['id'] }}">{{ test['name'] }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
-      </label>
-      {# سهم اختيار بارامترات معيّنة بس من هذا التحليل بدل طلبه كامل —
-         يفتح لائحة تشيك بوكسات (paramPanel_<id>) تتحمّل مرة وحدة عبر
-         /api/test-definitions/<id>/parameters. selected_params_<id> هو
-         الحقل الحقيقي اللي يوصل السيرفر: فاضي = كل التحليل (كالسابق
-         تماماً)، وإلا = بس معرّفات البارامترات المحددة. #}
-      <button type="button" class="nv-param-arrow" title="اختيار بارامترات معيّنة بس من هذا التحليل"
-              onclick="nvToggleParamPanel('{{ test['id'] }}')">▾</button>
-      <button type="button" class="nv-param-arrow" title="تعديل اسم هذا التحليل"
-              onclick="nvRenameTest('{{ test['id'] }}')">✏️</button>
-      <input type="hidden" id="selected_params_{{ test['id'] }}" name="selected_params_{{ test['id'] }}" value="">
-      <div class="nv-param-panel" id="paramPanel_{{ test['id'] }}" style="display:none;"></div>
-      </span>
-      {% endfor %}
-    </div>
-    <p style="margin-top:10px; font-weight:600;">{{ t('grand_total') }}: <span id="grandTotal">0</span></p>
   </div>
 
     </div>
@@ -1514,5 +1527,59 @@
       if (hasList) setTimeout(go, 0); else go();
     }, true);
   })();
+</script>
+
+<script>
+// تاريخ الميلاد → العمر تلقائيًا (بنفس سطر العمر)
+(function () {
+  var dob = document.getElementById('birth_date_input');
+  var ageEl = document.getElementById('age_input');
+  var unitEl = document.getElementById('age_unit_select');
+  if (!dob || !ageEl || !unitEl) return;
+  dob.addEventListener('change', function () {
+    if (!dob.value) return;
+    var b = new Date(dob.value + 'T00:00:00'), n = new Date();
+    if (isNaN(b) || b > n) return;
+    var days = Math.floor((n - b) / 86400000);
+    var years = n.getFullYear() - b.getFullYear();
+    if (n.getMonth() < b.getMonth() || (n.getMonth() === b.getMonth() && n.getDate() < b.getDate())) years--;
+    var val, unit;
+    if (years >= 1) { val = years; unit = 'Years'; }
+    else {
+      var months = (n.getFullYear() - b.getFullYear()) * 12 + (n.getMonth() - b.getMonth());
+      if (n.getDate() < b.getDate()) months--;
+      if (months >= 1) { val = months; unit = 'Months'; }
+      else if (days >= 7) { val = Math.floor(days / 7); unit = 'Weeks'; }
+      else if (days >= 1) { val = days; unit = 'Days'; }
+      else { val = Math.max(1, Math.floor((n - b) / 3600000)); unit = 'Hours'; }
+    }
+    ageEl.value = val; unitEl.value = unit;
+    ['input', 'change'].forEach(function (ev) { ageEl.dispatchEvent(new Event(ev, {bubbles: true})); unitEl.dispatchEvent(new Event(ev, {bubbles: true})); });
+  });
+  var today = new Date(); dob.max = today.toISOString().slice(0, 10);
+})();
+
+// حقول Reference / Other Information: تحت أسماء التحاليل، وتنزل تحت Health Information لو قائمة التحاليل صارت أطول من العمود الأيسر
+(function () {
+  var box = document.getElementById('nvRefOther');
+  var left = document.querySelector('.nv-left');
+  var orders = document.querySelector('.nv-orders-card');
+  var right = document.querySelector('.nv-right');
+  if (!box || !left || !orders || !right) return;
+  function place() {
+    if (window.innerWidth <= 900) return;          // الشاشات الضيقة: عمود واحد أصلاً
+    var leftH = 0;
+    Array.prototype.forEach.call(left.children, function (c) { if (c !== box) leftH += c.offsetHeight + 12; });
+    var ordersH = orders.offsetHeight + 12;
+    var inLeft = box.parentNode === left;
+    if (ordersH > leftH + 40) { if (!inLeft) left.appendChild(box); }
+    else if (ordersH < leftH - 40 || !inLeft) { if (inLeft || box.parentNode !== right) right.appendChild(box); }
+  }
+  window.addEventListener('load', place);
+  window.addEventListener('resize', place);
+  if (window.MutationObserver) new MutationObserver(function () { setTimeout(place, 50); })
+    .observe(orders, {childList: true, subtree: true});
+  setTimeout(place, 300);
+})();
 </script>
 {% endblock %}

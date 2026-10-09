@@ -35,7 +35,17 @@ def html_to_pdf(html_content: str, base_url: str, output_path: str) -> None:
     # الاستدعاءات المتزامنة بقفل بسيط بدل ما نشغّل event loop منفصل لكل طلب.
     with _playwright_lock:
         with sync_playwright() as p:
-            browser = p.chromium.launch()
+            # يستخدم Microsoft Edge المنصّب بويندوز (موجود افتراضياً بـ Windows 10/11)
+            # فما نحتاج نرسل Chromium مع البرنامج. إذا ما لقاه يجرب Chrome ثم Chromium.
+            browser = None
+            for _ch in ("msedge", "chrome", None):
+                try:
+                    browser = p.chromium.launch(channel=_ch) if _ch else p.chromium.launch()
+                    break
+                except Exception:
+                    continue
+            if browser is None:
+                raise RuntimeError("No Edge/Chrome/Chromium browser found for PDF export")
             try:
                 page = browser.new_page()
                 page.set_content(html_content, wait_until="load")

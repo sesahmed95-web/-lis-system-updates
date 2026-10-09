@@ -596,6 +596,8 @@ def migrate(conn):
             # البيانات، فكان أي حفظ لمريض أو طباعة تقرير سينهار فورًا
             # بخطأ "no such column: full_name_en". هذا العمود هو الإصلاح.
             ("full_name_en", "TEXT"),
+            # تاريخ الميلاد (اختياري): يُكتب بصفحة زيارة جديدة ويحسب العمر تلقائيًا
+            ("birth_date", "TEXT"),
         ],
         "doctors": [("email", "TEXT"), ("commission_percent", "REAL DEFAULT 0")],
         "digital_stamps": [
@@ -709,7 +711,9 @@ def migrate(conn):
                     # ويتسلسل من جديد حسب فترة التصفير بالإعدادات (يومي/شهري/سنوي/بدون).
                     ("sample_no", "TEXT"),
                     # رمز بوابة النتائج (QR للمريض): عشوائي طويل، يُولَّد مرة وحدة لكل زيارة (cloud_sync.py).
-                    ("portal_token", "TEXT")],
+                    ("portal_token", "TEXT"),
+                    # وقت ظهور النتائج المتوقع (اختياري) — يحدده الاستقبال بصفحة زيارة جديدة، يظهر بورقة QR/بوابة المريض
+                    ("expected_ready_at", "TEXT")],
         "test_definitions": [("is_examining_test", "INTEGER DEFAULT 0"),
                                # short_name: اختصار يدوي يحدده الأدمن لهذا التحليل تحديدًا
                                # (مثال: "PT" بدل "زمن البروثرومبين") — يُستخدم فقط بملصق

@@ -62,7 +62,11 @@ VERSION_FILE_PATH_IN_REPO = "VERSION"
 CHECK_INTERVAL_HOURS = 6
 # ===========================================================================
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# نسخة exe المثبّتة (PyInstaller): ملف VERSION يوضع بجانب LabSystem.exe (نفس منطق database.py)
+if getattr(sys, "frozen", False):
+    APP_DIR = os.path.dirname(sys.executable)
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
 VERSION_FILE = os.path.join(APP_DIR, "VERSION")
 API_BASE = "https://api.github.com"
 
@@ -222,6 +226,9 @@ def apply_update(silent=True, branch=None):
     نحتاج نعيد كتابة هذا المنطق من الصفر."""
     if sys.platform != "win32":
         raise RuntimeError("التحديث التلقائي مدعوم فقط على Windows حالياً")
+    if getattr(sys, "frozen", False):
+        # نسخة Setup/exe: ملفات .py صارت داخل الـexe فما يكدر update.ps1 يحدّثها.
+        raise RuntimeError("النسخة المثبّتة (Setup) تتحدّث بتثبيت ملف Setup جديد من المصمم، مو تلقائياً")
 
     tmp_dir = tempfile.mkdtemp(prefix="lis_update_")
     zip_path = os.path.join(tmp_dir, "update.zip")
@@ -256,6 +263,13 @@ def check_and_apply(db, force_apply=True):
         local_version = get_local_version()
         remote_version = fetch_remote_version(branch=branch)
         if is_newer(remote_version, local_version):
+            if getattr(sys, "frozen", False):
+                status = f"🆕 يتوفر إصدار جديد ({remote_version}) — اطلب ملف Setup الجديد من المصمم"
+                set_setting(db, "auto_update_last_check", now)
+                set_setting(db, "auto_update_last_status", status)
+                db.commit()
+                return {"ok": True, "updated": False, "remote_version": remote_version,
+                        "local_version": local_version, "message": status}
             status = f"🆕 تم العثور على إصدار جديد ({remote_version}) — جاري التحديث الآن..."
             set_setting(db, "auto_update_last_check", now)
             set_setting(db, "auto_update_last_status", status)

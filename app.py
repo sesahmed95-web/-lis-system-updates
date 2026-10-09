@@ -1833,6 +1833,113 @@ def designer_panel():
     )
 
 
+# ============== تفريغ بيانات البرنامج (المصمم فقط) قبل تسليمه لعميل ==============
+# كل مجموعة = جداول تُفرَّغ. الاعتماديات: اختيار "الزيارات" يفرض "النتائج" معه، واختيار "المرضى" يفرض "الزيارات".
+_WIPE_GROUPS = [
+    ("results", "النتائج السابقة (نتائج التحاليل + سجل التعديلات + ملاحظات التقارير + دمج/تفضيلات النتائج السابقة)",
+     ["visit_previous_merges", "visit_prev_prefs", "result_history", "results", "report_row_notes", "saved_reports",
+      "report_stamp_placements"], ["report_layout_overrides|scope='order_test'"]),
+    ("visits", "الزيارات (الزيارات + الطلبات + التحاليل المطلوبة + الفواتير + الدفعات + المتابعات + ترقيم العينات + بوابة QR)",
+     ["removed_order_tests", "patient_followups", "payments", "invoices", "order_tests", "orders", "visits",
+      "sample_counters", "portal_state"], []),
+    ("patients", "المرضى (بطاقات المرضى)", ["patients"], []),
+    ("whatsapp", "طابور وسجل الواتساب", ["whatsapp_sends"], []),
+    ("audit", "سجل العمليات (Audit log) وسجل ربط الأجهزة", ["audit_logs", "host_interface_log"], []),
+]
+_WIPE_DIRS = {"visits": ("static/whatsapp_pdfs", "static/pdf_archive", "static/reports_pdf", "static/portal_pdf_cache"),
+              "whatsapp": ("static/whatsapp_pdfs",)}
+
+
+def _wipe_counts(db):
+    existing = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    out = []
+    for key, label, tables, extra in _WIPE_GROUPS:
+        n = 0
+        for t_ in tables:
+            if t_ in existing:
+                n += db.execute(f"SELECT COUNT(*) FROM {t_}").fetchone()[0]
+        out.append({"key": key, "label": label, "count": n})
+    return out
+
+
+@app.route("/designer/wipe", methods=["GET", "POST"])
+@designer_required
+def designer_wipe():
+    """يفرّغ بيانات التشغيل (نتائج/زيارات/مرضى/واتساب/سجلات) ويبقي الإعدادات والتحاليل والنسب والتصاميم والمستخدمين والأطباء.
+    يأخذ نسخة احتياطية كاملة من القاعدة قبل التفريغ ويطلب كتابة كلمة تأكيد."""
+    db = get_db()
+    if request.method == "POST":
+        picked = set(request.form.getlist("groups"))
+        if "patients" in picked:
+            picked |= {"visits"}
+        if "visits" in picked:
+            picked |= {"results"}
+        if request.form.get("confirm", "").strip() != "تفريغ":
+            flash("لم يتم التفريغ: اكتب كلمة  تفريغ  بخانة التأكيد.")
+            return redirect(url_for("designer_wipe"))
+        if not picked:
+            flash("اختر مجموعة واحدة على الأقل.")
+            return redirect(url_for("designer_wipe"))
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"lis_before_wipe_{stamp}.db"
+        backup_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), backup_name)
+        try:
+            bk = sqlite3.connect(backup_path)
+            db.backup(bk)
+            bk.close()
+        except Exception as e:  # noqa: BLE001
+            flash(f"تعذّر أخذ النسخة الاحتياطية ({type(e).__name__}) — لم يُفرَّغ شي.")
+            return redirect(url_for("designer_wipe"))
+        existing = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        # الترتيب: النتائج → الزيارات → المرضى (الأبناء قبل الآباء)
+        db.execute("PRAGMA foreign_keys = OFF")
+        removed = 0
+        for key, label, tables, extra in _WIPE_GROUPS:
+            if key not in picked:
+                continue
+            for t_ in tables:
+                if t_ in existing:
+                    removed += db.execute(f"DELETE FROM {t_}").rowcount
+            for spec in extra:
+                tname, cond = spec.split("|", 1)
+                if tname in existing:
+                    removed += db.execute(f"DELETE FROM {tname} WHERE {cond}").rowcount
+            if "sqlite_sequence" in existing:
+                for t_ in tables:
+                    db.execute("DELETE FROM sqlite_sequence WHERE name=?", (t_,))
+            for d in _WIPE_DIRS.get(key, ()):
+                full = os.path.join(os.path.dirname(os.path.abspath(__file__)), d)
+                if os.path.isdir(full):
+                    for fn in os.listdir(full):
+                        fp = os.path.join(full, fn)
+                        if os.path.isfile(fp):
+                            try:
+                                os.remove(fp)
+                            except OSError:
+                                pass
+        if "visits" in picked:
+            try:  # بوابة QR المحلية: تفريغ الصفحات المنشورة أيضًا
+                import portal_local
+                _pc = portal_local._db()
+                _pc.execute("DELETE FROM reports")
+                _pc.commit()
+                _pc.close()
+            except Exception:
+                pass
+        db.commit()
+        db.execute("PRAGMA foreign_keys = ON")
+        try:
+            db.execute("VACUUM")
+        except Exception:
+            pass
+        log_action("DesignerWipe", "system", 0, ",".join(sorted(picked)))
+        flash(f"تم التفريغ ({removed} سجل). نسخة احتياطية كاملة قبل التفريغ: {backup_name} (بمجلد البرنامج).")
+        return redirect(url_for("designer_wipe"))
+    groups = _wipe_counts(db)
+    db.close()
+    return render_template("designer/wipe.html", groups=groups)
+
+
 @app.route("/designer/github-token", methods=["POST"])
 @designer_required
 def designer_save_github_token():
@@ -2170,6 +2277,8 @@ def new_visit():
         passport_number = request.form.get("passport_number", "").strip()
         travel_certificate_number = request.form.get("travel_certificate_number", "").strip()
         lab_card_number = request.form.get("lab_card_number", "").strip()
+        birth_date = (request.form.get("birth_date") or "").strip()[:10] or None
+        expected_ready_at = (request.form.get("expected_ready_at") or "").strip()[:16] or None
         fasting = request.form.get("fasting", "Undefined")
         notes = request.form.get("notes", "")
         # المعلومات الصحية (Health Information) — خاصة بهذي الزيارة تحديداً.
@@ -2224,11 +2333,11 @@ def new_visit():
             cur = db.execute(
                 "INSERT INTO patients (full_name, full_name_en, gender, age, age_unit, phone, address, contact_method, "
                 "title, email, national_id, passport_number, travel_certificate_number, lab_card_number, "
-                "branch_id, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "branch_id, created_at, birth_date) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (name, name_en, gender, age, age_unit, phone, address, contact_method,
                  title, email, national_id, passport_number, travel_certificate_number, lab_card_number,
-                 session.get("branch_id"), now),
+                 session.get("branch_id"), now, birth_date),
             )
             patient_id = cur.lastrowid
 
@@ -2247,8 +2356,8 @@ def new_visit():
         )
         visit_id = cur.lastrowid
         # رقم العينة: من حقل "Sample No." بصفحة زيارة جديدة (يتسلسل من جديد حسب إعداد التصفير)
-        db.execute("UPDATE visits SET sample_no=? WHERE id=?",
-                   (resolve_visit_sample_no(db, request.form.get("sample_no")), visit_id))
+        db.execute("UPDATE visits SET sample_no=?, expected_ready_at=? WHERE id=?",
+                   (resolve_visit_sample_no(db, request.form.get("sample_no")), expected_ready_at, visit_id))
         # (بوابة النتائج: توليد الرمز + إيقاظ العامل صار بعد db.commit() النهائي تحت —
         #  قبل كان يوقظ العامل الخلفي والزيارة لسا ما اكتملت فيتنافس معها على قفل القاعدة)
 
@@ -6115,6 +6224,49 @@ def _fmt_hhmm(iso):
         return iso or ""
 
 
+def _coag_table_mode(db):
+    """تقارير التخثر المنفردة (D-Dimer / Fibrinogen / PT&INR / PTT / Bleeding time): هل تطبع
+    بأسلوب جدول النتائج (نفس الكيمياء والهرمونات: Style A/B + الألوان + الملاحظات + النتائج السابقة)؟
+    الافتراضي نعم. الخيار "1..4" القديم (قالب coagulation.html) يبقى متاحًا من بطاقة التصاميم.
+    ?design=table|1..4 بالرابط يغلب الإعداد المحفوظ (معاينة مؤقتة)."""
+    try:
+        q = request.args.get("design")
+        if q == "table":
+            return True
+        if q in ("1", "2", "3", "4"):
+            return False
+    except RuntimeError:
+        pass
+    return get_setting(db, "report_design_coag", "table") == "table"
+
+
+def _coag_view(view, is_coag):
+    """التخثر بأسلوب B Matching Image: عمود SI Units يُستبدل بعمود Normal Range (لا وحدات SI بالتخثر)."""
+    if view is not None and is_coag:
+        view["range_col3"] = True
+    return view
+
+
+def _coag_fold_control(rows):
+    """يدمج قيمة "PT Control"/"PTT Control" كعمود Control مع صف PT/PTT نفسه، ولا يطبعها كصف مستقل.
+    Control يظهر فقط لو PT أو PTT موجود (INR/BT/Fibrinogen/D-Dimer بلا Control)."""
+    ctl = {}
+    for r in rows:
+        nm = (r.get("param_name") or r.get("name") or "").strip()
+        if nm.lower().endswith("control"):
+            ctl[nm[:-7].strip().lower()] = r.get("result")
+    out = []
+    for r in rows:
+        nm = (r.get("param_name") or r.get("name") or "").strip()
+        if nm.lower().endswith("control"):
+            continue
+        key = nm.lower()
+        if key in ("pt", "ptt") and ctl.get(key) not in (None, ""):
+            r["control"] = ctl[key]
+        out.append(r)
+    return out
+
+
 def _auto_report_template(db, test_definition_id, test_name):
     """تصميم افتراضي تلقائي لتحليل ما له صف report_templates: يعرض كل باراميترات التحليل
     (بترتيبها) بالستايل المختار من "تصميم التقارير". هكذا تحليل واحد (مثل FBS) تكتب نتيجته
@@ -6167,6 +6319,9 @@ def _print_report_impl(order_test_id):
         db.commit()
 
     template_name = REPORT_TEMPLATE_MAP.get(ot["test_code"])
+    _coag_table = (ot["test_code"] == "COAG" and _coag_table_mode(db))
+    if _coag_table:
+        template_name = None
 
     sibling_ot = None
     if ot["test_code"] in BF_RETIC_LINK:
@@ -6419,6 +6574,7 @@ def _print_report_impl(order_test_id):
             _ex, _note, _nkey = _row_extras_and_note(row_ctx, ot["test_definition_id"], pname)
             _lbl = resolve_label(_prow, rd.get("label"))
             custom_rows.append({
+                "param_name": pname,
                 "name": _lbl, "value2": format_unit2_value(result_val, unit2_factor_by_name.get(pname)),
                 "range2": normal_range2, "show_blank": True,
                 "history": _history_with_unit2(hist_all.get(pname), unit2_factor_by_name.get(pname) if unit2_by_name.get(pname) else None),
@@ -6507,7 +6663,11 @@ def _print_report_impl(order_test_id):
                 })
                 _auto_x += (_s["default_width"] or 140) + 20
 
-    if auto_template:
+    if _coag_table and custom_rows is not None:
+        # التخثر بأسلوب الجدول: Control يندمج مع PT/PTT (لا يُطبع كصف مستقل)
+        _hasres = [_r for _r in custom_rows if _r["result"] not in (None, "")]
+        custom_rows = _coag_fold_control(_hasres)
+    elif auto_template:
         # تصميم تلقائي: نعرض فقط الباراميترات اللي انكتبت لها نتيجة حالية
         custom_rows = [_r for _r in custom_rows if _r["result"] not in (None, "")]
 
@@ -6521,8 +6681,8 @@ def _print_report_impl(order_test_id):
         # الأساليب الجديدة (Style A/B + قوائم الستايل/الألوان + النتائج السابقة + ملاحظات الصفوف) تُمرَّر فقط
         # للقالب الجديد custom_v2. باقي التقارير (GUE/GSE/SFA/التخثر/CBC/Blood film/BMA/...) تبقى بدون أي
         # عنصر إضافي بشريط الطباعة.
-        layout_view=(build_layout_view(db, style_override=request.args.get("style"), cfg=layout_cfg,
-                                       theme_override=request.args.get("theme"))
+        layout_view=(_coag_view(build_layout_view(db, style_override=request.args.get("style"), cfg=layout_cfg,
+                                                  theme_override=request.args.get("theme")), _coag_table)
                      if template_name == "reports/custom_v2.html" else None),
         note_visit_id=(ot["visit_id"] if template_name == "reports/custom_v2.html" else None),
         prev_toggle_available=(prev_toggle_available if template_name == "reports/custom_v2.html" else False),
@@ -8850,7 +9010,7 @@ def _report_designs_context(db):
     for key, code in (("coag", "COAG"), ("gue", "GUE"), ("gse", "GSE"), ("sfa", "SFA")):
         r = db.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
         ids[key] = r["id"] if r else None
-    cur = {fam: get_setting(db, f"report_design_{fam}", "1") for fam in ("coag", "exam")}
+    cur = {fam: get_setting(db, f"report_design_{fam}", "table" if fam == "coag" else "1") for fam in ("coag", "exam")}
     return {"design_ids": ids, "design_cur": cur}
 
 
@@ -8863,7 +9023,7 @@ def report_designs():
     if request.method == "POST":
         for fam in ("coag", "exam"):
             v = request.form.get(fam, "")
-            if v in ("1", "2", "3", "4"):
+            if v in ("1", "2", "3", "4") or (fam == "coag" and v == "table"):
                 set_setting(db, f"report_design_{fam}", v)
         db.commit()
         flash("تم حفظ التصاميم المختارة.")
@@ -10392,8 +10552,11 @@ def report_designer():
             "test": test,
             "has_builtin": has_builtin,
             "has_custom": bool(custom),
-            "needs_design": not has_builtin and not custom,
+            "needs_design": False,
+            "auto_ok": (not has_builtin and not custom and bool(db.execute(
+                "SELECT 1 FROM test_parameters WHERE test_definition_id=? LIMIT 1", (test["id"],)).fetchone())),
         })
+        tests_status[-1]["needs_design"] = not has_builtin and not custom and not tests_status[-1]["auto_ok"]
 
     selected_id = request.args.get("test_definition_id", type=int)
     selected_test = None
@@ -10473,6 +10636,23 @@ def preview_report_design(test_definition_id):
         ), 500
 
 
+# قيم نموذجية لمعاينة تقارير الفحص (نفس القيم الظاهرة بالمعاينة المعتمدة preview_3)
+EXAM_PREVIEW_SAMPLES = {
+    "GUE": {"Color": "Yellow", "Specific Gravity": "1.020", "Reaction (pH)": "6.0", "Glucose": "Negative",
+            "Protein": "Negative", "Ketone": "Negative", "Bile Pigment": "Negative", "Urobilinogen": "0.2",
+            "Nitrite": "Negative", "RBCs": "1-2", "PUS": "2-3", "PUS (WBCs)": "2-3", "Casts": "Nil",
+            "Epithelial Cells": "Few", "Amorphous": "Nil", "Mucus": "Nil", "Crystals": "Nil",
+            "Parasites": "Nil", "Parasites / Others": "Nil"},
+    "GSE": {"Color": "Brown", "Consistency": "Formed", "Mucus": "Nil", "Blood": "Nil", "Worms / Helminths": "Nil",
+            "Pus Cells": "0-1", "RBCs": "Nil", "Amoeba (E. histolytica)": "Not seen", "Giardia lamblia": "Not seen",
+            "Helminthes Ova": "Not seen", "Undigested Food Particles": "Nil", "Fungi / Yeast": "Nil"},
+    "SFA": {"Volume": "3.2", "Color / Appearance": "Grey-white", "Liquefaction Time": "25", "Viscosity": "Normal",
+            "pH": "7.9", "Sperm Count": "42", "Total Sperm Count": "134", "Active (Progressive)": "48",
+            "Sluggish (Non-progressive)": "22", "Immotile": "30", "Normal Forms": "6", "Abnormal Forms": "94",
+            "Pus Cells": "1-2", "RBCs": "Nil", "Agglutination": "Nil"},
+}
+
+
 def _preview_report_design_impl(test_definition_id):
     # Renders the exact same report template print_report() uses, but with
     # clearly-labeled sample data instead of a real order/patient — so the
@@ -10486,11 +10666,17 @@ def _preview_report_design_impl(test_definition_id):
         return "Not found", 404
 
     template_name = REPORT_TEMPLATE_MAP.get(test["code"])
+    _coag_table = (test["code"] == "COAG" and _coag_table_mode(db))
+    if _coag_table:
+        template_name = None
     custom_template = None
     if not template_name and test["report_style"] == "generic_exam":
         template_name = "reports/generic_exam.html"
     if not template_name:
         custom_template = get_report_template(db, test_definition_id)
+        if not custom_template:
+            # بلا قالب محفوظ: نعاين التصميم التلقائي (نفس ما ستطبعه الطباعة الفعلية بأسلوب جدول النتائج)
+            custom_template = _auto_report_template(db, test_definition_id, test["name"])
         if not custom_template:
             flash("لا يوجد تصميم لهذا التحليل بعد لتتم معاينته. صممه أولاً بالأسفل.")
             return redirect(url_for("report_designer", test_definition_id=test_definition_id))
@@ -10538,6 +10724,7 @@ def _preview_report_design_impl(test_definition_id):
         custom_rows_align = custom_template["rows_align"] or "right"
         row_defs = json.loads(custom_template["rows_json"] or "[]")
         custom_rows = [{
+            "param_name": rd.get("param_name", ""),
             "name": resolve_label(params_by_name_row.get(rd.get("param_name", "")), rd.get("label")),
             "history": [], "extras": {}, "note": None, "note_key": None, "show_blank": True,
             "value2": None, "range2": None,
@@ -10570,6 +10757,45 @@ def _preview_report_design_impl(test_definition_id):
     if test["code"] == "COAG":
         # التخثر: المعاينة تعرض المدى الحقيقي المحفوظ (مريض افتراضي ذكر 30 سنة) بدل "— إلى —"
         ranges = {p["name"]: find_reference_range(db, p["id"], "Male", 30, "Years") for p in parameters}
+        if _coag_table and custom_rows is not None:
+            # أسلوب الجدول: قيم نموذجية + المدى الحقيقي + Control مدموج مع PT/PTT (بيانات وهمية للتوضيح)
+            _coag_samples = {"PT": "13.2", "PT Control": "12.8", "INR": "1.05", "PTT": "31", "PTT Control": "30",
+                             "Bleeding time": "3", "Plasma fibrinogen con": "320", "D. dimer": "250"}
+            for _r in custom_rows:
+                _pn = _r["param_name"]
+                _r["result"] = _coag_samples.get(_pn, "—")
+                _rg = ranges.get(_pn)
+                _txt = ""
+                if _rg:
+                    if _rg["range_text"]:
+                        _txt = _rg["range_text"]
+                    elif _rg["low"] is not None and _rg["high"] is not None:
+                        _txt = f"{_rg['low']} - {_rg['high']}"
+                    elif _rg["low"] is not None:
+                        _txt = f"> {_rg['low']}"
+                    elif _rg["high"] is not None:
+                        _txt = f"< {_rg['high']}"
+                _r["normal_range"] = _txt
+                _r["range_tiers"] = parse_range_tiers(_rg["range_text"]) if (_rg and _rg["range_text"]) else ([{"label": None, "value": _txt}] if _txt else [])
+            custom_rows = _coag_fold_control(custom_rows)
+
+    # تقارير الفحص GUE/GSE/SFA: المعاينة بنفس شكل المعاينة المعتمدة (preview_3) —
+    # قيم نموذجية واقعية + المدى الطبيعي الحقيقي المحفوظ (مريض نموذجي ذكر 34 سنة)
+    # بدل "—" و"— إلى —"، وبيانات مريض نموذجية بدل الشرطات. بيانات وهمية للتوضيح فقط.
+    _exam_preview_patient = {}
+    if test["code"] in EXAM_PREVIEW_SAMPLES:
+        _samples = EXAM_PREVIEW_SAMPLES[test["code"]]
+        ranges = {p["name"]: find_reference_range(db, p["id"], "Male", 34, "Years") for p in parameters}
+        results_by_name = {
+            p["name"]: {"value_text": _samples.get(p["name"], ""), "value_numeric": None, "flag": None}
+            for p in parameters
+        }
+        _exam_preview_patient = {
+            "patient_name": "أحمد محمد علي", "patient_name_en": "Ahmed Mohammed Ali",
+            "age": "34 Year(s)", "sex": "Male", "referring_doctor_name": "Dr. Sarah Hussein",
+            "sample_no": "IQ26/0055901", "patient_id": "26/0025990",
+            "sample_time": "10:15 AM", "number_of": "1",
+        }
 
     # نفس منطق _print_report_impl بالضبط (راجع التعليق هناك) — القوالب
     # الجاهزة الحديثة (GUE/GSE/SFA وأي قالب مستقبلي بنفس نمط
@@ -10587,7 +10813,7 @@ def _preview_report_design_impl(test_definition_id):
         ot={"test_name": test["name"], "test_code": test["code"]}, params=params, ranges=ranges, units=units_by_name, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
-        layout_view=build_layout_view(db), note_visit_id=None,
+        layout_view=_coag_view(build_layout_view(db, style_override=request.args.get("style")), _coag_table), note_visit_id=None,
         show_prev_values=show_prev_values, previous_visit_date=None, previous_values={},
         repeat_header_on_print=department_shows_previous_values(test["department"]),
         logo_url=logo_url, from_other_lab=False, font_size=14 if test["code"] == "CBC" else 16,
@@ -10597,11 +10823,12 @@ def _preview_report_design_impl(test_definition_id):
         enable_stamp_widget=bool(test["enable_stamp_widget"]) if "enable_stamp_widget" in test.keys() else False,
         stamp_target_type="test_definition", stamp_target_id=test_definition_id,
         digital_stamps=[], stamp_placements=[],
-        visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}", sex="—", age="—",
-        patient_name="اسم المريض — معاينة تصميم فقط", patient_id="0000",
-        referring_doctor_name="—", is_design_preview=True, preview_test_id=test_definition_id,
+        visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}",
+        is_design_preview=True, preview_test_id=test_definition_id,
         test_definition_id=test_definition_id,
-        sample_no="—", sample_time="—", number_of="—", patient_name_en="",
+        **{**dict(sex="—", age="—", patient_name="اسم المريض — معاينة تصميم فقط", patient_id="0000",
+                  referring_doctor_name="—", sample_no="—", sample_time="—", number_of="—",
+                  patient_name_en=""), **_exam_preview_patient},
         order_test_id=0, results_by_name=results_by_name, param_notes={},
         auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag, AUTO_FLAG_COLORS=flag_color_map,
         row_spacing_px=row_spacing_px_value,
@@ -10921,7 +11148,8 @@ def _portal_collect(db, visit_id):
             rows = _build_panel_rows_for_ot(db, ot, visit, {}, {})
         tests.append({"td_id": ot["test_definition_id"], "code": ot["test_code"], "name": ot["test_name"],
                       "status": ot["status"], "rows": rows})
-    return {"patient_name": visit["patient_name"], "created_at": visit["created_at"], "tests": tests}
+    return {"patient_name": visit["patient_name"], "created_at": visit["created_at"], "tests": tests,
+            "expected_ready_at": (visit["expected_ready_at"] if "expected_ready_at" in visit.keys() else None)}
 
 
 cloud_sync.set_collector(_portal_collect)
@@ -11008,6 +11236,16 @@ def api_portal_sync(visit_id):
     cloud_sync.ensure_token(db, visit_id)
     ok, msg = cloud_sync.sync_visit(db, visit_id, force=True)
     return {"ok": ok, "message": msg}, (200 if ok else 502)
+
+
+@app.route("/api/visits/<int:visit_id>/portal-diagnose")
+@login_required
+def api_portal_diagnose(visit_id):
+    """فحص سلسلة الـQR (رابط عام، بوابة محلية، رمز الزيارة، اكتمال التحاليل) — يُعرض بورقة الـQR."""
+    db = get_db()
+    return jsonify({"items": [{"level": l, "text": t} for l, t in cloud_sync.diagnose(db, visit_id)],
+                    "link": cloud_sync.portal_link(cloud_sync.get_cfg(db),
+                                                   (db.execute("SELECT portal_token FROM visits WHERE id=?", (visit_id,)).fetchone() or {"portal_token": None})["portal_token"])})
 
 
 @app.route("/api/visits/<int:visit_id>/portal-revoke", methods=["POST"])
