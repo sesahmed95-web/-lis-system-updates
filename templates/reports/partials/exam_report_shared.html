@@ -84,7 +84,7 @@
 
   /* ============== عنوان التحليل + عناوين الأقسام ============== */
   .report-title {
-    text-align: center; font-size: 1.25em; font-weight: 700; font-style: italic;
+    text-align: center; font-size: 1.19em; font-weight: 700; font-style: italic;
     {% if report_underline_style|default('solid') == 'none' %}
     text-decoration: none;
     {% else %}
@@ -94,12 +94,13 @@
     /* نفس تصحيح base_report.html — يمنع تقطّع الخط تحت الحروف المائلة
        (نقاط بمنتصف الكلمة) بمعاينة التصميم وبالتقرير المطبوع الفعلي. */
     text-decoration-skip-ink: none;
-    margin: 6px 0 18px 0;
+    margin: 6px 0 2px 0;
     color: #14213D;
   }
   .exam-section { position: relative; }
+  .report-title-wrap + .exam-section .section-title { margin-top: 0; }
   .section-title {
-    font-weight: 700; font-size: 1.05em; color: #111;
+    font-weight: 700; font-size: 0.9375em; color: #111;
     border-top: 1px solid #AEBBCB; padding-top: 9px; margin-top: 16px; margin-bottom: 4px;
     display: flex; align-items: center; gap: 6px;
   }
@@ -119,14 +120,14 @@
 
   /* ============== صف نتيجة مفردة ============== */
   .result-row {
-    display: grid; grid-template-columns: 18px 260px 18px 160px 1fr auto;
+    display: grid; grid-template-columns: 18px 210px 26px 180px 1fr auto;
     /* start (مو center) — لأن عمود القيمة (rval) قد يلف النتيجة + الوحدة
        على سطرين لو ما وسعوا (160px)، ووقتها align-items:center كان
        يحط عمود المدى الطبيعي (rnorm) بمنتصف الارتفاع، أي بين سطر
        النتيجة وسطر الوحدة، فيظهر متراكب فوق الاثنين بصريًا. start يخلي
        كل الأعمدة تبدأ من أعلى الصف دائمًا، بغض النظر عن أي عمود لف
        سطرين — يحل التراكب لأي تحليل عنده وحدة طويلة (mg/dL، uIU/mL...). */
-    align-items: start; padding: var(--exam-row-pad, 5px) 0; font-size: 1em; gap: 2px;
+    align-items: baseline; padding: var(--exam-row-pad, 5px) 0; font-size: 0.9375em; gap: 2px;
   }
   .result-row .rname {
     color: #1a1a1a;
@@ -145,16 +146,17 @@
     letter-spacing: 0.3px;
   }
   .result-row .rcolon { color: #1a1a1a; }
-  .result-row .rval { color: #1F3B7A; font-weight: 400; }
-  .result-row .runit { color: #1a1a1a; font-size: 0.85em; margin-inline-start: 4px; font-weight: normal; }
-  .result-row .rnorm { color: #1F3B7A; font-weight: 400; }
+  .result-row .rval { color: #0B3D91; font-weight: 400; }
+  .result-row .runit { color: #1a1a1a; font-size: 0.867em; margin-inline-start: 4px; font-weight: normal; }
+  .result-row .rnorm { color: #0B3D91; font-weight: 400; }
   /* ===== إصلاح تراكب النتيجة مع المدى الطبيعي (اكتُشف بمعاينة حقيقية) =====
      العمود الأول (18px) محجوز لمقبض السحب .row-drag-handle، لكنه display:none
      خارج وضع التعديل وبالطباعة -- فتنزاح كل الأعمدة خطوة: الاسم يدخل عمود
      الـ18px، والنتيجة تدخل عمود الـ18px الثاني، والمدى يدخل عمود الـ160px،
      فيتراكب النص فوق بعضه. خارج وضع التعديل نشيل عمود المقبض من الـgrid. */
-  .report-page:not(.exam-editing) .result-row { grid-template-columns: 260px 14px 160px 1fr auto; }
+  .report-page:not(.exam-editing) .result-row { grid-template-columns: 210px 26px 180px 1fr auto; }
   .report-page:not(.exam-editing) .exam-column .result-row { grid-template-columns: 1fr 12px 1fr auto; }
+  .report-page.exam-editing .exam-column .result-row { grid-template-columns: 14px 1fr 12px 1fr 1fr auto; }
 
   /* ===== تصاميم GUE / GSE / SFA الأربعة (تُختار من الإدارة ← تصاميم التقارير،
      أو مؤقتًا بإضافة ?design=1..4 لرابط الطباعة). 1 = الكلاسيكي الحالي. ===== */
@@ -218,9 +220,10 @@
     font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 12.5px;
   }
   .add-param-row input.add-param-input {
-    border: 1px solid #E2E8F0; border-radius: 5px; padding: 4px 8px; font-size: 12px;
+    display: none; border: 1px solid #E2E8F0; border-radius: 5px; padding: 4px 8px; font-size: 12px;
     font-family: inherit; min-width: 160px;
   }
+  .add-param-row.open input.add-param-input { display: inline-block; }
   .add-param-row button {
     border: 1px dashed #26529C; color: #26529C; background: #fff; border-radius: 5px;
     padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
@@ -229,13 +232,15 @@
 
   /* ============== شريط أدوات التعديل ============== */
   .exam-toolbar {
-    position: fixed; top: 90px; left: 12px; z-index: 500;
+    position: fixed; top: 8px; left: 6px; z-index: 500;
     background: #14213D; color: #fff; border-radius: 10px; padding: 8px 10px;
     font-family: "Segoe UI", Tahoma, Arial, sans-serif; font-size: 12.5px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.25); display: flex; flex-direction: column; gap: 6px;
     max-width: 230px;
   }
   .exam-toolbar > button { align-self: flex-start; }
+  .exam-toolbar .exam-tb-lbl { display: none; }
+  .exam-toolbar.is-open .exam-tb-lbl { display: inline; }
   .exam-toolbar button {
     background: #26529C; color: #fff; border: none; border-radius: 6px;
     padding: 6px 10px; cursor: pointer; font-size: 12px; font-family: inherit;
@@ -339,6 +344,8 @@
      يغيّر بيانات المريض الحقيقية بجداول أخرى). ============== */
   .report-title-wrap { display: flex; align-items: center; justify-content: center; gap: 6px; }
   .editable-meta-row { position: relative; }
+  /* القلم يطفو خارج الشبكة (كان يلفّ لسطر ثانٍ ويضاعف ارتفاع كل سطر بمعلومات المريض) */
+  .editable-meta-row .meta-edit-btn { position: absolute; inset-inline-end: 0; top: 50%; transform: translateY(-50%); }
   .title-edit-btn, .meta-edit-btn {
     opacity: 0; cursor: pointer; font-size: 11px; user-select: none; flex-shrink: 0;
   }
@@ -428,7 +435,19 @@
 {% set note_info = note_info or {'text': '', 'label': '', 'visible': false} %}
 {% set style = style or {} %}
 {% set display_name = resolve_label(param, style.get('label')) %}
-{% set normal_range = exam_range_display(range_row, unit) %}
+{% if exam_range_display is defined %}
+  {% set normal_range = exam_range_display(range_row, unit) %}
+{% else %}
+  {# احتياط: لو اننسخ هذا القالب بدون app.py الجديد — نفس المنطق القديم بدل ما ينكسر التقرير #}
+  {% set normal_range = '' %}
+  {% if range_row %}
+    {% if range_row['range_text'] %}{% set normal_range = range_row['range_text'] %}
+    {% elif range_row['low'] is not none and range_row['high'] is not none %}{% set normal_range = (range_row['low']|string) ~ ' - ' ~ (range_row['high']|string) %}
+    {% elif range_row['low'] is not none %}{% set normal_range = '> ' ~ (range_row['low']|string) %}
+    {% elif range_row['high'] is not none %}{% set normal_range = '< ' ~ (range_row['high']|string) %}
+    {% endif %}
+  {% endif %}
+{% endif %}
 {# مستويات نص حر متعدد الأسطر (المطلوب 4ب) — نفس منطق custom_rows/combined_panel،
    عبر parse_range_tiers المسجّلة كـ Jinja global بـapp.py. #}
 {% set range_tiers = parse_range_tiers(range_row['range_text']) if (range_row and range_row['range_text']) else ([{'label': none, 'value': normal_range}] if normal_range else []) %}
@@ -450,7 +469,7 @@
   <span class="rname">{{ display_name }}</span>
   <span class="rcolon">:</span>
   {% set _val_align = VALUE_ALIGN_CSS.get(style.get('align')) or resolve_value_align(param) %}
-  <span class="rval"{% if _val_align %} style="text-align:{{ _val_align }};"{% endif %}>{% if result_value not in (none, '') %}<span class="rval-num" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% elif auto_color %}style="color:{{ auto_color }};"{% endif %}>{{ result_value }}</span>{% if show_result_flag is defined and show_result_flag and flag and flag != 'Normal' %}<span class="flag-badge" style="font-size:0.75em; font-weight:bold; margin-inline-start:4px;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ flag }}</span>{% endif %}{% if unit %} <span class="runit">{{ unit }}</span>{% endif %}{% endif %}</span>
+  <span class="rval"{% if _val_align %} style="text-align:{{ _val_align }};"{% endif %}>{% if result_value not in (none, '') %}<span class="rval-num" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% elif auto_color %}style="color:{{ auto_color }};"{% endif %}>{{ result_value }}</span>{% if show_result_flag is defined and show_result_flag and flag and flag != 'Normal' %}<span class="flag-badge" style="font-size:0.75em; font-weight:bold; margin-inline-start:4px;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ flag }}</span>{% endif %}{% if unit %}{% if unit|trim == '%' %}<span class="runit" style="margin-inline-start:0;">%</span>{% else %} <span class="runit">{{ unit }}</span>{% endif %}{% endif %}{% endif %}</span>
   <span class="rnorm">
     {% if range_tiers|length > 1 %}
       {% for tier in range_tiers %}<div class="exam-range-tier">{% if tier.label %}<b>{{ tier.label }}</b>: {% endif %}{{ tier.value }}</div>{% endfor %}
@@ -515,7 +534,7 @@
 {% macro add_param_row(section_id, order_test_id, test_definition_id) %}
 <div class="add-param-row" data-section-key="{{ section_id }}">
   <input type="text" class="add-param-input" placeholder="اسم باراميتر جديد..." onkeydown="if(event.key==='Enter'){examAddParam(this, {{ test_definition_id }});}">
-  <button type="button" onclick="examAddParam(this.previousElementSibling, {{ test_definition_id }})">+ إضافة باراميتر جديد لهذا القسم</button>
+  <button type="button" onclick="var r=this.parentNode;if(!r.classList.contains('open')){r.classList.add('open');this.previousElementSibling.focus();}else{examAddParam(this.previousElementSibling, {{ test_definition_id }});}">+ إضافة باراميتر جديد لهذا القسم</button>
 </div>
 {% endmacro %}
 
@@ -590,16 +609,19 @@
 
 </div>
 
+{# base_report.html يرسم الشريط/النوافذ للأدمن — منع تكرارها (كان يظهر شريطان فوق بعض بنفس الـid فيتعطّل زر التعديل) #}
+{% if session.get('role') != 'admin' %}
 {{ edit_toolbar() }}
 {{ style_popover() }}
 {{ scope_modal() }}
+{% endif %}
 {% endmacro %}
 
 
 {% macro edit_toolbar() %}
 {% set rl = report_layout|default({}) %}
 <div class="exam-toolbar no-print">
-  <button type="button" id="examEditToggleBtn" onclick="examToggleEditMode()">✏️ تعديل التصميم</button>
+  <button type="button" id="examEditToggleBtn" onclick="examToggleEditMode()" title="تعديل التصميم">✏️<span class="exam-tb-lbl"> تعديل التصميم</span></button>
   <div id="examEditControls" style="display:none;">
     <div class="exam-toolbar-group">
       <span>موضع التقرير:</span>
@@ -1010,6 +1032,7 @@ function examToggleEditMode() {
   var controls = document.getElementById('examEditControls');
   var editing = page.classList.toggle('exam-editing');
   controls.style.display = editing ? 'flex' : 'none';
+  var _tb = document.querySelector('.exam-toolbar'); if (_tb) _tb.classList.toggle('is-open', editing);
   if (editing) {
     document.querySelectorAll('.result-row').forEach(function (r) { r.draggable = true; });
     document.querySelectorAll('.exam-section').forEach(function (s) { s.draggable = true; });

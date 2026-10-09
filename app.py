@@ -8751,11 +8751,21 @@ def api_tests_active_list():
 
 
 # --------------------------------------------------------------- management
+def _report_designs_context(db):
+    """بيانات لوحة اختيار التصاميم (تخثر 1..4 + GUE/GSE/SFA 1..4) المدمجة داخل صفحة مصمم التقارير."""
+    ids = {}
+    for key, code in (("coag", "COAG"), ("gue", "GUE"), ("gse", "GSE"), ("sfa", "SFA")):
+        r = db.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
+        ids[key] = r["id"] if r else None
+    cur = {fam: get_setting(db, f"report_design_{fam}", "1") for fam in ("coag", "exam")}
+    return {"design_ids": ids, "design_cur": cur}
+
+
 @app.route("/management/report-designs", methods=["GET", "POST"])
 @roles_required("admin")
 def report_designs():
-    """اختيار تصميم (1..4) لتقارير التخثر ولتقارير GUE/GSE/SFA. الاختيار يُحفظ
-    بجدول settings ويسري على كل الطباعة؛ المعاينات هنا حيّة من نفس قوالب الطباعة."""
+    """حفظ التصميم المختار (1..4) لطباعة التخثر ولتقارير GUE/GSE/SFA. اللوحة نفسها صارت داخل صفحة
+    \"مصمم التقارير\" (بطاقة التصاميم)؛ هذا المسار يبقى لحفظ الاختيار ولا يفتح صفحة منفصلة."""
     db = get_db()
     if request.method == "POST":
         for fam in ("coag", "exam"):
@@ -8763,14 +8773,8 @@ def report_designs():
             if v in ("1", "2", "3", "4"):
                 set_setting(db, f"report_design_{fam}", v)
         db.commit()
-        flash("تم حفظ تصاميم التقارير.")
-        return redirect(url_for("report_designs"))
-    ids = {}
-    for key, code in (("coag", "COAG"), ("gue", "GUE"), ("gse", "GSE"), ("sfa", "SFA")):
-        r = db.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
-        ids[key] = r["id"] if r else None
-    cur = {fam: get_setting(db, f"report_design_{fam}", "1") for fam in ("coag", "exam")}
-    return render_template("management/report_designs.html", ids=ids, cur=cur)
+        flash("تم حفظ التصاميم المختارة.")
+    return redirect(url_for("report_designer") + "#designs")
 
 
 @app.route("/management/dashboard-look", methods=["GET", "POST"])
@@ -10345,6 +10349,7 @@ def report_designer():
         result_layout=get_result_layout(db), result_label_defaults=RESULT_LABEL_DEFAULTS,
         merged_exclude_default=", ".join(MERGED_EXCLUDE_DEFAULT),
         result_extra_values=get_extra_col_values(db),
+        **_report_designs_context(db),
     )
 
 
@@ -10373,6 +10378,23 @@ def preview_report_design(test_definition_id):
             + escape(tb_text)
             + "</pre>"
         ), 500
+
+
+# قيم نموذجية لمعاينة تقارير الفحص (نفس القيم الظاهرة بالمعاينة المعتمدة preview_3)
+EXAM_PREVIEW_SAMPLES = {
+    "GUE": {"Color": "Yellow", "Specific Gravity": "1.020", "Reaction (pH)": "6.0", "Glucose": "Negative",
+            "Protein": "Negative", "Ketone": "Negative", "Bile Pigment": "Negative", "Urobilinogen": "0.2",
+            "Nitrite": "Negative", "RBCs": "1-2", "PUS": "2-3", "PUS (WBCs)": "2-3", "Casts": "Nil",
+            "Epithelial Cells": "Few", "Amorphous": "Nil", "Mucus": "Nil", "Crystals": "Nil",
+            "Parasites": "Nil", "Parasites / Others": "Nil"},
+    "GSE": {"Color": "Brown", "Consistency": "Formed", "Mucus": "Nil", "Blood": "Nil", "Worms / Helminths": "Nil",
+            "Pus Cells": "0-1", "RBCs": "Nil", "Amoeba (E. histolytica)": "Not seen", "Giardia lamblia": "Not seen",
+            "Helminthes Ova": "Not seen", "Undigested Food Particles": "Nil", "Fungi / Yeast": "Nil"},
+    "SFA": {"Volume": "3.2", "Color / Appearance": "Grey-white", "Liquefaction Time": "25", "Viscosity": "Normal",
+            "pH": "7.9", "Sperm Count": "42", "Total Sperm Count": "134", "Active (Progressive)": "48",
+            "Sluggish (Non-progressive)": "22", "Immotile": "30", "Normal Forms": "6", "Abnormal Forms": "94",
+            "Pus Cells": "1-2", "RBCs": "Nil", "Agglutination": "Nil"},
+}
 
 
 def _preview_report_design_impl(test_definition_id):
@@ -10473,6 +10495,24 @@ def _preview_report_design_impl(test_definition_id):
         # التخثر: المعاينة تعرض المدى الحقيقي المحفوظ (مريض افتراضي ذكر 30 سنة) بدل "— إلى —"
         ranges = {p["name"]: find_reference_range(db, p["id"], "Male", 30, "Years") for p in parameters}
 
+    # تقارير الفحص GUE/GSE/SFA: المعاينة بنفس شكل المعاينة المعتمدة (preview_3) —
+    # قيم نموذجية واقعية + المدى الطبيعي الحقيقي المحفوظ (مريض نموذجي ذكر 34 سنة)
+    # بدل "—" و"— إلى —"، وبيانات مريض نموذجية بدل الشرطات. بيانات وهمية للتوضيح فقط.
+    _exam_preview_patient = {}
+    if test["code"] in EXAM_PREVIEW_SAMPLES:
+        _samples = EXAM_PREVIEW_SAMPLES[test["code"]]
+        ranges = {p["name"]: find_reference_range(db, p["id"], "Male", 34, "Years") for p in parameters}
+        results_by_name = {
+            p["name"]: {"value_text": _samples.get(p["name"], ""), "value_numeric": None, "flag": None}
+            for p in parameters
+        }
+        _exam_preview_patient = {
+            "patient_name": "أحمد محمد علي", "patient_name_en": "Ahmed Mohammed Ali",
+            "age": "34 Year(s)", "sex": "Male", "referring_doctor_name": "Dr. Sarah Hussein",
+            "sample_no": "IQ26/0055901", "patient_id": "26/0025990",
+            "sample_time": "10:15 AM", "number_of": "1",
+        }
+
     # نفس منطق _print_report_impl بالضبط (راجع التعليق هناك) — القوالب
     # الجاهزة الحديثة (GUE/GSE/SFA وأي قالب مستقبلي بنفس نمط
     # exam_report_shared.html) تتوقع هذي المتغيرات دائمًا، وهذي المعاينة
@@ -10499,11 +10539,12 @@ def _preview_report_design_impl(test_definition_id):
         enable_stamp_widget=bool(test["enable_stamp_widget"]) if "enable_stamp_widget" in test.keys() else False,
         stamp_target_type="test_definition", stamp_target_id=test_definition_id,
         digital_stamps=[], stamp_placements=[],
-        visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}", sex="—", age="—",
-        patient_name="اسم المريض — معاينة تصميم فقط", patient_id="0000",
-        referring_doctor_name="—", is_design_preview=True, preview_test_id=test_definition_id,
+        visit_date=f"{datetime.now().day}/{datetime.now().month}/{datetime.now().year}",
+        is_design_preview=True, preview_test_id=test_definition_id,
         test_definition_id=test_definition_id,
-        sample_no="—", sample_time="—", number_of="—", patient_name_en="",
+        **{**dict(sex="—", age="—", patient_name="اسم المريض — معاينة تصميم فقط", patient_id="0000",
+                  referring_doctor_name="—", sample_no="—", sample_time="—", number_of="—",
+                  patient_name_en=""), **_exam_preview_patient},
         order_test_id=0, results_by_name=results_by_name, param_notes={},
         auto_flag_color_enabled=auto_flag_color_enabled, show_result_flag=show_result_flag, AUTO_FLAG_COLORS=flag_color_map,
         row_spacing_px=row_spacing_px_value,

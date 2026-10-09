@@ -1245,3 +1245,303 @@ Traceback (most recent call last):
     )
     ^
 sqlite3.OperationalError: database is locked
+
+================================================================================
+2026-10-09T08:07:31  preview test_definition_id=22
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10307, in preview_report_design
+    selected_test = db.execute("SELECT * FROM test_definitions WHERE id=?", (selected_id,)).fetchone()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10439, in _preview_report_design_impl
+        custom_heading_align = custom_template["heading_align"] or "center"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<26 lines>...
+    # المعاينة تحديدًا، فما تقدر أصلاً تشوف شكل/موضع "النتيجة" أو "Normal
+    ^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 2, in top-level template code
+    {% import "reports/partials/exam_report_shared.html" as shared with context %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 436, in top-level template code
+    {% block report_body %}{% endblock %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 24, in block 'report_body'
+    {{ shared.render_report_body("General Urine Examination", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 567, in template
+    {{ render_section_rows(names, params_by_name, ranges, units, results_by_name, param_notes, order_test_id, hidden, param_overrides) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 496, in template
+    {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name), name), param_notes.get(name), order_test_id, param_overrides.get(name), name in hidden, (results_by_name.get(name)['flag'] if results_by_name.get(name) else none)) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 431, in template
+    {% set normal_range = exam_range_display(range_row, unit) %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\utils.py", line 92, in from_obj
+    if hasattr(obj, "jinja_pass_arg"):
+       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+jinja2.exceptions.UndefinedError: 'exam_range_display' is undefined
+
+================================================================================
+2026-10-09T08:07:31  preview test_definition_id=22
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10307, in preview_report_design
+    selected_test = db.execute("SELECT * FROM test_definitions WHERE id=?", (selected_id,)).fetchone()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10439, in _preview_report_design_impl
+        custom_heading_align = custom_template["heading_align"] or "center"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<26 lines>...
+    # المعاينة تحديدًا، فما تقدر أصلاً تشوف شكل/موضع "النتيجة" أو "Normal
+    ^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 2, in top-level template code
+    {% import "reports/partials/exam_report_shared.html" as shared with context %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 436, in top-level template code
+    {% block report_body %}{% endblock %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 24, in block 'report_body'
+    {{ shared.render_report_body("General Urine Examination", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 567, in template
+    {{ render_section_rows(names, params_by_name, ranges, units, results_by_name, param_notes, order_test_id, hidden, param_overrides) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 496, in template
+    {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name), name), param_notes.get(name), order_test_id, param_overrides.get(name), name in hidden, (results_by_name.get(name)['flag'] if results_by_name.get(name) else none)) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 431, in template
+    {% set normal_range = exam_range_display(range_row, unit) %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\utils.py", line 92, in from_obj
+    if hasattr(obj, "jinja_pass_arg"):
+       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+jinja2.exceptions.UndefinedError: 'exam_range_display' is undefined
+
+================================================================================
+2026-10-09T08:15:11  preview test_definition_id=22
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10307, in preview_report_design
+    selected_test = db.execute("SELECT * FROM test_definitions WHERE id=?", (selected_id,)).fetchone()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10439, in _preview_report_design_impl
+        custom_heading_align = custom_template["heading_align"] or "center"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<26 lines>...
+    # المعاينة تحديدًا، فما تقدر أصلاً تشوف شكل/موضع "النتيجة" أو "Normal
+    ^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 2, in top-level template code
+    {% import "reports/partials/exam_report_shared.html" as shared with context %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 436, in top-level template code
+    {% block report_body %}{% endblock %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 24, in block 'report_body'
+    {{ shared.render_report_body("General Urine Examination", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 567, in template
+    {{ render_section_rows(names, params_by_name, ranges, units, results_by_name, param_notes, order_test_id, hidden, param_overrides) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 496, in template
+    {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name), name), param_notes.get(name), order_test_id, param_overrides.get(name), name in hidden, (results_by_name.get(name)['flag'] if results_by_name.get(name) else none)) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 431, in template
+    {% set normal_range = exam_range_display(range_row, unit) %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\utils.py", line 92, in from_obj
+    if hasattr(obj, "jinja_pass_arg"):
+       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+jinja2.exceptions.UndefinedError: 'exam_range_display' is undefined
+
+================================================================================
+2026-10-09T08:15:11  preview test_definition_id=22
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10307, in preview_report_design
+    selected_test = db.execute("SELECT * FROM test_definitions WHERE id=?", (selected_id,)).fetchone()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10439, in _preview_report_design_impl
+        custom_heading_align = custom_template["heading_align"] or "center"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<26 lines>...
+    # المعاينة تحديدًا، فما تقدر أصلاً تشوف شكل/موضع "النتيجة" أو "Normal
+    ^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 2, in top-level template code
+    {% import "reports/partials/exam_report_shared.html" as shared with context %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 436, in top-level template code
+    {% block report_body %}{% endblock %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 24, in block 'report_body'
+    {{ shared.render_report_body("General Urine Examination", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 567, in template
+    {{ render_section_rows(names, params_by_name, ranges, units, results_by_name, param_notes, order_test_id, hidden, param_overrides) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 496, in template
+    {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name), name), param_notes.get(name), order_test_id, param_overrides.get(name), name in hidden, (results_by_name.get(name)['flag'] if results_by_name.get(name) else none)) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 431, in template
+    {% set normal_range = exam_range_display(range_row, unit) %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\utils.py", line 92, in from_obj
+    if hasattr(obj, "jinja_pass_arg"):
+       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+jinja2.exceptions.UndefinedError: 'exam_range_display' is undefined
+
+================================================================================
+2026-10-09T08:15:11  preview test_definition_id=22
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10307, in preview_report_design
+    selected_test = db.execute("SELECT * FROM test_definitions WHERE id=?", (selected_id,)).fetchone()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10439, in _preview_report_design_impl
+        custom_heading_align = custom_template["heading_align"] or "center"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<26 lines>...
+    # المعاينة تحديدًا، فما تقدر أصلاً تشوف شكل/موضع "النتيجة" أو "Normal
+    ^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 2, in top-level template code
+    {% import "reports/partials/exam_report_shared.html" as shared with context %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 436, in top-level template code
+    {% block report_body %}{% endblock %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 24, in block 'report_body'
+    {{ shared.render_report_body("General Urine Examination", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 567, in template
+    {{ render_section_rows(names, params_by_name, ranges, units, results_by_name, param_notes, order_test_id, hidden, param_overrides) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 496, in template
+    {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name), name), param_notes.get(name), order_test_id, param_overrides.get(name), name in hidden, (results_by_name.get(name)['flag'] if results_by_name.get(name) else none)) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 431, in template
+    {% set normal_range = exam_range_display(range_row, unit) %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\utils.py", line 92, in from_obj
+    if hasattr(obj, "jinja_pass_arg"):
+       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+jinja2.exceptions.UndefinedError: 'exam_range_display' is undefined
+
+================================================================================
+2026-10-09T08:15:11  preview test_definition_id=22
+Traceback (most recent call last):
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10307, in preview_report_design
+    selected_test = db.execute("SELECT * FROM test_definitions WHERE id=?", (selected_id,)).fetchone()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 10439, in _preview_report_design_impl
+        custom_heading_align = custom_template["heading_align"] or "center"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<26 lines>...
+    # المعاينة تحديدًا، فما تقدر أصلاً تشوف شكل/موضع "النتيجة" أو "Normal
+    ^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 2, in top-level template code
+    {% import "reports/partials/exam_report_shared.html" as shared with context %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 436, in top-level template code
+    {% block report_body %}{% endblock %}
+    ^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 24, in block 'report_body'
+    {{ shared.render_report_body("General Urine Examination", sections_def, params_list, ranges, units, results_by_name, param_notes, order_test_id, test_definition_id) }}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 567, in template
+    {{ render_section_rows(names, params_by_name, ranges, units, results_by_name, param_notes, order_test_id, hidden, param_overrides) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 496, in template
+    {{ exam_row(params_by_name[name], ranges.get(name), units.get(name, ''), resolve_value(results_by_name.get(name), name), param_notes.get(name), order_test_id, param_overrides.get(name), name in hidden, (results_by_name.get(name)['flag'] if results_by_name.get(name) else none)) }}
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 431, in template
+    {% set normal_range = exam_range_display(range_row, unit) %}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\utils.py", line 92, in from_obj
+    if hasattr(obj, "jinja_pass_arg"):
+       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+jinja2.exceptions.UndefinedError: 'exam_range_display' is undefined
