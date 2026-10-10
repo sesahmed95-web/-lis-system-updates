@@ -904,12 +904,16 @@ def migrate(conn):
 
     # Backfill: any order_tests row created before the "price" column existed
     # gets the test's current default price locked in, so nothing breaks.
-    conn.execute(
-        "UPDATE order_tests SET price = ("
-        " SELECT price FROM test_definitions WHERE id = order_tests.test_definition_id"
-        ") WHERE price IS NULL"
-    )
-    conn.commit()
+    # لا نكتب (ولا نطلب قفل الكتابة) إلا لو فيه فعلاً صفوف تحتاج تعبئة: كان هذا الـUPDATE
+    # يشتغل بكل تشغيل حتى لو ما فيه شي يتحدّث، فيطلع "database is locked" لو نسخة ثانية
+    # من البرنامج شغّالة بالخلفية وتكتب بنفس اللحظة.
+    if conn.execute("SELECT 1 FROM order_tests WHERE price IS NULL LIMIT 1").fetchone():
+        conn.execute(
+            "UPDATE order_tests SET price = ("
+            " SELECT price FROM test_definitions WHERE id = order_tests.test_definition_id"
+            ") WHERE price IS NULL"
+        )
+        conn.commit()
 
     # المختبرات الي ترسل نماذج تحاليل لهذا المختبر (بدل اسم الدكتور المرسل) —
     # تُدرج مرة وحدة إذا مو موجودة أصلاً (بالاسم، بدون حساسية لحالة الأحرف)
@@ -1566,7 +1570,23 @@ def init_db():
     conn = get_db()
     conn.executescript(SCHEMA)
     conn.commit()
-    migrate(conn)
+    # لو قاعدة البيانات مقفولة (غالبًا نسخة ثانية من البرنامج شغّالة بالخلفية) ننتظر
+    # ونعيد المحاولة بدل ما نسقط فورًا، ولو استمر القفل نطلع رسالة واضحة.
+    import time as _t
+    for _attempt in range(8):
+        try:
+            migrate(conn)
+            break
+        except sqlite3.OperationalError as _e:
+            if "locked" not in str(_e).lower() or _attempt == 7:
+                if "locked" in str(_e).lower():
+                    raise RuntimeError(
+                        "قاعدة البيانات مقفولة: غالبًا نسخة ثانية من البرنامج شغّالة بالخلفية. "
+                        "أغلق كل نوافذ البرنامج (python.exe / LIS.exe من مدير المهام) ثم أعد التشغيل."
+                    ) from _e
+                raise
+            _t.sleep(3)
+            conn.rollback()
     if fresh:
         seed(conn)
     ensure_examining_tests(conn)

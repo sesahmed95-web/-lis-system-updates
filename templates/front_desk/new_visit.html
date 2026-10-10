@@ -203,14 +203,9 @@
             </select>
           </div>
           <div class="form-field">
-            <label>{{ 'تاريخ الميلاد' if lang=='ar' else 'Birth date' }} <small class="muted">({{ 'اختياري' if lang=='ar' else 'optional' }})</small></label>
-            <input type="date" name="birth_date" id="birth_date_input" max="{{ today_iso|default('') }}" dir="ltr" title="اكتب تاريخ الميلاد ويُحسب العمر تلقائيًا">
-          </div>
-        </div>
-        <div class="nv-row nv-row-3">
-          <div class="form-field">
-            <label>{{ 'وقت ظهور النتائج المتوقع' if lang=='ar' else 'Expected results time' }} <small class="muted">({{ 'اختياري' if lang=='ar' else 'optional' }})</small></label>
-            <input type="datetime-local" name="expected_ready_at" id="expected_ready_input" dir="ltr" title="اختياري: يظهر للمريض بورقة الـQR">
+            <label>{{ 'سنة الميلاد' if lang=='ar' else 'Birth year' }} <small class="muted">({{ 'يُحسب العمر تلقائيًا' if lang=='ar' else 'age is calculated' }})</small></label>
+            <input type="number" id="birth_year_input" min="1900" max="2100" step="1" dir="ltr" placeholder="1990" autocomplete="off">
+            <input type="hidden" name="birth_date" id="birth_date_input" value="">
           </div>
         </div>
         <div class="nv-row nv-row-contact">
@@ -233,7 +228,12 @@
             <input type="text" inputmode="decimal" id="totalAmountInput" name="total_amount_input" value="0">
           </div>
           <div class="form-field">
-            <label>الواصل</label>
+            <label style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+              <span>الواصل</span>
+              <span title="تأشير = المبلغ الكلي واصل بالكامل" style="font-size:12px; font-weight:600; cursor:pointer;">
+                <input type="checkbox" id="paidFullCheck" style="vertical-align:middle;"> ◀ دفع كامل
+              </span>
+            </label>
             <input type="text" inputmode="decimal" id="paidAmountInput" name="paid_amount" value="0">
           </div>
           <div class="form-field">
@@ -474,6 +474,22 @@
       <a class="btn small secondary" id="printBarcodeBtn" href="#" target="_blank"
          style="padding:4px 10px; font-size:12.5px; white-space:nowrap; pointer-events:none; opacity:.5;"
          title="يفعّل بعد حفظ الزيارة">🖨️ طباعة الباركود</a>
+      <a class="btn small secondary" id="printQrBtn" href="#" target="_blank"
+         style="padding:4px 10px; font-size:12.5px; white-space:nowrap; pointer-events:none; opacity:.5;"
+         title="يفعّل بعد حفظ الزيارة">📱 QR المريض</a>
+      <span style="display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap;">
+        <button type="button" class="btn small secondary" id="expectedBtn" onclick="toggleExpectedBox()"
+                style="padding:4px 10px; font-size:12.5px; white-space:nowrap;"
+                title="يظهر للمريض بورقة الـQR">⏱ وقت النتائج المتوقع</button>
+        <span id="expectedBox" style="display:none; align-items:center; gap:4px; flex-wrap:wrap;">
+          <input type="datetime-local" name="expected_ready_at" id="expected_ready_input" dir="ltr" style="padding:3px 6px;">
+          <button type="button" class="btn small secondary" onclick="setExpectedPlus(1)" style="padding:3px 8px;">+1 س</button>
+          <button type="button" class="btn small secondary" onclick="setExpectedPlus(2)" style="padding:3px 8px;">+2 س</button>
+          <button type="button" class="btn small secondary" onclick="setExpectedPlus(4)" style="padding:3px 8px;">+4 س</button>
+          <button type="button" class="btn small secondary" onclick="setExpectedPlus(24)" style="padding:3px 8px;">غداً</button>
+          <button type="button" class="btn small secondary" onclick="clearExpected()" style="padding:3px 8px;" title="مسح">✖</button>
+        </span>
+      </span>
     </div>
     <div class="nv-bottombar-right">
       <div class="nv-toggle-wrap">
@@ -482,6 +498,10 @@
           <input type="checkbox" id="toggleVisitBarcode">
           <span class="nv-switch-slider"></span>
         </label>
+      </div>
+      <div class="nv-toggle-wrap" title="عدد نسخ كل ملصق باركود عينة (فارغ = حسب إعداد صفحة الطباعة)">
+        <span>عدد الباركود</span>
+        <input type="number" id="barcodeCopiesInput" min="1" max="20" placeholder="تلقائي" style="width:64px; padding:2px 4px;">
       </div>
       <div class="nv-toggle-wrap">
         <span>Sample-wise</span>
@@ -507,6 +527,7 @@
     <button type="button" class="btn" id="createdPrintBarcodeBtn" onclick="printCreatedVisitBarcode()">🏷️ طباعة الباركود</button>
     <button type="button" class="btn" id="createdPrintSampleWiseBtn" onclick="printCreatedSampleBarcodes()">🧪🏷️ طباعة ملصقات العينات</button>
     <button type="button" class="btn" id="createdPrintInvoiceBtn" onclick="printCreatedInvoice()">🧾 طباعة الفاتورة</button>
+    <button type="button" class="btn" id="createdPrintQrBtn" onclick="printCreatedQr()">📱 QR المريض</button>
     <a class="btn secondary" id="goToVisitsBtn" href="#">📋 قائمة الزيارات</a>
     <button type="button" class="btn secondary" onclick="startAnotherVisit()">➕ زيارة جديدة أخرى</button>
   </div>
@@ -593,6 +614,7 @@
   const totalAmountInput = document.getElementById('totalAmountInput');
   const paidAmountInput = document.getElementById('paidAmountInput');
   const remainingAmountInput = document.getElementById('remainingAmountInput');
+  const paidFullCheck = document.getElementById('paidFullCheck');
 
   function updateBilling() {
     const computedTotal = parseFloat(document.getElementById('grandTotal').textContent) || 0;
@@ -600,7 +622,10 @@
       totalAmountInput.value = computedTotal;
     }
     const total = parseFloat(totalAmountInput.value) || 0;
+    // تأشير "دفع كامل": الواصل = المبلغ الكلي دائمًا (يتبع أي تغيير بالتحاليل/المبلغ)
+    if (paidFullCheck && paidFullCheck.checked) paidAmountInput.value = total;
     const paid = parseFloat(paidAmountInput.value) || 0;
+    // كتابة مبلغ أقل من الكلي = الفرق ينزل مباشرة بحقل الباقي
     remainingAmountInput.value = Math.max(0, total - paid);
   }
 
@@ -608,7 +633,12 @@
     totalAmountInput.dataset.userEdited = '1';
     updateBilling();
   });
-  paidAmountInput.addEventListener('input', updateBilling);
+  paidAmountInput.addEventListener('input', function () {
+    // الكتابة اليدوية بالواصل تلغي التأشير (المبلغ المكتوب هو الواصل)
+    if (paidFullCheck) paidFullCheck.checked = false;
+    updateBilling();
+  });
+  if (paidFullCheck) paidFullCheck.addEventListener('change', updateBilling);
 
   // ==================================================================
   // اختيار بارامترات معيّنة بس من داخل تحليل متعدد الباراميترات (سهم ▾)
@@ -700,7 +730,7 @@
       const hasPrice = p.price !== null && p.price !== undefined && p.price !== '';
       html += '<div class="nv-param-row">' +
         '<input type="checkbox" data-param-id="' + p.id + '" ' + (checked ? 'checked' : '') +
-        ' onchange="nvOnParamCheck(\'' + testId + '\')">' +
+        ' onchange="nvOnParamCheck(\'' + testId + '\', this)">' +
         '<label>' + p.name + '</label>' +
         '<button type="button" class="nv-param-arrow" title="تعديل اسم هذا الباراميتر" ' +
         'onclick="nvRenameParam(\'' + testId + '\', ' + p.id + ', this)">✏️</button>' +
@@ -764,8 +794,28 @@
       .catch(function () { alert('تعذّر الاتصال بالخادم'); });
   };
 
-  window.nvOnParamCheck = function (testId) {
+  // اختيار تلقائي مرافق: أي بارامتر "X" يختار معه "X Control" إن وُجد، و PT يختار معه INR.
+  // إلغاء "X" يلغي المرافقين معه. (أضف أزواجًا أخرى هنا إذا احتجت)
+  const NV_AUTO_COMPANIONS = { 'pt': ['inr'] };
+  function nvNorm(t) { return (t || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+
+  window.nvOnParamCheck = function (testId, changedCb) {
     const panel = document.getElementById('paramPanel_' + testId);
+    if (changedCb) {
+      const row = changedCb.closest('.nv-param-row');
+      const lab = row ? row.querySelector('label') : null;
+      const base = lab ? nvNorm(lab.textContent) : '';
+      if (base && base.indexOf('control') === -1) {
+        const wanted = [base + ' control', base + ' (control)'].concat(NV_AUTO_COMPANIONS[base] || []);
+        panel.querySelectorAll('.nv-param-row').forEach(function (r2) {
+          const l2 = r2.querySelector('label');
+          const cb2 = r2.querySelector('input[type=checkbox]');
+          if (l2 && cb2 && cb2 !== changedCb && wanted.indexOf(nvNorm(l2.textContent)) !== -1) {
+            cb2.checked = changedCb.checked;
+          }
+        });
+      }
+    }
     const ids = [];
     panel.querySelectorAll('input[type=checkbox]').forEach(function (c) {
       if (c.checked) ids.push(c.getAttribute('data-param-id'));
@@ -1006,11 +1056,13 @@
   const visitCreatedPanel = document.getElementById('visitCreatedPanel');
   const barcodePrintFrame = document.getElementById('barcodePrintFrame');
   let lastCreatedVisitId = null;
+  let visitAlreadySaved = false;   // يمنع تكرار الزيارة بالضغط على حفظ مرة ثانية بعد النجاح
 
   newVisitForm.addEventListener('submit', function (e) {
     e.preventDefault();
     // Enter داخل الحقول يُستخدم للتنقل فقط ولا يحفظ الزيارة (الحفظ بزر Create Visit)
     if (window.nvEnterGuardUntil && Date.now() < window.nvEnterGuardUntil) return;
+    if (visitAlreadySaved) { alert('تم حفظ هذه الزيارة. لزيارة جديدة اضغط "زيارة جديدة أخرى" بالأسفل.'); return; }
     // إلزامية اختيار تحليل واحد على الأقل قبل حفظ الزيارة — يشمل أي
     // تحليل من القائمة الأصلية أو تحليل جديد أُضيف عبر الحقل أعلاه
     // (لأنه بمجرد إضافته يصير خانة اختيار محدَّدة تلقائيًا بنفس الشبكة).
@@ -1035,8 +1087,8 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        createVisitBtn.disabled = false;
-        if (!data || !data.ok) { alert('حدث خطأ أثناء إنشاء الزيارة. حاول مرة أخرى.'); return; }
+        if (!data || !data.ok) { createVisitBtn.disabled = false; alert('حدث خطأ أثناء إنشاء الزيارة. حاول مرة أخرى.'); return; }
+        visitAlreadySaved = true;   // الزر يبقى معطّلاً بعد النجاح حتى "زيارة جديدة أخرى"
         lastCreatedVisitId = data.visit_id;
         document.getElementById('createdRegNumber').textContent = data.registration_number;
         document.getElementById('goToVisitsBtn').href = data.redirect_url;
@@ -1045,6 +1097,11 @@
         printBarcodeBtn.style.pointerEvents = 'auto';
         printBarcodeBtn.style.opacity = '1';
         printBarcodeBtn.title = '';
+        const printQrBtn = document.getElementById('printQrBtn');
+        printQrBtn.href = '/front-desk/visits/' + data.visit_id + '/print/portal-qr';
+        printQrBtn.style.pointerEvents = 'auto';
+        printQrBtn.style.opacity = '1';
+        printQrBtn.title = '';
 
         // إظهار/إخفاء أزرار الطباعة بلوحة "تم إنشاء الزيارة" حسب حالة
         // مفاتيح Visit Barcode / Sample-wise / Invoice أسفل الفورم — نفس
@@ -1074,7 +1131,14 @@
 
   window.printCreatedSampleBarcodes = function () {
     if (!lastCreatedVisitId) return;
-    window.open('/front-desk/visits/' + lastCreatedVisitId + '/print/samples', '_blank');
+    var cp = parseInt((document.getElementById('barcodeCopiesInput') || {}).value, 10);
+    var q = (cp >= 1 && cp <= 20) ? ('?copies=' + cp) : '';
+    window.open('/front-desk/visits/' + lastCreatedVisitId + '/print/samples' + q, '_blank');
+  };
+
+  window.printCreatedQr = function () {
+    if (!lastCreatedVisitId) return;
+    window.open('/front-desk/visits/' + lastCreatedVisitId + '/print/portal-qr', '_blank');
   };
 
   window.printCreatedInvoice = function () {
@@ -1530,33 +1594,53 @@
 </script>
 
 <script>
-// تاريخ الميلاد → العمر تلقائيًا (بنفس سطر العمر)
+// وقت ظهور النتائج المتوقع (يظهر للمريض بورقة الـQR)
+function nvFmtLocal(d) {
+  function p(n) { return (n < 10 ? '0' : '') + n; }
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function toggleExpectedBox() {
+  var box = document.getElementById('expectedBox');
+  var open = box.style.display === 'none';
+  box.style.display = open ? 'inline-flex' : 'none';
+  if (open && !document.getElementById('expected_ready_input').value) setExpectedPlus(2);
+}
+function setExpectedPlus(hours) {
+  var d = new Date(Date.now() + hours * 3600000);
+  if (hours >= 24) { d = new Date(); d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0); }
+  document.getElementById('expected_ready_input').value = nvFmtLocal(d);
+  var b = document.getElementById('expectedBtn');
+  b.textContent = '⏱ ' + document.getElementById('expected_ready_input').value.replace('T', ' ');
+}
+function clearExpected() {
+  document.getElementById('expected_ready_input').value = '';
+  document.getElementById('expectedBtn').textContent = '⏱ وقت النتائج المتوقع';
+  document.getElementById('expectedBox').style.display = 'none';
+}
+document.addEventListener('DOMContentLoaded', function () {
+  var inp = document.getElementById('expected_ready_input');
+  if (inp) inp.addEventListener('change', function () {
+    document.getElementById('expectedBtn').textContent = inp.value ? ('⏱ ' + inp.value.replace('T', ' ')) : '⏱ وقت النتائج المتوقع';
+  });
+});
+
+// سنة الميلاد → العمر تلقائيًا (يُكتب بحقل العمر بالسنوات)
 (function () {
+  var yearEl = document.getElementById('birth_year_input');
   var dob = document.getElementById('birth_date_input');
   var ageEl = document.getElementById('age_input');
   var unitEl = document.getElementById('age_unit_select');
-  if (!dob || !ageEl || !unitEl) return;
-  dob.addEventListener('change', function () {
-    if (!dob.value) return;
-    var b = new Date(dob.value + 'T00:00:00'), n = new Date();
-    if (isNaN(b) || b > n) return;
-    var days = Math.floor((n - b) / 86400000);
-    var years = n.getFullYear() - b.getFullYear();
-    if (n.getMonth() < b.getMonth() || (n.getMonth() === b.getMonth() && n.getDate() < b.getDate())) years--;
-    var val, unit;
-    if (years >= 1) { val = years; unit = 'Years'; }
-    else {
-      var months = (n.getFullYear() - b.getFullYear()) * 12 + (n.getMonth() - b.getMonth());
-      if (n.getDate() < b.getDate()) months--;
-      if (months >= 1) { val = months; unit = 'Months'; }
-      else if (days >= 7) { val = Math.floor(days / 7); unit = 'Weeks'; }
-      else if (days >= 1) { val = days; unit = 'Days'; }
-      else { val = Math.max(1, Math.floor((n - b) / 3600000)); unit = 'Hours'; }
-    }
-    ageEl.value = val; unitEl.value = unit;
-    ['input', 'change'].forEach(function (ev) { ageEl.dispatchEvent(new Event(ev, {bubbles: true})); unitEl.dispatchEvent(new Event(ev, {bubbles: true})); });
+  if (!yearEl || !dob || !ageEl || !unitEl) return;
+  function fire(el) { ['input', 'change'].forEach(function (ev) { el.dispatchEvent(new Event(ev, {bubbles: true})); }); }
+  yearEl.addEventListener('input', function () {
+    var raw = (yearEl.value || '').trim();
+    var y = parseInt(raw, 10), cy = new Date().getFullYear();
+    if (raw.length < 4 || isNaN(y) || y < 1900 || y > cy) { dob.value = ''; return; }
+    dob.value = y + '-01-01';
+    var age = cy - y;
+    if (age >= 1) { ageEl.value = age; unitEl.value = 'Years'; fire(ageEl); fire(unitEl); }
+    // مولود بنفس السنة الحالية: اكتب العمر يدويًا (أشهر/أيام) بحقل العمر
   });
-  var today = new Date(); dob.max = today.toISOString().slice(0, 10);
 })();
 
 // حقول Reference / Other Information: تحت أسماء التحاليل، وتنزل تحت Health Information لو قائمة التحاليل صارت أطول من العمود الأيسر

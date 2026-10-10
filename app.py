@@ -191,6 +191,17 @@ import faulthandler
 # فقط، بدون أي errorhandler عام (كان سبب كسر كل الصفحات بمحاولة سابقة).
 # يُكتب بملف crash_log.txt بمجلد البرنامج نفسه — راجعه أول شي لو انغلق
 # البرنامج فجأة بدون أي رسالة حمراء بالتيرمينال.
+import sys
+if getattr(sys, "frozen", False) and (sys.stdout is None or sys.stderr is None):
+    # نسخة Setup بدون نافذة سوداء (--noconsole): ما فيه stdout/stderr، فنوجّههم لملف يُصفَّر كل تشغيل
+    try:
+        _srv_log = open(os.path.join(os.path.dirname(sys.executable), "server_log.txt"), "w", encoding="utf-8", buffering=1)
+        if sys.stdout is None:
+            sys.stdout = _srv_log
+        if sys.stderr is None:
+            sys.stderr = _srv_log
+    except Exception:
+        pass
 _CRASH_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crash_log.txt")
 try:
     _crash_log_file = open(_CRASH_LOG_PATH, "a", encoding="utf-8", buffering=1)
@@ -3609,8 +3620,20 @@ def visits_list():
         query += "WHERE " + " AND ".join(conditions) + " "
     query += "ORDER BY v.created_at DESC, v.id DESC LIMIT 100"
     visits = db.execute(query, params).fetchall()
+    # عمود "التحاليل": كل تحاليل الزيارة بسعر كل تحليل (بنفس سطر المريض)
+    visit_tests = {}
+    _vids = [v["id"] for v in visits]
+    if _vids:
+        _ph = ",".join("?" * len(_vids))
+        for r in db.execute(
+            "SELECT o.visit_id AS visit_id, td.name AS tname, ot.price AS price FROM order_tests ot "
+            "JOIN orders o ON o.id = ot.order_id "
+            "JOIN test_definitions td ON td.id = ot.test_definition_id "
+            f"WHERE o.visit_id IN ({_ph}) ORDER BY ot.id", _vids,
+        ).fetchall():
+            visit_tests.setdefault(r["visit_id"], []).append({"name": r["tname"], "price": r["price"] or 0})
     return render_template("front_desk/visits.html", visits=visits, q=q, show_all=show_all,
-                            filter_label=filter_label)
+                            filter_label=filter_label, visit_tests=visit_tests)
 
 @app.route("/front-desk/visits/<int:visit_id>/delete", methods=["POST"])
 @roles_required("admin")
@@ -3769,10 +3792,28 @@ def visit_edit(visit_id):
         # طبيب / ماكو سعر خاص إله).
         if doctor_changed:
             existing = db.execute(
-                "SELECT id, test_definition_id FROM order_tests WHERE order_id=?", (order["id"],)
+                "SELECT id, test_definition_id, selected_param_ids FROM order_tests WHERE order_id=?", (order["id"],)
             ).fetchall()
             for row in existing:
-                new_price = get_test_price(db, row["test_definition_id"], referring_doctor_id)
+                new_price = None
+                # تحليل مطلوب جزئيًا (بارامترات مختارة فقط): سعره مجموع أسعار بارامتراته المختارة،
+                # مو سعر التحليل كامل (كان إعادة التسعير تسعّره كاملاً فيزيد الإجمالي ويظهر باقي).
+                _raw = (row["selected_param_ids"] or "").strip()
+                if _raw:
+                    try:
+                        _pids = [int(x) for x in _raw.split(",") if x.strip()]
+                    except ValueError:
+                        _pids = []
+                    if _pids:
+                        _ph = ",".join("?" * len(_pids))
+                        _pr = db.execute(
+                            f"SELECT price FROM test_parameters WHERE id IN ({_ph}) AND test_definition_id=?",
+                            (*_pids, row["test_definition_id"]),
+                        ).fetchall()
+                        if _pr:
+                            new_price = sum((x["price"] or 0) for x in _pr)
+                if new_price is None:
+                    new_price = get_test_price(db, row["test_definition_id"], referring_doctor_id)
                 db.execute("UPDATE order_tests SET price=?, doctor_id=? WHERE id=?",
                            (new_price, referring_doctor_id, row["id"]))
 
@@ -4232,7 +4273,7 @@ def print_sample_barcodes(visit_id):
         return "Not found", 404
     rows = db.execute(
         "SELECT ot.id, ot.barcode, ot.tube_barcode, td.name as test_name, td.short_name as test_short_name, "
-        "td.sample_type FROM order_tests ot "
+        "td.sample_type, td.department, ot.selected_param_ids FROM order_tests ot "
         "JOIN test_definitions td ON td.id = ot.test_definition_id "
         "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
         (visit_id,),
@@ -4243,18 +4284,49 @@ def print_sample_barcodes(visit_id):
     # مستقل لكل تحليل، لأن فعليًا هي نفس الأنبوب المسحوب مرة وحدة. تحليل
     # بدون sample_type محدد (فاضي) ياخذ باركوده الفردي القديم لحاله، لأننا
     # ما نعرف أكيد أي أنبوب يشاركه.
+    # الافتراضي الآن: التحاليل التابعة لنفس القسم (department) مثل Hematology
+    # تشترك بباركود واحد؛ تحليل بدون قسم يُجمَّع حسب نوع العينة، وبدونهما
+    # يبقى ملصقه الفردي. لإرجاع التجميع القديم (حسب نوع العينة فقط):
+    # الرابط ?group=sample_type أو إعداد barcode_group_mode = sample_type.
+    group_mode = (request.args.get("group") or get_setting(db, "barcode_group_mode", "department") or "department").strip()
+    # أسماء التحاليل المطبوعة على الملصق: لو التحليل مطلوب جزئيًا (مثلاً PT و PTT
+    # من Coagulation) تُطبع أسماء البارامترات المختارة نفسها بدل اسم التحليل
+    # الكامل، بدون بارامترات الـControl ولا INR (تُضاف تلقائيًا مع PT).
+    def _label_names(r, short=False):
+        raw = (r["selected_param_ids"] or "").strip()
+        if raw:
+            try:
+                _ids = [int(x) for x in raw.split(",") if x.strip()]
+            except ValueError:
+                _ids = []
+            if _ids:
+                _ph = ",".join("?" * len(_ids))
+                _names = [p["name"] for p in db.execute(
+                    f"SELECT name FROM test_parameters WHERE id IN ({_ph}) ORDER BY id", _ids).fetchall()]
+                _low = {n.strip().lower() for n in _names}
+                _out = [n for n in _names
+                        if "control" not in n.lower()
+                        and not (n.strip().lower() == "inr" and "pt" in _low)]
+                if _out:
+                    return _out
+        return [(r["test_short_name"] or r["test_name"]) if short else r["test_name"]]
+
     groups = {}
     ungrouped = []
     for r in rows:
         stype = (r["sample_type"] or "").strip()
-        if not stype:
+        dept = (r["department"] or "").strip()
+        key = (dept or stype) if group_mode != "sample_type" else stype
+        if not key:
             ungrouped.append(r)
             continue
-        groups.setdefault(stype, []).append(r)
+        groups.setdefault(key, []).append(r)
 
     reg_number = visit["registration_number"]
     tube_samples = []
     next_index = 1
+    _used_tubes = {r["tube_barcode"] for r in rows if r["tube_barcode"]}
+    _changed = False
     for stype in sorted(groups.keys()):
         group_rows = groups[stype]
         existing = next((r["tube_barcode"] for r in group_rows if r["tube_barcode"]), None)
@@ -4262,22 +4334,31 @@ def print_sample_barcodes(visit_id):
             tube_barcode = existing
         else:
             tube_barcode = f"{reg_number}T{next_index}"
+            while tube_barcode in _used_tubes:
+                next_index += 1
+                tube_barcode = f"{reg_number}T{next_index}"
             next_index += 1
-            ids = [r["id"] for r in group_rows]
+            _used_tubes.add(tube_barcode)
+        # كل تحاليل المجموعة تأخذ نفس باركود الأنبوب (حتى لو كانت قبل التجميع الجديد بباركودات مختلفة)
+        ids = [r["id"] for r in group_rows if r["tube_barcode"] != tube_barcode]
+        if ids:
             placeholders = ",".join("?" * len(ids))
             db.execute(f"UPDATE order_tests SET tube_barcode=? WHERE id IN ({placeholders})",
                        (tube_barcode, *ids))
+            _changed = True
         tube_samples.append({
-            "sample_type": stype,
+            # اسم القسم ما يُطبع على الملصق (فقط أسماء التحاليل/الأنواع المختارة)؛
+            # عند التجميع حسب نوع العينة فقط (?group=sample_type) يبقى العنوان القديم
+            "sample_type": stype if group_mode == "sample_type" else "",
             "barcode": tube_barcode,
-            "test_names": [r["test_name"] for r in group_rows],
+            "test_names": [n for r in group_rows for n in _label_names(r)],
             # short_names: نفس الترتيب أعلاه، لكل تحليل اختصاره اليدوي
             # (test_definitions.short_name) لو موجود، وإلا الاسم الكامل
             # نفسه (يتكفل القالب بتقصيره تلقائيًا وقت العرض لو ما فيه
             # اختصار محدد — راجع shortenTestList بالقالب).
-            "short_names": [r["test_short_name"] or r["test_name"] for r in group_rows],
+            "short_names": [n for r in group_rows for n in _label_names(r, short=True)],
         })
-    if next_index > 1:
+    if _changed:
         db.commit()
 
     # تحاليل بلا sample_type محدد — ما نعرف أي أنبوب تشاركه بأمان، فتطلع
@@ -4285,10 +4366,10 @@ def print_sample_barcodes(visit_id):
     # كليًا من العرض الرئيسي.
     for r in ungrouped:
         tube_samples.append({
-            "sample_type": r["test_name"],  # ما فيه نوع عينة معروف، فنعرض اسم التحليل نفسه كتوضيح
+            "sample_type": "",  # بدون عنوان: أسماء التحاليل تظهر تحته مباشرة
             "barcode": r["barcode"],
-            "test_names": [r["test_name"]],
-            "short_names": [r["test_short_name"] or r["test_name"]],
+            "test_names": _label_names(r),
+            "short_names": _label_names(r, short=True),
         })
 
     # باركودات فردية لكل تحليل لحاله — تبقى متوفرة كخيار إضافي (زر منفصل
@@ -4312,6 +4393,10 @@ def print_sample_barcodes(visit_id):
     # حتى تبقى "ثابتة" بين كل طباعة وطباعة إلى أن يغيّرها المستخدم بنفسه
     # من الشريط أعلى صفحة الطباعة، بدل ما ترجع لقيمة افتراضية كل مرة.
     barcode_copies = get_setting(db, "barcode_copies", "1")
+    # عدد النسخ المحدد من صفحة "زيارة جديدة" (?copies=N) يتقدّم على الإعداد المحفوظ
+    _cp = request.args.get("copies", type=int)
+    if _cp and 1 <= _cp <= 20:
+        barcode_copies = str(_cp)
     barcode_test_names_mode = get_setting(db, "barcode_test_names_mode", "full")  # full | short | none
 
     return render_template(
@@ -11282,4 +11367,7 @@ if __name__ == "__main__":
     # (settings.auto_update_enabled = 1). راجع auto_updater.py.
     threading.Thread(target=auto_updater.background_loop, args=(get_db,), daemon=True).start()
 
+    if getattr(sys, "frozen", False):
+        import logging
+        logging.getLogger("werkzeug").setLevel(logging.WARNING)   # ما نسجّل كل طلب GET بالملف
     app.run(host="0.0.0.0", port=9090, debug=False, threaded=True)

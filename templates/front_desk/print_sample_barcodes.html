@@ -207,14 +207,14 @@
     <button type="button" onclick="printTubes()" style="padding:6px 16px;font-weight:700;">🖨 طباعة</button>
   </div>
 
-  <h2 class="section-heading no-print">🧪 باركودات الأنابيب (حسب نوع العينة) — حدد عدد النسخ ثم اضغط طباعة</h2>
+  <h2 class="section-heading no-print">🧪 باركودات الأنابيب (حسب القسم) — حدد عدد النسخ ثم اضغط طباعة</h2>
   <div class="grid tube-grid">
     {% for s in tube_samples %}
     <div class="label">
       <div class="lab-name">{{ lab_name_ar }}</div>
       <div class="patient">{{ visit['full_name'] }}</div>
       <div class="meta">{{ visit['created_at'] }}</div>
-      <div class="sample-type">{{ s['sample_type'] }}</div>
+      {% if s['sample_type'] %}<div class="sample-type">{{ s['sample_type'] }}</div>{% endif %}
       {% if s['test_names']|length >= 1 %}
       <div class="test-list" data-full="{{ s['test_names']|join('، ') }}"
            data-short="{{ s['short_names']|join('، ') }}">{{ s['test_names']|join('، ') }}</div>

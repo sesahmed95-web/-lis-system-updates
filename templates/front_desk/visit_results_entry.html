@@ -102,6 +102,11 @@
     // قبل الفتح، نضمن الطلب يوصل طازج للسيرفر دائماً بدل ما يرجّع
     // المتصفح نسخة iframe مخزّنة قديمة لنفس الرابط.
     var bust = url + (url.indexOf('?') === -1 ? '?' : '&') + '_ts=' + Date.now();
+    // نفتح التقرير بنافذة حقيقية (مثل الباركود والفاتورة): الطباعة من داخل iframe لا تشتغل
+    // بنافذة Edge بوضع التطبيق. لو المتصفح منع النافذة المنبثقة نرجع للمعاينة داخل الصفحة.
+    var w = null;
+    try { w = window.open(bust, '_blank'); } catch (e) { w = null; }
+    if (w) return;
     document.getElementById('reportModalFrame').src = bust;
     document.getElementById('reportModalTitle').textContent = title ? ('🖨 ' + title) : '🖨 معاينة الطباعة';
     document.getElementById('reportModalOverlay').style.display = 'flex';

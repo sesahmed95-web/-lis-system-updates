@@ -29,7 +29,7 @@ table or the analyzer's Specimen ID entry accordingly.
 import socket
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from database import get_db, get_setting, set_setting, find_reference_range
 
@@ -130,11 +130,45 @@ def _find_specimen_order_tests(db, specimen_id):
 
 def _patient_for_order_test(db, order_test_id):
     return db.execute(
-        "SELECT p.id AS pid, p.full_name, p.gender, p.age, p.age_unit "
+        "SELECT p.id AS pid, p.full_name, p.gender, p.age, p.age_unit, p.birth_date "
         "FROM order_tests ot JOIN orders o ON o.id = ot.order_id "
         "JOIN visits v ON v.id = o.visit_id JOIN patients p ON p.id = v.patient_id "
         "WHERE ot.id=?", (order_test_id,)
     ).fetchone()
+
+
+def _dob_for_astm(pat):
+    """تاريخ الميلاد بصيغة ASTM (YYYYMMDD) لحقل P.8 — الجهاز يحسب منه العمر ويختار
+    المدى الطبيعي. لو التاريخ مسجّل نستخدمه، وإلا نشتقه من العمر ووحدته (تقريبي:
+    للسنوات يُستخدم 1 يناير حتى يطلع العمر نفسه المكتوب بالزيارة)."""
+    if not pat:
+        return ""
+    try:
+        bd = pat["birth_date"] or ""
+    except (KeyError, IndexError):
+        bd = ""
+    digits = "".join(ch for ch in str(bd) if ch.isdigit())
+    if len(digits) >= 8:
+        return digits[:8]
+    try:
+        age = int(float(pat["age"]))
+    except (TypeError, ValueError, KeyError):
+        return ""
+    unit = (pat["age_unit"] or "Years").strip().lower()
+    today = datetime.now().date()
+    try:
+        if unit.startswith("y"):
+            return f"{today.year - age:04d}0101"
+        if unit.startswith("m"):
+            total = today.year * 12 + (today.month - 1) - age
+            return f"{total // 12:04d}{total % 12 + 1:02d}{min(today.day, 28):02d}"
+        if unit.startswith("w"):
+            return (today - timedelta(weeks=age)).strftime("%Y%m%d")
+        if unit.startswith("d"):
+            return (today - timedelta(days=age)).strftime("%Y%m%d")
+    except (ValueError, OverflowError):
+        return ""
+    return ""
 
 
 def _flag_for(db, param_id, value_numeric, pat, analyzer):
@@ -213,7 +247,8 @@ def build_query_response(db, specimen_id):
 
     o = [""] * 26
     o[0], o[1], o[2], o[4], o[5], o[11], o[25] = "O", "1", sid, tests, "R", "A", "Q"
-    p = f"P|1||{pid}||{name_field}||{''}|{sex}"
+    # P.8 = تاريخ الميلاد (YYYYMMDD) حتى الجهاز يحسب العمر ويطبّق المدى الطبيعي المناسب
+    p = f"P|1||{pid}||{name_field}||{_dob_for_astm(pat)}|{sex}"
     return [header, p, "|".join(o), "L|1|N"]
 
 

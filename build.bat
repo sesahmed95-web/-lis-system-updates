@@ -23,7 +23,7 @@ if exist static (
 )
 
 echo ==== 4/4  Building LabSystem.exe with PyInstaller ====
-python -m PyInstaller --noconfirm --clean --onedir --name LabSystem --icon "icon\lab-icon.ico" !ADD! app.py
+python -m PyInstaller --noconfirm --clean --onedir --noconsole --name LabSystem --icon "icon\lab-icon.ico" !ADD! app.py
 if errorlevel 1 (
     echo.
     echo BUILD FAILED - read the errors above.
