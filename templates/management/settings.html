@@ -225,12 +225,12 @@
       <div class="form-field"><label>طريقة النشر</label>
         <select name="portal_mode" id="portalMode" onchange="portalModeChanged()">
           <option value="local" {{ 'selected' if current.portal_mode == 'local' }}>مدمجة بالبرنامج (بدون Render ولا GitHub) — موصى بها</option>
-          <option value="remote" {{ 'selected' if current.portal_mode == 'remote' }}>بوابة خارجية على Render (القديمة)</option>
+          <option value="remote" {{ 'selected' if current.portal_mode == 'remote' }}>سحابي (remote) — بوابة Cloudflare Worker أو Render</option>
         </select></div>
       <div class="form-field"><label>رابط البوابة العام (https://...)</label>
         <input type="text" name="portal_url" dir="ltr" placeholder="https://lab-pc.tail1234.ts.net" value="{{ current.portal_url }}"></div>
       <div class="form-field" id="portalKeyField"><label>المفتاح السري (API_SECRET_KEY) — للطريقة الخارجية فقط {% if current.portal_key_set %}<span class="muted">— محفوظ، اتركه فاضي للإبقاء عليه</span>{% endif %}</label>
-        <input type="password" name="portal_api_key" dir="ltr" autocomplete="new-password" placeholder="{{ '••••••••' if current.portal_key_set else 'نفس القيمة المضبوطة بـ Render' }}"></div>
+        <input type="password" name="portal_api_key" dir="ltr" autocomplete="new-password" placeholder="{{ '••••••••' if current.portal_key_set else 'الصق المفتاح السري الخاص ببوابة هذا العميل (API_SECRET_KEY)' }}"></div>
       <div class="form-field"><label>مدة بقاء رابط المريض (أيام)</label>
         <input type="number" name="portal_retention_days" min="1" max="365" value="{{ current.portal_retention_days }}" style="width:120px;">
         <span class="muted">بعدها يُحذف الرابط من البوابة؛ ملف PDF اللي نزّله المريض يبقى عنده.</span></div>
