@@ -1,0 +1,4 @@
+v38c — انسخ app.py و cloud_sync.py و templates\front_desk\print_portal_qr.html فوق ملفاتك (نفس المسارات)، ثم أعد بناء/تشغيل البرنامج.
+1) الـQR: إذا الرابط بالإعدادات هو Render ومعه مفتاح سري، يتعامل البرنامج معه كبوابة Render تلقائيًا (كان يخزّن محليًا ويعرض رابط Render فيرد "لم يُعثر").
+2) ورقة QR: فحص سريع فوري + فحص الشبكة بالخلفية + زر "دفع للبوابة الآن".
+3) stop_tracking_private_files.bat: يوقف تتبع portal_public.db (وبيانات أخرى) في git؛ بعده Commit ثم Push من GitHub Desktop.

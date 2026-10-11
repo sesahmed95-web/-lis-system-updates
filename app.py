@@ -11328,7 +11328,7 @@ def api_portal_sync(visit_id):
 def api_portal_diagnose(visit_id):
     """فحص سلسلة الـQR (رابط عام، بوابة محلية، رمز الزيارة، اكتمال التحاليل) — يُعرض بورقة الـQR."""
     db = get_db()
-    return jsonify({"items": [{"level": l, "text": t} for l, t in cloud_sync.diagnose(db, visit_id)],
+    return jsonify({"items": [{"level": l, "text": t} for l, t in cloud_sync.diagnose(db, visit_id, net=request.args.get("net") == "1")],
                     "link": cloud_sync.portal_link(cloud_sync.get_cfg(db),
                                                    (db.execute("SELECT portal_token FROM visits WHERE id=?", (visit_id,)).fetchone() or {"portal_token": None})["portal_token"])})
 

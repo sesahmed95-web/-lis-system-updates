@@ -64,7 +64,7 @@ def set_pdf_maker(fn):
 # ------------------------------------------------------------------ الإعدادات
 def get_cfg(db):
     gs = database.get_setting
-    return {
+    cfg = {
         "enabled": gs(db, "portal_enabled", "0") == "1",
         "url": (gs(db, "portal_url", "") or "").strip().rstrip("/"),
         "api_key": (gs(db, "portal_api_key", "") or "").strip(),
@@ -76,6 +76,17 @@ def get_cfg(db):
         # remote = البوابة القديمة على Render (cloud_portal) عبر مفتاح سري
         "mode": "remote" if gs(db, "portal_mode", "local") == "remote" else "local",
     }
+    # رابط Render لا يمكن أن يكون بوابة "محلية": بياناتها محفوظة بجهازك (9091) وRender ما يعرفها أبدًا
+    # → الـQR يعطي "لم يُعثر على هذا الرابط". إذا الرابط onrender.com ومعه مفتاح سري نتعامل معه كبوابة Render.
+    try:
+        import urllib.parse as _up
+        _host = (_up.urlparse(cfg["url"]).hostname or "").lower()
+    except Exception:  # noqa: BLE001
+        _host = ""
+    if cfg["mode"] == "local" and _host.endswith(".onrender.com") and cfg["api_key"]:
+        cfg["mode"] = "remote"
+        cfg["mode_auto"] = True
+    return cfg
 
 
 def _num(v, default):
@@ -293,16 +304,16 @@ def _prune_pdf_cache():
         pass
 
 
-def _post_json(cfg, path, payload):
+def _post_json(cfg, path, payload, timeout=None):
     req = urllib.request.Request(
         cfg["url"] + path, data=json.dumps(payload).encode("utf-8"), method="POST",
         headers={"Content-Type": "application/json", "X-API-Key": cfg["api_key"],
                  "User-Agent": "LIS-CloudSync/1.0"})
-    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SEC) as resp:
+    with urllib.request.urlopen(req, timeout=(timeout or HTTP_TIMEOUT_SEC)) as resp:
         return json.loads(resp.read().decode("utf-8") or "{}")
 
 
-def test_connection(cfg):
+def test_connection(cfg, timeout=20):
     """(ok, رسالة). local: نفتح الرابط العام من جهاز المختبر نفسه ونتأكد إنه يوصل لبوابة البرنامج.
     remote: نرسل سجل تجريبي ثم نحذفه."""
     if cfg.get("mode") == "local":
@@ -312,7 +323,7 @@ def test_connection(cfg):
             return False, "الرابط لازم يبدأ بـ https:// (الموبايل ما يفتح روابط بدون تشفير بشكل موثوق)."
         try:
             req = urllib.request.Request(cfg["url"] + "/healthz", headers={"User-Agent": "LIS-CloudSync/1.0"})
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = resp.read(200).decode("utf-8", "ignore")
             if "lis-portal-ok" in body:
                 return True, "✅ الرابط العام يوصل لبوابة البرنامج بنجاح."
@@ -510,7 +521,7 @@ def start_worker():
 
 
 # ------------------------------------------------------------------ تشخيص "ليش الـQR ما يطلّع النتائج؟"
-def diagnose(db, visit_id):
+def diagnose(db, visit_id, net=False):
     """يفحص سلسلة الـQR كاملة ويرجّع قائمة (مستوى, نص): ok / warn / bad. للقراءة فقط (ما يغيّر شي)."""
     import urllib.parse
     out = []
@@ -531,6 +542,11 @@ def diagnose(db, visit_id):
             out.append(("warn", "الرابط ما يبدأ بـ https:// — بعض الموبايلات ما تفتحه. استخدم رابط https."))
         else:
             out.append(("ok", f"الرابط العام: {url}"))
+    if url and cfg.get("mode") == "local" and (urllib.parse.urlparse(url).hostname or "").lower().endswith(".onrender.com"):
+        out.append(("bad", "السبب الجذري: الوضع «محلي» لكن الرابط عنوان Render. نتائجك محفوظة بجهازك (9091) وRender ما يعرفها → يظهر «لم يُعثر على هذا الرابط». "
+                           "الحل: ضع رابط نفق عام لجهازك (Tailscale Funnel/Cloudflare) بدل رابط Render، أو اختر وضع Render وأدخل المفتاح السري."))
+    if cfg.get("mode_auto"):
+        out.append(("warn", "الرابط Render ومعه مفتاح سري، فالبرنامج يتعامل معه كبوابة Render تلقائيًا (وليس وضع محلي)."))
     if cfg.get("mode") == "local":
         try:
             with urllib.request.urlopen("http://127.0.0.1:9091/healthz", timeout=4) as r:
@@ -538,13 +554,27 @@ def diagnose(db, visit_id):
             out.append(("ok", "بوابة البرنامج المحلية (9091) شغّالة.") if ok else ("bad", "المنفذ 9091 يرد لكن مو بوابة البرنامج."))
         except Exception as e:  # noqa: BLE001
             out.append(("bad", f"بوابة البرنامج المحلية (9091) ما تشتغل ({type(e).__name__}) — أعد تشغيل البرنامج."))
-        if url and url.startswith("https://"):
-            ok, msg = test_connection(cfg)
+        if net and url and url.startswith("https://"):
+            ok, msg = test_connection(cfg, timeout=8)
             out.append(("ok" if ok else "bad", "الرابط العام من هذا الجهاز: " + msg.replace("✅ ", "").replace("❌ ", "")))
     row = db.execute("SELECT portal_token FROM visits WHERE id=?", (visit_id,)).fetchone()
     tok = row["portal_token"] if row else None
     if not tok:
         out.append(("bad", "هذي الزيارة ما لها رمز QR بعد (سجّلت قبل تفعيل المزامنة؟). افتح ورقة الـQR مرة ثانية لتوليده."))
+    if cfg.get("mode") == "remote" and tok:
+        if not cfg["api_key"]:
+            out.append(("bad", "وضع Render لكن المفتاح السري فاضي بالإعدادات."))
+        elif net:
+            try:
+                res = _post_json(cfg, "/api/missing", {"tokens": [tok]}, timeout=15)
+                if tok in (res.get("missing") or []):
+                    out.append(("bad", "بوابة Render لا تملك رمز هذه الزيارة (Render المجاني ينسى بياناته عند النوم/إعادة النشر). اضغط «دفع للبوابة الآن»."))
+                else:
+                    out.append(("ok", "بوابة Render تملك رمز هذه الزيارة."))
+            except urllib.error.HTTPError as e:
+                out.append(("bad", f"Render رجّع HTTP {e.code} (المفتاح السري غير مطابق لـ API_SECRET_KEY؟)."))
+            except Exception as e:  # noqa: BLE001
+                out.append(("warn", f"Render لم يرد خلال 15 ثانية ({type(e).__name__}) — غالبًا نائم (يحتاج حتى دقيقة ليصحى). أعد الفحص بعد قليل."))
     st = db.execute("SELECT * FROM portal_state WHERE visit_id=?", (visit_id,)).fetchone()
     if tok and not st:
         out.append(("warn", "الزيارة لم تُدفع للبوابة بعد (انتظر نصف دقيقة أو اضغط 🔄 مزامنة)."))

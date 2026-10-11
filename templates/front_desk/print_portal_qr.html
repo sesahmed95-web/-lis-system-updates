@@ -26,13 +26,26 @@
 </head>
 <body>
 <div class="bar"><button onclick="window.print()">🖨 طباعة</button></div>
-<div class="diag" id="diagBox"><b>🔍 فحص الـQR (لا يُطبع)</b><div id="diagItems">جارٍ الفحص…</div><div class="lnk" id="diagLink"></div></div>
+<div class="diag" id="diagBox"><b>🔍 فحص الـQR (لا يُطبع)</b><div id="diagItems">جارٍ الفحص…</div><div class="lnk" id="diagLink"></div>
+  <div style="margin-top:6px"><button type="button" id="pushBtn" style="font-size:12px;padding:3px 10px;cursor:pointer">🔄 دفع للبوابة الآن</button> <span id="pushMsg" style="font-size:12px"></span></div></div>
 <script>
-fetch('/api/visits/{{ visit['id'] }}/portal-diagnose').then(function(r){return r.json();}).then(function(d){
+function render(d, more){
   var h=''; d.items.forEach(function(i){ h+='<div class="'+i.level+'">'+i.text.replace(/</g,'&lt;')+'</div>'; });
+  if(more) h+='<div class="warn">جارٍ فحص الاتصال بالبوابة العامة…</div>';
   document.getElementById('diagItems').innerHTML=h||'—';
   document.getElementById('diagLink').textContent=d.link||'';
+}
+// فحص سريع (بدون شبكة) يظهر فورًا، ثم فحص الاتصال بالبوابة بالخلفية (قد ياخذ حتى 15 ثانية)
+fetch('/api/visits/{{ visit['id'] }}/portal-diagnose').then(function(r){return r.json();}).then(function(d){
+  render(d,true);
+  return fetch('/api/visits/{{ visit['id'] }}/portal-diagnose?net=1').then(function(r){return r.json();}).then(function(d2){render(d2,false);});
 }).catch(function(){ document.getElementById('diagItems').textContent='تعذّر الفحص'; });
+document.getElementById('pushBtn').onclick=function(){
+  var m=document.getElementById('pushMsg'); m.textContent='جارٍ الدفع… (قد ياخذ حتى دقيقة إذا Render نايم)';
+  fetch('/api/visits/{{ visit['id'] }}/portal-sync',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+    m.textContent=d.ok?'✅ تم الدفع ('+d.message+')':'❌ '+d.message;
+  }).catch(function(){m.textContent='❌ فشل الاتصال';});
+};
 </script>
 {% if not enabled %}
 <div class="warn">⚠️ المزامنة غير مفعّلة بالإعدادات، فالـQR لن يعرض شي إلى أن تفعّلها (الإعدادات ← بوابة النتائج).</div>
