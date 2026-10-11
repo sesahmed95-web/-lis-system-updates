@@ -30,6 +30,9 @@ Name: "{app}"; Permissions: users-modify
 Source: "dist\LabSystem\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "start_lab.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stop_lab.bat"; DestDir: "{app}"; Flags: ignoreversion
+; optional per-client settings: put portal_preset.json (made by tools\make_portal_preset.py) NEXT TO LabSystem_Setup.exe;
+; the installer copies it into the app folder and the program applies it on first start (portal URL/key, lab name...)
+Source: "{src}\portal_preset.json"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist ignoreversion
 
 [Icons]
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\start_lab.vbs"""; IconFilename: "{app}\{#MyAppExe}"; WorkingDir: "{app}"
@@ -40,10 +43,7 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 [Run]
 ; open port 9090 so other lab PCs can connect on the local network
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Lab System 9090"" dir=in action=allow protocol=TCP localport=9090"; Flags: runhidden
-; analyzers (ASTM host interface) connect to this port - default 5000
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Lab System ASTM 5000"" dir=in action=allow protocol=TCP localport=5000"; Flags: runhidden
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\start_lab.vbs"""; Description: "Start Lab System now"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Lab System 9090"""; Flags: runhidden
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Lab System ASTM 5000"""; Flags: runhidden

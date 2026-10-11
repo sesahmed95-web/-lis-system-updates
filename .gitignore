@@ -41,3 +41,8 @@ portal_pdf_cache/*
 # أرشيف PDF ونسخ الواتساب المولّدة
 static/whatsapp_pdfs/*
 !static/whatsapp_pdfs/.keep
+
+# ملفات إعداد العملاء (فيها مفتاح سري)
+portal_preset.json
+portal_preset.applied.json
+client_presets/
