@@ -17,6 +17,7 @@ import zipfile
 import threading
 import time
 
+from database import close_request_connections
 from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_test_price, find_or_create_doctor, find_or_create_referral_center,
                        get_report_template, save_report_template,
@@ -1284,7 +1285,10 @@ def inject_globals():
             theme_page_bg_color = _v
     license_banner = None
     if "user_id" in session:
-        lic = license_manager.check_license(db)
+        try:
+            lic = license_manager.check_license(db)
+        except sqlite3.OperationalError:
+            lic = {"status": "unknown"}     # قاعدة مشغولة: نتجاوز شريط الترخيص فقط بدل خطأ 500
         # الشريط التحذيري "متبقي كم يوم" يظهر فقط للترخيص التجريبي، وليس
         # لأي ترخيص عادي (حتى لو كان له تاريخ انتهاء بعد سنة مثلاً).
         if lic["status"] == "active" and lic.get("is_trial") and lic.get("days_left") is not None:
@@ -1393,6 +1397,13 @@ _license_check_cache = None
 _license_check_lock = threading.Lock()
 
 
+@app.teardown_request
+def _release_db_connections(exc=None):
+    """نهاية كل طلب (نجح أو فشل): ألغِ أي كتابة معلّقة وسكّر كل اتصالات القاعدة المفتوحة به،
+    حتى ما يقدر طلب فاشل يقفل القاعدة على الجميع (شوف الشرح بـ database.close_request_connections)."""
+    close_request_connections()
+
+
 @app.before_request
 def enforce_license():
     # المسارات المستثناة من فحص الترخيص: الملفات الثابتة، ولوحة المصمم نفسها
@@ -1430,10 +1441,16 @@ def enforce_license():
     with _license_check_lock:
         cached = _license_check_cache
         if cached is None or (now_ts - cached[0]) > 300:
-            db = get_db()
-            lic = license_manager.check_license(db)
-            db.close()
-            _license_check_cache = (now_ts, lic)
+            try:
+                db = get_db()
+                lic = license_manager.check_license(db)
+                db.close()
+                _license_check_cache = (now_ts, lic)
+            except sqlite3.OperationalError:
+                # القاعدة مشغولة لحظيًا: لا نطيّح الصفحة بخطأ 500 — نستخدم آخر نتيجة معروفة (أو نسمح)
+                # ونعيد الفحص بعد دقيقة تقريبًا.
+                lic = cached[1] if cached else {"status": "active"}
+                _license_check_cache = (now_ts - 240, lic)
         else:
             lic = cached[1]
     if lic["status"] in ("expired", "hardware_mismatch", "pending", "revoked"):
@@ -1716,14 +1733,14 @@ def interface_set():
         session["user_id"] = shadow_user["id"]
         session["full_name"] = session.get("operator_name") or shadow_user["full_name"]
     session["interface"] = choice
-    log_action("SetInterface", "user", session["user_id"], choice)
+    log_action("SetInterface", "user", session.get("user_id"), choice)
     return redirect(url_for("dashboard"))
 
 
 @app.route("/logout")
 def logout():
     if "user_id" in session:
-        log_action("Logout", "user", session["user_id"])
+        log_action("Logout", "user", session.get("user_id"))
     session.clear()
     return redirect(url_for("landing"))
 
@@ -2363,7 +2380,7 @@ def new_visit():
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', ?, ?, ?)",
             (reg_number, patient_id, referring_doctor_id, referral_center_id, visit_type, fasting, notes, examining_doctor, expenses,
              examining_doctor_fee, attending_doctor, weight, height, symptoms, disease, therapy,
-             is_home_visit, home_visit_address, home_visit_fee, session.get("branch_id"), session["user_id"], now),
+             is_home_visit, home_visit_address, home_visit_fee, session.get("branch_id"), session.get("user_id"), now),
         )
         visit_id = cur.lastrowid
         # رقم العينة: من حقل "Sample No." بصفحة زيارة جديدة (يتسلسل من جديد حسب إعداد التصفير)
@@ -2456,7 +2473,7 @@ def new_visit():
             "INSERT INTO invoices (visit_id, total_amount, discount_amount, extra_charges, paid_amount, status, "
             "created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (visit_id, invoice_total, discount_amount, extra_charges, paid_amount, invoice_status,
-             session["user_id"], now),
+             session.get("user_id"), now),
         )
         invoice_id = inv_cur.lastrowid
 
@@ -2464,7 +2481,7 @@ def new_visit():
         if paid_amount > 0:
             db.execute(
                 "INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) VALUES (?, ?, 'Cash', ?, ?)",
-                (invoice_id, paid_amount, session["user_id"], now),
+                (invoice_id, paid_amount, session.get("user_id"), now),
             )
             # مهم: log_action() تفتح اتصال قاعدة بيانات ثاني مستقل. استدعاؤها هنا (قبل db.commit)
             # كان يخلي الاتصال الثاني ينتظر قفل الكتابة المحجوز من اتصال هذي الزيارة لين 5 ثواني
@@ -2737,14 +2754,14 @@ def patient_history(patient_id):
                     "UPDATE results SET value_numeric=?, value_text=?, flag=?, entered_by=?, entered_at=? "
                     "WHERE id=?",
                     (old_result["value_numeric"], old_result["value_text"], old_result["flag"],
-                     session["user_id"], now, existing_result["id"]),
+                     session.get("user_id"), now, existing_result["id"]),
                 )
             else:
                 db.execute(
                     "INSERT INTO results (order_test_id, test_parameter_id, value_numeric, value_text, flag, "
                     "entered_by, entered_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (new_order_test_id, old_result["test_parameter_id"], old_result["value_numeric"],
-                     old_result["value_text"], old_result["flag"], session["user_id"], now),
+                     old_result["value_text"], old_result["flag"], session.get("user_id"), now),
                 )
             copied += 1
         db.commit()
@@ -2968,7 +2985,7 @@ def api_visit_pay(visit_id):
     new_paid = float(inv["paid_amount"] or 0) + amount
     status = "Paid" if new_paid >= float(inv["total_amount"] or 0) else "Partial"
     db.execute("INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) VALUES (?, ?, 'Cash', ?, ?)",
-               (inv["id"], amount, session["user_id"], now))
+               (inv["id"], amount, session.get("user_id"), now))
     db.execute("UPDATE invoices SET paid_amount=?, status=? WHERE id=?", (new_paid, status, inv["id"]))
     db.commit()
     log_action("Payment", "invoice", inv["id"], f"amount={amount} (from results/print screen)")
@@ -3937,7 +3954,7 @@ def visit_remove_test(visit_id, order_test_id):
     db.execute(
         "INSERT INTO removed_order_tests (visit_id, order_id, test_definition_id, snapshot, removed_by, removed_at) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (visit_id, ot_row["order_id"], ot_row["test_definition_id"], json.dumps(snapshot), session["user_id"], now),
+        (visit_id, ot_row["order_id"], ot_row["test_definition_id"], json.dumps(snapshot), session.get("user_id"), now),
     )
 
     db.execute("DELETE FROM results WHERE order_test_id=?", (order_test_id,))
@@ -5649,7 +5666,7 @@ def result_entry(order_test_id):
                 flash(err)
                 return redirect(url_for("result_entry", order_test_id=order_test_id))
         gate_person = (request.form.get("gate_person_name") or "").strip()
-        save_order_test_results(db, ot, parameters, request.form, session["user_id"], patient_id=ot["patient_id"])
+        save_order_test_results(db, ot, parameters, request.form, session.get("user_id"), patient_id=ot["patient_id"])
         # التحليل المعتمد (Verified) يبقى معتمَد بعد التعديل — الحقول صارت
         # قابلة للتعديل دائمًا حتى بعد الاعتماد (بطلب المستخدم)، وكل تعديل
         # يبقى مسجّل بجدول result_history (القيمة القديمة + مين عدّلها ووقتها)
@@ -5807,7 +5824,7 @@ def visit_results_entry(visit_id):
             # مين عدّلها ووقتها) بغض النظر عن حالة الاعتماد.
             parameters = get_ordered_parameters(db, ot)
             touched = save_order_test_results(
-                db, ot, parameters, request.form, session["user_id"], field_prefix=f"ot{ot['id']}_",
+                db, ot, parameters, request.form, session.get("user_id"), field_prefix=f"ot{ot['id']}_",
                 patient_id=ot["patient_id"],
             )
             if touched:
@@ -7482,7 +7499,7 @@ def print_and_save_result(order_test_id):
     for t, params, prefix, changed in plan:
         if t["status"] in done and not changed:
             continue
-        if save_order_test_results(db, t, params, request.form, session["user_id"],
+        if save_order_test_results(db, t, params, request.form, session.get("user_id"),
                                    field_prefix=prefix, patient_id=t["patient_id"]):
             saved_any = True
     for t, _p, _pre, _c in plan:
@@ -7808,7 +7825,7 @@ def verify_result(order_test_id):
     db = get_db()
     now = datetime.now().isoformat(timespec="seconds")
     db.execute("UPDATE results SET verified_by=?, verified_at=? WHERE order_test_id=?",
-               (session["user_id"], now, order_test_id))
+               (session.get("user_id"), now, order_test_id))
     db.execute("UPDATE order_tests SET status='Verified' WHERE id=?", (order_test_id,))
     db.commit()
     log_action("Verify", "order_test", order_test_id)
@@ -7985,7 +8002,7 @@ def pay_invoice(visit_id):
     if invoice:
         now = datetime.now().isoformat(timespec="seconds")
         db.execute("INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) "
-                   "VALUES (?, ?, 'Cash', ?, ?)", (invoice["id"], amount, session["user_id"], now))
+                   "VALUES (?, ?, 'Cash', ?, ?)", (invoice["id"], amount, session.get("user_id"), now))
         new_paid = invoice["paid_amount"] + amount
         status = "Paid" if new_paid >= invoice["total_amount"] else "Partial"
         db.execute("UPDATE invoices SET paid_amount=?, status=? WHERE id=?",
@@ -10544,7 +10561,7 @@ def report_designer():
                 return redirect(url_for("report_designer", test_definition_id=test_id))
             rows_json = json.dumps(rows, ensure_ascii=False)
             source_docx_name = secure_filename(file.filename)
-            save_report_template(db, test_id, test["name"], rows_json, source_docx_name, session["user_id"],
+            save_report_template(db, test_id, test["name"], rows_json, source_docx_name, session.get("user_id"),
                                   heading_align=heading_align, rows_align=rows_align)
             log_action("SaveReportTemplate", "test_definition", int(test_id), f"docx:{source_docx_name}")
             flash(f"تم استيراد التصميم من Word: {matched} من {total} سطر تم ربطها تلقائيًا بنتائج التحليل. "
@@ -10620,7 +10637,7 @@ def report_designer():
         # نفسه يبقى بقاعدة البيانات (بدون DROP) لعدم فقدان بيانات قديمة، بس
         # ما عاد يُقرأ من فورم ولا يُقرأ شرطيًا بالقوالب (custom.html صارت
         # تطبع بهذا التخطيط دائمًا بغض النظر عن قيمته).
-        save_report_template(db, test_id, heading, rows_json, None, session["user_id"],
+        save_report_template(db, test_id, heading, rows_json, None, session.get("user_id"),
                               heading_align=heading_align, rows_align=rows_align, unit_column=1)
         log_action("SaveReportTemplate", "test_definition", int(test_id), "manual")
         flash("تم حفظ تصميم التقرير. الشعار سيُضاف تلقائيًا عند الطباعة.")

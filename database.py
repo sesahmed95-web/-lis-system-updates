@@ -41,7 +41,43 @@ def get_db():
     # 5 ثواني قبل لا يرمي الخطأ (بدل ما يفشل فورًا).
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
+    _track_request_connection(conn)
     return conn
+
+
+# ---------------------------------------------------------------------------
+# إصلاح جذري لمشكلة "database is locked" الدائمة (لازم إعادة تشغيل البرنامج):
+# كل get_db() يفتح اتصال جديد. لو طلب (request) كتب بالقاعدة (INSERT) ثم صار فيه خطأ قبل
+# db.commit() (مثال حقيقي بسجل الأخطاء: KeyError 'user_id' بـ new_visit)، يبقى الاتصال مفتوح
+# بعملية كتابة معلّقة (لأن الاستثناء يمسك الإطار اللي فيه المتغير db)، فيمسك قفل الكتابة
+# ويفشل كل طلب كتابة بعده (حتى الفحص الدوري وفحص الترخيص) لين يموت البرنامج.
+# الحل: نسجّل كل اتصال يُفتح داخل طلب، وبنهاية الطلب (حتى لو صار خطأ) نسوي rollback ونسكّره.
+# ---------------------------------------------------------------------------
+def _track_request_connection(conn):
+    try:
+        from flask import g, has_request_context
+        if has_request_context():
+            g.setdefault("_lis_db_conns", []).append(conn)
+    except Exception:
+        pass
+
+
+def close_request_connections():
+    """يُستدعى من teardown_request: يلغي أي كتابة غير مثبّتة ويسكّر كل اتصالات الطلب."""
+    try:
+        from flask import g
+        conns = g.pop("_lis_db_conns", [])
+    except Exception:
+        return
+    for c in conns:
+        try:
+            c.rollback()
+        except Exception:
+            pass
+        try:
+            c.close()
+        except Exception:
+            pass
 
 
 def hash_password(password: str) -> str:

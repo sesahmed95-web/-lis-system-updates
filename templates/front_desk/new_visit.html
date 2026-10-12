@@ -40,7 +40,7 @@
   #patientMatchesList .match-item:hover { background: #F1F5F9; }
   #patientMatchesList .match-item small { display: block; color: #64748B; }
   #existingPatientBanner { display:none; margin: 6px 0 10px; padding: 8px 10px; background: #ECFDF5;
-    border: 1px solid #A7F3D0; border-radius: 6px; font-size: 12.5px; display:flex; justify-content: space-between; align-items: center; gap: 10px; }
+    border: 1px solid #A7F3D0; border-radius: 6px; font-size: 12.5px; justify-content: space-between; align-items: center; gap: 10px; }
   #previousVisitsPanel { display: none; margin-top: 10px; }
   #previousVisitsPanel .prev-visit-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     padding: 8px 10px; border: 1px solid #E2E8F0; border-radius: 6px; margin-bottom: 6px; font-size: 12.5px; }
@@ -106,6 +106,63 @@
   .nv-param-panel .nv-param-hint { color: #64748B; font-size: 11px; margin-bottom: 4px; }
   .nv-partial-badge { font-size: 10.5px; color: #B45309; background: #FEF3C7; border-radius: 4px;
     padding: 0 4px; margin-inline-start: 3px; }
+
+  /* =====================================================================
+     ترتيب مضغوط: كل الصفحة بشاشة وحدة بدون تمرير — بيانات المريض + المرجع
+     بجهة، والتحاليل + الحساب بجهة، المعلومات الإضافية قابلة للطي، وشريط
+     الحفظ ثابت بأسفل الشاشة. (المعرّفات وأسماء الحقول ما تغيّرت)
+     ===================================================================== */
+  .nv-layout { grid-template-columns: minmax(400px, 0.95fr) minmax(0, 1.2fr); gap: 10px; }
+  .nv-left { gap: 8px; min-width: 0; }
+  .nv-right { min-width: 0; }
+  .nv-layout .card { padding: 8px 12px; border-radius: 10px; }
+  .nv-layout h3 { font-size: 13.5px; margin: 0 0 6px; }
+  .nv-layout .form-grid { gap: 4px 10px; }
+  .nv-layout .form-field { margin-bottom: 3px; }
+  .nv-layout .form-field > label, .nv-row label { font-size: 11.5px; margin-bottom: 2px; line-height: 1.2; }
+  .nv-layout input:not([type="checkbox"]):not([type="hidden"]), .nv-layout select {
+    padding: 4px 8px; font-size: 13px; min-height: 30px; box-sizing: border-box; }
+  .nv-row { gap: 8px; }
+  .nv-row-name { grid-template-columns: 120px minmax(0, 1fr); }
+  .nv-row-contact { grid-template-columns: 1fr 1.2fr 1.4fr; }
+  .nv-row-ref { grid-template-columns: 1.35fr 1.35fr .8fr .9fr; }
+  .nv-layout textarea.nv-autogrow { height: 30px; min-height: 30px; }
+
+  /* بطاقة التحاليل: تملأ الجهة، والقائمة تتمرر من داخلها فقط */
+  .nv-orders-card { display: flex; flex-direction: column; }
+  .nv-orders-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .nv-orders-head h3 { margin: 0; white-space: nowrap; }
+  #testFilterInput { flex: 1; min-width: 120px; }
+  .nv-orders-card .nv-checkbox-grid {
+    grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 3px 8px;
+    max-height: calc(100vh - 370px); min-height: 220px; overflow-y: auto;
+    padding: 6px 8px; border: 1px solid #E2E8F0; border-radius: 8px; align-content: start; }
+  .nv-checkbox-grid .checkbox-item { font-size: 12.5px; line-height: 1.25; }
+  .nv-custom { margin-bottom: 6px; }
+  .nv-custom > summary, .nv-extra > summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: #1D4ED8;
+    padding: 2px 0; list-style: none; }
+  .nv-custom > summary::-webkit-details-marker, .nv-extra > summary::-webkit-details-marker { display: none; }
+  .nv-custom[open] > summary, .nv-extra[open] > summary { margin-bottom: 6px; }
+  #customTestRow { margin-bottom: 4px; }
+
+  /* الحساب: المبلغ الكلي / الواصل / الباقي تحت التحاليل مباشرة */
+  .nv-pay { margin-top: 8px; padding: 8px 10px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; }
+  .nv-pay .form-grid { display: block; }
+  .nv-pay .nv-row { margin: 0; }
+  .nv-grand { font-size: 12px; font-weight: 600; color: #475569; margin-top: 2px; }
+  #totalAmountInput, #paidAmountInput { font-weight: 700; }
+  #remainingAmountInput { font-weight: 700; color: #B91C1C; }
+
+  /* معلومات إضافية (صحية/هوية): مطوية افتراضيًا */
+  .nv-extra .card { box-shadow: none; border: 0; padding: 4px 0; background: transparent; }
+  .nv-extra .card h3 { margin-top: 4px; }
+
+  /* شريط الحفظ ثابت بأسفل الشاشة */
+  .nv-bottombar { position: sticky; bottom: 0; z-index: 40; margin-top: 8px; padding: 8px 12px; gap: 8px;
+    box-shadow: 0 -2px 10px rgba(0,0,0,.08); }
+  @media (max-height: 760px) {
+    .nv-orders-card .nv-checkbox-grid { max-height: calc(100vh - 330px); }
+  }
 </style>
 <form method="POST" id="newVisitForm">
   <input type="hidden" name="existing_patient_id" id="existing_patient_id" value="">
@@ -117,15 +174,14 @@
     <div class="card">
       <h3>{{ t('patient_information') }}</h3>
 
-      <div class="form-field" style="max-width:260px;">
-        <label for="sample_no_input">رقم العينة (Sample No.)</label>
-        <input type="text" name="sample_no" id="sample_no_input" autocomplete="off" dir="ltr" maxlength="40"
-               title="يُولَّد تلقائيًا ويتسلسل من جديد حسب الإعدادات — تقدر تعدّله يدويًا">
-        <span class="muted" style="font-size:11px;">تلقائي — يتسلسل من جديد حسب الإعدادات، وتقدر تعدّله.</span>
-      </div>
-
       <div class="form-grid">
-        <div class="form-field" id="patientMatches" style="grid-column: span 2;">
+        <div class="nv-row nv-row-name">
+        <div class="form-field">
+          <label for="sample_no_input" title="يُولَّد تلقائيًا ويتسلسل حسب الإعدادات، وتقدر تعدّله">رقم العينة</label>
+          <input type="text" name="sample_no" id="sample_no_input" autocomplete="off" dir="ltr" maxlength="40"
+                 title="يُولَّد تلقائيًا ويتسلسل من جديد حسب الإعدادات — تقدر تعدّله يدويًا">
+        </div>
+        <div class="form-field" id="patientMatches">
           <label>{{ t('patient_name') }} *</label>
           <div style="display:flex; gap:6px;">
             <select name="title" id="patient_title" style="width:92px; flex-shrink:0;">
@@ -139,6 +195,7 @@
             <input type="text" name="patient_name" id="patient_name" required autocomplete="off" style="flex:1;">
           </div>
           <div id="patientMatchesList"></div>
+        </div>
         </div>
         <div id="existingPatientBanner" style="grid-column: span 2;">
           <span>✅ تم اختيار مريض مسجّل سابقًا — لن يتم إنشاء بطاقة مريض مكررة.</span>
@@ -189,6 +246,11 @@
             </select>
           </div>
           <div class="form-field">
+            <label title="{{ 'يُحسب العمر تلقائيًا' if lang=='ar' else 'age is calculated' }}">{{ 'سنة الميلاد' if lang=='ar' else 'Birth year' }}</label>
+            <input type="number" id="birth_year_input" min="1900" max="2100" step="1" dir="ltr" placeholder="1990" autocomplete="off">
+            <input type="hidden" name="birth_date" id="birth_date_input" value="">
+          </div>
+          <div class="form-field">
             <label>{{ t('age') }}</label>
             <input type="number" step="any" name="age" id="age_input" min="0">
           </div>
@@ -201,11 +263,6 @@
               <option value="Months">{{ t('unit_months') }}</option>
               <option value="Years" selected>{{ t('unit_years') }}</option>
             </select>
-          </div>
-          <div class="form-field">
-            <label>{{ 'سنة الميلاد' if lang=='ar' else 'Birth year' }} <small class="muted">({{ 'يُحسب العمر تلقائيًا' if lang=='ar' else 'age is calculated' }})</small></label>
-            <input type="number" id="birth_year_input" min="1900" max="2100" step="1" dir="ltr" placeholder="1990" autocomplete="off">
-            <input type="hidden" name="birth_date" id="birth_date_input" value="">
           </div>
         </div>
         <div class="nv-row nv-row-contact">
@@ -222,140 +279,13 @@
             <input type="text" name="address" id="address_input">
           </div>
         </div>
-        <div class="nv-row nv-row-3">
-          <div class="form-field">
-            <label>المبلغ الكلي</label>
-            <input type="text" inputmode="decimal" id="totalAmountInput" name="total_amount_input" value="0">
-          </div>
-          <div class="form-field">
-            <label style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
-              <span>الواصل</span>
-              <span title="تأشير = المبلغ الكلي واصل بالكامل" style="font-size:12px; font-weight:600; cursor:pointer;">
-                <input type="checkbox" id="paidFullCheck" style="vertical-align:middle;"> ◀ دفع كامل
-              </span>
-            </label>
-            <input type="text" inputmode="decimal" id="paidAmountInput" name="paid_amount" value="0">
-          </div>
-          <div class="form-field">
-            <label>الباقي</label>
-            <input type="text" inputmode="decimal" id="remainingAmountInput" value="0" readonly tabindex="-1">
-          </div>
-        </div>
       </div>
     </div>
 
-    <div class="card">
-      <h3>{{ 'المعلومات الصحية' if lang=='ar' else 'Health Information' }}</h3>
-      <div class="form-grid">
-        <div class="nv-row nv-row-3">
-          <div class="form-field">
-            <label>الوزن (Weight)</label>
-            <input type="number" step="any" min="0" name="weight" id="weight_input">
-          </div>
-          <div class="form-field">
-            <label>الطول (Height)</label>
-            <input type="number" step="any" min="0" name="height" id="height_input">
-          </div>
-          <div class="form-field">
-            <label title="الوزن (كغم) ÷ الطول² (متر) — يُحسب تلقائيًا للعرض فقط ولا يُحفظ">BMI (كتلة الجسم)</label>
-            <input type="text" id="bmi_input" readonly tabindex="-1" placeholder="—"
-                   title="الوزن (كغم) ÷ الطول² (متر) — يُحسب تلقائيًا للعرض فقط ولا يُحفظ">
-          </div>
-        </div>
-        <div class="nv-row nv-row-4">
-          <div class="form-field">
-            <label>الأعراض (Symptoms)</label>
-            <textarea name="symptoms" id="symptoms_input" rows="1" class="nv-autogrow"></textarea>
-          </div>
-          <div class="form-field">
-            <label>المرض (Disease)</label>
-            <textarea name="disease" id="disease_input" rows="1" class="nv-autogrow"></textarea>
-          </div>
-          <div class="form-field">
-            <label>العلاج (Therapy)</label>
-            <textarea name="therapy" id="therapy_input" rows="1" class="nv-autogrow"></textarea>
-          </div>
-          <div class="form-field">
-            <label>{{ t('fasting') }}</label>
-            <select name="fasting" id="fasting_select">
-              <option value="Undefined">-</option>
-              <option value="Yes">{{ t('yes') }}</option>
-              <option value="No">{{ t('no') }}</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-field" style="grid-column: span 2;">
-          <label>{{ t('notes') }}</label>
-          <textarea name="notes"></textarea>
-        </div>
-      </div>
-    </div>
-
-    </div>
-
-    <div class="nv-right">
-
-
-  <div class="card nv-orders-card">
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-      <h3>{{ t('orders_section') }}</h3>
-      {% if current_role in ('admin', 'supervisor') %}
-      <button type="button" class="btn small secondary" onclick="openTestManageModal()">+ Add Test</button>
-      {% endif %}
-    </div>
-    {% if quick_items %}
-    <div style="margin-bottom:10px;">
-      <span class="muted">⚡ {{ t('quick_add_items') }}:</span>
-      {% for qi in quick_items %}
-      <button type="button" class="btn small secondary" style="margin:4px;"
-        onclick="document.getElementById('test_{{ qi['id'] }}').checked = true; refreshPrices();">{{ qi['name'] }}</button>
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    <div id="customTestRow">
-      <div class="form-field" style="flex:2; min-width:180px;">
-        <label style="font-size:12px;">تحليل غير موجود بالقائمة؟ اكتب اسمه هنا</label>
-        <input type="text" id="customTestName" placeholder="اسم التحليل" autocomplete="off">
-      </div>
-      <div class="form-field" style="width:110px;">
-        <label style="font-size:12px;">السعر</label>
-        <input type="number" id="customTestPrice" step="any" min="0" placeholder="0">
-      </div>
-      <button type="button" class="btn small" onclick="addCustomTest()">+ إضافة وتحديد</button>
-    </div>
-    <small class="muted" id="customTestError" style="display:none; color:#DC2626; display:none;"></small>
-
-    <div class="checkbox-grid nv-checkbox-grid">
-      {% for test in tests %}
-      <span class="checkbox-item-wrap" id="test_item_{{ test['id'] }}">
-      <label class="checkbox-item">
-        <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}"
-               data-exam="{{ '1' if test['id'] in examining_test_ids else '0' }}">
-        <span id="test_label_{{ test['id'] }}">{{ test['name'] }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
-      </label>
-      {# سهم اختيار بارامترات معيّنة بس من هذا التحليل بدل طلبه كامل —
-         يفتح لائحة تشيك بوكسات (paramPanel_<id>) تتحمّل مرة وحدة عبر
-         /api/test-definitions/<id>/parameters. selected_params_<id> هو
-         الحقل الحقيقي اللي يوصل السيرفر: فاضي = كل التحليل (كالسابق
-         تماماً)، وإلا = بس معرّفات البارامترات المحددة. #}
-      <button type="button" class="nv-param-arrow" title="اختيار بارامترات معيّنة بس من هذا التحليل"
-              onclick="nvToggleParamPanel('{{ test['id'] }}')">▾</button>
-      <button type="button" class="nv-param-arrow" title="تعديل اسم هذا التحليل"
-              onclick="nvRenameTest('{{ test['id'] }}')">✏️</button>
-      <input type="hidden" id="selected_params_{{ test['id'] }}" name="selected_params_{{ test['id'] }}" value="">
-      <div class="nv-param-panel" id="paramPanel_{{ test['id'] }}" style="display:none;"></div>
-      </span>
-      {% endfor %}
-    </div>
-    <p style="margin-top:10px; font-weight:600;">{{ t('grand_total') }}: <span id="grandTotal">0</span></p>
-  </div>
-
-  <div id="nvRefOther">
     <div class="card">
       <h3>{{ t('reference_information') }}</h3>
       <div class="form-grid">
-        <div class="nv-row nv-row-4">
+        <div class="nv-row nv-row-4 nv-row-ref">
           <div class="form-field">
             <label>Center / Lab</label>
             <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
@@ -436,6 +366,55 @@
       </div>
     </div>
 
+    <details class="card nv-extra" id="nvExtra">
+      <summary>➕ معلومات إضافية (اختياري): صحية / هوية</summary>
+    <div class="card">
+      <h3>{{ 'المعلومات الصحية' if lang=='ar' else 'Health Information' }}</h3>
+      <div class="form-grid">
+        <div class="nv-row nv-row-3">
+          <div class="form-field">
+            <label>الوزن (Weight)</label>
+            <input type="number" step="any" min="0" name="weight" id="weight_input">
+          </div>
+          <div class="form-field">
+            <label>الطول (Height)</label>
+            <input type="number" step="any" min="0" name="height" id="height_input">
+          </div>
+          <div class="form-field">
+            <label title="الوزن (كغم) ÷ الطول² (متر) — يُحسب تلقائيًا للعرض فقط ولا يُحفظ">BMI (كتلة الجسم)</label>
+            <input type="text" id="bmi_input" readonly tabindex="-1" placeholder="—"
+                   title="الوزن (كغم) ÷ الطول² (متر) — يُحسب تلقائيًا للعرض فقط ولا يُحفظ">
+          </div>
+        </div>
+        <div class="nv-row nv-row-4">
+          <div class="form-field">
+            <label>الأعراض (Symptoms)</label>
+            <textarea name="symptoms" id="symptoms_input" rows="1" class="nv-autogrow"></textarea>
+          </div>
+          <div class="form-field">
+            <label>المرض (Disease)</label>
+            <textarea name="disease" id="disease_input" rows="1" class="nv-autogrow"></textarea>
+          </div>
+          <div class="form-field">
+            <label>العلاج (Therapy)</label>
+            <textarea name="therapy" id="therapy_input" rows="1" class="nv-autogrow"></textarea>
+          </div>
+          <div class="form-field">
+            <label>{{ t('fasting') }}</label>
+            <select name="fasting" id="fasting_select">
+              <option value="Undefined">-</option>
+              <option value="Yes">{{ t('yes') }}</option>
+              <option value="No">{{ t('no') }}</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-field" style="grid-column: span 2;">
+          <label>{{ t('notes') }}</label>
+          <textarea name="notes"></textarea>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h3>{{ 'معلومات أخرى' if lang=='ar' else 'Other Information' }}</h3>
       <div class="form-grid">
@@ -458,6 +437,89 @@
           </div>
         </div>
       </div>
+    </div>
+    </details>
+    </div>
+
+    <div class="nv-right">
+  <div class="card nv-orders-card">
+    <div class="nv-orders-head">
+      <h3>{{ t('orders_section') }}</h3>
+      <input type="search" id="testFilterInput" placeholder="🔎 بحث عن تحليل…" autocomplete="off" aria-label="بحث عن تحليل">
+      {% if current_role in ('admin', 'supervisor') %}
+      <button type="button" class="btn small secondary" onclick="openTestManageModal()">+ Add Test</button>
+      {% endif %}
+    </div>
+    {% if quick_items %}
+    <div style="margin-bottom:10px;">
+      <span class="muted">⚡ {{ t('quick_add_items') }}:</span>
+      {% for qi in quick_items %}
+      <button type="button" class="btn small secondary" style="margin:4px;"
+        onclick="document.getElementById('test_{{ qi['id'] }}').checked = true; refreshPrices();">{{ qi['name'] }}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <details class="nv-custom"><summary>➕ تحليل غير موجود بالقائمة؟</summary>
+    <div id="customTestRow">
+      <div class="form-field" style="flex:2; min-width:180px;">
+        <label style="font-size:12px;">تحليل غير موجود بالقائمة؟ اكتب اسمه هنا</label>
+        <input type="text" id="customTestName" placeholder="اسم التحليل" autocomplete="off">
+      </div>
+      <div class="form-field" style="width:110px;">
+        <label style="font-size:12px;">السعر</label>
+        <input type="number" id="customTestPrice" step="any" min="0" placeholder="0">
+      </div>
+      <button type="button" class="btn small" onclick="addCustomTest()">+ إضافة وتحديد</button>
+    </div>
+    <small class="muted" id="customTestError" style="display:none; color:#DC2626; display:none;"></small>
+    </details>
+
+    <div class="checkbox-grid nv-checkbox-grid">
+      {% for test in tests %}
+      <span class="checkbox-item-wrap" id="test_item_{{ test['id'] }}">
+      <label class="checkbox-item">
+        <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}"
+               data-exam="{{ '1' if test['id'] in examining_test_ids else '0' }}">
+        <span id="test_label_{{ test['id'] }}">{{ test['name'] }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
+      </label>
+      {# سهم اختيار بارامترات معيّنة بس من هذا التحليل بدل طلبه كامل —
+         يفتح لائحة تشيك بوكسات (paramPanel_<id>) تتحمّل مرة وحدة عبر
+         /api/test-definitions/<id>/parameters. selected_params_<id> هو
+         الحقل الحقيقي اللي يوصل السيرفر: فاضي = كل التحليل (كالسابق
+         تماماً)، وإلا = بس معرّفات البارامترات المحددة. #}
+      <button type="button" class="nv-param-arrow" title="اختيار بارامترات معيّنة بس من هذا التحليل"
+              onclick="nvToggleParamPanel('{{ test['id'] }}')">▾</button>
+      <button type="button" class="nv-param-arrow" title="تعديل اسم هذا التحليل"
+              onclick="nvRenameTest('{{ test['id'] }}')">✏️</button>
+      <input type="hidden" id="selected_params_{{ test['id'] }}" name="selected_params_{{ test['id'] }}" value="">
+      <div class="nv-param-panel" id="paramPanel_{{ test['id'] }}" style="display:none;"></div>
+      </span>
+      {% endfor %}
+    </div>
+    <div class="nv-pay">
+      <div class="form-grid">
+        <div class="nv-row nv-row-3">
+          <div class="form-field">
+            <label>المبلغ الكلي</label>
+            <input type="text" inputmode="decimal" id="totalAmountInput" name="total_amount_input" value="0">
+          </div>
+          <div class="form-field">
+            <label style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+              <span>الواصل</span>
+              <span title="تأشير = المبلغ الكلي واصل بالكامل" style="font-size:12px; font-weight:600; cursor:pointer;">
+                <input type="checkbox" id="paidFullCheck" style="vertical-align:middle;"> ◀ دفع كامل
+              </span>
+            </label>
+            <input type="text" inputmode="decimal" id="paidAmountInput" name="paid_amount" value="0">
+          </div>
+          <div class="form-field">
+            <label>الباقي</label>
+            <input type="text" inputmode="decimal" id="remainingAmountInput" value="0" readonly tabindex="-1">
+          </div>
+        </div>
+      </div>
+      <div class="nv-grand">{{ t('grand_total') }}: <span id="grandTotal">0</span></div>
     </div>
   </div>
 
@@ -483,10 +545,20 @@
                 title="يظهر للمريض بورقة الـQR">⏱ وقت النتائج المتوقع</button>
         <span id="expectedBox" style="display:none; align-items:center; gap:4px; flex-wrap:wrap;">
           <input type="datetime-local" name="expected_ready_at" id="expected_ready_input" dir="ltr" style="padding:3px 6px;">
-          <button type="button" class="btn small secondary" onclick="setExpectedPlus(1)" style="padding:3px 8px;">+1 س</button>
-          <button type="button" class="btn small secondary" onclick="setExpectedPlus(2)" style="padding:3px 8px;">+2 س</button>
-          <button type="button" class="btn small secondary" onclick="setExpectedPlus(4)" style="padding:3px 8px;">+4 س</button>
-          <button type="button" class="btn small secondary" onclick="setExpectedPlus(24)" style="padding:3px 8px;">غداً</button>
+          <select id="expectedPreset" onchange="applyExpectedPreset(this.value)" style="padding:3px 6px; font-size:12.5px;" title="مدة جاهزة تُحسب من الآن">
+            <option value="">اختر مدة جاهزة…</option>
+            <option value="30m">نصف ساعة</option>
+            <option value="1d">يوم</option>
+            <option value="2d">يومين</option>
+            <option value="3d">3 أيام</option>
+            <option value="4d">4 أيام</option>
+            <option value="5d">5 أيام</option>
+            <option value="6d">6 أيام</option>
+            <option value="1w">أسبوع</option>
+            <option value="2w">أسبوعين</option>
+            <option value="3w">3 أسابيع</option>
+            <option value="1m">شهر</option>
+          </select>
           <button type="button" class="btn small secondary" onclick="clearExpected()" style="padding:3px 8px;" title="مسح">✖</button>
         </span>
       </span>
@@ -1085,40 +1157,60 @@
       headers: { 'X-LIS-Ajax': '1' },
       body: new FormData(newVisitForm),
     })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (!data || !data.ok) { createVisitBtn.disabled = false; alert('حدث خطأ أثناء إنشاء الزيارة. حاول مرة أخرى.'); return; }
-        visitAlreadySaved = true;   // الزر يبقى معطّلاً بعد النجاح حتى "زيارة جديدة أخرى"
-        lastCreatedVisitId = data.visit_id;
-        document.getElementById('createdRegNumber').textContent = data.registration_number;
-        document.getElementById('goToVisitsBtn').href = data.redirect_url;
-        const printBarcodeBtn = document.getElementById('printBarcodeBtn');
-        printBarcodeBtn.href = '/front-desk/visits/' + data.visit_id + '/print/barcode';
-        printBarcodeBtn.style.pointerEvents = 'auto';
-        printBarcodeBtn.style.opacity = '1';
-        printBarcodeBtn.title = '';
-        const printQrBtn = document.getElementById('printQrBtn');
-        printQrBtn.href = '/front-desk/visits/' + data.visit_id + '/print/portal-qr';
-        printQrBtn.style.pointerEvents = 'auto';
-        printQrBtn.style.opacity = '1';
-        printQrBtn.title = '';
-
-        // إظهار/إخفاء أزرار الطباعة بلوحة "تم إنشاء الزيارة" حسب حالة
-        // مفاتيح Visit Barcode / Sample-wise / Invoice أسفل الفورم — نفس
-        // فلسفة المفاتيح: تفعيل/إظهار القسم المرتبط فقط، بدون طباعة تلقائية.
-        document.getElementById('createdPrintBarcodeBtn').style.display =
-          document.getElementById('toggleVisitBarcode').checked ? '' : 'none';
-        document.getElementById('createdPrintSampleWiseBtn').style.display =
-          document.getElementById('toggleSampleWise').checked ? '' : 'none';
-        document.getElementById('createdPrintInvoiceBtn').style.display =
-          document.getElementById('toggleInvoice').checked ? '' : 'none';
-
-        visitCreatedPanel.style.display = 'block';
-        visitCreatedPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      .then(function (r) {
+        // تحويل لصفحة قفل الترخيص / تسجيل الدخول (انتهاء الجلسة أو الترخيص): الرد يكون صفحة HTML مو JSON
+        if (r.redirected) {
+          alert('انتهت الجلسة أو الترخيص، لذلك لم تُحفظ الزيارة. سيتم تحويلك للصفحة المناسبة (قفل الترخيص أو تسجيل الدخول).');
+          window.location.href = r.url;
+          return null;
+        }
+        return r.text().then(function (txt) {
+          try { return JSON.parse(txt); }
+          catch (e) { var err = new Error('non-json'); err.status = r.status; throw err; }
+        });
       })
-      .catch(function () {
+      .then(function (data) {
+        if (data === null) return;
+        if (!data || !data.ok) { createVisitBtn.disabled = false; alert((data && data.error) ? ('تعذّر حفظ الزيارة: ' + data.error) : 'حدث خطأ أثناء إنشاء الزيارة. حاول مرة أخرى.'); return; }
+        try {
+          visitAlreadySaved = true;   // الزر يبقى معطّلاً بعد النجاح حتى "زيارة جديدة أخرى"
+          lastCreatedVisitId = data.visit_id;
+          document.getElementById('createdRegNumber').textContent = data.registration_number;
+          document.getElementById('goToVisitsBtn').href = data.redirect_url;
+          const printBarcodeBtn = document.getElementById('printBarcodeBtn');
+          printBarcodeBtn.href = '/front-desk/visits/' + data.visit_id + '/print/barcode';
+          printBarcodeBtn.style.pointerEvents = 'auto';
+          printBarcodeBtn.style.opacity = '1';
+          printBarcodeBtn.title = '';
+          const printQrBtn = document.getElementById('printQrBtn');
+          printQrBtn.href = '/front-desk/visits/' + data.visit_id + '/print/portal-qr';
+          printQrBtn.style.pointerEvents = 'auto';
+          printQrBtn.style.opacity = '1';
+          printQrBtn.title = '';
+
+          // إظهار/إخفاء أزرار الطباعة بلوحة "تم إنشاء الزيارة" حسب حالة
+          // مفاتيح Visit Barcode / Sample-wise / Invoice أسفل الفورم — نفس
+          // فلسفة المفاتيح: تفعيل/إظهار القسم المرتبط فقط، بدون طباعة تلقائية.
+          document.getElementById('createdPrintBarcodeBtn').style.display =
+            document.getElementById('toggleVisitBarcode').checked ? '' : 'none';
+          document.getElementById('createdPrintSampleWiseBtn').style.display =
+            document.getElementById('toggleSampleWise').checked ? '' : 'none';
+          document.getElementById('createdPrintInvoiceBtn').style.display =
+            document.getElementById('toggleInvoice').checked ? '' : 'none';
+
+          visitCreatedPanel.style.display = 'block';
+          visitCreatedPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch (e2) {
+          alert('تم حفظ الزيارة، لكن حدث خطأ بعرض الأزرار (' + e2.message + '). اذهب لصفحة الزيارات للتأكد.');
+        }
+      })
+      .catch(function (err) {
         createVisitBtn.disabled = false;
-        alert('تعذر الاتصال بالسيرفر. تحقق من الاتصال وحاول مرة أخرى.');
+        if (err && err.message === 'non-json') {
+          alert('السيرفر رجّع صفحة غير متوقعة (رمز ' + (err.status || '?') + ') ولم تُحفظ الزيارة. غالبًا انتهت الجلسة أو الترخيص أو صار خطأ بالسيرفر. اضغط F5 وتأكد من تسجيل الدخول والترخيص.');
+        } else {
+          alert('تعذر الاتصال بالسيرفر (تأكد أن البرنامج شغّال على حاسبة السيرفر) وحاول مرة أخرى.');
+        }
       });
   });
 
@@ -1554,13 +1646,14 @@
   (function () {
     var form = document.getElementById('newVisitForm');
     if (!form) return;
-    var ORDER = ['sample_no_input', 'patient_name', 'gender_select', 'age_input', 'age_unit_select', 'phone_input', 'email_input',
-      'address_input', 'totalAmountInput', 'paidAmountInput', 'weight_input', 'height_input', 'symptoms_input',
-      'disease_input', 'therapy_input', 'fasting_select', 'referral_lab_name', 'doctor_name', 'examining_doctor',
-      'home_visit_select', 'home_visit_address_input', 'home_visit_fee_input', 'contact_method_select',
+    var ORDER = ['sample_no_input', 'patient_name', 'gender_select', 'birth_year_input', 'age_input', 'age_unit_select', 'phone_input',
+      'email_input', 'address_input', 'referral_lab_name', 'doctor_name', 'examining_doctor', 'home_visit_select',
+      'home_visit_address_input', 'home_visit_fee_input', 'contact_method_select', 'totalAmountInput', 'paidAmountInput',
+      'weight_input', 'height_input', 'symptoms_input', 'disease_input', 'therapy_input', 'fasting_select',
       'national_id_input', 'passport_number_input', 'travel_certificate_input', 'lab_card_number_input'];
 
-    function usable(el) { return el && !el.disabled && !el.readOnly && el.offsetParent !== null; }
+    // حقول داخل قسم مطوي (معلومات إضافية) تُتخطّى: Chrome يبقي offsetParent لها غير null رغم أنها مخفية
+    function usable(el) { return el && !el.disabled && !el.readOnly && el.offsetParent !== null && !(el.closest && el.closest('details:not([open])')); }
     function nextAfter(id) {
       for (var k = ORDER.indexOf(id) + 1; k < ORDER.length; k++) {
         var el = document.getElementById(ORDER[k]);
@@ -1601,19 +1694,23 @@ function nvFmtLocal(d) {
 }
 function toggleExpectedBox() {
   var box = document.getElementById('expectedBox');
-  var open = box.style.display === 'none';
-  box.style.display = open ? 'inline-flex' : 'none';
-  if (open && !document.getElementById('expected_ready_input').value) setExpectedPlus(2);
+  box.style.display = box.style.display === 'none' ? 'inline-flex' : 'none';
 }
-function setExpectedPlus(hours) {
-  var d = new Date(Date.now() + hours * 3600000);
-  if (hours >= 24) { d = new Date(); d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0); }
-  document.getElementById('expected_ready_input').value = nvFmtLocal(d);
-  var b = document.getElementById('expectedBtn');
-  b.textContent = '⏱ ' + document.getElementById('expected_ready_input').value.replace('T', ' ');
+function applyExpectedPreset(v) {
+  if (!v) return;
+  var d = new Date();
+  var n = parseInt(v, 10), u = v.slice(-1);
+  if (u === 'm' && v === '30m') d = new Date(Date.now() + 30 * 60000);
+  else if (u === 'd') d.setDate(d.getDate() + n);
+  else if (u === 'w') d.setDate(d.getDate() + 7 * n);
+  else if (u === 'm') d.setMonth(d.getMonth() + n);
+  var inp = document.getElementById('expected_ready_input');
+  inp.value = nvFmtLocal(d);
+  document.getElementById('expectedBtn').textContent = '⏱ ' + inp.value.replace('T', ' ');
 }
 function clearExpected() {
   document.getElementById('expected_ready_input').value = '';
+  var pr = document.getElementById('expectedPreset'); if (pr) pr.value = '';
   document.getElementById('expectedBtn').textContent = '⏱ وقت النتائج المتوقع';
   document.getElementById('expectedBox').style.display = 'none';
 }
@@ -1643,27 +1740,38 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 })();
 
-// حقول Reference / Other Information: تحت أسماء التحاليل، وتنزل تحت Health Information لو قائمة التحاليل صارت أطول من العمود الأيسر
+// بحث سريع بقائمة التحاليل (التحاليل المؤشّرة تبقى ظاهرة دائمًا)
 (function () {
-  var box = document.getElementById('nvRefOther');
-  var left = document.querySelector('.nv-left');
-  var orders = document.querySelector('.nv-orders-card');
-  var right = document.querySelector('.nv-right');
-  if (!box || !left || !orders || !right) return;
-  function place() {
-    if (window.innerWidth <= 900) return;          // الشاشات الضيقة: عمود واحد أصلاً
-    var leftH = 0;
-    Array.prototype.forEach.call(left.children, function (c) { if (c !== box) leftH += c.offsetHeight + 12; });
-    var ordersH = orders.offsetHeight + 12;
-    var inLeft = box.parentNode === left;
-    if (ordersH > leftH + 40) { if (!inLeft) left.appendChild(box); }
-    else if (ordersH < leftH - 40 || !inLeft) { if (inLeft || box.parentNode !== right) right.appendChild(box); }
+  var inp = document.getElementById('testFilterInput');
+  if (!inp) return;
+  function norm(t) { return (t || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  function run() {
+    var q = norm(inp.value);
+    document.querySelectorAll('.nv-checkbox-grid .checkbox-item-wrap').forEach(function (w) {
+      var cb = w.querySelector('input.test-check');
+      var show = !q || (cb && cb.checked) || norm(w.textContent).indexOf(q) !== -1;
+      w.style.display = show ? '' : 'none';
+    });
   }
-  window.addEventListener('load', place);
-  window.addEventListener('resize', place);
-  if (window.MutationObserver) new MutationObserver(function () { setTimeout(place, 50); })
-    .observe(orders, {childList: true, subtree: true});
-  setTimeout(place, 300);
+  inp.addEventListener('input', run);
+  inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') e.preventDefault(); });
+})();
+
+// "معلومات إضافية": تنفتح تلقائيًا إذا فيها قيمة (مثلاً بعد اختيار مريض مسجّل)
+(function () {
+  var box = document.getElementById('nvExtra');
+  if (!box) return;
+  function sync() {
+    if (box.open) return;
+    var has = Array.prototype.some.call(box.querySelectorAll('input:not([readonly]):not([type=hidden]), textarea, select'), function (el) {
+      if (el.tagName === 'SELECT') return el.value && el.value !== 'Undefined';
+      return (el.value || '').trim() !== '';
+    });
+    if (has) box.open = true;
+  }
+  document.addEventListener('click', function () { setTimeout(sync, 400); });
+  document.addEventListener('change', function () { setTimeout(sync, 100); });
+  window.addEventListener('load', function () { setTimeout(sync, 300); });
 })();
 </script>
 {% endblock %}
