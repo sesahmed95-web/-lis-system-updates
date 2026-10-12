@@ -107,6 +107,7 @@
     var w = null;
     try { w = window.open(bust, '_blank'); } catch (e) { w = null; }
     if (w) return;
+    // النافذة المنبثقة انمنعت: نعرض التقرير بمعاينة داخل الصفحة (زر 🖨 طباعة بالشريط)
     document.getElementById('reportModalFrame').src = bust;
     document.getElementById('reportModalTitle').textContent = title ? ('🖨 ' + title) : '🖨 معاينة الطباعة';
     document.getElementById('reportModalOverlay').style.display = 'flex';
@@ -190,11 +191,17 @@
     if (!tg) return url;
     return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'show_prev=' + (tg.checked ? '1' : '0');
   }
-  function lisRunSaveAndPrint(postUrl, form, getUrl, title) {
+  function lisRunSaveAndPrint(postUrl, form, getUrl, title, requireCompleted) {
     function attempt(gate) {
       return lisPostJson(postUrl, form, gate).then(function (data) {
         if (data.ok) {
           lisDirty = false;
+          // أزرار الطباعة العلوية: لو ما فيه أي تحليل مكتمل بالزيارة ما يوجد شي يُطبع —
+          // قبل كان يفتح صفحة فاضية بصمت فيبدو الزر "ما يشتغل".
+          if (requireCompleted && typeof data.completed === 'number' && data.completed === 0) {
+            alert('لا توجد نتائج مكتملة لهذه الزيارة بعد — أدخل قيمة واحدة على الأقل في أي تحليل ثم اضغط الطباعة.');
+            return;
+          }
           openReportModal(lisWithAuto(lisWithShowPrev(getUrl(data))), title);
           return;
         }
@@ -303,7 +310,7 @@
     lisPaymentGate(function () {
       var form = document.getElementById('visitResultsForm');
       if (!form) { openReportModal(url, title); return; }
-      lisRunSaveAndPrint(window.location.href, form, function () { return url; }, title);
+      lisRunSaveAndPrint(window.location.href, form, function () { return url; }, title, true);
     });
   }
 

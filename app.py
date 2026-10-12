@@ -5844,7 +5844,13 @@ def visit_results_entry(visit_id):
         elif not wants_json:
             flash("لم تُدخل أي قيمة جديدة.")
         if wants_json:
-            return jsonify({"ok": True, "saved": any_saved})
+            # عدد التحاليل المكتملة/المعتمدة بالزيارة — تستخدمه أزرار الطباعة العلوية
+            # (اللوحة المجمّعة/كل النتائج) لتنبيه المستخدم لو ما فيه شي يُطبع.
+            _done_cnt = db.execute(
+                "SELECT COUNT(*) c FROM order_tests ot JOIN orders o ON o.id = ot.order_id "
+                "WHERE o.visit_id=? AND ot.status IN ('Completed', 'Verified')", (visit_id,),
+            ).fetchone()["c"]
+            return jsonify({"ok": True, "saved": any_saved, "completed": _done_cnt})
         return redirect(url_for("visit_results_entry", visit_id=visit_id))
 
     boxes = []

@@ -66,6 +66,11 @@
   {% endif %}
 </div>
 
+<div id="seqBar" style="display:none; position:fixed; bottom:60px; inset-inline:16px; z-index:10000; background:#205072; color:#fff; padding:10px 14px; border-radius:8px; align-items:center; justify-content:space-between; gap:10px; box-shadow:0 6px 20px rgba(0,0,0,0.25);">
+  <span id="seqLabel" style="font-size:13px;"></span>
+  <button type="button" id="seqNextBtn" class="btn small" onclick="printAllAdvance()">التالي ▶</button>
+</div>
+
 <!-- شريط رسائل بسيط لعرض نتيجة إرسال الواتساب (نجاح/فشل) بدل flash
      العادي — لأن هذي الصفحة جوه iframe مودال، والإرسال يصير بـfetch()
      بدون أي تنقّل/إعادة تحميل. -->
@@ -129,7 +134,14 @@
   ];
   var sequentialIndex = -1;
 
+  function lisAutoUrl(url) { return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'auto=1'; }
   function openReportModal(url, title) {
+    // الطباعة من داخل iframe لا تشتغل بنافذة Edge بوضع التطبيق (نفس سبب
+    // visit_results_entry.html) → نفتح التقرير بنافذة حقيقية تطبع تلقائيًا (auto=1)،
+    // ولو انمنعت النافذة المنبثقة نرجع للمعاينة داخل الصفحة.
+    var w = null;
+    try { w = window.open(lisAutoUrl(url) + '&_ts=' + Date.now(), '_blank'); } catch (e) { w = null; }
+    if (w) return;
     document.getElementById('reportModalFrame').src = url;
     document.getElementById('reportModalTitle').textContent = title ? ('🖨 ' + title) : '🖨 معاينة الطباعة';
     document.getElementById('reportModalOverlay').style.display = 'flex';
@@ -156,18 +168,28 @@
   // المنبثقة، وزر "التالي" ينقل للتقرير اللي بعده (كل تقرير بصفحته
   // الأصلية الحقيقية، بدون محاولة دمجها كلها بصفحة وحدة قد تكسر تنسيق
   // أي تقرير منها).
+  // التقارير تنفتح بنوافذ حقيقية تطبع تلقائيًا؛ شريط "التالي" بالصفحة نفسها
+  // (مو داخل المودال) ينقلك للتقرير اللي بعده — كل ضغطة = تقرير واحد (يمنع حظر النوافذ).
+  function updateSeqBar() {
+    var bar = document.getElementById('seqBar');
+    if (!bar) return;
+    if (sequentialIndex < 0 || reportUrls.length < 2) { bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+    document.getElementById('seqLabel').textContent =
+      'تم فتح (' + (sequentialIndex + 1) + ' / ' + reportUrls.length + '): ' + reportNames[sequentialIndex];
+    document.getElementById('seqNextBtn').style.display =
+      (sequentialIndex < reportUrls.length - 1) ? 'inline-flex' : 'none';
+  }
   function printAllSequential() {
     sequentialIndex = 0;
-    var nextBtn = document.getElementById('reportModalNextBtn');
-    if (nextBtn) nextBtn.style.display = reportUrls.length > 1 ? 'inline-flex' : 'none';
     openReportModal(reportUrls[0], reportNames[0]);
+    updateSeqBar();
   }
   function printAllAdvance() {
     sequentialIndex++;
-    if (sequentialIndex >= reportUrls.length) { closeReportModal(); return; }
-    var nextBtn = document.getElementById('reportModalNextBtn');
-    if (nextBtn) nextBtn.style.display = (sequentialIndex < reportUrls.length - 1) ? 'inline-flex' : 'none';
+    if (sequentialIndex >= reportUrls.length) { sequentialIndex = -1; updateSeqBar(); return; }
     openReportModal(reportUrls[sequentialIndex], reportNames[sequentialIndex]);
+    updateSeqBar();
   }
 
   // زر "🔙 الرجوع لإدخال النتائج": هذي الصفحة أصلاً محمّلة جوه iframe
@@ -186,6 +208,7 @@
         return;
       }
     } catch (err) { /* تجاهل ونكمل للسلوك الاحتياطي تحت */ }
+    if (window.opener) { window.close(); return; }
     window.location.href = "{{ url_for('visit_results_entry', visit_id=visit['id']) }}";
   }
 
