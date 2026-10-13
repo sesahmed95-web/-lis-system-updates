@@ -4099,6 +4099,23 @@ def visit_barcode_qr(visit_id):
     return send_file(buf, mimetype="image/png")
 
 
+
+# ستايلات ملصقات الباركود + إظهار/إخفاء اسم المختبر (اختياري). كلها تُحفظ بالإعدادات
+# وتتغير من شريط الإعدادات أعلى صفحتي الباركود عبر /api/settings/barcode-print-prefs.
+# اسم المختبر نفسه يُقرأ دائمًا من إعدادات البرنامج (app_name_ar، وإلا app_name) —
+# فأي تغيير له من الإعدادات ينعكس مباشرة على الملصق عند تفعيل خيار الإظهار.
+BARCODE_STYLES = ("classic", "compact", "bold", "banner", "minimal")
+
+
+def _barcode_show_lab_name(db):
+    return get_setting(db, "barcode_show_lab_name", "1") != "0"
+
+
+def _barcode_style(db, key):
+    v = get_setting(db, key, "classic")
+    return v if v in BARCODE_STYLES else "classic"
+
+
 @app.route("/front-desk/visits/<int:visit_id>/print/barcode")
 @login_required
 def print_visit_barcode(visit_id):
@@ -4121,7 +4138,8 @@ def print_visit_barcode(visit_id):
         mode = "full"
     return render_template(
         "front_desk/print_visit_barcode.html", visit=visit, tests=tests, draw_time=draw_time,
-        lab_name_ar=lab_name_ar,
+        lab_name_ar=lab_name_ar, show_lab_name=_barcode_show_lab_name(db),
+        vb_style=_barcode_style(db, "vb_style"), barcode_styles=BARCODE_STYLES,
         vb_copies=_int("vb_copies", 1, 1, 50), vb_w=_int("vb_w", 50, 20, 200),
         vb_h=_int("vb_h", 30, 15, 200), vb_names_mode=mode,
     )
@@ -4248,7 +4266,9 @@ def print_barcode_finder():
     """صفحة بحث سريعة: اكتب اسم المريض، تطلعلك آخر زياراته والتحاليل
     المطلوبة بيها، وتضغط زر لتطبع باركوداتها — مفيدة لو تلف باركود أصلي
     وتحتاج تعيد طباعته بسرعة بدون الرجوع لسجل الزيارة الكامل."""
-    return render_template("front_desk/print_barcode_finder.html")
+    db = get_db()
+    return render_template("front_desk/print_barcode_finder.html",
+                           show_lab_name=get_setting(db, "barcode_show_lab_name", "1") != "0")
 
 
 @app.route("/api/patients/<int:patient_id>/recent-visits")
@@ -4420,7 +4440,8 @@ def print_sample_barcodes(visit_id):
         "front_desk/print_sample_barcodes.html", visit=visit,
         tube_samples=tube_samples, individual_samples=individual_samples,
         samples=individual_samples,  # توافق مع أي نسخة قديمة من القالب لسا تستخدم "samples"
-        lab_name_ar=lab_name_ar,
+        lab_name_ar=lab_name_ar, show_lab_name=_barcode_show_lab_name(db),
+        barcode_style=_barcode_style(db, "barcode_style"), barcode_styles=BARCODE_STYLES,
         barcode_copies=barcode_copies,
         barcode_test_names_mode=barcode_test_names_mode,
     )
@@ -4466,6 +4487,17 @@ def api_set_barcode_print_prefs():
                 return jsonify({"ok": False, "error": f"{key}: القيمة يجب أن تكون بين {lo} و{hi}"}), 400
             set_setting(db, setting, str(n))
             updated[key] = n
+    for key in ("barcode_style", "vb_style"):
+        if key in body:
+            st = (body.get(key) or "").strip()
+            if st not in BARCODE_STYLES:
+                return jsonify({"ok": False, "error": "ستايل غير صالح"}), 400
+            set_setting(db, key, st)
+            updated[key] = st
+    if "show_lab_name" in body:
+        v = "0" if str(body.get("show_lab_name")).strip().lower() in ("0", "false", "") else "1"
+        set_setting(db, "barcode_show_lab_name", v)
+        updated["show_lab_name"] = v
     if "vb_names_mode" in body:
         mode = (body.get("vb_names_mode") or "").strip()
         if mode not in ("full", "short", "none"):

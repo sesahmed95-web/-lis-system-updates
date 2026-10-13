@@ -6,17 +6,17 @@
   <p class="muted">{{ visit['gender'] }} · {{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['created_at'] }}</p>
   <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
   <button type="button" class="btn small secondary print-link" id="printAllLink"
-     onclick="lisSaveThenPrint('{{ url_for('print_visit_results_bundle', visit_id=visit['id']) }}', 'طباعة كل النتائج المكتملة')">🖨 طباعة كل النتائج المكتملة</button>
+     onclick="lisTopPrintBtn('{{ url_for('print_visit_results_bundle', visit_id=visit['id']) }}', 'طباعة كل النتائج المكتملة')">🖨 طباعة كل النتائج المكتملة</button>
   <button type="button" class="btn small secondary"
-     onclick="lisSaveThenPrint('{{ url_for('print_combined_panel', visit_id=visit['id']) }}', 'اللوحة المجمّعة')"
+     onclick="lisTopPrintBtn('{{ url_for('print_combined_panel', visit_id=visit['id']) }}', 'اللوحة المجمّعة')"
      title="يجمع تحاليل الكيمياء/الفايروسات/الهرمونات/الفيتامينات وأي قسم آخر بورقة A4 وحدة، مرتّبة حسب القسم">🧾 طباعة اللوحة المجمّعة</button>
   <button type="button" class="btn small secondary"
-     onclick="lisSaveThenPrint('{{ url_for('print_combined_panel', visit_id=visit['id']) }}?headings=0', 'التقرير الشامل')"
+     onclick="lisTopPrintBtn('{{ url_for('print_combined_panel', visit_id=visit['id']) }}?headings=0', 'التقرير الشامل')"
      title="كل تحاليل الكيمياء والهرمونات والفيتامينات والفايروسات والدلائل الورمية والتخثر بتقرير واحد بدون عناوين أقسام (ما عدا CBC وBlood film وRetic وBMA وBMP وFluid وHb.H وElectrophoresis)">📄 التقرير الشامل (بدون أقسام)</button>
   {% if balance and balance['remaining'] > 0 %}
-  <button type="button" class="btn small" style="background:#B45309;border-color:#B45309;color:#fff;"
-     onclick="lisPrintBalanceSlip()"
-     title="يطبع ورقة صغيرة (بحجم ملصق الباركود): الاسم + التاريخ والوقت + المتبقي + الواصل">🧾 ورقة المتبقي ({{ '{:,.0f}'.format(balance['remaining']) }})</button>
+  <button type="button" class="btn small" id="lisBalanceBtn" style="background:#B45309;border-color:#B45309;color:#fff;"
+     onclick="lisPayRemaining()"
+     title="يفتح نافذة تسديد المتبقي (ومنها تقدر تطبع ورقة المتبقي). بعد التسديد الكامل يختفي الزر">💵 المتبقي (<span id="lisBalanceAmt">{{ '{:,.0f}'.format(balance['remaining']) }}</span>) — تسديد</button>
   {% endif %}
   <a class="btn small secondary" target="_blank" href="{{ url_for('print_visit_portal_qr', visit_id=visit['id']) }}"
      title="طباعة QR يمسحه المريض بموبايله لمشاهدة نتائجه (غير باركود القناني)">📱 QR المريض</a>
@@ -246,7 +246,26 @@
       })
       .catch(function () { proceed(); });
   }
-  function lisShowUnpaidModal(b, proceed) {
+  // زر "المتبقي" بأعلى الصفحة: يفتح نافذة التسديد مباشرة. بعد التسديد الكامل يختفي الزر
+  // بدون إعادة تحميل الصفحة (حتى ما تضيع نتائج مكتوبة ولسا ما انحفظت).
+  function lisUpdateBalanceBtn(remaining) {
+    var btn = document.getElementById('lisBalanceBtn');
+    if (!btn) return;
+    if (!(remaining > 0)) { btn.remove(); return; }
+    var amt = document.getElementById('lisBalanceAmt');
+    if (amt) amt.textContent = lisFmtMoney(remaining);
+  }
+  function lisPayRemaining() {
+    fetch('/api/visits/' + LIS_VISIT_ID + '/balance', { headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) { return r.json(); })
+      .then(function (b) {
+        if (!b || !b.ok) { alert((b && b.error) || 'تعذّر قراءة الحساب'); return; }
+        if (!(b.remaining > 0)) { lisUpdateBalanceBtn(0); alert('المريض مسدّد كامل المبلغ.'); return; }
+        lisShowUnpaidModal(b, function () { lisUpdateBalanceBtn(0); }, true);
+      })
+      .catch(function () { alert('تعذّر الاتصال بالسيرفر'); });
+  }
+  function lisShowUnpaidModal(b, proceed, payOnly) {
     var old = document.getElementById('lisUnpaidOverlay');
     if (old) old.remove();
     var ov = document.createElement('div');
@@ -281,6 +300,10 @@
       document.getElementById('lisUpAmount').value = Math.round(x.remaining);
     }
     fill(b);
+    if (payOnly) {
+      var fb = document.getElementById('lisUpForce'); if (fb) fb.remove();
+      document.getElementById('lisUpCancel').textContent = 'إغلاق';
+    }
     function close() { ov.remove(); }
     document.getElementById('lisUpCancel').onclick = close;
     document.getElementById('lisUpForce').onclick = function () { close(); proceed(); };
@@ -296,6 +319,7 @@
           if (!d.ok) { msg.textContent = d.error || 'تعذّر تسجيل الدفعة'; return; }
           if (d.remaining > 0) {
             b.paid = d.paid; b.total = d.total; b.remaining = d.remaining; fill(b);
+            lisUpdateBalanceBtn(d.remaining);
             msg.style.color = '#92400E';
             msg.textContent = 'تم تسجيل الدفعة، لكن لسا باقي ' + lisFmtMoney(d.remaining) + '.';
             return;
@@ -306,7 +330,7 @@
     };
   }
   // أزرار أعلى الصفحة (كل النتائج / اللوحة المجمّعة)
-  function lisSaveThenPrint(url, title) {
+  function lisTopPrintBtn(url, title) {
     lisPaymentGate(function () {
       var form = document.getElementById('visitResultsForm');
       if (!form) { openReportModal(url, title); return; }
@@ -465,6 +489,65 @@
     });
   }
   document.addEventListener('DOMContentLoaded', lisApplyShowPrev);
+</script>
+
+
+<!-- نافذة Ctrl+P: اختيار ماذا تطبع (تحليل محدد / كل النتائج المكتملة / اللوحة المجمّعة) ثم Print -->
+<div id="lisCtrlPOverlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:10002; align-items:center; justify-content:center; padding:20px;">
+  <div dir="rtl" style="background:#fff; border-radius:12px; width:100%; max-width:440px; padding:20px 22px; box-shadow:0 20px 60px rgba(0,0,0,.35);">
+    <h3 style="margin:0 0 12px;">🖨 طباعة النتائج</h3>
+    <label style="display:flex; gap:8px; align-items:flex-start; margin-bottom:10px; cursor:pointer;">
+      <input type="radio" name="lisCtrlPMode" value="test" checked style="margin-top:5px;">
+      <span style="flex:1;">تحليل محدد
+        <select id="lisCtrlPTest" style="width:100%; margin-top:4px;" onfocus="document.querySelector('input[name=lisCtrlPMode][value=test]').checked=true;">
+          {% for box in boxes %}<option value="{{ box.ot['id'] }}">{{ box.ot['test_name'] }}</option>{% endfor %}
+        </select>
+      </span>
+    </label>
+    <label style="display:flex; gap:8px; align-items:center; margin-bottom:10px; cursor:pointer;">
+      <input type="radio" name="lisCtrlPMode" value="all"> <span>🖨 طباعة كل النتائج المكتملة</span>
+    </label>
+    <label style="display:flex; gap:8px; align-items:center; margin-bottom:16px; cursor:pointer;">
+      <input type="radio" name="lisCtrlPMode" value="panel"> <span>🧾 طباعة اللوحة المجمّعة</span>
+    </label>
+    <div style="display:flex; gap:8px; justify-content:flex-start;">
+      <button type="button" class="btn" id="lisCtrlPGo">Print</button>
+      <button type="button" class="btn secondary" id="lisCtrlPCancel">إلغاء</button>
+    </div>
+  </div>
+</div>
+<script>
+  (function () {
+    var BUNDLE_URL = "{{ url_for('print_visit_results_bundle', visit_id=visit['id']) }}";
+    var PANEL_URL = "{{ url_for('print_combined_panel', visit_id=visit['id']) }}";
+    var ov = document.getElementById('lisCtrlPOverlay');
+    function openDlg() {
+      // لو المؤشر داخل بطاقة تحليل، نحدد هذا التحليل تلقائيًا
+      var box = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.rb-box') : null;
+      var sel = document.getElementById('lisCtrlPTest');
+      if (box && box.id && sel) { sel.value = box.id.replace('rbox_', ''); }
+      document.querySelector('input[name=lisCtrlPMode][value=test]').checked = true;
+      ov.style.display = 'flex';
+      document.getElementById('lisCtrlPGo').focus();
+    }
+    function closeDlg() { ov.style.display = 'none'; }
+    function go() {
+      var mode = document.querySelector('input[name=lisCtrlPMode]:checked').value;
+      closeDlg();
+      if (mode === 'test') { lisPrintOne(parseInt(document.getElementById('lisCtrlPTest').value, 10)); }
+      else if (mode === 'all') { lisTopPrintBtn(BUNDLE_URL, 'طباعة كل النتائج المكتملة'); }
+      else { lisTopPrintBtn(PANEL_URL, 'اللوحة المجمّعة'); }
+    }
+    document.getElementById('lisCtrlPGo').addEventListener('click', go);
+    document.getElementById('lisCtrlPCancel').addEventListener('click', closeDlg);
+    ov.addEventListener('click', function (e) { if (e.target === ov) closeDlg(); });
+    window.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault(); e.stopPropagation();
+        openDlg();
+      } else if (e.key === 'Escape' && ov.style.display === 'flex') { closeDlg(); }
+    }, true);
+  })();
 </script>
 
 <form method="POST" id="visitResultsForm">
@@ -821,7 +904,7 @@
       var hasProtected = form.querySelectorAll('.badge-Completed, .badge-Verified').length > 0;
       if (!hasProtected) return;
       if (!lisDirty) return; // ما تغيّر شي بالحقول → ما نطلب كلمة مرور (السيرفر يتحقق أيضاً)
-      // لو زر الطباعة (lisSaveThenPrint فوق) هو اللي سوّى requestSubmit
+      // لو زر الطباعة (lisTopPrintBtn فوق) هو اللي سوّى requestSubmit
       // بعد ما جمع اسم المستخدم/كلمة المرور مسبقًا وحطّهم كحقول مخفية،
       // ما نطلبهم مرة ثانية هون -- نخلي الإرسال يكمل عادي بنفس القيم.
       var existingUser = form.querySelector('input[name="gate_username"]');

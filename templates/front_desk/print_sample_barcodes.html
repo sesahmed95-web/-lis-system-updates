@@ -41,6 +41,34 @@
   .prefs-bar input[type=number] { width: 55px; padding: 4px 6px; border: 1px solid #CBD5E1; border-radius: 5px; }
   .prefs-bar select { padding: 4px 6px; border: 1px solid #CBD5E1; border-radius: 5px; }
   .prefs-saved { font-size: 11.5px; color: #16A34A; visibility: hidden; }
+
+  /* ===== ستايلات الملصق (تُختار من الشريط أعلى الصفحة وتُحفظ) ===== */
+  .label, .lab-name { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body.hide-lab .lab-name { display: none !important; }
+  /* compact: ملصق أصغر وأخف، بدون حدود تقريبًا */
+  body.bs-compact .label { width: 180px; padding: 6px 8px; border: 1px solid #ccc; }
+  body.bs-compact .lab-name { font-size: 9px; }
+  body.bs-compact .patient { font-size: 11px; margin: 2px 0 1px; }
+  body.bs-compact .meta { font-size: 8.5px; margin: 0 0 2px; }
+  body.bs-compact .sample-type { font-size: 12px; margin: 1px 0; }
+  body.bs-compact .test-list, body.bs-compact .test { font-size: 9.5px; margin: 2px 0 3px; }
+  /* bold: اسم المريض ونوع العينة كبار وبحدود سوداء — مناسب للطابعات الحرارية */
+  body.bs-bold .label { border: 2px solid #000; border-style: solid; border-radius: 4px; }
+  body.bs-bold .lab-name { font-size: 10px; }
+  body.bs-bold .patient { font-size: 17px; font-weight: 800; margin: 3px 0; }
+  body.bs-bold .meta { color: #000; font-size: 10.5px; }
+  body.bs-bold .sample-type { font-size: 17px; font-weight: 800; color: #000; }
+  body.bs-bold .test-list, body.bs-bold .test { font-weight: 700; color: #000; }
+  /* banner: اسم المختبر بشريط أسود كامل العرض أعلى الملصق */
+  body.bs-banner .label { border: 1px solid #000; border-style: solid; overflow: hidden; padding-top: 0; }
+  body.bs-banner .lab-name { background: #000; color: #fff; margin: 0 -14px 6px; padding: 3px 6px; font-size: 11px; letter-spacing: .3px; }
+  body.bs-banner .patient { font-size: 14px; }
+  body.bs-banner .sample-type { color: #000; }
+  /* minimal: بدون إطار وبدون سطر التاريخ — الاسم + نوع العينة + الباركود فقط */
+  body.bs-minimal .label { border: none; padding: 6px 8px; }
+  body.bs-minimal .meta { display: none; }
+  body.bs-minimal .sample-type { color: #000; }
+  body.bs-minimal .patient { font-size: 14px; }
   @media print {
     .no-print { display: none !important; }
     body.printing-individual .tube-grid { display: none !important; }
@@ -166,6 +194,19 @@
     refreshPreview();
   }
 
+  function onStyleChanged() {
+    var st = document.getElementById('prefStyle').value;
+    ['classic', 'compact', 'bold', 'banner', 'minimal'].forEach(function (k) { document.body.classList.remove('bs-' + k); });
+    document.body.classList.add('bs-' + st);
+    savePrefs({ barcode_style: st });
+  }
+
+  function onShowLabChanged() {
+    var on = document.getElementById('prefShowLab').checked;
+    document.body.classList.toggle('hide-lab', !on);
+    savePrefs({ show_lab_name: on ? '1' : '0' });
+  }
+
   function printTubes() {
     refreshPreview();
     window.print();
@@ -187,7 +228,7 @@
   }
 </script>
 </head>
-<body onload="preparePrint()">
+<body onload="preparePrint()" class="bs-{{ barcode_style }}{{ '' if show_lab_name else ' hide-lab' }}">
 
   <div class="no-print prefs-bar">
     <label>
@@ -201,6 +242,18 @@
         <option value="short" {% if barcode_test_names_mode == 'short' %}selected{% endif %}>مختصر</option>
         <option value="none" {% if barcode_test_names_mode == 'none' %}selected{% endif %}>بدون</option>
       </select>
+    </label>
+    <label>
+      ستايل الملصق:
+      <select id="prefStyle" onchange="onStyleChanged()">
+        {% for key, label in [('classic','كلاسيك'),('compact','مصغّر'),('bold','عريض (حراري)'),('banner','شريط المختبر'),('minimal','بسيط')] %}
+        <option value="{{ key }}" {% if barcode_style == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label title="الاسم يُؤخذ من إعدادات البرنامج (اسم المختبر) — أي تغيير له هناك ينعكس هنا">
+      <input type="checkbox" id="prefShowLab" {% if show_lab_name %}checked{% endif %} onchange="onShowLabChanged()">
+      إظهار اسم المختبر{% if lab_name_ar %} ({{ lab_name_ar }}){% endif %}
     </label>
     <span id="prefsSaved" class="prefs-saved">✓ تم الحفظ</span>
     <span style="font-size:12.5px;color:#334155;">عدد الملصقات: <b id="labelsCount">0</b></span>

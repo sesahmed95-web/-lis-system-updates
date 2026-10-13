@@ -34,6 +34,27 @@
   .bc { flex: 0 0 auto; text-align: center; }
   .bc img { height: 8mm; max-width: 100%; object-fit: fill; width: 92%; image-rendering: pixelated; }
 
+
+  /* ===== ستايلات الملصق ===== */
+  .label, .lab { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* compact: خطوط أصغر وباركود أقصر — يتسع لتحاليل أكثر */
+  .label.s-compact .pname { font-size: 7pt; }
+  .label.s-compact .meta { font-size: 5.5pt; }
+  .label.s-compact .bc img { height: 6.5mm; }
+  /* bold: اسم المريض كبير وغامق، حدود سوداء */
+  .label.s-bold { outline: 0.3mm solid #000; outline-offset: -0.4mm; }
+  .label.s-bold .pname { font-size: 10.5pt; font-weight: 900; }
+  .label.s-bold .meta { font-size: 6.5pt; font-weight: 700; }
+  .label.s-bold .bc img { height: 7mm; }
+  /* banner: اسم المختبر بشريط أسود كامل العرض أعلى الملصق */
+  .label.s-banner .lab { background: #000; color: #fff; margin: -1mm -1.5mm 0.8mm; padding: 0.5mm 1mm; font-size: 6pt; }
+  .label.s-banner .pname { font-size: 9pt; }
+  /* minimal: الاسم + الباركود فقط بباركود أكبر */
+  .label.s-minimal .tests { display: none; }
+  .label.s-minimal .pname { font-size: 10pt; text-align: center; }
+  .label.s-minimal .meta { justify-content: center; }
+  .label.s-minimal .bc { margin-top: auto; }
+  .label.s-minimal .bc img { height: 12mm; }
   @media print {
     body { background: #fff; }
     .no-print { display: none !important; }
@@ -60,6 +81,17 @@
     <input type="number" id="lw" min="20" max="200" value="{{ vb_w }}" title="العرض">
     ×
     <input type="number" id="lh" min="15" max="200" value="{{ vb_h }}" title="الارتفاع">
+  </label>
+  <label>ستايل الملصق:
+    <select id="styleSel">
+      {% for key, label in [('classic','كلاسيك'),('compact','مصغّر'),('bold','عريض'),('banner','شريط المختبر'),('minimal','بسيط')] %}
+      <option value="{{ key }}" {% if vb_style == key %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label title="الاسم يُؤخذ من إعدادات البرنامج (اسم المختبر) — أي تغيير له هناك ينعكس هنا">
+    <input type="checkbox" id="showLab" {% if show_lab_name %}checked{% endif %}>
+    إظهار اسم المختبر{% if lab_name_ar %} ({{ lab_name_ar }}){% endif %}
   </label>
   <button type="button" id="printBtn">🖨️ طباعة</button>
   <button type="button" class="sec" onclick="window.close()">إغلاق</button>
@@ -91,6 +123,7 @@
   var $copies = document.getElementById('copies');
   var $mode = document.getElementById('namesMode');
   var $w = document.getElementById('lw'), $h = document.getElementById('lh');
+  var $style = document.getElementById('styleSel'), $lab = document.getElementById('showLab');
 
   function clamp(v, lo, hi, d) { v = parseInt(v, 10); if (!v) v = d; return Math.max(lo, Math.min(hi, v)); }
 
@@ -109,12 +142,16 @@
     for (var i = 0; i < n; i++) {
       var node = tpl.content.firstElementChild.cloneNode(true);
       node.style.width = w + 'mm'; node.style.height = h + 'mm';
+      node.classList.add('s-' + $style.value);
+      if (!$lab.checked) { var lb = node.querySelector('.lab'); if (lb) lb.remove(); }
       var t = node.querySelector('.tests');
       if (mode === 'none') { t.style.display = 'none'; }
       else { t.textContent = (mode === 'short' ? t.getAttribute('data-short') : t.getAttribute('data-full')); }
       sheet.appendChild(node);
     }
-    sheet.querySelectorAll('.tests').forEach(function (el) { if (el.style.display !== 'none') fitText(el); });
+    sheet.querySelectorAll('.tests').forEach(function (el) {
+      if (el.style.display !== 'none' && $style.value !== 'minimal') fitText(el);
+    });
   }
 
   var timer = null;
@@ -132,9 +169,10 @@
   function changed() {
     render();
     save({ vb_copies: clamp($copies.value, 1, 50, 1), vb_names_mode: $mode.value,
-           vb_w: clamp($w.value, 20, 200, 50), vb_h: clamp($h.value, 15, 200, 30) });
+           vb_w: clamp($w.value, 20, 200, 50), vb_h: clamp($h.value, 15, 200, 30),
+           vb_style: $style.value, show_lab_name: $lab.checked ? '1' : '0' });
   }
-  [$copies, $mode, $w, $h].forEach(function (el) { el.addEventListener('input', changed); el.addEventListener('change', changed); });
+  [$copies, $mode, $w, $h, $style, $lab].forEach(function (el) { el.addEventListener('input', changed); el.addEventListener('change', changed); });
 
   function doPrint() { render(); setTimeout(function () { window.print(); }, 150); }
   document.getElementById('printBtn').addEventListener('click', doPrint);

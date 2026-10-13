@@ -8,6 +8,12 @@
     المريض، اختر الزيارة، واطبع باركوداتها (كل الأنابيب أو تحليل وحيد بس)
     من نفس صفحة الطباعة المعتادة.
   </p>
+  <label style="display:inline-flex; align-items:center; gap:6px; margin-bottom:12px; cursor:pointer; font-weight:normal;"
+         title="يتحكم بظهور اسم المختبر على الملصق الملصوق بالأنابيب — الاختيار يُحفظ لكل الطباعات القادمة">
+    <input type="checkbox" id="pbfShowLabName" {{ 'checked' if show_lab_name }} onchange="pbfSaveLabName(this)">
+    إظهار اسم المختبر على ملصق الباركود
+    <span id="pbfLabMsg" class="muted" style="font-size:11px;"></span>
+  </label>
   <div class="form-field" style="position:relative; max-width:420px;">
     <label>اسم المريض</label>
     <input type="text" id="pbfQuery" autocomplete="off" placeholder="اكتب اسم المريض..." style="width:100%;">
@@ -34,6 +40,13 @@
   .pbf-results .pbf-sub { color:#64748B; font-size:11.5px; }
 </style>
 <script>
+  function pbfSaveLabName(cb) {
+    var fd = new FormData(); fd.append('show_lab_name', cb.checked ? '1' : '0');
+    fetch('/api/settings/barcode-print-prefs', {method: 'POST', body: fd})
+      .then(function (r) { return r.json(); })
+      .then(function (d) { document.getElementById('pbfLabMsg').textContent = d.ok ? '✓ تم' : (d.error || 'تعذر الحفظ'); })
+      .catch(function () { document.getElementById('pbfLabMsg').textContent = 'تعذر الحفظ'; });
+  }
   var pbfInput = document.getElementById('pbfQuery');
   var pbfResults = document.getElementById('pbfResults');
   var pbfTimer = null;
