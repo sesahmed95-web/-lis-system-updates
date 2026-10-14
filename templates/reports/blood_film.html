@@ -20,7 +20,7 @@
   </tr>
   <tr>
     <td class="field-name">Basophils :</td><td class="pct-val">{{ params.get('Basophils', '') }}</td><td class="unit-val">{{ units.get('Basophils') or '%' }}</td>
-    <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">{{ units.get('NRBC') or '100/wbc' }}</td>
+    <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">{{ units.get('NRBC') or '/100wbc' }}</td>
   </tr>
   <tr>
     <td class="field-name">{% if params.get('Reactive lymphocytes') %}Reactive lymphocytes{% else %}Atypical lymphocytes{% endif %} :</td>

@@ -45,6 +45,7 @@
   /* ===== ستايلات الملصق (تُختار من الشريط أعلى الصفحة وتُحفظ) ===== */
   .label, .lab-name { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body.hide-lab .lab-name { display: none !important; }
+  .ld-line { line-height: 1.25; }
   /* compact: ملصق أصغر وأخف، بدون حدود تقريبًا */
   body.bs-compact .label { width: 180px; padding: 6px 8px; border: 1px solid #ccc; }
   body.bs-compact .lab-name { font-size: 9px; }
@@ -124,31 +125,46 @@
   // بنفسه من هذا الشريط، بدل ما ترجع لنسخة وحدة/الاسم الكامل تلقائيًا.
   var originalTubeGridHTML = null; // يُحفظ قبل أي تكرار للنسخ، حتى نقدر نرجع له كل طباعة
 
-  function shortenTestList(shortText) {
-    // "data-short" يجي جاهز من السيرفر: اختصار يدوي محدد لكل تحليل من
-    // كتالوج التحاليل (test_definitions.short_name) لو الأدمن حدده، وإلا
-    // الاسم الكامل نفسه. هذا التابع يقصّر إضافيًا فقط أي اسم لسا طويل
-    // (يعني ما له اختصار يدوي بعد) حتى ما يفيض عن الملصق.
-    return shortText.split('، ').map(function (name) {
-      name = name.trim();
+  function shortenTestList(arr) {
+    // اختصارات الأسماء الطويلة (لو ما عندها اختصار يدوي) حتى ما تفيض عن الملصق
+    return arr.map(function (name) {
+      name = String(name).trim();
       return name.length > 14 ? name.slice(0, 14) + '…' : name;
     }).join('، ');
   }
 
-  function applyTestNamesMode(mode) {
-    document.querySelectorAll('.tube-grid .test-list').forEach(function (el) {
-      var full = el.getAttribute('data-full') || el.textContent;
-      var short = el.getAttribute('data-short') || full;
-      if (mode === 'none') {
-        el.style.display = 'none';
-      } else if (mode === 'short') {
-        el.style.display = '';
-        el.textContent = shortenTestList(short);
-      } else { // full
-        el.style.display = '';
-        el.textContent = full;
-      }
+  function fieldValue(F, ln, lay) {
+    if (ln.f === 'custom') return ln.t || '';
+    if (ln.f === 'tests') {
+      if (lay.tmode === 'none') return '';
+      return lay.tmode === 'short' ? shortenTestList(F.tests_short || []) : (F.tests_full || []).join('، ');
+    }
+    return F[ln.f] || '';
+  }
+
+  // يرسم أسطر كل ملصق داخل root حسب تصميم الأسطر الحالي (LD.layout())
+  function renderLines(root) {
+    if (!root) return;
+    var lay = LD.layout();
+    root.querySelectorAll('.label[data-f]').forEach(function (lab) {
+      var F = JSON.parse(lab.getAttribute('data-f'));
+      LD.buildLines(lab.querySelector('.lines'), lay, function (ln) { return fieldValue(F, ln, lay); });
     });
+  }
+
+  function applySizing() {
+    var lay = LD.layout(), css = '';
+    var sel = '.tube-grid .label, .individual-print-grid .label';
+    if (lay.w) css += sel + ' { width: ' + lay.w + 'mm; }';
+    if (lay.h) css += sel + ' { height: ' + lay.h + 'mm; overflow: hidden; }';
+    if (lay.roll && lay.w && lay.h) {
+      css += '@page { size: ' + lay.w + 'mm ' + lay.h + 'mm; margin: 0; }' +
+        '@media print { body { padding: 0 !important; } .grid { display: block !important; gap: 0; } ' +
+        'body.printing-individual .individual-print-grid { display: block !important; } ' +
+        sel + ' { margin: 0; border: none; border-radius: 0; page-break-after: always; break-after: page; } ' +
+        '.tube-grid .label:last-child, .individual-print-grid .label:last-child { page-break-after: auto; break-after: auto; } }';
+    }
+    document.getElementById('dynStyle').textContent = css;
   }
 
   function getCopiesCount() {
@@ -156,17 +172,6 @@
     if (!n || n < 1) n = 1;
     if (n > 20) n = 20;
     return n;
-  }
-
-  function duplicateTubeLabels(copies) {
-    var grid = document.querySelector('.tube-grid');
-    if (!grid || originalTubeGridHTML === null) return;
-    grid.innerHTML = originalTubeGridHTML; // رجوع للأصل أول حتى لا تتراكم نسخ فوق نسخ كل طباعة
-    if (copies <= 1) return;
-    var originals = Array.prototype.slice.call(grid.children);
-    for (var c = 1; c < copies; c++) {
-      originals.forEach(function (node) { grid.appendChild(node.cloneNode(true)); });
-    }
   }
 
   function savePrefs(partial) {
@@ -188,12 +193,6 @@
     refreshPreview();
   }
 
-  function onTestNamesModeChanged() {
-    var mode = document.getElementById('prefTestNamesMode').value;
-    savePrefs({ test_names_mode: mode });
-    refreshPreview();
-  }
-
   function onStyleChanged() {
     var st = document.getElementById('prefStyle').value;
     ['classic', 'compact', 'bold', 'banner', 'minimal'].forEach(function (k) { document.body.classList.remove('bs-' + k); });
@@ -209,24 +208,43 @@
 
   function printTubes() {
     refreshPreview();
-    window.print();
+    var w = document.getElementById('ldWarn');
+    setTimeout(function () {
+      if (w && w.style.display !== 'none' && !confirm('يوجد تنبيه تجاوز بالملصق — النص قد ينقص بالطباعة. تطبع رغم ذلك؟')) return;
+      window.print();
+    }, 80);
   }
 
   // يجهّز المعاينة فقط (أسماء التحاليل + عدد النسخ) ولا يطبع تلقائيًا: المستخدم يحدد عدد النسخ ثم يضغط "طباعة".
   function refreshPreview() {
-    applyTestNamesMode(document.getElementById('prefTestNamesMode').value);
-    duplicateTubeLabels(getCopiesCount());
-    applyTestNamesMode(document.getElementById('prefTestNamesMode').value);
+    var grid = document.querySelector('.tube-grid');
+    if (originalTubeGridHTML === null) return;
+    grid.innerHTML = originalTubeGridHTML; // رجوع للأصل أول حتى لا تتراكم نسخ فوق نسخ
+    renderLines(grid);
+    renderLines(document.querySelector('.individual-print-grid'));
+    var copies = getCopiesCount();
+    if (copies > 1) {
+      var originals = Array.prototype.slice.call(grid.children);
+      for (var c = 1; c < copies; c++) originals.forEach(function (node) { grid.appendChild(node.cloneNode(true)); });
+    }
+    applySizing();
     var n = document.querySelectorAll('.tube-grid .label').length;
-    var c = document.getElementById('labelsCount');
-    if (c) c.textContent = n;
+    var cnt = document.getElementById('labelsCount');
+    if (cnt) cnt.textContent = n;
+    var lay = LD.layout();
+    setTimeout(function () {
+      var labels = document.querySelectorAll('.tube-grid .label');
+      LD.setWarnings(LD.check(labels, lay.h ? labels : []));
+    }, 30);
   }
 
   function preparePrint() {
     originalTubeGridHTML = document.querySelector('.tube-grid').innerHTML;
+    LD.onChange = refreshPreview;
     refreshPreview();
   }
 </script>
+<style id="dynStyle"></style>
 </head>
 <body onload="preparePrint()" class="bs-{{ barcode_style }}{{ '' if show_lab_name else ' hide-lab' }}">
 
@@ -234,14 +252,6 @@
     <label>
       عدد النسخ:
       <input type="number" id="prefCopies" min="1" max="20" value="{{ barcode_copies }}" onchange="onCopiesChanged()">
-    </label>
-    <label>
-      أسماء التحاليل:
-      <select id="prefTestNamesMode" onchange="onTestNamesModeChanged()">
-        <option value="full" {% if barcode_test_names_mode == 'full' %}selected{% endif %}>الاسم الكامل</option>
-        <option value="short" {% if barcode_test_names_mode == 'short' %}selected{% endif %}>مختصر</option>
-        <option value="none" {% if barcode_test_names_mode == 'none' %}selected{% endif %}>بدون</option>
-      </select>
     </label>
     <label>
       ستايل الملصق:
@@ -260,18 +270,14 @@
     <button type="button" onclick="printTubes()" style="padding:6px 16px;font-weight:700;">🖨 طباعة</button>
   </div>
 
+  {% set ld_kind = 'tube' %}
+  {% include "front_desk/_label_designer.html" %}
+
   <h2 class="section-heading no-print">🧪 باركودات الأنابيب (حسب القسم) — حدد عدد النسخ ثم اضغط طباعة</h2>
   <div class="grid tube-grid">
     {% for s in tube_samples %}
-    <div class="label">
-      <div class="lab-name">{{ lab_name_ar }}</div>
-      <div class="patient">{{ visit['full_name'] }}</div>
-      <div class="meta">{{ visit['created_at'] }}</div>
-      {% if s['sample_type'] %}<div class="sample-type">{{ s['sample_type'] }}</div>{% endif %}
-      {% if s['test_names']|length >= 1 %}
-      <div class="test-list" data-full="{{ s['test_names']|join('، ') }}"
-           data-short="{{ s['short_names']|join('، ') }}">{{ s['test_names']|join('، ') }}</div>
-      {% endif %}
+    <div class="label" data-f='{{ s["fields"] | tojson }}'>
+      <div class="lines"></div>
       <img src="{{ url_for('barcode_image', code=s['barcode']) }}" alt="barcode">
     </div>
     {% endfor %}
@@ -314,12 +320,8 @@
      بس البطاقات المحدَّدة فعليًا (باقيها display:none من printSelectedIndividual). #}
   <div class="grid individual-print-grid">
     {% for s in individual_samples %}
-    <div class="label individual-card" data-barcode="{{ s['barcode'] }}">
-      <div class="lab-name">{{ lab_name_ar }}</div>
-      <div class="patient">{{ visit['full_name'] }}</div>
-      <div class="meta">{{ visit['created_at'] }}</div>
-      <div class="test">{{ s['test_name'] }}</div>
-      <div class="sample-type">{{ s['sample_type'] or '' }}</div>
+    <div class="label individual-card" data-barcode="{{ s['barcode'] }}" data-f='{{ s["fields"] | tojson }}'>
+      <div class="lines"></div>
       <img src="{{ url_for('barcode_image', code=s['barcode']) }}" alt="barcode">
     </div>
     {% endfor %}

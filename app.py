@@ -18,6 +18,8 @@ import threading
 import time
 
 from database import close_request_connections
+from database import text_style_css, sanitize_text_style, TEXT_STYLE_FONTS
+from database import write_pending_preset_logo
 from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_test_price, find_or_create_doctor, find_or_create_referral_center,
                        get_report_template, save_report_template,
@@ -2199,6 +2201,61 @@ def designer_delete_issue_log(log_id):
     return redirect(url_for("designer_panel"))
 
 
+@app.route("/designer/client/delete", methods=["POST"])
+@designer_required
+def designer_delete_client():
+    """حذف عميل كامل من سجل لوحة المصمم (كل أسطر أكواد التفعيل لنفس معرّف الجهاز).
+    لا يحتاج أي توكن ولا يلغي الترخيص عند العميل — فقط ينظّف السجل المعروض.
+    لإلغاء ترخيصه فعليًا عن بُعد استخدم زر \"إلغاء التفعيل\" (يحتاج توكن الكتابة)."""
+    hardware_id = request.form.get("hardware_id", "").strip()
+    if not hardware_id:
+        flash("معرّف جهاز العميل مفقود.")
+        return redirect(url_for("designer_panel"))
+    db = get_db()
+    n = db.execute("DELETE FROM license_issue_log WHERE hardware_id=?", (hardware_id,)).rowcount
+    db.commit()
+    db.close()
+    flash(f"تم حذف العميل من السجل ({n} سطر).")
+    return redirect(url_for("designer_panel"))
+
+
+@app.route("/designer/client/extend", methods=["POST"])
+@designer_required
+def designer_extend_client():
+    """تمديد فترة عميل: يولّد كود تفعيل جديد لنفس الجهاز بتاريخ انتهاء =
+    (تاريخ انتهائه الحالي لو لسا ما انتهى، وإلا اليوم) + عدد الأيام المدخل، ويسجّله
+    بالسجل ويعرضه لتسلّمه للعميل. محلي بالكامل — لا يحتاج توكن ولا إنترنت."""
+    hardware_id = request.form.get("hardware_id", "").strip().upper()
+    username = request.form.get("username", "").strip()
+    try:
+        extra_days = int(float(request.form.get("extra_days", "0") or 0))
+    except ValueError:
+        extra_days = 0
+    if not hardware_id or extra_days <= 0:
+        flash("أدخل عدد أيام التمديد (رقم أكبر من صفر).")
+        return redirect(url_for("designer_panel"))
+    db = get_db()
+    row = db.execute(
+        "SELECT expiry, username FROM license_issue_log WHERE upper(hardware_id)=? ORDER BY id DESC LIMIT 1",
+        (hardware_id,),
+    ).fetchone()
+    username = username or (row["username"] if row and row["username"] else "client")
+    base = date.today()
+    if row and row["expiry"] and row["expiry"] not in ("PERM", "None"):
+        try:
+            cur = date.fromisoformat(str(row["expiry"])[:10])
+            if cur > base:
+                base = cur
+        except ValueError:
+            pass
+    expiry_date = (base + timedelta(days=extra_days)).isoformat()
+    code = license_manager.generate_activation_code(hardware_id, expiry_date, is_trial=False)
+    license_manager.log_issued_code(db, hardware_id, username, expiry_date, code)
+    db.close()
+    return render_template("designer/generated.html", username=username, code=code,
+                           hardware_id=hardware_id, expiry_date=expiry_date)
+
+
 @app.route("/designer/change-password", methods=["POST"])
 @designer_required
 def designer_change_password():
@@ -2268,6 +2325,16 @@ def print_visit_full_report(visit_id):
             "font-family:Tahoma,Arial,sans-serif;color:#64748B;'>"
             "لا توجد نتائج مكتملة بهذي الزيارة بعد لعرضها أو طباعتها.</div>"
         )
+    # autoprint=1: طباعة تلقائية مرة وحدة للصفحة المدمجة كلها. نستخدم اسم وسيط مختلف
+    # عن auto حتى لا تنفّذ تقارير التحاليل المضمّنة طباعتها الذاتية كل وحدة لحالها
+    # (طلبات طباعة متعددة متزامنة = نافذة طباعة تتجمّد).
+    if request.args.get("autoprint") == "1":
+        _ap = ("<script>window.addEventListener('load',function(){setTimeout(function(){"
+               "window.print();},700);});</script>")
+        if "</body>" in html_content:
+            html_content = html_content.replace("</body>", _ap + "</body>", 1)
+        else:
+            html_content += _ap
     return html_content
 
 
@@ -2307,6 +2374,11 @@ def new_visit():
         lab_card_number = request.form.get("lab_card_number", "").strip()
         birth_date = (request.form.get("birth_date") or "").strip()[:10] or None
         expected_ready_at = (request.form.get("expected_ready_at") or "").strip()[:16] or None
+        expected_ready_text = (request.form.get("expected_ready_text") or "").strip()[:60] or None
+        if expected_ready_text and not expected_ready_at:
+            _edt = parse_expected_text(expected_ready_text)
+            if _edt:
+                expected_ready_at = _edt.strftime("%Y-%m-%dT%H:%M")
         fasting = request.form.get("fasting", "Undefined")
         notes = request.form.get("notes", "")
         # المعلومات الصحية (Health Information) — خاصة بهذي الزيارة تحديداً.
@@ -2384,8 +2456,9 @@ def new_visit():
         )
         visit_id = cur.lastrowid
         # رقم العينة: من حقل "Sample No." بصفحة زيارة جديدة (يتسلسل من جديد حسب إعداد التصفير)
-        db.execute("UPDATE visits SET sample_no=?, expected_ready_at=? WHERE id=?",
-                   (resolve_visit_sample_no(db, request.form.get("sample_no")), expected_ready_at, visit_id))
+        db.execute("UPDATE visits SET sample_no=?, expected_ready_at=?, expected_ready_text=? WHERE id=?",
+                   (resolve_visit_sample_no(db, request.form.get("sample_no")), expected_ready_at,
+                    expected_ready_text, visit_id))
         # (بوابة النتائج: توليد الرمز + إيقاظ العامل صار بعد db.commit() النهائي تحت —
         #  قبل كان يوقظ العامل الخلفي والزيارة لسا ما اكتملت فيتنافس معها على قفل القاعدة)
 
@@ -4116,6 +4189,228 @@ def _barcode_style(db, key):
     return v if v in BARCODE_STYLES else "classic"
 
 
+
+# ====================== مصمّم الملصقات (أسطر قابلة للتحكم) ======================
+# كل ملصق (tube = ملصق الأنابيب، request = ملصق ورقة طلب المريض) له تصميم محفوظ
+# بالإعدادات كـJSON: القياس (مم)، الأسطر بالترتيب (كل سطر: الحقل + حجم الخط + غامق +
+# محاذاة + هل يُسمح بلفّ السطر)، وإعدادات الباركود وعدد النسخ. الصفحة تنبّه لو أي سطر
+# تجاوز عرض الملصق أو المحتوى تجاوز ارتفاعه.
+LABEL_FIELD_TITLES = {
+    "lab_name": "اسم المختبر", "patient_name": "اسم المريض", "age_gender": "العمر والجنس",
+    "datetime": "التاريخ والوقت", "date": "التاريخ فقط", "time": "الوقت فقط",
+    "reg_no": "رقم التسجيل", "sample_no": "رقم العينة (Sample No.)", "visit_id": "رقم الزيارة الداخلي",
+    "sample_type": "نوع العينة / القسم", "tests": "أسماء التحاليل",
+    "tests_codes": "أكواد التحاليل", "custom": "نص ثابت (تكتبه أنت)",
+}
+LABEL_SCAN_TITLES = {
+    "reg_no": "رقم التسجيل", "sample_no": "رقم العينة", "patient_name": "اسم المريض",
+    "age_gender": "العمر والجنس", "datetime": "التاريخ والوقت", "lab_name": "اسم المختبر",
+    "tests": "أسماء التحاليل", "tests_codes": "أكواد التحاليل",
+}
+LABEL_FIELDS_BY_KIND = {
+    "tube": ("lab_name", "patient_name", "age_gender", "datetime", "date", "time", "reg_no",
+             "sample_no", "sample_type", "tests", "tests_codes", "custom"),
+    "request": ("lab_name", "patient_name", "age_gender", "datetime", "date", "time", "reg_no",
+                "sample_no", "visit_id", "tests", "tests_codes", "custom"),
+}
+_DEFAULT_LABEL_LAYOUTS = {
+    "tube": {
+        "w": 0, "h": 0, "roll": False, "tmode": "full",
+        "lines": [{"f": "lab_name"}, {"f": "patient_name"}, {"f": "datetime"},
+                  {"f": "sample_type"}, {"f": "tests", "w": 1}],
+    },
+    "request": {
+        "w": 60, "h": 40, "roll": True, "copies": 1, "tmode": "full",
+        "lines": [{"f": "lab_name", "s": 6, "b": 1}, {"f": "patient_name", "s": 9, "b": 1},
+                  {"f": "age_gender", "s": 7}, {"f": "reg_no", "s": 7, "b": 1},
+                  {"f": "datetime", "s": 7}, {"f": "tests", "s": 7, "b": 1, "w": 1}],
+        "bc": {"type": "qr", "pos": "side", "h": 18},
+        "scan": ["reg_no", "patient_name", "age_gender", "datetime", "tests"],
+    },
+}
+
+
+def _lnum(v, lo, hi, default=None):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, x))
+
+
+def _sanitize_label_layout(kind, raw):
+    import copy as _copy
+    d = _copy.deepcopy(_DEFAULT_LABEL_LAYOUTS[kind])
+    if not isinstance(raw, dict):
+        return d
+    d["w"] = _lnum(raw.get("w"), 0, 300, d["w"])
+    d["h"] = _lnum(raw.get("h"), 0, 300, d["h"])
+    if kind == "request":
+        d["w"] = d["w"] or 60
+        d["h"] = d["h"] or 40
+    d["roll"] = bool(raw.get("roll", d["roll"]))
+    d["tmode"] = raw.get("tmode") if raw.get("tmode") in ("full", "short", "none") else d["tmode"]
+    allowed = LABEL_FIELDS_BY_KIND[kind]
+    lines = []
+    for ln in (raw.get("lines") or [])[:10]:
+        if not isinstance(ln, dict) or ln.get("f") not in allowed:
+            continue
+        item = {"f": ln["f"]}
+        sz = _lnum(ln.get("s"), 3, 40)
+        if sz:
+            item["s"] = sz
+        if ln.get("b") in (0, 1, True, False):
+            item["b"] = 1 if ln.get("b") else 0
+        if ln.get("a") in ("left", "center", "right"):
+            item["a"] = ln["a"]
+        if ln.get("w"):
+            item["w"] = 1
+        if ln["f"] == "custom":
+            item["t"] = str(ln.get("t") or "")[:80]
+        lines.append(item)
+    if lines:
+        d["lines"] = lines
+    elif isinstance(raw.get("lines"), list):
+        d["lines"] = []  # المستخدم حذف كل الأسطر عمدًا
+    if kind == "request":
+        bc = raw.get("bc") or {}
+        d["bc"] = {
+            "type": bc.get("type") if bc.get("type") in ("qr", "code128") else "qr",
+            "pos": bc.get("pos") if bc.get("pos") in ("bottom", "side") else "side",
+            "h": _lnum(bc.get("h"), 6, 60, 18),
+        }
+        d["copies"] = int(_lnum(raw.get("copies"), 1, 50, 1))
+        if isinstance(raw.get("scan"), list):
+            d["scan"] = [k for k in raw["scan"] if k in LABEL_SCAN_TITLES]
+    return d
+
+
+def _get_label_layout(db, kind):
+    try:
+        raw = json.loads(get_setting(db, f"label_layout_{kind}", "") or "null")
+    except ValueError:
+        raw = None
+    return _sanitize_label_layout(kind, raw)
+
+
+@app.route("/api/settings/label-layout/<kind>", methods=["POST"])
+@login_required
+def api_set_label_layout(kind):
+    if kind not in _DEFAULT_LABEL_LAYOUTS:
+        return jsonify({"ok": False, "error": "نوع ملصق غير معروف"}), 404
+    raw = request.get_json(silent=True)
+    if not isinstance(raw, dict):
+        return jsonify({"ok": False, "error": "بيانات غير صالحة"}), 400
+    layout = _sanitize_label_layout(kind, raw)
+    db = get_db()
+    set_setting(db, f"label_layout_{kind}", json.dumps(layout, ensure_ascii=False))
+    db.commit()
+    return jsonify({"ok": True, "layout": layout})
+
+
+@app.route("/api/settings/label-layout/<kind>/reset", methods=["POST"])
+@login_required
+def api_reset_label_layout(kind):
+    if kind not in _DEFAULT_LABEL_LAYOUTS:
+        return jsonify({"ok": False, "error": "نوع ملصق غير معروف"}), 404
+    db = get_db()
+    set_setting(db, f"label_layout_{kind}", "")
+    db.commit()
+    return jsonify({"ok": True, "layout": _sanitize_label_layout(kind, None)})
+
+
+def _fmt_dt(v):
+    v = str(v or "").replace("T", " ")
+    return v[:16]
+
+
+def _label_visit_fields(visit, lab_name, tests=None, draw_time=None):
+    """الحقول المشتركة لأي ملصق (قيم نصية جاهزة)."""
+    keys = visit.keys()
+    age = visit["age"] if "age" in keys and visit["age"] else ""
+    unit = (visit["age_unit"] if "age_unit" in keys else "") or ""
+    gender = (visit["gender"] if "gender" in keys else "") or ""
+    age_gender = (f"{age} {unit}".strip() if age else "")
+    if gender:
+        age_gender = (age_gender + " · " if age_gender else "") + gender
+    dt = _fmt_dt(draw_time or visit["created_at"])
+    out = {
+        "lab_name": lab_name or "",
+        "patient_name": visit["full_name"] if "full_name" in keys else "",
+        "age_gender": age_gender,
+        "datetime": dt, "date": dt[:10], "time": dt[11:16],
+        "reg_no": f"#{visit['registration_number']}",
+        "sample_no": (str(visit["sample_no"]) if "sample_no" in keys and visit["sample_no"] else ""),
+        "visit_id": str(visit["id"]),
+    }
+    if tests is not None:
+        out["tests_full"] = [t["name"] for t in tests]
+        out["tests_short"] = [(t["short_name"] or t["name"]) for t in tests]
+        out["tests_codes"] = ", ".join(t["code"] for t in tests if t["code"])
+    return out
+
+
+def _request_scan_payload(visit, tests, draw_time, lab_name, scan, tmode):
+    """النص الذي يطلعه القارئ عند مسح QR ملصق الطلب (سطر لكل حقل مختار)."""
+    f = _label_visit_fields(visit, lab_name, tests, draw_time)
+    names = {"full": f["tests_full"], "short": f["tests_short"]}.get(
+        tmode, [t["code"] or t["name"] for t in tests])
+    lines = []
+    for k in scan:
+        if k == "reg_no":
+            lines.append(f"Reg: {visit['registration_number']}")
+        elif k == "sample_no" and f["sample_no"]:
+            lines.append(f"Sample: {f['sample_no']}")
+        elif k == "patient_name":
+            lines.append(f"Name: {f['patient_name']}")
+        elif k == "age_gender" and f["age_gender"]:
+            lines.append(f"Age: {f['age_gender']}")
+        elif k == "datetime":
+            lines.append(f"Date: {f['datetime']}")
+        elif k == "lab_name" and f["lab_name"]:
+            lines.append(f"Lab: {f['lab_name']}")
+        elif k == "tests":
+            lines.append("Tests: " + ", ".join(names))
+        elif k == "tests_codes" and f["tests_codes"]:
+            lines.append("Codes: " + f["tests_codes"])
+    return "\n".join(lines)
+
+
+@app.route("/front-desk/visits/<int:visit_id>/barcode/request.png")
+@login_required
+def visit_request_qr(visit_id):
+    db = get_db()
+    visit, tests, draw_time = _visit_barcode_context(db, visit_id)
+    if not visit:
+        return "Not found", 404
+    scan = [k for k in (request.args.get("scan") or "").split(",") if k in LABEL_SCAN_TITLES]
+    tmode = request.args.get("tm") if request.args.get("tm") in ("full", "short", "codes") else "full"
+    lab_name = get_setting(db, "app_name_ar", "") or get_setting(db, "app_name", "")
+    payload = _request_scan_payload(visit, tests, draw_time, lab_name, scan or ["reg_no"], tmode)
+    img = generate_qr(payload)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return send_file(buf, mimetype="image/png")
+
+
+@app.route("/front-desk/visits/<int:visit_id>/print/request-label")
+@login_required
+def print_request_label(visit_id):
+    """ملصق خاص بورقة طلب المريض (request): تصميم/محتوى/عدد مستقل عن ملصقات الأنابيب."""
+    db = get_db()
+    visit, tests, draw_time = _visit_barcode_context(db, visit_id)
+    if not visit:
+        return "Not found", 404
+    lab_name = get_setting(db, "app_name_ar", "") or get_setting(db, "app_name", "")
+    return render_template(
+        "front_desk/print_request_label.html", visit=visit,
+        label_data=_label_visit_fields(visit, lab_name, tests, draw_time),
+        label_layout=_get_label_layout(db, "request"),
+        field_titles=[(k, LABEL_FIELD_TITLES[k]) for k in LABEL_FIELDS_BY_KIND["request"]],
+        scan_titles=list(LABEL_SCAN_TITLES.items()),
+    )
+
 @app.route("/front-desk/visits/<int:visit_id>/print/barcode")
 @login_required
 def print_visit_barcode(visit_id):
@@ -4303,7 +4598,7 @@ def api_patient_recent_visits(patient_id):
 def print_sample_barcodes(visit_id):
     db = get_db()
     visit = db.execute(
-        "SELECT v.*, p.full_name FROM visits v JOIN patients p ON p.id = v.patient_id WHERE v.id=?",
+        "SELECT v.*, p.full_name, p.age, p.age_unit, p.gender FROM visits v JOIN patients p ON p.id = v.patient_id WHERE v.id=?",
         (visit_id,),
     ).fetchone()
     if not visit:
@@ -4436,12 +4731,27 @@ def print_sample_barcodes(visit_id):
         barcode_copies = str(_cp)
     barcode_test_names_mode = get_setting(db, "barcode_test_names_mode", "full")  # full | short | none
 
+    # تصميم أسطر ملصق الأنبوب (محفوظ) + قيم الحقول لكل ملصق. أول مرة (بدون تصميم محفوظ)
+    # نرث خيار "أسماء التحاليل" القديم حتى ما يتغير شكل الملصق.
+    _tube_layout = _get_label_layout(db, "tube")
+    if not (get_setting(db, "label_layout_tube", "") or "").strip() and barcode_test_names_mode in ("full", "short", "none"):
+        _tube_layout["tmode"] = barcode_test_names_mode
+    _base = _label_visit_fields(visit, lab_name_ar)
+    for _s in tube_samples:
+        _s["fields"] = {**_base, "sample_type": _s["sample_type"] or "", "tests_full": _s["test_names"],
+                        "tests_short": _s["short_names"], "tests_codes": ""}
+    for _s in individual_samples:
+        _s["fields"] = {**_base, "sample_type": _s["sample_type"] or "", "tests_full": [_s["test_name"]],
+                        "tests_short": [_s["test_short_name"]], "tests_codes": ""}
+
     return render_template(
         "front_desk/print_sample_barcodes.html", visit=visit,
         tube_samples=tube_samples, individual_samples=individual_samples,
         samples=individual_samples,  # توافق مع أي نسخة قديمة من القالب لسا تستخدم "samples"
         lab_name_ar=lab_name_ar, show_lab_name=_barcode_show_lab_name(db),
         barcode_style=_barcode_style(db, "barcode_style"), barcode_styles=BARCODE_STYLES,
+        label_layout=_tube_layout,
+        field_titles=[(k, LABEL_FIELD_TITLES[k]) for k in LABEL_FIELDS_BY_KIND["tube"]],
         barcode_copies=barcode_copies,
         barcode_test_names_mode=barcode_test_names_mode,
     )
@@ -6118,6 +6428,112 @@ def _build_panel_rows_for_ot(db, ot, visit, merged_by_test_def, ctx=None):
     return rows
 
 
+
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+_NUM_WORDS = {"واحد": 1, "اثنين": 2, "اثنان": 2, "ثنين": 2, "ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4,
+              "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6, "سبع": 7, "سبعه": 7, "ثمان": 8, "ثماني": 8, "ثمانيه": 8,
+              "تسع": 9, "تسعه": 9, "عشر": 10, "عشره": 10}
+
+
+def _norm_ar(t):
+    t = (t or "").translate(_AR_DIGITS).lower().replace("ـ", "")
+    for a, b in (("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ى", "ي"), ("ة", "ه"), ("،", " "), (",", " ")):
+        t = t.replace(a, b)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def parse_expected_text(text, now=None):
+    """يحوّل وقت مكتوب (ربع ساعة / نصف ساعة / ساعتين / ساعة ونصف / 3 ساعات / 45 دقيقة / يومين / 4:30 /
+    الساعة 5 مساء ...) إلى datetime. يرجّع None إذا ما فهم النص (فيُعرض كما كُتب)."""
+    now = now or datetime.now()
+    t = _norm_ar(text)
+    if not t:
+        return None
+    for w in ("بعد", "خلال", "تقريبا", "حوالي", "نحو", "الي", "في", "ب"):
+        t = re.sub(rf"(?<![\w]){w}(?![\w])", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    # ---------- ساعة محددة (4:30 / الساعة 5 مساء) ----------
+    m = re.fullmatch(r"(?:الساعه )?(\d{1,2})(?:[:.](\d{2}))?\s*(صباحا|ص|ظهرا|عصرا|العصر|مساء|م|ليلا|الليل|المساء|الصباح|الظهر)?", t)
+    if m and (":" in t or "." in t or t.startswith("الساعه") or m.group(3)):
+        h, mi, per = int(m.group(1)), int(m.group(2) or 0), m.group(3) or ""
+        if h > 23 or mi > 59:
+            return None
+        pm = per in ("مساء", "م", "عصرا", "العصر", "ليلا", "الليل", "المساء", "ظهرا", "الظهر")
+        if pm and h < 12:
+            h += 12
+        cand = now.replace(hour=h, minute=mi, second=0, microsecond=0)
+        if not per and h <= 12:
+            if cand <= now:
+                cand2 = cand + timedelta(hours=12)
+                cand = cand2 if cand2 > now else cand + timedelta(days=1)
+        elif cand <= now:
+            cand += timedelta(days=1)
+        return cand
+    # ---------- مدة (ساعة ونصف / 3 ساعات / 45 دقيقة / يومين ...) ----------
+    minutes = 0.0
+    rest = t
+    def take(pattern, mins):
+        nonlocal rest, minutes
+        hit = re.search(pattern, rest)
+        if hit:
+            minutes += mins(hit) if callable(mins) else mins
+            rest = (rest[:hit.start()] + " " + rest[hit.end():]).strip()
+            return True
+        return False
+    take(r"ثلاث(?:ه)? ارباع (?:ال)?ساعه", 45)
+    take(r"(?<![\w])ربع (?:ال)?ساعه", 15)
+    take(r"(?<![\w])ثلث (?:ال)?ساعه", 20)
+    take(r"(?<![\w])(?:نصف|نص) (?:ال)?ساعه", 30)
+    unit_mins = {"دقيقه": 1, "دقايق": 1, "دقائق": 1, "دقيقتين": 2, "ساعه": 60, "ساعات": 60, "ساعتين": 120, "ساعتان": 120,
+                 "يوم": 1440, "ايام": 1440, "يومين": 2880, "يومان": 2880, "اسبوع": 10080, "اسابيع": 10080,
+                 "اسبوعين": 20160}
+    num = r"(\d+(?:\.\d+)?|" + "|".join(sorted(_NUM_WORDS, key=len, reverse=True)) + r")"
+    units = "|".join(sorted(unit_mins, key=len, reverse=True))
+    # رقم + وحدة
+    while True:
+        hit = re.search(num + r" (?:ال)?(" + units + r")(?![\w])", rest)
+        if not hit:
+            break
+        n = hit.group(1)
+        val = float(n) if re.fullmatch(r"\d+(?:\.\d+)?", n) else _NUM_WORDS[n]
+        minutes += val * unit_mins[hit.group(2)]
+        rest = (rest[:hit.start()] + " " + rest[hit.end():]).strip()
+    # وحدة لحالها (ساعة، ساعتين، يوم، يومين، اسبوع...)
+    for mt in re.finditer(r"(?<![\w])(" + units + r")(?![\w])", rest):
+        minutes += unit_mins[mt.group(1)]
+    rest = re.sub(r"(?<![\w])(" + units + r")(?![\w])", " ", rest)
+    # كسور بعد ساعة: ونصف / وربع / وثلث
+    take(r"(?<![\w])و ?(?:نصف|نص)(?![\w])", 30)
+    take(r"(?<![\w])و ?ربع(?![\w])", 15)
+    take(r"(?<![\w])و ?ثلث(?![\w])", 20)
+    left = re.sub(r"(?<![\w])(?:و|ال|تقريبا)(?![\w])", " ", rest).strip()
+    if minutes <= 0 or left:
+        return None
+    return (now + timedelta(minutes=minutes)).replace(second=0, microsecond=0)
+
+
+@app.route("/api/expected/parse")
+@login_required
+def api_expected_parse():
+    txt = (request.args.get("text") or "").strip()[:60]
+    dt = parse_expected_text(txt)
+    if not dt:
+        return {"ok": False}
+    return {"ok": True, "iso": dt.strftime("%Y-%m-%dT%H:%M"), "label": dt.strftime("%Y-%m-%d %H:%M")}
+
+
+def _heading_css_ctx(cfg, dept_names):
+    """CSS جاهز لعنوان اللوحة المجمّعة وعناوين الأقسام (من إعدادات مصمم التقارير)."""
+    head = text_style_css(cfg.get("head_style") or {})
+    per = cfg.get("dept_styles") or {}
+    return {"title_css": text_style_css(cfg.get("title_style") or {}), "head_css": head,
+            "dept_css_map": {n: head + text_style_css(per[n]) for n in dept_names if n in per}}
+
+
+def _form_text_style(prefix):
+    return sanitize_text_style({k: request.form.get(f"{prefix}_{k}") for k in ("color", "font", "size", "case", "bold", "italic")})
+
+
 @app.route("/front-desk/visits/<int:visit_id>/print/combined-panel")
 @login_required
 def print_combined_panel(visit_id):
@@ -6301,6 +6717,7 @@ def print_combined_panel(visit_id):
         "reports/combined_panel.html",
         panel_groups=panel_groups, logo_url=logo_url, from_other_lab=from_other_lab,
         show_dept_headings=show_dept_headings, all_rows=all_rows, merged_title=layout_cfg["merged_title"],
+        **_heading_css_ctx(layout_cfg, [g["department"] for g in panel_groups]),
         sample_no=(visit["sample_no"] if "sample_no" in visit.keys() else "") or "",
         layout_view=_view, note_visit_id=visit_id,
         report_layout={}, report_layout_has_patient_override=False,
@@ -10745,6 +11162,11 @@ def report_designer():
         result_layout=get_result_layout(db), result_label_defaults=RESULT_LABEL_DEFAULTS,
         merged_exclude_default=", ".join(MERGED_EXCLUDE_DEFAULT),
         result_extra_values=get_extra_col_values(db),
+        heading_dept_names=[r[0] for r in db.execute(
+            "SELECT DISTINCT COALESCE(NULLIF(TRIM(report_group), ''), department) AS n FROM test_definitions "
+            "WHERE COALESCE(NULLIF(TRIM(report_group), ''), department) IS NOT NULL "
+            "AND TRIM(COALESCE(NULLIF(TRIM(report_group), ''), department)) <> '' ORDER BY n").fetchall()],
+        text_style_fonts=list(TEXT_STYLE_FONTS.keys()),
         **_report_designs_context(db),
     )
 
@@ -11074,6 +11496,17 @@ def save_result_style_settings():
     _dh = request.form.get("dept_headings", cfg["dept_headings"])
     cfg["dept_headings"] = _dh if _dh in ("auto", "show", "hide") else "auto"
     cfg["merged_title"] = (request.form.get("merged_title") or "").strip()[:120]
+    cfg["title_style"] = _form_text_style("title")
+    cfg["head_style"] = _form_text_style("head")
+    _ds = {}
+    for _k in list(request.form.keys()):
+        _m = re.fullmatch(r"ds_(\d+)_name", _k)
+        if _m:
+            _nm = (request.form.get(_k) or "").strip()[:80]
+            _st = _form_text_style(f"ds_{_m.group(1)}")
+            if _nm and _st:
+                _ds[_nm] = _st
+    cfg["dept_styles"] = _ds
     cfg["merged_exclude"] = (request.form.get("merged_exclude") or "").strip()[:2000]
     cfg["show_prev_visit_line"] = 1 if request.form.get("show_prev_visit_line") else 0
     save_result_layout(db, cfg)
@@ -11194,6 +11627,7 @@ def result_style_preview():
             "reports/combined_panel.html",
             panel_groups=groups, all_rows=[r for g in groups for r in g["rows"]], show_dept_headings=show_headings,
             merged_title=cfg["merged_title"], logo_url=logo_url, from_other_lab=False,
+            **_heading_css_ctx(cfg, [g["department"] for g in groups]),
             layout_view=view, note_visit_id=None, prev_toggle_available=False, show_prev_values=show_prev,
             report_layout={}, report_layout_has_patient_override=False,
             visit_date="28/9/2026", sex="Male", age="45 Year",
@@ -11289,7 +11723,8 @@ def _portal_collect(db, visit_id):
         tests.append({"td_id": ot["test_definition_id"], "code": ot["test_code"], "name": ot["test_name"],
                       "status": ot["status"], "rows": rows})
     return {"patient_name": visit["patient_name"], "created_at": visit["created_at"], "tests": tests,
-            "expected_ready_at": (visit["expected_ready_at"] if "expected_ready_at" in visit.keys() else None)}
+            "expected_ready_at": (visit["expected_ready_at"] if "expected_ready_at" in visit.keys() else None),
+            "expected_ready_text": (visit["expected_ready_text"] if "expected_ready_text" in visit.keys() else None)}
 
 
 cloud_sync.set_collector(_portal_collect)
@@ -11404,6 +11839,7 @@ def api_portal_test():
     return {"ok": ok, "message": msg}
 if __name__ == "__main__":
     init_db()
+    write_pending_preset_logo(UPLOAD_DIR)   # شعار العميل القادم من portal_preset.json (إن وُجد)
     cloud_sync.start_worker()
     astm_host.start_listener_if_enabled()
 

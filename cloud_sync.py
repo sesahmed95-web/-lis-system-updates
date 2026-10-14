@@ -136,6 +136,18 @@ def _eta_text(cfg, data):
     """الوقت المتوقع = أطول وقت بين التحاليل غير الجاهزة (أو كلها لو ما اكتمل شي)، منسوبًا لوقت التسجيل."""
     # وقت يحدده الاستقبال يدويًا بصفحة زيارة جديدة (اختياري) — يغلب التقدير التلقائي
     _exp = (data.get("expected_ready_at") or "").strip()
+    _txt = (data.get("expected_ready_text") or "").strip()
+    if _txt:
+        # الموظف كتب الوقت بكلماته (ربع ساعة / ساعتين / ...): نعرضه كما كتبه + الوقت المحسوب بين قوسين
+        _sfx = ""
+        if _exp and ":" not in _txt:
+            try:
+                _dt = datetime.fromisoformat(_exp)
+                _same = str(data.get("created_at") or "")[:10] == _dt.strftime("%Y-%m-%d")
+                _sfx = " (" + ("" if _same else _dt.strftime("%Y-%m-%d") + " ") + "الساعة " + _dt.strftime("%H:%M") + ")"
+            except (TypeError, ValueError):
+                pass
+        return "الوقت المتوقع: " + _txt + _sfx
     if _exp:
         try:
             _dt = datetime.fromisoformat(_exp)

@@ -210,7 +210,7 @@
 
 
 {# =============================== الماكرو الرئيسي =============================== #}
-{% macro render_results(rows, view, group_title=None, name_header=None) %}
+{% macro render_results(rows, view, group_title=None, name_header=None, title_style='') %}
 {% set L = view.labels %}
 {% set ex = view.ex %}
 {% set style = view.style %}
@@ -218,7 +218,7 @@
 
 {# ---------------------------- Style A (a1 / a2) ---------------------------- #}
 {% if style in ('a1', 'a2') %}
-  {% if group_title %}<div class="rs-a-dept">{{ group_title }}</div>{% endif %}
+  {% if group_title %}<div class="rs-a-dept" style="{{ title_style }}">{{ group_title }}</div>{% endif %}
   {% set ncols = 4 + (ex.test|length) + (ex.result|length) + (ex.unit|length) + (ex.range|length) %}
   <table class="rs-a-table">
     <tr>
@@ -272,7 +272,7 @@
   {% if tpl.append('minmax(0,1fr)') %}{% endif %}
   {% for e in ex.si %}{% if tpl.append('minmax(0,.6fr)') %}{% endif %}{% endfor %}
   {% set gt = 'grid-template-columns:' ~ (tpl|join(' ')) ~ ';' %}
-  {% if group_title %}<div class="report-heading" style="text-align:center; margin:14px 0 6px 0;">{{ group_title }}</div>{% endif %}
+  {% if group_title %}<div class="report-heading" style="text-align:center; margin:14px 0 6px 0;{{ title_style }}">{{ group_title }}</div>{% endif %}
   <div class="rs-bg-head" style="{{ gt }}">
     <div class="rs-bg-first">{{ name_header or L.test }}</div>
     {% for e in ex.test %}<div>{{ e.title }}</div>{% endfor %}
@@ -344,7 +344,7 @@
 
 {# ---------------------------- Style B compact ---------------------------- #}
 {% else %}
-  {% if group_title %}<div class="report-heading" style="text-align:center; margin:14px 0 6px 0;">{{ group_title }}</div>{% endif %}
+  {% if group_title %}<div class="report-heading" style="text-align:center; margin:14px 0 6px 0;{{ title_style }}">{{ group_title }}</div>{% endif %}
   {% for row in rows %}
   {% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and not row.color and row.flag) else none %}
   <div class="rs-bc-block"{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>

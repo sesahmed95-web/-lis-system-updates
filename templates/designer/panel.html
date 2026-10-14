@@ -130,6 +130,19 @@
             <input type="hidden" name="hardware_id" value="{{ row['hardware_id'] }}">
             <button class="btn small secondary" type="submit">📤 تحديث فوري</button>
           </form>
+          <form method="POST" action="{{ url_for('designer_extend_client') }}" style="display:flex; gap:4px; align-items:center;"
+                onsubmit="return confirm('توليد كود تفعيل جديد بتمديد الفترة لهذا العميل؟');">
+            <input type="hidden" name="hardware_id" value="{{ row['hardware_id'] }}">
+            <input type="hidden" name="username" value="{{ row['username'] }}">
+            <input type="number" name="extra_days" min="1" placeholder="تمديد الفترة (أيام)" required
+                   style="width:130px; padding:4px 6px;" title="عدد الأيام المضافة على تاريخ انتهاء العميل الحالي">
+            <button class="btn small" type="submit">⏳ تمديد</button>
+          </form>
+          <form method="POST" action="{{ url_for('designer_delete_client') }}"
+                onsubmit="return confirm('حذف العميل {{ row['username'] }} بكل أسطره من السجل؟ (لا يلغي الترخيص عنده، فقط ينظّف السجل هنا)');">
+            <input type="hidden" name="hardware_id" value="{{ row['hardware_id'] }}">
+            <button class="btn small secondary" type="submit" style="color:#b91c1c;">🗑 حذف العميل</button>
+          </form>
           <form method="POST" action="{{ url_for('designer_delete_issue_log', log_id=row['id']) }}"
                 onsubmit="return confirm('حذف هذا السطر من السجل؟ (لا يلغي الترخيص المفعّل عند العميل، فقط ينظّف السجل هنا)');">
             <button class="btn small secondary" type="submit">🗑 حذف السطر</button>

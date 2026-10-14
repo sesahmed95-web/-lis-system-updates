@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<title>Request Label #{{ visit['registration_number'] }}</title>
+<style id="pageSizeStyle"></style>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", Tahoma, Arial, sans-serif; background: #E5E7EB; }
+  .bar { background: #fff; border-bottom: 1px solid #CBD5E1; padding: 10px 14px; display: flex; gap: 16px; flex-wrap: wrap;
+         align-items: center; justify-content: center; direction: rtl; }
+  .bar label { font-size: 13px; color: #334155; display: flex; align-items: center; gap: 6px; }
+  .bar input[type=number] { width: 72px; font-size: 16px; font-weight: 700; text-align: center; border: 1px solid #26529C; border-radius: 6px; padding: 5px 6px; }
+  .bar button { padding: 7px 16px; border-radius: 7px; border: 1px solid #26529C; background: #26529C; color: #fff; font-size: 14px; cursor: pointer; }
+  .bar button.sec { background: #fff; color: #26529C; }
+  .designer-area { padding: 12px 14px 0; max-width: 980px; margin: 0 auto; }
+
+  .sheet { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px; justify-content: center; }
+  .label { background: #fff; padding: 1.5mm; display: flex; flex-direction: column; gap: 1mm; overflow: hidden; color: #000;
+           box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+  .label.pos-side { flex-direction: row; align-items: stretch; }
+  .rl-lines { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-start; }
+  .rl-lines > .ld-line { flex: 0 0 auto; }
+  .rl-bc { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+  .label.pos-bottom .rl-bc { justify-content: center; }
+  .rl-bc img { image-rendering: pixelated; display: block; }
+  .ld-line { line-height: 1.18; unicode-bidi: plaintext; text-align: start; }
+  .lab-name { font-size: 6pt; font-weight: 700; }
+  .patient { font-size: 9pt; font-weight: 800; }
+  .meta { font-size: 7pt; }
+  .test-list { font-size: 7pt; font-weight: 700; }
+  .test { font-size: 7pt; }
+
+  @media print {
+    body { background: #fff; }
+    .no-print { display: none !important; }
+    .sheet { display: block; padding: 0; }
+    .label { box-shadow: none; page-break-after: always; break-after: page; margin: 0; }
+    .label:last-child { page-break-after: auto; break-after: auto; }
+    body.flow .sheet { display: flex; flex-wrap: wrap; gap: 2mm; }
+    body.flow .label { page-break-after: auto; break-after: auto; }
+  }
+</style>
+</head>
+<body>
+
+<div class="no-print bar">
+  <label>عدد الباركودات:
+    <input type="number" id="copies" min="1" max="50" value="{{ label_layout.copies or 1 }}">
+  </label>
+  <button type="button" id="printBtn">🖨️ طباعة</button>
+  <button type="button" class="sec" onclick="window.close()">إغلاق</button>
+  <span style="font-size:12.5px;color:#475569;">ملصق ورقة طلب المريض — محتواه وقياسه مستقل عن ملصقات الأنابيب</span>
+</div>
+
+<div class="designer-area">
+  {% set ld_kind = 'request' %}
+  {% include "front_desk/_label_designer.html" %}
+</div>
+
+<div class="sheet" id="sheet"></div>
+
+<script>
+(function () {
+  var D = {{ label_data|tojson }};
+  var VISIT_ID = {{ visit['id'] }};
+  var QR_URL = {{ url_for('visit_request_qr', visit_id=visit['id'])|tojson }};
+  var C128_URL = {{ url_for('visit_barcode_code128', visit_id=visit['id'])|tojson }};
+  var sheet = document.getElementById('sheet');
+  var $copies = document.getElementById('copies');
+
+  function valueOf(ln, lay) {
+    if (ln.f === 'custom') return ln.t || '';
+    if (ln.f === 'tests') {
+      if (lay.tmode === 'none') return '';
+      return (lay.tmode === 'short' ? D.tests_short : D.tests_full).join(', ');
+    }
+    return D[ln.f] || '';
+  }
+
+  function barcodeSrc(lay) {
+    var bc = lay.bc || {};
+    if (bc.type === 'code128') return C128_URL + '?_=' + Date.now();
+    var tm = lay.tmode === 'none' ? 'codes' : lay.tmode;
+    return QR_URL + '?scan=' + encodeURIComponent((lay.scan || []).join(',')) + '&tm=' + tm + '&_=' + Date.now();
+  }
+
+  function render() {
+    var lay = LD.layout();
+    var n = Math.max(1, Math.min(50, parseInt($copies.value, 10) || 1));
+    var w = lay.w || 60, h = lay.h || 40, bc = lay.bc || {};
+    document.getElementById('pageSizeStyle').textContent = lay.roll
+      ? '@page { size: ' + w + 'mm ' + h + 'mm; margin: 0; }'
+      : '@page { margin: 6mm; }';
+    document.body.classList.toggle('flow', !lay.roll);
+    sheet.innerHTML = '';
+    var src = barcodeSrc(lay);
+    for (var i = 0; i < n; i++) {
+      var lab = document.createElement('div');
+      lab.className = 'label pos-' + (bc.pos === 'bottom' ? 'bottom' : 'side');
+      lab.style.width = w + 'mm'; lab.style.height = h + 'mm';
+      var lines = document.createElement('div'); lines.className = 'rl-lines';
+      LD.buildLines(lines, lay, function (ln) { return valueOf(ln, lay); });
+      var box = document.createElement('div'); box.className = 'rl-bc';
+      var img = document.createElement('img'); img.alt = 'barcode'; img.src = src;
+      var bh = bc.h || 18;
+      if (bc.type === 'code128') {
+        img.style.height = bh + 'mm';
+        img.style.width = (bc.pos === 'bottom') ? '100%' : 'auto';
+        img.style.maxWidth = (bc.pos === 'bottom') ? '100%' : '45%';
+        img.style.objectFit = 'fill';
+      } else { img.style.width = bh + 'mm'; img.style.height = bh + 'mm'; }
+      box.appendChild(img);
+      lab.appendChild(lines); lab.appendChild(box);
+      sheet.appendChild(lab);
+    }
+    // التنبيهات بعد ما يكمل الرسم
+    setTimeout(function () {
+      LD.setWarnings(LD.check(sheet.querySelectorAll('.label'), sheet.querySelectorAll('.rl-lines')));
+    }, 30);
+  }
+
+  LD.onChange = function () { render(); };
+  $copies.addEventListener('input', function () { LD.layout().copies = Math.max(1, Math.min(50, parseInt($copies.value, 10) || 1)); LD.touch(); });
+  document.getElementById('printBtn').addEventListener('click', function () {
+    var warn = document.getElementById('ldWarn');
+    if (warn && warn.style.display !== 'none' && !confirm('يوجد تنبيه تجاوز بالملصق — النص قد ينقص بالطباعة. تطبع رغم ذلك؟')) return;
+    render(); setTimeout(function () { window.print(); }, 250);
+  });
+  $copies.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('printBtn').click(); } });
+  render();
+})();
+</script>
+</body>
+</html>

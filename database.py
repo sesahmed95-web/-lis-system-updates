@@ -6,6 +6,7 @@ import sqlite3
 import os
 import sys
 import json
+import re
 import hashlib
 from datetime import datetime
 
@@ -749,7 +750,9 @@ def migrate(conn):
                     # رمز بوابة النتائج (QR للمريض): عشوائي طويل، يُولَّد مرة وحدة لكل زيارة (cloud_sync.py).
                     ("portal_token", "TEXT"),
                     # وقت ظهور النتائج المتوقع (اختياري) — يحدده الاستقبال بصفحة زيارة جديدة، يظهر بورقة QR/بوابة المريض
-                    ("expected_ready_at", "TEXT")],
+                    ("expected_ready_at", "TEXT"),
+                     # نص الوقت المتوقع كما كتبه الموظف (ربع ساعة / ساعتين / ...) — يظهر بورقة الـQR وببوابة المريض
+                     ("expected_ready_text", "TEXT")],
         "test_definitions": [("is_examining_test", "INTEGER DEFAULT 0"),
                                # short_name: اختصار يدوي يحدده الأدمن لهذا التحليل تحديدًا
                                # (مثال: "PT" بدل "زمن البروثرومبين") — يُستخدم فقط بملصق
@@ -1164,7 +1167,7 @@ def ensure_bfretic_parameters(conn):
         ("Promyelocytes", "%", "Numeric", None, None, None),
         ("Atypical lymphocytes", "%", "Numeric", None, None, None),
         ("Reactive lymphocytes", "%", "Numeric", None, None, None),
-        ("NRBC", "100/wbc", "Numeric", None, None, None),
+        ("NRBC", "/100wbc", "Numeric", None, None, None),
         ("Basophils", "%", "Numeric", None, None, None),
         ("Blast", "%", "Numeric", None, None, None),
         ("RBC_desc", "", "Text", None, None, None),
@@ -1248,9 +1251,12 @@ def ensure_nrbc_parameter(conn):
         if exists:
             continue
         conn.execute(
-            "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, 'NRBC', '100/wbc', 'Numeric')",
+            "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, 'NRBC', '/100wbc', 'Numeric')",
             (test_id,),
         )
+    # قواعد قديمة: الوحدة الافتراضية كانت "100/wbc" وصارت "/100wbc". نغيّر فقط لو لسا القيمة الافتراضية القديمة
+    # (لو العميل/المصمم عدّلها يدويًا بقيمة ثانية ما نلمسها).
+    conn.execute("UPDATE test_parameters SET unit='/100wbc' WHERE name='NRBC' AND unit='100/wbc'")
     conn.commit()
 
 
@@ -1648,6 +1654,23 @@ _PRESET_KEYS = {
 }
 
 
+_PENDING_LOGO = None
+
+
+def write_pending_preset_logo(upload_dir):
+    """يكتب شعار الـpreset (إن وُجد) بمجلد static/uploads بعد ما يعرف app.py مساره. آمن لو ما فيه شي."""
+    global _PENDING_LOGO
+    if not _PENDING_LOGO:
+        return
+    try:
+        os.makedirs(upload_dir, exist_ok=True)
+        with open(os.path.join(upload_dir, _PENDING_LOGO[0]), "wb") as fh:
+            fh.write(_PENDING_LOGO[1])
+    except OSError:
+        pass
+    _PENDING_LOGO = None
+
+
 def apply_client_preset(conn):
     """تجهيز عميل جديد قبل تسليمه البرنامج: ملف portal_preset.json بجانب lis.db (تنشئه أداة
     tools/make_client_package.py) يضبط اسم المختبر وإعدادات بوابة النتائج مرة وحدة عند أول تشغيل،
@@ -1671,6 +1694,43 @@ def apply_client_preset(conn):
                     conn.execute("UPDATE settings SET value=? WHERE key=?", (v, key))
                 else:
                     conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, v))
+        # شهادات/ألقاب الأطباء بترويسة التقارير (examining_doctors_list): نستبدل أطباء الترويسة فقط
+        docs = data.get("letterhead_doctors") if isinstance(data, dict) else None
+        if isinstance(docs, list) and docs:
+            conn.execute("DELETE FROM examining_doctors_list WHERE show_on_letterhead=1")
+            for i, dct in enumerate(docs[:12]):
+                if not isinstance(dct, dict) or not str(dct.get("name") or "").strip():
+                    continue
+                nm = str(dct["name"]).strip()[:120]
+                try:
+                    fs = int(dct["font_size"]) if dct.get("font_size") not in (None, "") else None
+                except (TypeError, ValueError):
+                    fs = None
+                vals = (str(dct.get("title") or "الدكتور").strip()[:40], (dct.get("degree_ar") or None),
+                        (dct.get("degree_en") or None), int(dct.get("sort_order", i) or 0), fs)
+                ex = conn.execute("SELECT id FROM examining_doctors_list WHERE name=?", (nm,)).fetchone()
+                if ex:
+                    conn.execute("UPDATE examining_doctors_list SET title=?, degree_ar=?, degree_en=?, sort_order=?, "
+                                 "font_size=?, show_on_letterhead=1 WHERE id=?", vals + (ex["id"],))
+                else:
+                    conn.execute("INSERT INTO examining_doctors_list (name, title, degree_ar, degree_en, sort_order, "
+                                 "font_size, show_on_letterhead) VALUES (?, ?, ?, ?, ?, ?, 1)", (nm,) + vals)
+        # شعار المختبر: الملف (base64) يُكتب لاحقًا بمجلد static/uploads (انظر write_pending_preset_logo)،
+        # لأن مجلد uploads مستثنى من الـSetup عمدًا (ملفات الزبون) فكان الشعار ينكسر عند العميل.
+        global _PENDING_LOGO
+        lg = data.get("logo") if isinstance(data, dict) else None
+        if isinstance(lg, dict) and lg.get("b64"):
+            import base64
+            fname = re.sub(r"[^A-Za-z0-9_.-]", "_", str(lg.get("filename") or "logo.png"))[:60]
+            if fname.rsplit(".", 1)[-1].lower() in ("png", "jpg", "jpeg", "gif", "webp", "svg"):
+                raw = base64.b64decode(lg["b64"])
+                if 0 < len(raw) <= 3 * 1024 * 1024:
+                    _PENDING_LOGO = (fname, raw)
+                    row = conn.execute("SELECT key FROM settings WHERE key='logo_path'").fetchone()
+                    if row:
+                        conn.execute("UPDATE settings SET value=? WHERE key='logo_path'", ("uploads/" + fname,))
+                    else:
+                        conn.execute("INSERT INTO settings (key, value) VALUES ('logo_path', ?)", ("uploads/" + fname,))
         conn.commit()
         os.replace(path, os.path.join(_BASE_DIR, "portal_preset.applied.json"))
     except (OSError, ValueError):
@@ -1791,7 +1851,7 @@ def seed(conn):
           ("Promyelocytes", "%", "Numeric", None, None, None),
           ("Atypical lymphocytes", "%", "Numeric", None, None, None),
           ("Reactive lymphocytes", "%", "Numeric", None, None, None),
-          ("NRBC", "100/wbc", "Numeric", None, None, None),
+          ("NRBC", "/100wbc", "Numeric", None, None, None),
           ("Basophils", "%", "Numeric", None, None, None),
           ("Blast", "%", "Numeric", None, None, None),
           ("RBC_desc", "", "Text", None, None, None),
@@ -1820,7 +1880,7 @@ def seed(conn):
           ("Promyelocytes", "%", "Numeric", None, None, None),
           ("Atypical lymphocytes", "%", "Numeric", None, None, None),
           ("Reactive lymphocytes", "%", "Numeric", None, None, None),
-          ("NRBC", "100/wbc", "Numeric", None, None, None),
+          ("NRBC", "/100wbc", "Numeric", None, None, None),
           ("Basophils", "%", "Numeric", None, None, None),
           ("Blast", "%", "Numeric", None, None, None)]),
         ("FLUIDEXAM", "Fluid examination", "فحص السوائل", "Hematology", "Fluid", 7000,
@@ -2397,6 +2457,62 @@ RESULT_LABEL_DEFAULTS = {
     "b_compact": {"normal_range": "Normal Range", "previous": "Previous Result", "control": "Control"},
 }
 
+# ---- تنسيق عناوين اللوحة المجمّعة (عنوان اللوحة + عناوين الأقسام مثل BIOCHEMISTRY / VITAMINS) ----
+TEXT_STYLE_FONTS = {
+    "arial": "Arial, Helvetica, sans-serif", "tahoma": "Tahoma, Geneva, sans-serif",
+    "segoe": "'Segoe UI', Tahoma, sans-serif", "times": "'Times New Roman', Times, serif",
+    "georgia": "Georgia, serif", "courier": "'Courier New', monospace",
+    "calibri": "Calibri, Arial, sans-serif", "verdana": "Verdana, Geneva, sans-serif",
+}
+TEXT_STYLE_CASES = {"upper": "uppercase", "lower": "lowercase", "capitalize": "capitalize", "none": "none"}
+
+
+def sanitize_text_style(d):
+    """يرجّع dict نظيف فيه فقط المفاتيح المحدّدة (الفاضي = الافتراضي): color, font, size, case, bold, italic."""
+    out = {}
+    if not isinstance(d, dict):
+        return out
+    c = str(d.get("color") or "").strip()
+    if re.fullmatch(r"#[0-9A-Fa-f]{6}", c):
+        out["color"] = c
+    f = str(d.get("font") or "").strip()
+    if f in TEXT_STYLE_FONTS:
+        out["font"] = f
+    try:
+        n = int(float(d.get("size") or 0))
+    except (TypeError, ValueError):
+        n = 0
+    if 6 <= n <= 60:
+        out["size"] = n
+    cs = str(d.get("case") or "").strip()
+    if cs in TEXT_STYLE_CASES:
+        out["case"] = cs
+    for k in ("bold", "italic"):
+        v = str(d.get(k) if d.get(k) is not None else "").strip()
+        if v in ("1", "0"):
+            out[k] = v
+    return out
+
+
+def text_style_css(d):
+    """يحوّل style نظيف لسلسلة CSS تُحط بـ style=\"...\"."""
+    d = sanitize_text_style(d)
+    css = ""
+    if "color" in d:
+        css += f"color:{d['color']};"
+    if "font" in d:
+        css += f"font-family:{TEXT_STYLE_FONTS[d['font']]};"
+    if "size" in d:
+        css += f"font-size:{d['size']}px;"
+    if "case" in d:
+        css += f"text-transform:{TEXT_STYLE_CASES[d['case']]};"
+    if "bold" in d:
+        css += "font-weight:700;" if d["bold"] == "1" else "font-weight:400;"
+    if "italic" in d:
+        css += "font-style:italic;" if d["italic"] == "1" else "font-style:normal;"
+    return css
+
+
 RESULT_LAYOUT_DEFAULTS = {
     "style": "b_grid",          # الافتراضي = شكل custom_v2 الحالي (Style B matching image 1)
     "labels": {},               # style -> {key: text} تسميات مخصصة تتغلب على الافتراضي
@@ -2411,6 +2527,9 @@ RESULT_LAYOUT_DEFAULTS = {
     "merged_exclude": "",       # فاضي = القائمة الافتراضية (MERGED_EXCLUDE_DEFAULT)
     # المسافة (بالبكسل) بين قيمة النتيجة ووحدتها -- إعداد مستقل عن الثيم (مو لون)
     # فينطبق بكل الأحوال على الأساليب الأربعة سوا.
+    "title_style": {},          # تنسيق عنوان اللوحة المجمّعة (merged_title)
+    "head_style": {},           # تنسيق كل عناوين الأقسام (BIOCHEMISTRY ...)
+    "dept_styles": {},          # {اسم القسم: style} تخصيص قسم معيّن فوق head_style
     "unit_gap": 6,
     "show_prev_visit_line": 0,  # سطر "زيارة سابقة بتاريخ: ..." القديم أسفل التقرير (اختياري، مخفي افتراضيًا)
 }
@@ -2430,6 +2549,11 @@ def get_result_layout(db):
                       "dept_headings", "merged_title", "merged_exclude", "unit_gap"):
                 if k in saved:
                     cfg[k] = saved[k]
+            cfg["title_style"] = sanitize_text_style(saved.get("title_style"))
+            cfg["head_style"] = sanitize_text_style(saved.get("head_style"))
+            _ds = saved.get("dept_styles")
+            cfg["dept_styles"] = ({str(k)[:80]: sanitize_text_style(v) for k, v in list(_ds.items())[:80]
+                                   if sanitize_text_style(v)} if isinstance(_ds, dict) else {})
             if isinstance(saved.get("labels"), dict):
                 cfg["labels"] = saved["labels"]
             if isinstance(saved.get("extra_cols"), list):

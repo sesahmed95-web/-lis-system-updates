@@ -87,7 +87,18 @@
       <h3 style="margin:0;">زيارة #{{ vd.visit['registration_number'] }} — {{ vd.visit['created_at'][:10] if vd.visit['created_at'] else '' }}
         <span class="badge">{{ vd.visit['status'] }}</span>
       </h3>
-      <div style="display:flex; gap:8px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        {# أزرار الطباعة السريعة لهذي الزيارة (من صفحة المريض مباشرة) #}
+        <a class="btn small" target="_blank" rel="noopener" title="يفتح قائمة التحاليل المكتملة لهذي الزيارة للطباعة"
+           href="{{ url_for('print_visit_results_bundle', visit_id=vd.visit['id']) }}?auto=1">🖨 طباعة كل النتائج المكتملة</a>
+        <a class="btn small" target="_blank" rel="noopener"
+           href="{{ url_for('print_combined_panel', visit_id=vd.visit['id']) }}?auto=1&show_prev=0">🧾 طباعة اللوحة المجمّعة</a>
+        <a class="btn small secondary" target="_blank" rel="noopener"
+           href="{{ url_for('print_sample_barcodes', visit_id=vd.visit['id']) }}">🧪 باركود الأنابيب</a>
+        <a class="btn small secondary" target="_blank" rel="noopener"
+           href="{{ url_for('print_visit_barcode', visit_id=vd.visit['id']) }}">🏷 باركود المريض</a>
+        <a class="btn small secondary" target="_blank" rel="noopener"
+           href="{{ url_for('print_request_label', visit_id=vd.visit['id']) }}">📋 باركود الريكويست</a>
         <a class="btn small" target="_blank" rel="noopener"
            href="{{ url_for('print_visit_full_report', visit_id=vd.visit['id']) }}">🖨️ عرض/طباعة التقرير الكامل</a>
         {% if session.get('interface') == 'both' or session.get('designer_id') %}

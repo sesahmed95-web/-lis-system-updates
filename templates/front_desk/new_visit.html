@@ -544,6 +544,14 @@
                 style="padding:4px 10px; font-size:12.5px; white-space:nowrap;"
                 title="يظهر للمريض بورقة الـQR">⏱ وقت النتائج المتوقع</button>
         <span id="expectedBox" style="display:none; align-items:center; gap:4px; flex-wrap:wrap;">
+          <input type="text" name="expected_ready_text" id="expected_text_input" list="expectedSuggestions" maxlength="60" autocomplete="off"
+                 placeholder="اكتب الوقت: ربع ساعة / ساعتين / 3 ساعات / 4:30" style="padding:3px 6px; min-width:230px;"
+                 title="اكتب الوقت بكلماتك (ربع ساعة، نصف ساعة، ساعة ونصف، ساعتين، 45 دقيقة، يومين، الساعة 5 مساء...) ويُحسب تلقائيًا. أي نص آخر يظهر للمريض كما كتبته.">
+          <datalist id="expectedSuggestions">
+            <option value="ربع ساعة"><option value="نصف ساعة"><option value="ساعة"><option value="ساعة ونصف">
+            <option value="ساعتين"><option value="3 ساعات"><option value="4 ساعات"><option value="يوم"><option value="يومين">
+          </datalist>
+          <span id="expectedPreview" class="muted" style="font-size:12px;"></span>
           <input type="datetime-local" name="expected_ready_at" id="expected_ready_input" dir="ltr" style="padding:3px 6px;">
           <select id="expectedPreset" onchange="applyExpectedPreset(this.value)" style="padding:3px 6px; font-size:12.5px;" title="مدة جاهزة تُحسب من الآن">
             <option value="">اختر مدة جاهزة…</option>
@@ -1697,6 +1705,7 @@ function toggleExpectedBox() {
   box.style.display = box.style.display === 'none' ? 'inline-flex' : 'none';
 }
 function applyExpectedPreset(v) {
+  var _t = document.getElementById('expected_text_input'); if (_t) { _t.value = ''; var _p = document.getElementById('expectedPreview'); if (_p) _p.textContent = ''; }
   if (!v) return;
   var d = new Date();
   var n = parseInt(v, 10), u = v.slice(-1);
@@ -1708,8 +1717,38 @@ function applyExpectedPreset(v) {
   inp.value = nvFmtLocal(d);
   document.getElementById('expectedBtn').textContent = '⏱ ' + inp.value.replace('T', ' ');
 }
+// ---- كتابة الوقت المتوقع بالنص (ربع ساعة / ساعتين ...): الحساب من السيرفر (نفس منطق الحفظ) ----
+var _expTextTimer = null;
+function onExpectedTextInput() {
+  clearTimeout(_expTextTimer);
+  _expTextTimer = setTimeout(function () {
+    var ti = document.getElementById('expected_text_input'), inp = document.getElementById('expected_ready_input');
+    var pv = document.getElementById('expectedPreview'), btn = document.getElementById('expectedBtn');
+    var txt = (ti.value || '').trim();
+    if (!txt) { inp.value = ''; pv.textContent = ''; btn.textContent = '⏱ وقت النتائج المتوقع'; return; }
+    var pr = document.getElementById('expectedPreset'); if (pr) pr.value = '';
+    fetch('/api/expected/parse?text=' + encodeURIComponent(txt), { headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.ok) {
+          inp.value = d.iso; pv.textContent = '← ' + d.label;
+          btn.textContent = '⏱ ' + txt + ' (' + d.label.slice(11) + ')';
+        } else {
+          inp.value = ''; pv.textContent = '← يظهر كما كتبته';
+          btn.textContent = '⏱ ' + txt;
+        }
+      }).catch(function () { pv.textContent = ''; });
+  }, 350);
+}
+document.addEventListener('DOMContentLoaded', function () {
+  var ti = document.getElementById('expected_text_input');
+  if (ti) ti.addEventListener('input', onExpectedTextInput);
+});
+
 function clearExpected() {
   document.getElementById('expected_ready_input').value = '';
+  var _ti = document.getElementById('expected_text_input'); if (_ti) _ti.value = '';
+  var _pv = document.getElementById('expectedPreview'); if (_pv) _pv.textContent = '';
   var pr = document.getElementById('expectedPreset'); if (pr) pr.value = '';
   document.getElementById('expectedBtn').textContent = '⏱ وقت النتائج المتوقع';
   document.getElementById('expectedBox').style.display = 'none';

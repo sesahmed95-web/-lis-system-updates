@@ -1,0 +1,200 @@
+{# مصمّم الملصق المشترك (ملصق الأنابيب + ملصق ورقة الطلب).
+   المتغيرات المطلوبة قبل الـinclude: ld_kind ('tube' | 'request') + label_layout + field_titles (+ scan_titles للطلب).
+   الصفحة المضيفة تضبط LD.onChange = function () { ...إعادة رسم الملصقات...; LD.setWarnings(قائمة تنبيهات); } #}
+<div class="no-print ld-wrap" dir="rtl">
+  <button type="button" class="ld-toggle" onclick="LD.toggle()">⚙ تصميم الملصق (الأسطر والقياسات)</button>
+  <span id="ldSaved" class="ld-saved">✓ تم الحفظ</span>
+  <div id="ldWarn" class="ld-warn" style="display:none;"></div>
+  <div id="ldPanel" class="ld-panel" style="display:none;"></div>
+</div>
+<style>
+  .ld-wrap { margin: 0 0 14px; font-family: "Segoe UI", Tahoma, Arial, sans-serif; }
+  .ld-toggle { padding: 7px 14px; border: 1px solid #26529C; background: #fff; color: #26529C; border-radius: 7px; cursor: pointer; font-size: 13px; }
+  .ld-saved { font-size: 12px; color: #16A34A; visibility: hidden; margin-inline-start: 10px; }
+  .ld-warn { margin-top: 8px; background: #FEF2F2; border: 1px solid #FCA5A5; color: #991B1B; border-radius: 8px; padding: 8px 12px; font-size: 13px; line-height: 1.7; }
+  .ld-panel { margin-top: 8px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #334155; }
+  .ld-panel h4 { margin: 12px 0 6px; font-size: 13.5px; color: #1E293B; }
+  .ld-panel h4:first-child { margin-top: 0; }
+  .ld-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 5px 0; border-bottom: 1px dashed #E2E8F0; }
+  .ld-row .ld-n { width: 20px; font-weight: 700; color: #64748B; }
+  .ld-row select, .ld-row input[type=text], .ld-row input[type=number], .ld-panel input[type=number], .ld-panel select { padding: 4px 6px; border: 1px solid #CBD5E1; border-radius: 5px; font-size: 13px; }
+  .ld-row input[type=number] { width: 66px; }
+  .ld-row input[type=text] { width: 150px; }
+  .ld-row label, .ld-line-opts label, .ld-inline label { display: inline-flex; align-items: center; gap: 4px; }
+  .ld-mini { padding: 3px 8px; border: 1px solid #CBD5E1; background: #fff; border-radius: 5px; cursor: pointer; }
+  .ld-mini.del { color: #B91C1C; }
+  .ld-inline { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 4px 0; }
+  .ld-scan { display: flex; gap: 12px; flex-wrap: wrap; }
+  .ld-hint { color: #64748B; font-size: 12px; margin: 3px 0; }
+  @media screen { .ld-line.ld-ovf { outline: 1.5px solid #DC2626; background: #FEE2E2; } }
+</style>
+<script>
+var LD = (function () {
+  var kind = {{ ld_kind|tojson }};
+  var layout = {{ label_layout|tojson }};
+  var fieldTitles = {{ field_titles|tojson }};
+  var scanTitles = {{ (scan_titles or [])|tojson }};
+  var CLS = { lab_name: 'lab-name', patient_name: 'patient', age_gender: 'meta', datetime: 'meta', date: 'meta',
+              time: 'meta', reg_no: 'meta', sample_no: 'meta', visit_id: 'meta', sample_type: 'sample-type',
+              tests: 'test-list', tests_codes: 'test', custom: 'test' };
+  var api = { onChange: null };
+  var saveTimer = null;
+  var $panel = document.getElementById('ldPanel');
+
+  function titleOf(f) { for (var i = 0; i < fieldTitles.length; i++) if (fieldTitles[i][0] === f) return fieldTitles[i][1]; return f; }
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
+  function save() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      fetch('/api/settings/label-layout/' + kind, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(layout) }).then(function (r) { return r.json(); }).then(function (res) {
+        var s = document.getElementById('ldSaved');
+        if (res && res.ok) { s.style.visibility = 'visible'; setTimeout(function () { s.style.visibility = 'hidden'; }, 1300); }
+      }).catch(function () {});
+    }, 500);
+  }
+  function changed() { if (api.onChange) api.onChange(layout); save(); }
+
+  function lineRow(ln, i) {
+    var opts = fieldTitles.map(function (ft) { return '<option value="' + ft[0] + '"' + (ft[0] === ln.f ? ' selected' : '') + '>' + esc(ft[1]) + '</option>'; }).join('');
+    var aopt = [['', 'محاذاة تلقائية'], ['right', 'يمين'], ['center', 'وسط'], ['left', 'يسار']].map(function (a) {
+      return '<option value="' + a[0] + '"' + ((ln.a || '') === a[0] ? ' selected' : '') + '>' + a[1] + '</option>'; }).join('');
+    return '<div class="ld-row" data-i="' + i + '"><span class="ld-n">' + (i + 1) + '</span>' +
+      '<select data-k="f">' + opts + '</select>' +
+      '<input type="text" data-k="t" placeholder="اكتب النص" value="' + esc(ln.t || '') + '" style="' + (ln.f === 'custom' ? '' : 'display:none;') + '">' +
+      '<input type="number" data-k="s" step="0.5" min="3" max="40" placeholder="خط تلقائي" title="حجم الخط (pt) — فارغ = تلقائي" value="' + (ln.s || '') + '">' +
+      '<label><input type="checkbox" data-k="b"' + (ln.b === 1 ? ' checked' : '') + '> غامق</label>' +
+      '<select data-k="a">' + aopt + '</select>' +
+      '<label title="لو مفعّل: السطر يلتف لأكثر من سطر بدل ما يُقصّ"><input type="checkbox" data-k="w"' + (ln.w ? ' checked' : '') + '> يسمح بالالتفاف</label>' +
+      '<button type="button" class="ld-mini" data-act="up" title="أعلى">▲</button>' +
+      '<button type="button" class="ld-mini" data-act="down" title="أسفل">▼</button>' +
+      '<button type="button" class="ld-mini del" data-act="del" title="حذف السطر">✕</button></div>';
+  }
+
+  function build() {
+    var h = '<h4>القياس</h4><div class="ld-inline">' +
+      '<label>العرض (مم): <input type="number" id="ldW" min="0" max="300" value="' + (layout.w || '') + '"' + (kind === 'tube' ? ' placeholder="تلقائي"' : '') + '></label>' +
+      '<label>الارتفاع (مم): <input type="number" id="ldH" min="0" max="300" value="' + (layout.h || '') + '"' + (kind === 'tube' ? ' placeholder="تلقائي"' : '') + '></label>' +
+      '<label title="يضبط حجم الصفحة على قياس الملصق ويطبع كل ملصق بصفحة (لرول الملصقات)"><input type="checkbox" id="ldRoll"' + (layout.roll ? ' checked' : '') + '> طباعة كل ملصق بصفحة مستقلة (رول)</label>' +
+      '<label>أسماء التحاليل: <select id="ldTmode">' +
+        [['full', 'الاسم الكامل'], ['short', 'مختصر'], ['none', 'بدون']].map(function (m) { return '<option value="' + m[0] + '"' + (layout.tmode === m[0] ? ' selected' : '') + '>' + m[1] + '</option>'; }).join('') +
+      '</select></label></div>';
+    if (kind === 'tube') h += '<div class="ld-hint">العرض/الارتفاع فارغ = القياس التلقائي الحالي.</div>';
+    h += '<h4>الأسطر (من الأعلى للأسفل)</h4><div id="ldLines">' + layout.lines.map(lineRow).join('') + '</div>' +
+      '<div style="margin-top:8px;"><button type="button" class="ld-mini" id="ldAdd">＋ إضافة سطر</button> ' +
+      '<button type="button" class="ld-mini" id="ldReset">↺ رجوع للتصميم الافتراضي</button></div>';
+    if (kind === 'request') {
+      var bc = layout.bc || {};
+      h += '<h4>الباركود</h4><div class="ld-inline">' +
+        '<label>النوع: <select id="ldBcType"><option value="qr"' + (bc.type === 'qr' ? ' selected' : '') + '>QR — يطلع تفاصيل كاملة عند المسح</option>' +
+        '<option value="code128"' + (bc.type === 'code128' ? ' selected' : '') + '>Code128 — رقم التسجيل + أكواد التحاليل</option></select></label>' +
+        '<label>مكانه: <select id="ldBcPos"><option value="side"' + (bc.pos === 'side' ? ' selected' : '') + '>بجانب الأسطر</option><option value="bottom"' + (bc.pos === 'bottom' ? ' selected' : '') + '>أسفل الأسطر</option></select></label>' +
+        '<label>حجمه (مم): <input type="number" id="ldBcH" min="6" max="60" value="' + (bc.h || 18) + '"></label></div>' +
+        '<h4>ماذا يطلع عند مسحه بالقارئ؟ <span class="ld-hint">(يعمل مع QR؛ أي قارئ مربوط بأي جهاز يكتب هذا النص)</span></h4><div class="ld-scan" id="ldScan">' +
+        scanTitles.map(function (st) { return '<label><input type="checkbox" data-scan="' + st[0] + '"' + ((layout.scan || []).indexOf(st[0]) >= 0 ? ' checked' : '') + '> ' + esc(st[1]) + '</label>'; }).join('') +
+        '</div><div class="ld-hint">أسماء التحاليل بالمسح تتبع خيار "أسماء التحاليل" أعلاه (بدون = أكواد التحاليل).</div>';
+    }
+    $panel.innerHTML = h;
+    wire();
+  }
+
+  function wire() {
+    function num(id) { var v = parseFloat(document.getElementById(id).value); return isNaN(v) ? 0 : v; }
+    ['ldW', 'ldH'].forEach(function (id) { document.getElementById(id).addEventListener('input', function () { layout.w = num('ldW'); layout.h = num('ldH'); changed(); }); });
+    document.getElementById('ldRoll').addEventListener('change', function () { layout.roll = this.checked; changed(); });
+    document.getElementById('ldTmode').addEventListener('change', function () { layout.tmode = this.value; changed(); });
+    document.getElementById('ldAdd').addEventListener('click', function () {
+      if (layout.lines.length >= 10) { alert('الحد الأقصى 10 أسطر.'); return; }
+      layout.lines.push({ f: fieldTitles[0][0] }); build(); changed();
+    });
+    document.getElementById('ldReset').addEventListener('click', function () {
+      if (!confirm('الرجوع للتصميم الافتراضي لهذا الملصق؟')) return;
+      fetch('/api/settings/label-layout/' + kind + '/reset', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (res) {
+        if (res && res.ok) { layout = res.layout; build(); if (api.onChange) api.onChange(layout); }
+      });
+    });
+    var L = document.getElementById('ldLines');
+    L.addEventListener('input', rowEdit); L.addEventListener('change', rowEdit);
+    L.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-act]'); if (!b) return;
+      var i = parseInt(b.closest('.ld-row').getAttribute('data-i'), 10), act = b.getAttribute('data-act');
+      if (act === 'del') layout.lines.splice(i, 1);
+      else if (act === 'up' && i > 0) { var t = layout.lines[i]; layout.lines[i] = layout.lines[i - 1]; layout.lines[i - 1] = t; }
+      else if (act === 'down' && i < layout.lines.length - 1) { var t2 = layout.lines[i]; layout.lines[i] = layout.lines[i + 1]; layout.lines[i + 1] = t2; }
+      build(); changed();
+    });
+    if (kind === 'request') {
+      function bcEdit() {
+        layout.bc = { type: document.getElementById('ldBcType').value, pos: document.getElementById('ldBcPos').value, h: num('ldBcH') || 18 };
+        changed();
+      }
+      ['ldBcType', 'ldBcPos', 'ldBcH'].forEach(function (id) { document.getElementById(id).addEventListener('change', bcEdit); document.getElementById(id).addEventListener('input', bcEdit); });
+      document.getElementById('ldScan').addEventListener('change', function () {
+        layout.scan = Array.prototype.map.call(document.querySelectorAll('#ldScan input:checked'), function (c) { return c.getAttribute('data-scan'); });
+        changed();
+      });
+    }
+  }
+
+  function rowEdit(e) {
+    var el = e.target, k = el.getAttribute('data-k'); if (!k) return;
+    var row = el.closest('.ld-row'), i = parseInt(row.getAttribute('data-i'), 10), ln = layout.lines[i];
+    if (k === 'f') { ln.f = el.value; row.querySelector('[data-k=t]').style.display = ln.f === 'custom' ? '' : 'none'; }
+    else if (k === 't') ln.t = el.value;
+    else if (k === 's') { var v = parseFloat(el.value); if (v) ln.s = v; else delete ln.s; }
+    else if (k === 'b') { if (el.checked) ln.b = 1; else delete ln.b; }
+    else if (k === 'a') { if (el.value) ln.a = el.value; else delete ln.a; }
+    else if (k === 'w') { if (el.checked) ln.w = 1; else delete ln.w; }
+    changed();
+  }
+
+  // يبني أسطر الملصق: getValue(line) يرجّع النص أو فاضي لو ما فيه قيمة (يُتخطى السطر)
+  api.buildLines = function (container, lay, getValue) {
+    container.innerHTML = '';
+    (lay || layout).lines.forEach(function (ln, i) {
+      var v = getValue(ln); if (v === null || v === undefined || v === '') return;
+      var d = document.createElement('div');
+      d.className = 'ld-line ' + (CLS[ln.f] || 'test'); d.textContent = v; d.setAttribute('data-ln', i);
+      if (ln.s) d.style.fontSize = ln.s + 'pt';
+      if (ln.b === 1) d.style.fontWeight = '800';
+      if (ln.a) d.style.textAlign = ln.a;
+      d.style.whiteSpace = ln.w ? 'normal' : 'nowrap'; d.style.overflow = 'hidden';
+      container.appendChild(d);
+    });
+  };
+  // تنبيهات التجاوز: سطر أعرض من الملصق، أو محتوى أطول من ارتفاع الملصق
+  api.check = function (labels, heightBoxes) {
+    var msgs = [];
+    Array.prototype.forEach.call(document.querySelectorAll('.ld-line.ld-ovf'), function (n) { n.classList.remove('ld-ovf'); });
+    Array.prototype.forEach.call(labels, function (lab) {
+      Array.prototype.forEach.call(lab.querySelectorAll('.ld-line'), function (d) {
+        if (d.style.whiteSpace === 'nowrap' && d.scrollWidth > d.clientWidth + 1) {
+          d.classList.add('ld-ovf');
+          var i = parseInt(d.getAttribute('data-ln'), 10), ln = layout.lines[i] || {};
+          var m = '⚠ السطر ' + (i + 1) + ' («' + titleOf(ln.f) + '») أطول من عرض الملصق — صغّر الخط أو فعّل «يسمح بالالتفاف» أو كبّر العرض.';
+          if (msgs.indexOf(m) < 0) msgs.push(m);
+        }
+      });
+    });
+    Array.prototype.forEach.call(heightBoxes || [], function (box) {
+      if (box.scrollHeight > box.clientHeight + 1) {
+        var m2 = '⚠ محتوى الملصق أطول من ارتفاعه (' + layout.h + ' مم) — قلّل عدد الأسطر أو صغّر الخط أو كبّر الارتفاع.';
+        if (msgs.indexOf(m2) < 0) msgs.push(m2);
+      }
+    });
+    return msgs;
+  };
+  api.setWarnings = function (msgs) {
+    var w = document.getElementById('ldWarn');
+    if (!msgs || !msgs.length) { w.style.display = 'none'; w.innerHTML = ''; return; }
+    w.style.display = 'block'; w.innerHTML = msgs.map(esc).join('<br>');
+  };
+  api.toggle = function () {
+    if ($panel.style.display === 'none') { build(); $panel.style.display = 'block'; } else { $panel.style.display = 'none'; }
+  };
+  api.layout = function () { return layout; };
+  api.touch = changed;
+  return api;
+})();
+</script>

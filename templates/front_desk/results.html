@@ -27,7 +27,11 @@
         <td>
           <div style="display:flex; flex-direction:column; gap:4px; min-width:190px;">
             <button type="button" class="btn small secondary print-link"
-               onclick="openReportModal('{{ url_for('print_visit_results_bundle', visit_id=r['visit_id']) }}')">🖨 طباعة كل النتائج</button>
+               onclick="openReportModal('{{ url_for('print_visit_full_report', visit_id=r['visit_id']) }}?autoprint=1')"
+               title="كل التحاليل المكتملة بصفحة وحدة ونافذة طباعة وحدة">🖨 طباعة النتائج المكتملة</button>
+            <button type="button" class="btn small secondary print-link"
+               onclick="openReportModal('{{ url_for('print_combined_panel', visit_id=r['visit_id']) }}?auto=1')"
+               title="اللوحة المجمّعة (كيمياء/هرمونات/فيتامينات...) بورقة وحدة">🧾 طباعة اللوحة المجمّعة</button>
             {% if r['tests_list'] %}
             <div style="display:flex; gap:4px;">
               <select id="testSel_{{ r['visit_id'] }}" style="flex:1; font-size:12px;">
@@ -99,7 +103,13 @@
   // فتح أي رابط تقرير طباعة داخل نفس الصفحة (modal + iframe) بدل نافذة
   // منفصلة — يحافظ على هوية وتصميم البرنامج بدل شكل نافذة المتصفح الخام.
   function openReportModal(url) {
-    document.getElementById('reportModalFrame').src = url;
+    // نافذة حقيقية أولاً (الطباعة من داخل iframe تتجمّد بوضع التطبيق)، والمعاينة
+    // داخل الصفحة فقط كاحتياط لو المتصفح منع النافذة المنبثقة.
+    var bust = url + (url.indexOf('?') === -1 ? '?' : '&') + '_ts=' + Date.now();
+    var w = null;
+    try { w = window.open(bust, '_blank'); } catch (e) { w = null; }
+    if (w) return;
+    document.getElementById('reportModalFrame').src = bust;
     document.getElementById('reportModalOverlay').style.display = 'flex';
   }
   function closeReportModal() {
@@ -124,7 +134,7 @@
   function printSpecific(visitId) {
     var sel = document.getElementById('testSel_' + visitId);
     var otId = sel.value;
-    openReportModal('/reports/print/' + otId);
+    openReportModal('/reports/print/' + otId + '?auto=1');
   }
 </script>
 {% endblock %}

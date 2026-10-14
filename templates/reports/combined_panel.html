@@ -10,13 +10,13 @@
   }
   .panel-dept-heading:first-child { margin-top: 0; }
 </style>
-{% if merged_title %}<div class="report-heading" style="text-align:center;">{{ merged_title }}</div>{% endif %}
+{% if merged_title %}<div class="report-heading" style="text-align:center;{{ title_css or '' }}">{{ merged_title }}</div>{% endif %}
 {% if show_dept_headings %}
 {% for group in panel_groups %}
 {% if layout_view.style in ('a1', 'a2') %}
-{{ render_results(group.rows, layout_view, group_title=group.department) }}
+{{ render_results(group.rows, layout_view, group_title=group.department, title_style=(dept_css_map or {}).get(group.department, head_css or '')) }}
 {% else %}
-<div class="panel-dept-heading">{{ group.department }}</div>
+<div class="panel-dept-heading" style="{{ (dept_css_map or {}).get(group.department, head_css or '') }}">{{ group.department }}</div>
 {{ render_results(group.rows, layout_view) }}
 {% endif %}
 {% else %}

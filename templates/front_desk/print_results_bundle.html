@@ -33,6 +33,8 @@
 
   {% if reports %}
   <button type="button" class="btn small" style="margin-inline-start:8px;" onclick="printAllSequential()">🖨 طباعة الكل تباعًا</button>
+  <button type="button" class="btn small" style="margin-inline-start:8px;"
+     onclick="openReportModal('{{ url_for('print_combined_panel', visit_id=visit['id']) }}', 'اللوحة المجمّعة')">🧾 طباعة اللوحة المجمّعة</button>
   {% if visit['phone'] %}
   <button type="button" class="btn small" id="waSendCombinedBtn" style="margin-inline-start:8px;"
      onclick="sendVisitWhatsapp('combined', this)">📱 إرسال الكل (ملف واحد)</button>

@@ -6,7 +6,8 @@
   <p class="muted">{{ visit['gender'] }} · {{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['created_at'] }}</p>
   <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
   <button type="button" class="btn small secondary print-link" id="printAllLink"
-     onclick="lisTopPrintBtn('{{ url_for('print_visit_results_bundle', visit_id=visit['id']) }}', 'طباعة كل النتائج المكتملة')">🖨 طباعة كل النتائج المكتملة</button>
+     onclick="lisTopPrintBtn('{{ url_for('print_visit_full_report', visit_id=visit['id']) }}?autoprint=1', 'طباعة النتائج المكتملة')"
+     title="كل التحاليل المكتملة بصفحة وحدة وبنافذة طباعة وحدة (نفس تصميم كل تقرير)">🖨 طباعة النتائج المكتملة</button>
   <button type="button" class="btn small secondary"
      onclick="lisTopPrintBtn('{{ url_for('print_combined_panel', visit_id=visit['id']) }}', 'اللوحة المجمّعة')"
      title="يجمع تحاليل الكيمياء/الفايروسات/الهرمونات/الفيتامينات وأي قسم آخر بورقة A4 وحدة، مرتّبة حسب القسم">🧾 طباعة اللوحة المجمّعة</button>
@@ -18,6 +19,8 @@
      onclick="lisPayRemaining()"
      title="يفتح نافذة تسديد المتبقي (ومنها تقدر تطبع ورقة المتبقي). بعد التسديد الكامل يختفي الزر">💵 المتبقي (<span id="lisBalanceAmt">{{ '{:,.0f}'.format(balance['remaining']) }}</span>) — تسديد</button>
   {% endif %}
+  <a class="btn small secondary" target="_blank" href="{{ url_for('print_request_label', visit_id=visit['id']) }}"
+     title="ملصق خاص بورقة طلب المريض — محتواه وقياسه وعدده مستقل عن باركود الأنابيب">🏷 باركود الطلب</a>
   <a class="btn small secondary" target="_blank" href="{{ url_for('print_visit_portal_qr', visit_id=visit['id']) }}"
      title="طباعة QR يمسحه المريض بموبايله لمشاهدة نتائجه (غير باركود القناني)">📱 QR المريض</a>
   <label style="margin-inline-start:10px; display:inline-flex; align-items:center; gap:4px; font-weight:normal;"
@@ -105,6 +108,10 @@
     // نفتح التقرير بنافذة حقيقية (مثل الباركود والفاتورة): الطباعة من داخل iframe لا تشتغل
     // بنافذة Edge بوضع التطبيق. لو المتصفح منع النافذة المنبثقة نرجع للمعاينة داخل الصفحة.
     var w = null;
+    if (window.lisPendingWin && !window.lisPendingWin.closed) {
+      w = window.lisPendingWin; window.lisPendingWin = null;
+      try { w.location.href = bust; return; } catch (e) { w = null; }
+    }
     try { w = window.open(bust, '_blank'); } catch (e) { w = null; }
     if (w) return;
     // النافذة المنبثقة انمنعت: نعرض التقرير بمعاينة داخل الصفحة (زر 🖨 طباعة بالشريط)
@@ -184,6 +191,7 @@
       .then(function (r) { return r.json(); });
   }
   function lisWithAuto(url) {
+    if (url.indexOf('autoprint=1') >= 0) return url;   // الصفحة المدمجة تطبع نفسها مرة وحدة
     return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'auto=1';
   }
   function lisWithShowPrev(url) {
@@ -199,6 +207,7 @@
           // أزرار الطباعة العلوية: لو ما فيه أي تحليل مكتمل بالزيارة ما يوجد شي يُطبع —
           // قبل كان يفتح صفحة فاضية بصمت فيبدو الزر "ما يشتغل".
           if (requireCompleted && typeof data.completed === 'number' && data.completed === 0) {
+            lisClosePending();
             alert('لا توجد نتائج مكتملة لهذه الزيارة بعد — أدخل قيمة واحدة على الأقل في أي تحليل ثم اضغط الطباعة.');
             return;
           }
@@ -207,16 +216,17 @@
         }
         if (data.needs_gate) {
           var g = lisAskGate();
-          if (!g) return;
+          if (!g) { lisClosePending(); return; }
           return attempt(g);
         }
         alert(data.error || 'تعذّر حفظ/طباعة النتيجة');
       });
     }
-    return attempt(null).catch(function (e) { alert('خطأ بالاتصال: ' + e); });
+    return attempt(null).catch(function (e) { lisClosePending(); alert('خطأ بالاتصال: ' + e); });
   }
   // زر 🖨️ داخل بطاقة تحليل واحد
   function lisPrintOne(otId) {
+    lisPreOpen();
     lisPaymentGate(function () {
       var form = document.getElementById('visitResultsForm');
       if (!form) return;
@@ -242,7 +252,8 @@
       .then(function (r) { return r.json(); })
       .then(function (b) {
         if (!b || !b.ok || !(b.remaining > 0)) { proceed(); return; }
-        lisShowUnpaidModal(b, proceed);
+        lisClosePending();
+        lisShowUnpaidModal(b, function () { lisPreOpen(); proceed(); });
       })
       .catch(function () { proceed(); });
   }
@@ -331,6 +342,7 @@
   }
   // أزرار أعلى الصفحة (كل النتائج / اللوحة المجمّعة)
   function lisTopPrintBtn(url, title) {
+    lisPreOpen();
     lisPaymentGate(function () {
       var form = document.getElementById('visitResultsForm');
       if (!form) { openReportModal(url, title); return; }
@@ -498,54 +510,73 @@
     <h3 style="margin:0 0 12px;">🖨 طباعة النتائج</h3>
     <label style="display:flex; gap:8px; align-items:flex-start; margin-bottom:10px; cursor:pointer;">
       <input type="radio" name="lisCtrlPMode" value="test" checked style="margin-top:5px;">
-      <span style="flex:1;">تحليل محدد
+      <span style="flex:1;">تحليل محدد <small class="muted">(1)</small>
         <select id="lisCtrlPTest" style="width:100%; margin-top:4px;" onfocus="document.querySelector('input[name=lisCtrlPMode][value=test]').checked=true;">
           {% for box in boxes %}<option value="{{ box.ot['id'] }}">{{ box.ot['test_name'] }}</option>{% endfor %}
         </select>
       </span>
     </label>
     <label style="display:flex; gap:8px; align-items:center; margin-bottom:10px; cursor:pointer;">
-      <input type="radio" name="lisCtrlPMode" value="all"> <span>🖨 طباعة كل النتائج المكتملة</span>
+      <input type="radio" name="lisCtrlPMode" value="all"> <span>🖨 طباعة النتائج المكتملة <small class="muted">(2)</small></span>
     </label>
     <label style="display:flex; gap:8px; align-items:center; margin-bottom:16px; cursor:pointer;">
-      <input type="radio" name="lisCtrlPMode" value="panel"> <span>🧾 طباعة اللوحة المجمّعة</span>
+      <input type="radio" name="lisCtrlPMode" value="panel"> <span>🧾 طباعة اللوحة المجمّعة <small class="muted">(3)</small></span>
     </label>
     <div style="display:flex; gap:8px; justify-content:flex-start;">
-      <button type="button" class="btn" id="lisCtrlPGo">Print</button>
+      <button type="button" class="btn" id="lisCtrlPGo">Print (Enter)</button>
       <button type="button" class="btn secondary" id="lisCtrlPCancel">إلغاء</button>
     </div>
   </div>
 </div>
 <script>
   (function () {
-    var BUNDLE_URL = "{{ url_for('print_visit_results_bundle', visit_id=visit['id']) }}";
+    var ALL_URL = "{{ url_for('print_visit_full_report', visit_id=visit['id']) }}?autoprint=1";
     var PANEL_URL = "{{ url_for('print_combined_panel', visit_id=visit['id']) }}";
     var ov = document.getElementById('lisCtrlPOverlay');
+    function radio(v) { return document.querySelector('input[name=lisCtrlPMode][value=' + v + ']'); }
+    function isOpen() { return ov.style.display === 'flex'; }
     function openDlg() {
       // لو المؤشر داخل بطاقة تحليل، نحدد هذا التحليل تلقائيًا
       var box = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.rb-box') : null;
       var sel = document.getElementById('lisCtrlPTest');
       if (box && box.id && sel) { sel.value = box.id.replace('rbox_', ''); }
-      document.querySelector('input[name=lisCtrlPMode][value=test]').checked = true;
+      radio('test').checked = true;
       ov.style.display = 'flex';
-      document.getElementById('lisCtrlPGo').focus();
+      radio('test').focus();          // الأسهم ↑↓ تنقّل بين الخيارات الثلاثة، Enter = طباعة
     }
     function closeDlg() { ov.style.display = 'none'; }
     function go() {
       var mode = document.querySelector('input[name=lisCtrlPMode]:checked').value;
+      var testId = parseInt(document.getElementById('lisCtrlPTest').value, 10);
       closeDlg();
-      if (mode === 'test') { lisPrintOne(parseInt(document.getElementById('lisCtrlPTest').value, 10)); }
-      else if (mode === 'all') { lisTopPrintBtn(BUNDLE_URL, 'طباعة كل النتائج المكتملة'); }
+      if (mode === 'test') { lisPrintOne(testId); }
+      else if (mode === 'all') { lisTopPrintBtn(ALL_URL, 'طباعة النتائج المكتملة'); }
       else { lisTopPrintBtn(PANEL_URL, 'اللوحة المجمّعة'); }
     }
     document.getElementById('lisCtrlPGo').addEventListener('click', go);
     document.getElementById('lisCtrlPCancel').addEventListener('click', closeDlg);
     ov.addEventListener('click', function (e) { if (e.target === ov) closeDlg(); });
     window.addEventListener('keydown', function (e) {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'p' || e.key === 'P')) {
+      // e.code = مفتاح P الفيزيائي، فيشتغل حتى لو لوحة المفاتيح عربية (e.key يرجع "ح")
+      var isP = e.code === 'KeyP' || (e.key && e.key.toLowerCase() === 'p');
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && isP) {
         e.preventDefault(); e.stopPropagation();
-        openDlg();
-      } else if (e.key === 'Escape' && ov.style.display === 'flex') { closeDlg(); }
+        if (!isOpen()) openDlg();
+        return;
+      }
+      if (!isOpen()) return;
+      if (e.key === 'Escape') { e.preventDefault(); closeDlg(); return; }
+      if (e.key === 'Enter') {
+        if (e.target && e.target.id === 'lisCtrlPCancel') return;   // Enter على "إلغاء" يلغي
+        e.preventDefault(); e.stopPropagation(); go(); return;
+      }
+      if (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3' ||
+          e.code === 'Numpad1' || e.code === 'Numpad2' || e.code === 'Numpad3') {
+        if (e.target && e.target.tagName === 'SELECT') return;
+        var n = e.code.slice(-1);
+        var r = radio(n === '1' ? 'test' : (n === '2' ? 'all' : 'panel'));
+        r.checked = true; r.focus(); e.preventDefault();
+      }
     }, true);
   })();
 </script>

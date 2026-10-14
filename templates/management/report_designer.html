@@ -180,6 +180,56 @@
         <option value="hide" {{ 'selected' if rl.dept_headings == 'hide' }}>لا تظهر أبدًا (جدول واحد)</option>
       </select>
     </div>
+    {% macro ts_row(prefix, label, st, hidden_name=None) %}
+    <tr>
+      <td style="padding:4px 6px; min-width:150px;">{{ label }}{% if hidden_name is not none %}<input type="hidden" name="{{ prefix }}_name" value="{{ hidden_name }}">{% endif %}</td>
+      <td style="padding:4px 6px; white-space:nowrap;">
+        <input type="color" value="{{ st.get('color') or '#26529C' }}" title="اختر لون" style="width:34px; height:28px; padding:0; border:1px solid #CBD5E1;"
+               oninput="this.nextElementSibling.value=this.value">
+        <input type="text" name="{{ prefix }}_color" value="{{ st.get('color', '') }}" placeholder="افتراضي" dir="ltr" maxlength="7" style="width:78px;">
+      </td>
+      <td style="padding:4px 6px;"><select name="{{ prefix }}_font">
+        <option value="">افتراضي</option>
+        {% for f in text_style_fonts %}<option value="{{ f }}" {{ 'selected' if st.get('font') == f }}>{{ f|capitalize }}</option>{% endfor %}
+      </select></td>
+      <td style="padding:4px 6px;"><input type="number" name="{{ prefix }}_size" min="6" max="60" value="{{ st.get('size', '') }}" placeholder="—" style="width:62px;"></td>
+      <td style="padding:4px 6px;"><select name="{{ prefix }}_case">
+        <option value="">افتراضي</option>
+        <option value="upper" {{ 'selected' if st.get('case') == 'upper' }}>AB — أحرف كبيرة</option>
+        <option value="lower" {{ 'selected' if st.get('case') == 'lower' }}>ab — أحرف صغيرة</option>
+        <option value="capitalize" {{ 'selected' if st.get('case') == 'capitalize' }}>Ab — أول حرف كبير</option>
+        <option value="none" {{ 'selected' if st.get('case') == 'none' }}>كما كُتب</option>
+      </select></td>
+      <td style="padding:4px 6px;"><select name="{{ prefix }}_bold">
+        <option value="">افتراضي</option>
+        <option value="1" {{ 'selected' if st.get('bold') == '1' }}>مضخّم</option>
+        <option value="0" {{ 'selected' if st.get('bold') == '0' }}>عادي</option>
+      </select></td>
+      <td style="padding:4px 6px;"><select name="{{ prefix }}_italic">
+        <option value="">افتراضي</option>
+        <option value="1" {{ 'selected' if st.get('italic') == '1' }}>مائل</option>
+        <option value="0" {{ 'selected' if st.get('italic') == '0' }}>عادي</option>
+      </select></td>
+    </tr>
+    {% endmacro %}
+    <div class="form-field" style="border:1px solid #CBD5E1; border-radius:8px; padding:10px 12px; margin:10px 0;">
+      <label style="font-weight:700;">🎨 تنسيق عنوان اللوحة وعناوين الأقسام (BIOCHEMISTRY / VITAMINS / ...)</label>
+      <p class="muted" style="font-size:0.8em; margin:4px 0 8px;">اللون والخط والحجم والأحرف (كبيرة/صغيرة) والمضخّم والمائل. الفارغ = الشكل الافتراضي. تنسيق «كل عناوين الأقسام» يُطبَّق على الجميع، وتنسيق قسم معيّن يتغلّب عليه. لإخفاء عنوان اللوحة امسح نصه بالحقل أعلاه، ولإخفاء عناوين الأقسام اختر «لا تعرض عناوين».</p>
+      <div style="overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+        <thead><tr style="background:#F1F5F9;">
+          <th style="padding:4px 6px; text-align:start;">العنصر</th><th>اللون</th><th>الخط</th><th>الحجم (px)</th><th>الأحرف</th><th>مضخّم</th><th>مائل</th>
+        </tr></thead>
+        <tbody>
+          {{ ts_row('title', 'عنوان اللوحة (فوق)', rl.title_style or {}) }}
+          {{ ts_row('head', 'كل عناوين الأقسام', rl.head_style or {}) }}
+          {% for n in heading_dept_names %}
+          {{ ts_row('ds_' ~ loop.index0, 'قسم: ' ~ n, (rl.dept_styles or {}).get(n, {}), hidden_name=n) }}
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
     <div class="form-field">
       <label>تحاليل مستثناة من التقرير الشامل (كلمة بكل سطر — تُطابَق مع كود التحليل أو اسمه)</label>
       <textarea name="merged_exclude" rows="5" dir="ltr" style="width:100%;" placeholder="{{ merged_exclude_default }}">{{ rl.merged_exclude }}</textarea>

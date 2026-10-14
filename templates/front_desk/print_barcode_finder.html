@@ -98,7 +98,8 @@
             '<td class="mono">' + v.registration_number + '</td>' +
             '<td class="muted">' + (v.created_at || '') + '</td>' +
             '<td>' + v.tests.join('، ') + '</td>' +
-            '<td><a class="btn small" href="/front-desk/visits/' + v.visit_id + '/print/samples" target="_blank">🖨 طباعة الباركود</a></td>';
+            '<td><a class="btn small" href="/front-desk/visits/' + v.visit_id + '/print/samples" target="_blank">🖨 طباعة الباركود</a> ' +
+              '<a class="btn small secondary" href="/front-desk/visits/' + v.visit_id + '/print/request-label" target="_blank">🏷 باركود الطلب</a></td>';
           body.appendChild(tr);
         });
         document.getElementById('pbfVisitsCard').style.display = 'block';
