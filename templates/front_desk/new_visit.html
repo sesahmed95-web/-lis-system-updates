@@ -121,12 +121,14 @@
   .nv-layout .form-field { margin-bottom: 3px; }
   .nv-layout .form-field > label, .nv-row label { font-size: 11.5px; margin-bottom: 2px; line-height: 1.2; }
   .nv-layout input:not([type="checkbox"]):not([type="hidden"]), .nv-layout select {
-    padding: 4px 8px; font-size: 13px; min-height: 30px; box-sizing: border-box; }
+    padding: 5px 8px; font-size: 13px; min-height: 34px; height: auto; line-height: 1.6; box-sizing: border-box; overflow: visible; }
+  /* حقل اسم المريض: خط عربي فيه نزول (ي ق ع ج) كان يُقتطع من الأسفل بسبب ارتفاع/line-height ضيّق */
+  #patient_name, #patient_name_en { line-height: 1.7 !important; min-height: 36px !important; padding-top: 5px !important; padding-bottom: 7px !important; }
   .nv-row { gap: 8px; }
   .nv-row-name { grid-template-columns: 120px minmax(0, 1fr); }
   .nv-row-contact { grid-template-columns: 1fr 1.2fr 1.4fr; }
   .nv-row-ref { grid-template-columns: 1.35fr 1.35fr .8fr .9fr; }
-  .nv-layout textarea.nv-autogrow { height: 30px; min-height: 30px; }
+  .nv-layout textarea.nv-autogrow { height: 34px; min-height: 34px; line-height: 1.6; }
 
   /* بطاقة التحاليل: تملأ الجهة، والقائمة تتمرر من داخلها فقط */
   .nv-orders-card { display: flex; flex-direction: column; }

@@ -1651,7 +1651,19 @@ _PRESET_KEYS = {
     "app_name", "app_name_ar", "lab_phone", "lab_address",
     "portal_enabled", "portal_mode", "portal_url", "portal_api_key", "portal_pdf_enabled",
     "portal_default_hours", "portal_ready_when", "portal_retention_days",
+    # --- تصميم التقارير وترتيبها (يُنسخ من برنامجك للعميل): أسلوب الجدول + تنسيق العناوين (result_layout_json)،
+    #     ترتيب أقسام اللوحة المجمّعة وترتيب التحاليل بشاشة النتائج، خطوط/ألوان/مسافات التقرير والترويسة.
+    "result_layout_json", "combined_panel_group_order", "results_entry_test_order",
+    "logo_width", "logo_position", "letterhead_font_size", "letterhead_font_family",
+    "report_underline_style", "report_row_pad", "report_col_pad",
+    "test_name_font_size", "result_value_font_size", "show_result_flag",
+    "flag_color_low", "flag_color_high", "conclusion_marker_colors",
+    "patient_info_top_gap", "patient_info_row_gap", "patient_info_label_width", "patient_info_col_gap",
+    "barcode_test_names_mode", "barcode_show_lab_name", "vb_names_mode",
+    "theme_primary_color", "theme_page_bg_color",
 }
+# أعمدة تصميم التقرير لكل تحليل (تُطابَق بالـcode): اسم الريبورت المجمّع، لون/فاصل صفحة اللوحة، تباعد الصفوف، سطر Done by.
+_PRESET_TEST_DESIGN_COLS = ("report_group", "panel_color", "panel_page_break", "row_spacing", "done_by_note")
 
 
 _PENDING_LOGO = None
@@ -1694,6 +1706,23 @@ def apply_client_preset(conn):
                     conn.execute("UPDATE settings SET value=? WHERE key=?", (v, key))
                 else:
                     conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, v))
+        # تصميم التقرير لكل تحليل (test_designs): نحدّث فقط التحاليل الموجودة عند العميل بنفس الـcode
+        tds = data.get("test_designs") if isinstance(data, dict) else None
+        if isinstance(tds, list):
+            for td in tds[:2000]:
+                if not isinstance(td, dict) or not td.get("code"):
+                    continue
+                sets, vals = [], []
+                for col in _PRESET_TEST_DESIGN_COLS:
+                    if col in td:
+                        sets.append(col + "=?")
+                        vals.append(td[col])
+                if sets:
+                    try:
+                        conn.execute("UPDATE test_definitions SET " + ", ".join(sets) + " WHERE code=?",
+                                     tuple(vals) + (str(td["code"]),))
+                    except Exception:   # عمود غير موجود بقاعدة قديمة: نتجاهل هذا التحليل فقط
+                        pass
         # شهادات/ألقاب الأطباء بترويسة التقارير (examining_doctors_list): نستبدل أطباء الترويسة فقط
         docs = data.get("letterhead_doctors") if isinstance(data, dict) else None
         if isinstance(docs, list) and docs:

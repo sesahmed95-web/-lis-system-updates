@@ -1287,10 +1287,10 @@ def inject_globals():
             theme_page_bg_color = _v
     license_banner = None
     if "user_id" in session:
-        try:
-            lic = license_manager.check_license(db)
-        except sqlite3.OperationalError:
-            lic = {"status": "unknown"}     # قاعدة مشغولة: نتجاوز شريط الترخيص فقط بدل خطأ 500
+        # كان check_license() ينادى هنا بكل عرض صفحة (وهو يكتب بالقاعدة) فيتصادم مع باقي الطلبات
+        # ويسبب "صفنات" البرنامج. نستخدم نتيجة enforce_license المحفوظة بالذاكرة (تتجدد كل 5 دقائق).
+        _lc = _license_check_cache
+        lic = _lc[1] if _lc else {"status": "unknown"}
         # الشريط التحذيري "متبقي كم يوم" يظهر فقط للترخيص التجريبي، وليس
         # لأي ترخيص عادي (حتى لو كان له تاريخ انتهاء بعد سنة مثلاً).
         if lic["status"] == "active" and lic.get("is_trial") and lic.get("days_left") is not None:
@@ -1404,6 +1404,66 @@ def _release_db_connections(exc=None):
     """نهاية كل طلب (نجح أو فشل): ألغِ أي كتابة معلّقة وسكّر كل اتصالات القاعدة المفتوحة به،
     حتى ما يقدر طلب فاشل يقفل القاعدة على الجميع (شوف الشرح بـ database.close_request_connections)."""
     close_request_connections()
+
+
+# ---------------------------------------------------------------------------
+# مراقب "الصفنات": يسجّل بملف hang_log.txt (بمجلد البرنامج) أي طلب علق أكثر من 6 ثواني
+# مع مكان توقفه بالكود (stack)، وأي طلب انتهى ببطء (> 2 ثانية). لو البرنامج صفن أرسل الملف.
+# ---------------------------------------------------------------------------
+_inflight = {}
+_inflight_lock = threading.Lock()
+_inflight_seq = [0]
+_HANG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hang_log.txt")
+
+
+def _hang_log(text):
+    try:
+        if os.path.exists(_HANG_LOG) and os.path.getsize(_HANG_LOG) > 2_000_000:
+            os.replace(_HANG_LOG, _HANG_LOG + ".old")
+        with open(_HANG_LOG, "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+    except Exception:
+        pass
+
+
+@app.before_request
+def _track_request_start():
+    with _inflight_lock:
+        _inflight_seq[0] += 1
+        rid = _inflight_seq[0]
+        _inflight[rid] = {"t": time.time(), "ep": request.endpoint, "path": request.full_path,
+                          "thread": threading.get_ident(), "reported": False}
+    request.environ["lis.rid"] = rid
+
+
+@app.teardown_request
+def _track_request_end(exc=None):
+    rid = request.environ.get("lis.rid")
+    with _inflight_lock:
+        info = _inflight.pop(rid, None)
+    if info and (time.time() - info["t"]) > 2.0 and request.endpoint != "static":
+        _hang_log(f"[{datetime.now().isoformat(timespec='seconds')}] SLOW {time.time() - info['t']:.1f}s "
+                  f"{request.method} {info['path']} ({info['ep']})")
+
+
+def _hang_watchdog():
+    import sys as _sys, traceback as _tb
+    while True:
+        time.sleep(3)
+        try:
+            now = time.time()
+            with _inflight_lock:
+                stuck = [(rid, dict(i)) for rid, i in _inflight.items()
+                         if now - i["t"] > 6 and not i["reported"]]
+                for rid, _i in stuck:
+                    _inflight[rid]["reported"] = True
+            for rid, i in stuck:
+                fr = _sys._current_frames().get(i["thread"])
+                stack = "".join(_tb.format_stack(fr)) if fr else "(no frame)"
+                _hang_log(f"[{datetime.now().isoformat(timespec='seconds')}] HANG {now - i['t']:.0f}s+ "
+                          f"{i['path']} ({i['ep']})\n{stack}")
+        except Exception:
+            pass
 
 
 @app.before_request
@@ -2219,20 +2279,68 @@ def designer_delete_client():
     return redirect(url_for("designer_panel"))
 
 
+def _parse_extension_text(raw):
+    """نص حر لمدة التمديد: "1 يوم" / "2 يوم" / "اسبوع" / "1 شهر" / "3 شهر" / "6 اشهر" / "1 سنة" /
+    "سنتين" / "دائمي". يرجّع ("perm", None) أو ("delta", (سنوات, أشهر, أيام)) أو None لو ما فهم."""
+    t = str(raw or "").strip().lower()
+    t = t.translate({ord(c): str(i) for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")})
+    t = t.translate({ord(c): str(i) for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")})
+    t = (t.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ة", "ه").replace("ى", "ي"))
+    t = re.sub(r"\s+", " ", t).strip()
+    if not t:
+        return None
+    if re.search(r"دائم|دايم|مدي? ?الحياه|permanent|perm|forever|lifetime|unlimited", t):
+        return ("perm", None)
+    if re.fullmatch(r"\d+", t):                      # رقم لحاله = أيام (السلوك القديم)
+        return ("delta", (0, 0, int(t)))
+    y = m = d = 0
+    found = False
+    units = [
+        (r"(\d+)?\s*(?:سنتين|سنتان)", "y2"), (r"(\d+)?\s*(?:سنوات|سنه|سنين|سنة|years?|yrs?|y)(?![a-z\u0621-\u064a])", "y"),
+        (r"(\d+)?\s*(?:شهرين|شهران)", "m2"), (r"(\d+)?\s*(?:اشهر|شهور|شهر|months?|mos?)(?![a-z\u0621-\u064a])", "m"),
+        (r"(\d+)?\s*(?:اسبوعين|اسبوعان)", "w2"), (r"(\d+)?\s*(?:اسابيع|اسبوع|weeks?|w)(?![a-z\u0621-\u064a])", "w"),
+        (r"(\d+)?\s*(?:يومين|يومان)", "d2"), (r"(\d+)?\s*(?:ايام|يوم|days?|d)(?![a-z\u0621-\u064a])", "d"),
+    ]
+    rest = t
+    for pat, kind in units:
+        for mt in list(re.finditer(pat, rest)):
+            n = int(mt.group(1)) if mt.group(1) else 1
+            if kind.endswith("2"):
+                n = 2
+            if kind[0] == "y": y += n
+            elif kind[0] == "m": m += n
+            elif kind[0] == "w": d += 7 * n
+            else: d += n
+            found = True
+        rest = re.sub(pat, " ", rest)
+    left = re.sub(r"[\s,و+]|and", "", rest)
+    if not found or left:
+        return None
+    return ("delta", (y, m, d))
+
+
+def _add_ymd(base, y, m, d):
+    """يضيف سنوات/أشهر تقويمية (مع ضبط آخر الشهر) ثم أيام."""
+    import calendar
+    total = base.year * 12 + (base.month - 1) + y * 12 + m
+    ny, nm = divmod(total, 12)
+    nm += 1
+    nd = min(base.day, calendar.monthrange(ny, nm)[1])
+    return date(ny, nm, nd) + timedelta(days=d)
+
+
 @app.route("/designer/client/extend", methods=["POST"])
 @designer_required
 def designer_extend_client():
-    """تمديد فترة عميل: يولّد كود تفعيل جديد لنفس الجهاز بتاريخ انتهاء =
-    (تاريخ انتهائه الحالي لو لسا ما انتهى، وإلا اليوم) + عدد الأيام المدخل، ويسجّله
-    بالسجل ويعرضه لتسلّمه للعميل. محلي بالكامل — لا يحتاج توكن ولا إنترنت."""
+    """تمديد فترة عميل بنص حر (1 يوم، 2 يوم، 1 شهر، 3 شهر، 6 شهر، 1 سنة، دائمي ...):
+    يولّد كود تفعيل جديد لنفس الجهاز. التمديد يُحسب من تاريخ انتهائه الحالي لو لسا
+    ما انتهى، وإلا من اليوم. "دائمي" = ترخيص بلا تاريخ انتهاء. محلي — بدون توكن ولا إنترنت."""
     hardware_id = request.form.get("hardware_id", "").strip().upper()
     username = request.form.get("username", "").strip()
-    try:
-        extra_days = int(float(request.form.get("extra_days", "0") or 0))
-    except ValueError:
-        extra_days = 0
-    if not hardware_id or extra_days <= 0:
-        flash("أدخل عدد أيام التمديد (رقم أكبر من صفر).")
+    raw = request.form.get("extension", request.form.get("extra_days", ""))
+    parsed = _parse_extension_text(raw)
+    if not hardware_id or parsed is None:
+        flash("ما فهمت مدة التمديد — اكتب مثلاً: 1 يوم، 2 يوم، 1 شهر، 3 شهر، 6 شهر، 1 سنة، دائمي.")
         return redirect(url_for("designer_panel"))
     db = get_db()
     row = db.execute(
@@ -2240,15 +2348,18 @@ def designer_extend_client():
         (hardware_id,),
     ).fetchone()
     username = username or (row["username"] if row and row["username"] else "client")
-    base = date.today()
-    if row and row["expiry"] and row["expiry"] not in ("PERM", "None"):
-        try:
-            cur = date.fromisoformat(str(row["expiry"])[:10])
-            if cur > base:
-                base = cur
-        except ValueError:
-            pass
-    expiry_date = (base + timedelta(days=extra_days)).isoformat()
+    if parsed[0] == "perm":
+        expiry_date = None
+    else:
+        base = date.today()
+        if row and row["expiry"] and row["expiry"] not in ("PERM", "None", "دائم"):
+            try:
+                cur = date.fromisoformat(str(row["expiry"])[:10])
+                if cur > base:
+                    base = cur
+            except ValueError:
+                pass
+        expiry_date = _add_ymd(base, *parsed[1]).isoformat()
     code = license_manager.generate_activation_code(hardware_id, expiry_date, is_trial=False)
     license_manager.log_issued_code(db, hardware_id, username, expiry_date, code)
     db.close()
@@ -9119,6 +9230,111 @@ def unit_converter():
 # للحالة الشائعة: بس تبي تغيّر/تصلّح نص الوحدة نفسه (مثال: NRBC من
 # "100/wbc" إلى "/100wbc") بدون لمس أي رقم ثاني إطلاقاً.
 # ------------------------------------------------------------------------
+# ------------------------------------------------------------------------
+# تعبئة وحدات SI تلقائيًا: جدول تحويلات قياسية معروفة (غلوكوز mg/dL -> mmol/L، كرياتينين -> µmol/L ...).
+# لا يغيّر الوحدة الأساسية ولا المديات، ولا يمسح/يبدّل أي وحدة ثانية موجودة أصلاً (يعبّي الفاضي فقط).
+# تُطبَّق فقط لو اسم الباراميتر والوحدة الأساسية الحالية يطابقان الجدول حرفيًا (احتياطًا من تحويل خاطئ).
+# بدون معامل: HbA1c (% -> mmol/mol) لأن تحويله معادلة (×10.929 − 23.5) وليس معامل ضرب فقط.
+# ------------------------------------------------------------------------
+_AUTO_SI_RULES = [
+    # (regex لاسم الباراميتر, الوحدات الأساسية المقبولة (مطبَّعة), الوحدة الثانية, المعامل)
+    (r"triglycerid|\btg\b|\btag\b", ("mg/dl",), "mmol/L", 0.01129),
+    (r"cholesterol|\bhdl\b|\bldl\b|\bvldl\b", ("mg/dl",), "mmol/L", 0.02586),
+    (r"glucose|\bfbs\b|\brbs\b|\bppbs\b|\b2hpp\b|blood sugar", ("mg/dl",), "mmol/L", 0.0555),
+    (r"\bbun\b|urea nitrogen", ("mg/dl",), "mmol/L", 0.357),
+    (r"\burea\b|blood urea", ("mg/dl",), "mmol/L", 0.1665),
+    (r"creatinine", ("mg/dl",), "µmol/L", 88.4),
+    (r"uric", ("mg/dl",), "µmol/L", 59.48),
+    (r"bilirubin", ("mg/dl",), "µmol/L", 17.1),
+    (r"calcium", ("mg/dl",), "mmol/L", 0.2495),
+    (r"phosph", ("mg/dl",), "mmol/L", 0.3229),
+    (r"magnesium", ("mg/dl",), "mmol/L", 0.4114),
+    (r"albumin|total protein|globulin", ("g/dl",), "g/L", 10),
+    (r"\biron\b|serum iron", ("ug/dl",), "µmol/L", 0.1791),
+    (r"vitamin ?d|25.?oh", ("ng/ml",), "nmol/L", 2.496),
+    (r"b ?12|cobalamin", ("pg/ml",), "pmol/L", 0.738),
+    (r"folate|folic", ("ng/ml",), "nmol/L", 2.266),
+    (r"cortisol", ("ug/dl",), "nmol/L", 27.59),
+    (r"insulin", ("uiu/ml", "miu/l"), "pmol/L", 6.945),
+]
+
+
+def _norm_unit(u):
+    return re.sub(r"\s+", "", str(u or "").lower().replace("µ", "u").replace("μ", "u"))
+
+
+def _auto_si_candidates(db):
+    rows = db.execute(
+        "SELECT tp.id, tp.name, tp.unit, td.name AS test_name FROM test_parameters tp "
+        "JOIN test_definitions td ON td.id = tp.test_definition_id "
+        "WHERE (tp.unit2 IS NULL OR TRIM(tp.unit2) = '') AND tp.unit IS NOT NULL AND TRIM(tp.unit) <> '' "
+        "ORDER BY td.department, td.name, tp.name"
+    ).fetchall()
+    out = []
+    for r in rows:
+        nm = (r["name"] or "").lower()
+        un = _norm_unit(r["unit"])
+        for rx, units, unit2, factor in _AUTO_SI_RULES:
+            if re.search(rx, nm) and un in units:
+                out.append({"id": r["id"], "test": r["test_name"], "name": r["name"], "unit": r["unit"],
+                            "unit2": unit2, "factor": factor})
+                break
+    return out
+
+
+@app.route("/master/unit-converter/auto-si", methods=["GET", "POST"])
+@roles_required("supervisor")
+def unit_converter_auto_si():
+    db = get_db()
+    cands = _auto_si_candidates(db)
+    if request.method == "POST":
+        picked = set(request.form.getlist("pid"))
+        n = 0
+        for c in cands:
+            if str(c["id"]) in picked:
+                db.execute("UPDATE test_parameters SET unit2=?, unit2_factor=? WHERE id=? AND (unit2 IS NULL OR TRIM(unit2)='')",
+                           (c["unit2"], c["factor"], c["id"]))
+                log_action("SetDualUnit", "test_parameter", c["id"], f"auto: {c['unit']} -> {c['unit2']} (x{c['factor']})")
+                n += 1
+        db.commit()
+        flash(f"تمت تعبئة وحدة SI تلقائيًا لـ {n} باراميتر.")
+        return redirect(url_for("unit_converter_auto_si"))
+    from flask import render_template_string as _rts
+    tpl = """{% extends "base.html" %}
+{% block page_title %}وحدات SI تلقائية{% endblock %}
+{% block content %}
+<div class="card" dir="rtl">
+  <h3>🌐 تعبئة وحدات SI تلقائيًا</h3>
+  <p class="muted">التحاليل التالية لها تحويل SI قياسي معروف ولسا ما عندها وحدة ثانية. اختر ما تريد ثم "تطبيق" —
+  لا يتغيّر شي من الوحدة الأساسية ولا المديات، ولا يُستبدل أي إعداد موجود. تقدر تعدّل أي معامل لاحقًا من صفحة تعديل الوحدات.
+  راجع المعاملات قبل التطبيق. (HbA1c: تحويله لـ mmol/mol معادلة وليس معامل ضرب، فلا يدخل هنا.)</p>
+  {% if cands %}
+  <form method="POST">
+    <table>
+      <thead><tr><th><input type="checkbox" checked onclick="document.querySelectorAll('.pidchk').forEach(function(c){c.checked=this.checked}.bind(this))"></th>
+        <th>التحليل</th><th>الباراميتر</th><th>الوحدة الحالية</th><th>وحدة SI</th><th>المعامل (×)</th><th>مثال</th></tr></thead>
+      <tbody>
+      {% for c in cands %}
+      <tr><td><input class="pidchk" type="checkbox" name="pid" value="{{ c.id }}" checked></td>
+        <td>{{ c.test }}</td><td>{{ c.name }}</td><td class="mono">{{ c.unit }}</td>
+        <td class="mono">{{ c.unit2 }}</td><td class="mono">{{ c.factor }}</td>
+        <td class="mono">100 {{ c.unit }} = {{ (100 * c.factor)|round(3) }} {{ c.unit2 }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <button class="btn" type="submit" style="margin-top:10px;">✅ تطبيق على المحدد</button>
+    <a class="btn secondary" href="{{ url_for('unit_converter') }}">رجوع</a>
+  </form>
+  {% else %}
+  <p>لا يوجد تحاليل جديدة تنطبق عليها القائمة (إما مضبوطة مسبقًا أو وحدتها الحالية مختلفة).</p>
+  <a class="btn secondary" href="{{ url_for('unit_converter') }}">رجوع</a>
+  {% endif %}
+</div>
+{% endblock %}"""
+    db.close()
+    return _rts(tpl, cands=cands)
+
+
 @app.route("/master/unit-converter/<int:param_id>/set-unit", methods=["POST"])
 @roles_required("supervisor")
 def unit_converter_set_unit(param_id):
@@ -11846,6 +12062,7 @@ if __name__ == "__main__":
 
     import threading
     threading.Thread(target=whatsapp_background_worker, daemon=True).start()
+    threading.Thread(target=_hang_watchdog, daemon=True).start()
     # يحمّل توكن قراءة GitHub من الإعدادات المحلية (settings.github_read_token)
     # إلى الذاكرة قبل تشغيل خيط التحديث — التوكن نفسه ما يُكتب أبداً بكود
     # auto_updater.py حتى ما يترفع مع git push ويُلغى تلقائياً من GitHub

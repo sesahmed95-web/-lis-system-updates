@@ -134,8 +134,8 @@
                 onsubmit="return confirm('توليد كود تفعيل جديد بتمديد الفترة لهذا العميل؟');">
             <input type="hidden" name="hardware_id" value="{{ row['hardware_id'] }}">
             <input type="hidden" name="username" value="{{ row['username'] }}">
-            <input type="number" name="extra_days" min="1" placeholder="تمديد الفترة (أيام)" required
-                   style="width:130px; padding:4px 6px;" title="عدد الأيام المضافة على تاريخ انتهاء العميل الحالي">
+            <input type="text" name="extension" required autocomplete="off" dir="auto" placeholder="تمديد: 1 يوم / 3 شهر / 1 سنة / دائمي"
+                   style="width:190px; padding:4px 6px;" title="اكتب بحرية: 1 يوم، 2 يوم، اسبوع، 1 شهر، 3 شهر، 6 شهر، 1 سنة، سنتين، دائمي">
             <button class="btn small" type="submit">⏳ تمديد</button>
           </form>
           <form method="POST" action="{{ url_for('designer_delete_client') }}"

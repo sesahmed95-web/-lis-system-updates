@@ -15,6 +15,20 @@ import os
 import sys
 
 
+# إعدادات تصميم التقارير/ترتيبها اللي تنتقل للعميل (نفس _PRESET_KEYS بـ database.py، بدون أي كلمة مرور/توكن).
+DESIGN_KEYS = (
+    "result_layout_json", "combined_panel_group_order", "results_entry_test_order",
+    "logo_width", "logo_position", "letterhead_font_size", "letterhead_font_family",
+    "report_underline_style", "report_row_pad", "report_col_pad",
+    "test_name_font_size", "result_value_font_size", "show_result_flag",
+    "flag_color_low", "flag_color_high", "conclusion_marker_colors",
+    "patient_info_top_gap", "patient_info_row_gap", "patient_info_label_width", "patient_info_col_gap",
+    "barcode_test_names_mode", "barcode_show_lab_name", "vb_names_mode",
+    "theme_primary_color", "theme_page_bg_color",
+)
+TEST_DESIGN_COLS = ("report_group", "panel_color", "panel_page_break", "row_spacing", "done_by_note")
+
+
 def ask(prompt, default=""):
     v = input(f"{prompt}{' [' + default + ']' if default else ''}: ").strip()
     return v or default
@@ -27,8 +41,13 @@ def read_branding(db_path, project_dir):
     con = sqlite3.connect("file:" + db_path.replace("\\", "/") + "?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     try:
+        _keys = ("app_name", "app_name_ar", "lab_phone", "lab_address", "logo_path") + DESIGN_KEYS
         st = {r["key"]: r["value"] for r in con.execute(
-            "SELECT key, value FROM settings WHERE key IN ('app_name','app_name_ar','lab_phone','lab_address','logo_path')")}
+            "SELECT key, value FROM settings WHERE key IN (" + ",".join("?" * len(_keys)) + ")", _keys)}
+        tcols = [r[1] for r in con.execute("PRAGMA table_info(test_definitions)")]
+        twant = [c for c in ("code",) + TEST_DESIGN_COLS if c in tcols]
+        test_designs = [dict(r) for r in con.execute("SELECT " + ", ".join(twant) + " FROM test_definitions")] \
+            if "code" in twant and len(twant) > 1 else []
         cols = [r[1] for r in con.execute("PRAGMA table_info(examining_doctors_list)")]
         want = [c for c in ("name", "title", "degree_ar", "degree_en", "sort_order", "font_size") if c in cols]
         docs = [dict(r) for r in con.execute(
@@ -44,6 +63,7 @@ def read_branding(db_path, project_dir):
                 with open(fp, "rb") as fh:
                     logo = {"filename": os.path.basename(fp), "b64": base64.b64encode(fh.read()).decode("ascii")}
                 break
+    st["__test_designs__"] = test_designs
     return st, docs, logo
 
 
@@ -58,7 +78,9 @@ def main():
     if src.lower() not in ("n", "no", ""):
         try:
             bst, bdocs, blogo = read_branding(src, project_dir)
-            print(f"   -> found: {len(bdocs)} letterhead doctor(s), logo: {'yes' if blogo else 'NO (file not found)'}")
+            print(f"   -> found: {len(bdocs)} letterhead doctor(s), logo: {'yes' if blogo else 'NO (file not found)'}, "
+                  f"report design settings: {sum(1 for k in DESIGN_KEYS if bst.get(k) not in (None, ''))}, "
+                  f"test designs: {len(bst.get('__test_designs__', []))}")
         except Exception as e:      # قاعدة مقفلة/مسار خطأ: نكمل بدون
             print("   (could not read that database:", type(e).__name__, e, ") - close the program and try again, or continue without it")
     name_ar = ask("1) Lab name in ARABIC (optional)", bst.get("app_name_ar", "") or "")
@@ -79,6 +101,9 @@ def main():
         "portal_enabled": "1", "portal_mode": "remote", "portal_url": url,
         "portal_api_key": key, "portal_pdf_enabled": "1", "portal_default_hours": hours,
     }
+    for k in DESIGN_KEYS:                      # تصميم التقارير + الترتيب من lis.db (إن اخترت نسخها)
+        if bst.get(k) not in (None, ""):
+            settings[k] = bst[k]
     settings = {k: v for k, v in settings.items() if v != ""}
     import re
     slug = re.sub(r"[^A-Za-z0-9]+", "_", name_en or url.split("//")[-1].split(".")[0]).strip("_") or "client"
@@ -86,6 +111,8 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, "portal_preset.json")
     payload = {"settings": settings}
+    if bst.get("__test_designs__"):
+        payload["test_designs"] = bst["__test_designs__"]
     if bdocs:
         payload["letterhead_doctors"] = bdocs
     if blogo:
