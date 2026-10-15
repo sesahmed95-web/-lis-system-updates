@@ -504,6 +504,56 @@
 </script>
 
 
+
+<script>
+  // قسم هذا الجهاز: يُحفظ بالجهاز نفسه (localStorage) ويخفي تحاليل الأقسام الثانية (تسهيل مو منع).
+  // الحقول المخفية تتعطّل حتى ما تنرسل، وshown_ot_ids يحمل فقط التحاليل المعروضة — السيرفر يحفظها هي بس.
+  document.addEventListener('DOMContentLoaded', function () {
+    var KEY = 'lisDeviceDept';
+    var sel = document.getElementById('lisDeviceDept');
+    var info = document.getElementById('lisDeptInfo');
+    var link = document.getElementById('lisDeptShowAll');
+    var hid = document.getElementById('lisShownIds');
+    if (!sel) return;
+    var forceAll = false;
+    var saved = 'all';
+    try { saved = localStorage.getItem(KEY) || 'all'; } catch (e) {}
+    sel.value = saved;
+    function allowed(group, mode) {
+      if (mode === 'all') return true;
+      if (mode === 'hema_micro') return group === 'hema' || group === 'micro';
+      return group === mode;
+    }
+    function apply() {
+      var mode = forceAll ? 'all' : sel.value;
+      var boxes = Array.prototype.slice.call(document.querySelectorAll('.rb-box'));
+      var visible = boxes.filter(function (b) { return allowed(b.getAttribute('data-dept'), mode); });
+      if (!visible.length) { visible = boxes; mode = 'all'; }      // ما نخفي كل شي أبدًا
+      var hiddenCount = 0, ids = [];
+      boxes.forEach(function (b) {
+        var show = visible.indexOf(b) >= 0;
+        b.style.display = show ? '' : 'none';
+        Array.prototype.forEach.call(b.querySelectorAll('input, select, textarea'), function (el) {
+          if (show) { if (el.dataset.lisDis === '1') { el.disabled = false; delete el.dataset.lisDis; } }
+          else if (!el.disabled) { el.disabled = true; el.dataset.lisDis = '1'; }
+        });
+        if (show) ids.push(b.id.replace('rbox_', '')); else hiddenCount++;
+      });
+      hid.value = ids.join(',');
+      if (hiddenCount) {
+        info.textContent = 'مخفي ' + hiddenCount + ' تحليل من أقسام ثانية لهذا المريض.';
+        link.style.display = ''; link.textContent = forceAll ? 'رجوع لقسم الجهاز' : 'عرض كل الأقسام';
+      } else { info.textContent = ''; link.style.display = forceAll ? '' : 'none'; if (forceAll) link.textContent = 'رجوع لقسم الجهاز'; }
+    }
+    sel.addEventListener('change', function () {
+      try { localStorage.setItem(KEY, sel.value); } catch (e) {}
+      forceAll = false; apply();
+    });
+    link.addEventListener('click', function (e) { e.preventDefault(); forceAll = !forceAll; apply(); });
+    apply();
+  });
+</script>
+
 <!-- نافذة Ctrl+P: اختيار ماذا تطبع (تحليل محدد / كل النتائج المكتملة / اللوحة المجمّعة) ثم Print -->
 <div id="lisCtrlPOverlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:10002; align-items:center; justify-content:center; padding:20px;">
   <div dir="rtl" style="background:#fff; border-radius:12px; width:100%; max-width:440px; padding:20px 22px; box-shadow:0 20px 60px rgba(0,0,0,.35);">
@@ -581,11 +631,90 @@
   })();
 </script>
 
+
+<script>
+  // إدراج رمز (رياضي/طبي) عند موضع المؤشر داخل أي حقل نص حر بتقارير نقي العظم والفحوصات الخاصة
+  function lisInsertSymbol(fid, sym) {
+    var el = document.getElementById(fid);
+    if (!el) return;
+    var a = el.selectionStart, b = el.selectionEnd;
+    if (typeof a !== 'number') { el.value += sym; }
+    else { el.value = el.value.slice(0, a) + sym + el.value.slice(b); el.selectionStart = el.selectionEnd = a + sym.length; }
+    el.focus();
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+</script>
+<style>
+  /* ===== عرض مضغوط (افتراضي): تقليل المسافات + بارامترات التحاليل الطويلة بعمودين لتقليل النزول بالمسطرة ===== */
+  .rb-grid:not(.rb-normal) .rb-box { padding: 10px 12px; margin-bottom: 10px; }
+  .rb-grid:not(.rb-normal) .rb-box h4 { font-size: 1em; }
+  .rb-grid:not(.rb-normal) .rb-box > div:first-child + p.muted { margin: 2px 0 6px !important; }
+  .rb-grid:not(.rb-normal) .rb-box .form-field { margin-bottom: 6px !important; }
+  .rb-grid:not(.rb-normal) .rb-box .form-field label { display: inline; margin-inline-end: 6px; }
+  .rb-grid:not(.rb-normal) .rb-box table td, .rb-grid:not(.rb-normal) .rb-box table th { padding: 3px 8px !important; }
+  .rb-grid:not(.rb-normal) .rb-box input[type=text], .rb-grid:not(.rb-normal) .rb-box input[type=number] { padding: 4px 8px !important; min-height: 30px; }
+  .rb-grid:not(.rb-normal) .rb-box textarea { padding: 4px 8px !important; min-height: 32px; }
+  .rb-grid:not(.rb-normal) .rb-wide { column-span: all; }
+  .rb-grid:not(.rb-normal) .rb-wide table { display: block; width: 100%; }
+  .rb-grid:not(.rb-normal) .rb-wide thead { display: none; }
+  .rb-grid:not(.rb-normal) .rb-wide tbody { display: block; column-count: 2; column-gap: 24px; }
+  .rb-grid:not(.rb-normal) .rb-wide tbody tr {
+    display: grid; grid-template-columns: minmax(80px, 1.3fr) 44px minmax(60px, .9fr) minmax(110px, 1.9fr) 64px;
+    align-items: center; gap: 0 6px; break-inside: avoid; border-bottom: 1px solid #EEF2F6;
+  }
+  .rb-grid:not(.rb-normal) .rb-wide tbody tr td { border: 0 !important; padding: 2px 4px !important; min-width: 0; }
+  .rb-exam .lis-spell-row, .rb-exam .lis-cleanup-btn { display: none !important; }
+</style>
+<script>
+  (function () {
+    try { if (localStorage.getItem('lisRbNormal') === '1') document.getElementById('rbGrid').classList.add('rb-normal'); } catch (e) {}
+    var b = document.getElementById('rbCompactBtn');
+    if (b) b.textContent = document.getElementById('rbGrid').classList.contains('rb-normal') ? '↕ عرض عادي' : '↕ عرض مضغوط';
+  })();
+  function lisToggleCompact() {
+    var g = document.getElementById('rbGrid'); g.classList.toggle('rb-normal');
+    var n = g.classList.contains('rb-normal');
+    document.getElementById('rbCompactBtn').textContent = n ? '↕ عرض عادي' : '↕ عرض مضغوط';
+    try { localStorage.setItem('lisRbNormal', n ? '1' : '0'); } catch (e) {}
+  }
+  function lisSpellAll(otId, on) {
+    document.querySelectorAll('#rbox_' + otId + ' textarea').forEach(function (t) { t.spellcheck = !!on; });
+  }
+  function lisCleanupAll(otId) {
+    document.querySelectorAll('#rbox_' + otId + ' textarea').forEach(function (t) {
+      if (t.value && typeof lisCleanupText === 'function') lisCleanupText(t);
+    });
+  }
+</script>
 <form method="POST" id="visitResultsForm">
-  <div class="rb-grid">
+  <input type="hidden" name="shown_ot_ids" id="lisShownIds" value="{% for b in boxes %}{{ b.ot['id'] }}{{ ',' if not loop.last }}{% endfor %}">
+  <div id="lisDeptBar" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px; padding:8px 12px; background:#F1F5F9; border:1px solid #E2E8F0; border-radius:8px;">
+    <label style="display:inline-flex; align-items:center; gap:6px; font-weight:600; margin:0;">🖥 قسم هذا الجهاز:
+      <select id="lisDeviceDept" style="min-width:210px;">
+        <option value="all">كل الأقسام</option>
+        <option value="hema">أمراض الدم (Hematology + التخثر)</option>
+        <option value="micro">الأحياء المجهرية / Others (GUE, GSE, SFA...)</option>
+        <option value="hema_micro">أمراض الدم + الأحياء المجهرية</option>
+        <option value="chem">الكيمياء والهرمونات</option>
+      </select>
+    </label>
+    <span id="lisDeptInfo" class="muted" style="font-size:13px;"></span>
+    <a href="#" id="lisDeptShowAll" style="display:none; font-size:13px;">عرض كل الأقسام</a>
+    {% if only_mode %}
+    <span style="font-size:13px; color:#92400E; background:#FEF3C7; border-radius:6px; padding:3px 8px;">معروض التحليل المختار فقط{% if only_hidden %} ({{ only_hidden }} تحليل آخر بالزيارة مخفي){% endif %}</span>
+    <a href="{{ url_for('visit_results_entry', visit_id=visit['id']) }}" style="font-size:13px;">عرض كل تحاليل الزيارة</a>
+    {% endif %}
+    <a href="{{ url_for('quick_entry') }}" class="btn small secondary" style="margin-inline-start:auto;">⚡ الإدخال السريع</a>
+  </div>
+  <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+    <button type="button" class="btn small secondary" id="rbCompactBtn" onclick="lisToggleCompact()"
+            title="عرض مضغوط: مسافات أقل وبارامترات التقارير الطويلة بعمودين حتى ما تحتاج تنزل كثير">↕ عرض مضغوط</button>
+  </div>
+  <div class="rb-grid" id="rbGrid">
     {% for box in boxes %}
     {% set ot = box.ot %}
-    <div class="card rb-box" id="rbox_{{ ot['id'] }}">
+    {% set _txt_cnt = box.parameters|selectattr('result_type', 'equalto', 'Text')|list|length %}
+    <div class="card rb-box{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') %} rb-exam{% endif %}{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') or (box.parameters|length >= 8 and _txt_cnt == 0) %} rb-wide{% endif %}" id="rbox_{{ ot['id'] }}" data-dept="{{ dept_group(ot['test_department']) }}">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
         <h4 style="margin:0;">{{ ot['test_name'] }}</h4>
         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
@@ -595,6 +724,16 @@
         </div>
       </div>
       <p class="muted" style="margin:4px 0 10px;">{{ t('barcode') }}: <span class="mono">{{ ot['barcode'] }}</span></p>
+      {% if ot['test_code'] in ('GUE', 'GSE', 'SFA') %}
+      {# تدقيق إملائي/كتابة مرة وحدة لكل التقرير بدل كل باراميتر لحاله #}
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 10px; padding:8px 10px; background:#F1F5F9; border-radius:8px;">
+        <label style="display:flex; align-items:center; gap:5px; font-size:13px; cursor:pointer;">
+          <input type="checkbox" checked onchange="lisSpellAll({{ ot['id'] }}, this.checked)"> 🔤 تدقيق إملائي لكل التقرير
+        </label>
+        <button type="button" class="btn small secondary" onclick="lisCleanupAll({{ ot['id'] }})"
+                title="يصحح المسافات وحرف البداية وعلامة الترقيم بكل حقول التقرير مرة وحدة — لا يغيّر أي كلمة طبية">✓ تدقيق كتابة كل التقرير</button>
+      </div>
+      {% endif %}
 
       <div class="form-field" style="max-width:260px; margin-bottom:10px;">
         <label style="font-size:0.85em;">الجهاز (Analyzer) — اختياري</label>
@@ -637,6 +776,14 @@
             </td>
             <td>
               {% if p['result_type'] == 'Text' %}
+              {% if p['name'] in ('Cellularity', 'Megakaryocytes', 'Myelopoiesis', 'Erythropoiesis', 'Clinical notes', 'Conclusion', 'Sickling Test', 'Hb H preparation', 'Biopsy No') %}
+              <div class="math-toolbar" style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:4px;">
+                {% for sym in ['≥', '≤', '>', '<', '±', '×', '÷', '=', '≈', '%', '°', 'µ', '↑', '↓', '→', '10⁹', '10¹²', '½'] %}
+                <button type="button" class="btn small secondary" style="padding:1px 8px; font-size:14px; min-width:30px;"
+                  onclick="lisInsertSymbol('{{ fid }}', '{{ sym }}')" title="إدراج الرمز عند موضع المؤشر">{{ sym }}</button>
+                {% endfor %}
+              </div>
+              {% endif %}
               {% if p['name'] == 'Conclusion' %}
               <div class="conclusion-toolbar" style="display:flex; gap:6px; margin-bottom:4px;">
                 <button type="button" class="btn small secondary" style="padding:2px 9px; font-size:14px; color:#D40000; font-weight:bold;"
@@ -660,13 +807,13 @@
               </div>
               {% endif %}
               <textarea id="{{ fid }}" name="ot{{ ot['id'] }}_param_{{ p['id'] }}" dir="ltr" style="text-align:left; width:100%;"
-                        rows="2" class="lis-autoresize" data-param-name="{{ p['name'] }}" spellcheck="true"
+                        rows="1" class="lis-autoresize" data-param-name="{{ p['name'] }}" spellcheck="true"
                         >{{ existing['value_text'] if existing else '' }}</textarea>
-              <label class="muted" style="display:flex; align-items:center; gap:4px; font-size:11px; margin-top:3px;">
+              <label class="muted lis-spell-row" style="display:flex; align-items:center; gap:4px; font-size:11px; margin-top:3px;">
                 <input type="checkbox" checked onchange="document.getElementById('{{ fid }}').spellcheck = this.checked;">
                 🔤 تدقيق إملائي (اختياري)
               </label>
-              <button type="button" class="btn small secondary" style="padding:2px 8px; font-size:11px; margin-top:2px;"
+              <button type="button" class="btn small secondary lis-cleanup-btn" style="padding:2px 8px; font-size:11px; margin-top:2px;"
                 onclick="lisCleanupText(document.getElementById('{{ fid }}'))"
                 title="يصحح فقط المسافات وحرف البداية وعلامة الترقيم — لا يترجم ولا يغيّر أي كلمة أو مصطلح طبي">✓ تدقيق الكتابة</button>
               {% if p['name'] in NORMAL_CLICHE_TEXT %}

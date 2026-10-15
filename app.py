@@ -344,6 +344,10 @@ REPORT_TEMPLATE_MAP = {
     "GUE": "reports/urine_exam.html",
     "GSE": "reports/stool_exam.html",
     "SFA": "reports/seminal_fluid.html",
+    "BMA": "reports/bma.html",
+    "BMBIOPSY": "reports/bm_biopsy.html",
+    "SICKLE": "reports/special_hematology.html",
+    "HBPREP": "reports/special_hematology.html",
 }
 
 # نفس القوائم Macroscopic/Microscopic المكتوبة داخل reports/urine_exam.html،
@@ -426,7 +430,7 @@ def _build_exam_sections(test_code, params, report_layout):
 # report (which already has the Reticulocyte/Corrected Retic fields built
 # in) instead of two separate pages. If Retic Count is ordered on its own
 # (no Blood Film for that visit), it prints its own small standalone report.
-BF_RETIC_LINK = {"BF": "RETIC", "RETIC": "BF"}
+BF_RETIC_LINK = {"BF": "RETIC", "RETIC": "BF", "SICKLE": "HBPREP", "HBPREP": "SICKLE"}   # أزواج تُطبع بتقرير واحد
 
 # Test codes whose printed report gets a blank stamp/signature space for the
 # examining doctor (Blood Film, Blood Film + Retic, standalone Retic, Fluid
@@ -648,6 +652,76 @@ def exam_range_display(range_row, unit=None):
 
 
 app.jinja_env.globals["exam_range_display"] = exam_range_display
+
+# ------------------------------------------------------------------------
+# تلوين النتيجة غير الطبيعية بالأحمر بتقارير الفحص (GUE/GSE/SFA). خيار قابل للتشغيل/الإيقاف من
+# الإدارة ← مصمم التقارير (الإعداد exam_abnormal_red، الافتراضي مفعّل). يقارن النتيجة بالمدى الطبيعي:
+#   - مدى رقمي (0-2 أو 1.005 - 1.030): خارج المدى = غير طبيعي.
+#   - مدى نصي (Negative / Nil / Yellow ...): أي قيمة مختلفة عنه = غير طبيعي، و"Negative/Nil/Absent/None"
+#     تُعدّ مترادفات. اللون اليدوي المضبوط لصف معيّن يبقى له الأسبقية دائمًا.
+# ------------------------------------------------------------------------
+_EXAM_NEG_WORDS = {"negative", "neg", "nil", "absent", "none", "not seen", "not detected", "nad", "-", "--", "normal"}
+_EXAM_ABN_RED = "#C0392B"
+
+
+def _exam_num(x):
+    try:
+        return float(str(x).strip().replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def exam_abnormal_color(result_value, range_row):
+    try:
+        if result_value in (None, "") or not range_row:
+            return ""
+        db = get_db()
+        if get_setting(db, "exam_abnormal_red", "1") != "1":
+            return ""
+        val = str(result_value).strip()
+        if not val:
+            return ""
+        vnorm = re.sub(r"\s+", " ", val.lower())
+        vnum = _exam_num(val)
+        low = range_row["low"] if "low" in range_row.keys() else None
+        high = range_row["high"] if "high" in range_row.keys() else None
+        rtext = ((range_row["range_text"] if "range_text" in range_row.keys() else "") or "").strip()
+        if vnum is not None and (low is not None or high is not None) and not rtext:
+            return _EXAM_ABN_RED if ((low is not None and vnum < low) or (high is not None and vnum > high)) else ""
+        if not rtext:
+            if vnum is not None and (low is not None or high is not None):
+                return _EXAM_ABN_RED if ((low is not None and vnum < low) or (high is not None and vnum > high)) else ""
+            return ""
+        lines = [ln.strip() for ln in re.split(r"[\n;]+", rtext) if ln.strip()]
+        # لو المدى متعدد الأسطر (مستويات): نترك التلوين للمستخدم (لا نعرف أي مستوى ينطبق)
+        if len(lines) > 1:
+            return ""
+        rt = lines[0]
+        m = re.match(r"^\s*(-?\d+(?:\.\d+)?)\s*(?:-|–|to)\s*(-?\d+(?:\.\d+)?)\s*[A-Za-z/%µ]*\s*$", rt)
+        if m:
+            a, b = float(m.group(1)), float(m.group(2))
+            if vnum is not None:
+                return _EXAM_ABN_RED if (vnum < min(a, b) or vnum > max(a, b)) else ""
+            return _EXAM_ABN_RED if "+" in val or vnorm in ("positive", "present") else ""
+        m = re.match(r"^\s*([<>]=?)\s*(-?\d+(?:\.\d+)?)", rt)
+        if m and vnum is not None:
+            lim = float(m.group(2))
+            ok = {"<": vnum < lim, "<=": vnum <= lim, ">": vnum > lim, ">=": vnum >= lim}[m.group(1)]
+            return "" if ok else _EXAM_ABN_RED
+        normals = {re.sub(r"\s+", " ", t.strip().lower()) for t in re.split(r"\s*(?:/|,|\bor\b|،)\s*", rt) if t.strip()}
+        if normals & _EXAM_NEG_WORDS:
+            normals |= _EXAM_NEG_WORDS
+        if vnorm in normals:
+            return ""
+        return _EXAM_ABN_RED
+    except Exception:
+        return ""
+
+
+app.jinja_env.globals["exam_abnormal_color"] = exam_abnormal_color
+app.jinja_env.globals["exam_abnormal_red_enabled"] = lambda: get_setting(get_db(), "exam_abnormal_red", "1") == "1"
+
+
 
 
 # ألوان تلوين رقم النتيجة تلقائيًا حسب flag (المطلوب 2) — المستخدم صراحة
@@ -983,6 +1057,21 @@ DEPARTMENT_PRIORITY_KEYWORDS = [
     ("coagul", "تخثر"),                               # 5) Coagulation
     ("hemat", "دم"),                                  # 6) Hematology / blood diseases
 ]
+
+
+def _dept_group(department):
+    """يصنّف قسم التحليل لمجموعة قسم الجهاز: chem (كيمياء/هرمونات/فيتامينات/فايروسات) | hema (أمراض الدم/التخثر)
+    | micro (أحياء مجهرية/سيرولوجي/طفيليات/Others: GUE وGSE وSFA وغيرها). يُستخدم لفلتر \"قسم هذا الجهاز\"."""
+    d = (department or "").lower()
+    if any(k in d for k in ("chem", "كيمياء", "hormone", "هرمون", "vitamin", "فيتامين", "viral", "virolog", "فايروس", "فيروس",
+                            "tumor", "marker", "lipid", "diabet")):
+        return "chem"
+    if any(k in d for k in ("hemat", "coagul", "blood", "دم", "تخثر")):
+        return "hema"
+    return "micro"
+
+
+app.jinja_env.globals["dept_group"] = _dept_group
 
 
 def department_priority_rank(department):
@@ -1534,8 +1623,9 @@ def enforce_interface_scope():
     path = request.path
     # صفحات مشتركة: سجل المريض + تقرير الطباعة مفتوحة لكل الواجهات (استقبال/
     # مختبر/الاثنين) حتى موظف المختبر يقدر يطبع ويتابع نتائج المريض.
-    if request.endpoint in ("patient_history", "print_visit_full_report"):
-        return
+    if request.endpoint in ("patient_history", "print_visit_full_report", "visit_results_entry", "print_combined_panel",
+                            "quick_entry", "api_quick_entry_search"):
+        return   # أي جهاز (حتى واجهة المختبر) يقدر يدخل النتائج من شاشة الزيارة/الإدخال السريع
     if interface == "reception" and path.startswith("/workbench"):
         flash("هذي الصفحة خاصة بواجهة المختبر فقط.")
         return redirect(url_for("dashboard"))
@@ -3393,11 +3483,119 @@ def results_list():
             ") "
         )
         filter_label = "زيارات فيها تنبيهات حرجة غير مُصادَق عليها"
-    query += "GROUP BY v.id ORDER BY v.id DESC LIMIT 200"
+    query += "GROUP BY v.id "
+    if not q and not filter_type:
+        # صفحة "إدخال النتائج": المريض المكتملة كل نتائجه ينتقل لصفحة "النتائج المكتملة".
+        # البحث (q) يبقى يشوف كل شي. ?all=1 يعرض الكل.
+        if request.args.get("all") != "1":
+            query += "HAVING SUM(CASE WHEN ot.status NOT IN ('Completed', 'Verified') THEN 1 ELSE 0 END) > 0 "
+    query += "ORDER BY v.id DESC LIMIT 200"
     q_params = [f"%{q}%", _scan_like(q), f"%{q}%"] if q else []
     rows = db.execute(query, q_params).fetchall()
     return render_template("front_desk/results.html", rows=rows, filter_type=filter_type,
                             filter_label=filter_label, q=q)
+
+
+
+# ------------------------------------------------------------------------
+# صفحة "النتائج المكتملة": مرضى عندهم نتائج مكتملة (اليوم افتراضيًا، أو بحث بالاسم/الرقم/الباركود على كل الأيام).
+# اسم المريض -> PDF مجمّع لكل تحاليله المكتملة، اسم التحليل -> PDF لهذا التحليل. المسار بلا بادئة (يفتح من كل الواجهات).
+# ------------------------------------------------------------------------
+@app.route("/completed-results")
+@login_required
+def completed_results():
+    db = get_db()
+    q = request.args.get("q", "").strip()
+    day = request.args.get("date", "").strip()
+    all_days = request.args.get("all") == "1"
+    if not day:
+        day = datetime.now().strftime("%Y-%m-%d")
+    where = ["ot.status IN ('Completed', 'Verified')"]
+    params = []
+    if q:
+        where.append("(p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR v.id IN ("
+                     "SELECT o2.visit_id FROM order_tests ot2 JOIN orders o2 ON o2.id = ot2.order_id WHERE ot2.barcode LIKE ?))")
+        params += [f"%{q}%", _scan_like(q), f"%{q}%"]
+    elif not all_days:
+        where.append("substr(v.created_at,1,10) = ?")
+        params.append(day)
+    rows = db.execute(
+        "SELECT v.id as visit_id, v.registration_number, v.created_at, p.full_name as patient_name, p.phone as phone, "
+        "MIN(COALESCE(ot.collected_at, v.created_at)) as drawn_at, "
+        "GROUP_CONCAT(ot.id || '\u0001' || COALESCE(NULLIF(td.code, ''), td.name) || '\u0001' || td.name, '\u0002') as tests_list, "
+        "(SELECT COUNT(*) FROM order_tests ot3 JOIN orders o3 ON o3.id = ot3.order_id WHERE o3.visit_id = v.id) as total_tests "
+        "FROM order_tests ot JOIN orders o ON o.id = ot.order_id JOIN visits v ON v.id = o.visit_id "
+        "JOIN patients p ON p.id = v.patient_id JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "WHERE " + " AND ".join(where) + " GROUP BY v.id ORDER BY v.id DESC LIMIT 200", params).fetchall()
+    visits = []
+    for r in rows:
+        tests = []
+        for part in (r["tests_list"] or "").split("\u0002"):
+            bits = part.split("\u0001")
+            if len(bits) == 3:
+                tests.append({"id": int(bits[0]), "code": bits[1], "name": bits[2]})
+        visits.append({"visit_id": r["visit_id"], "reg": r["registration_number"], "name": r["patient_name"],
+                       "phone": r["phone"], "drawn": (r["drawn_at"] or "")[:16].replace("T", " "),
+                       "tests": tests, "total": r["total_tests"]})
+    return render_template("front_desk/completed_results.html", visits=visits, q=q, day=day, all_days=all_days)
+
+
+def _restore_printed_at(db, snapshot):
+    """عرض PDF ما يُعتبر طباعة: نرجّع printed_at لقيمته السابقة (print_report يثبّتها أول فتحة)."""
+    try:
+        for ot_id, prev in snapshot.items():
+            db.execute("UPDATE order_tests SET printed_at=? WHERE id=?", (prev, ot_id))
+        db.commit()
+    except Exception:
+        pass
+
+
+def _serve_pdf_or_html(html_content, prefix):
+    """يحوّل HTML لـPDF ويعرضه بالمتصفح (inline). لو محرك الـPDF فشل نعرض التقرير نفسه (جاهز للطباعة) بدل خطأ."""
+    try:
+        import pdf_export
+        pdf_path = pdf_export.make_temp_pdf_path(_safe_pdf_name_part(prefix))
+        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+        if os.path.exists(pdf_path):
+            return send_file(pdf_path, mimetype="application/pdf", as_attachment=False,
+                             download_name=os.path.basename(pdf_path))
+    except Exception:
+        pass
+    return html_content
+
+
+@app.route("/reports/pdf/test/<int:order_test_id>")
+@login_required
+def report_pdf_test(order_test_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT ot.printed_at, p.full_name, td.name as test_name FROM order_tests ot "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id JOIN orders o ON o.id = ot.order_id "
+        "JOIN visits v ON v.id = o.visit_id JOIN patients p ON p.id = v.patient_id WHERE ot.id=?", (order_test_id,)).fetchone()
+    if not row:
+        return "Not found", 404
+    html_content = print_report(order_test_id)
+    _restore_printed_at(db, {order_test_id: row["printed_at"]})
+    if not isinstance(html_content, str):
+        return html_content
+    return _serve_pdf_or_html(html_content, f"{row['full_name']} - {row['test_name']}")
+
+
+@app.route("/reports/pdf/visit/<int:visit_id>")
+@login_required
+def report_pdf_visit(visit_id):
+    db = get_db()
+    vrow = db.execute("SELECT p.full_name FROM visits v JOIN patients p ON p.id = v.patient_id WHERE v.id=?", (visit_id,)).fetchone()
+    if not vrow:
+        return "Not found", 404
+    snap = {r["id"]: r["printed_at"] for r in db.execute(
+        "SELECT ot.id, ot.printed_at FROM order_tests ot JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?", (visit_id,))}
+    html_content = _build_combined_designed_reports_html(visit_id)
+    _restore_printed_at(db, snap)
+    if not html_content:
+        return ("<div dir='rtl' style='padding:40px;text-align:center;font-family:Tahoma,Arial,sans-serif;color:#64748B;'>"
+                "لا توجد نتائج مكتملة لهذا المريض بعد.</div>")
+    return _serve_pdf_or_html(html_content, f"{vrow['full_name']} - كل النتائج")
 
 
 @app.route("/search")
@@ -4326,7 +4524,7 @@ LABEL_FIELDS_BY_KIND = {
 }
 _DEFAULT_LABEL_LAYOUTS = {
     "tube": {
-        "w": 0, "h": 0, "roll": False, "tmode": "full",
+        "w": 0, "h": 0, "roll": False, "tmode": "full", "d": 0,
         "lines": [{"f": "lab_name"}, {"f": "patient_name"}, {"f": "datetime"},
                   {"f": "sample_type"}, {"f": "tests", "w": 1}],
     },
@@ -4359,6 +4557,15 @@ def _sanitize_label_layout(kind, raw):
     if kind == "request":
         d["w"] = d["w"] or 60
         d["h"] = d["h"] or 40
+    if kind == "tube":
+        # قطر الأنبوب (مم): عرض الملصق ≤ المحيط − 6 مم حتى ما تتقابل حافتا الملصق حول الأنبوب.
+        # 13 مم → 34 مم | 16 مم → 44 مم. العرض يُقصّ تلقائيًا هنا حتى لو الواجهة تجاوزته.
+        d["d"] = _lnum(raw.get("d"), 0, 40, 0) or 0
+        if d["d"]:
+            import math as _math
+            _maxw = round(_math.pi * d["d"] - 6, 1)
+            if not d["w"] or d["w"] > _maxw:
+                d["w"] = _maxw
     d["roll"] = bool(raw.get("roll", d["roll"]))
     d["tmode"] = raw.get("tmode") if raw.get("tmode") in ("full", "short", "none") else d["tmode"]
     allowed = LABEL_FIELDS_BY_KIND[kind]
@@ -5072,6 +5279,61 @@ def print_visit_results_bundle(visit_id):
 # النتائج المكتملة" (print_visit_results_bundle فوق) بالضبط، حتى يطابق
 # ملف الـPDF المُرسَل/المؤرشف شكل وترتيب نفس التقارير المعروضة هناك.
 # يرجّع None لو ما فيه أي تحليل مكتمل بعد (أو تعذّر توليد أي تقرير منها).
+def _render_report_for_merge(otid):
+    """يرجّع ("ok", html) أو ("error", traceback) أو ("skip", None) لتقرير تحليل واحد، ليُدمج بصفحة
+    مدمجة. الأخطاء كانت تُتجاهل بصمت فيظهر "لا توجد نتائج" — صارت تظهر للمستخدم ومسجلة بـ error_log.txt."""
+    try:
+        r = _print_report_impl(otid)
+    except Exception:
+        import traceback
+        tb = traceback.format_exc()
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "error_log.txt"), "a", encoding="utf-8") as f:
+                f.write("\n" + "=" * 80 + "\n" + datetime.now().isoformat(timespec="seconds")
+                        + f"  (merged print) order_test_id={otid}\n" + tb)
+        except Exception:
+            pass
+        return ("error", tb)
+    if isinstance(r, tuple):
+        r = r[0]
+    if hasattr(r, "get_data"):
+        if getattr(r, "status_code", 200) != 200:
+            return ("skip", None)
+        r = r.get_data(as_text=True)
+    if not isinstance(r, str):
+        return ("skip", None)
+    return ("ok", r)
+
+
+def _collect_report_bodies(order_test_ids):
+    """يجمع <head> واحد + أقسام <body> لتقارير التحاليل المعطاة (بنفس ترتيبها) لدمجها بصفحة وحدة."""
+    db = get_db()
+    head_html = None
+    body_sections = []
+    for otid in order_test_ids:
+        kind, val = _render_report_for_merge(otid)
+        if kind == "skip":
+            continue
+        page_break = "" if not body_sections else ' style="page-break-before:always;"'
+        if kind == "error":
+            nm = db.execute("SELECT td.name n FROM order_tests ot JOIN test_definitions td ON td.id=ot.test_definition_id "
+                            "WHERE ot.id=?", (otid,)).fetchone()
+            body_sections.append(
+                f'<div{page_break}><div dir="rtl" style="border:2px solid #C0392B;background:#FDECEA;padding:14px;margin:14px;'
+                f'font-family:Tahoma,Arial;">❌ تعذّر طباعة تقرير <b>{escape(nm["n"] if nm else str(otid))}</b> — '
+                f'صوّر هذا النص وأرسله:<pre style="direction:ltr;text-align:left;white-space:pre-wrap;font-size:11px;">'
+                f'{escape(val)}</pre></div></div>')
+            continue
+        head_match = re.search(r"<head\b[^>]*>(.*?)</head>", val, re.S)
+        body_match = re.search(r"<body\b[^>]*>(.*?)</body>", val, re.S)
+        if not body_match:
+            continue
+        if head_html is None and head_match:
+            head_html = head_match.group(1)
+        body_sections.append(f"<div{page_break}>{body_match.group(1)}</div>")
+    return head_html, body_sections
+
+
 def _build_combined_designed_reports_html(visit_id):
     db = get_db()
     order_tests = db.execute(
@@ -5108,24 +5370,7 @@ def _build_combined_designed_reports_html(visit_id):
         seen_codes.add(code)
         order_test_ids.append(ot["id"])
 
-    head_html = None
-    body_sections = []
-    for otid in order_test_ids:
-        try:
-            report_html = print_report(otid)
-        except Exception:
-            continue
-        if not isinstance(report_html, str):
-            continue  # print_report رجّع redirect (لا يوجد تصميم لهذا التحليل) — نتجاهله بصمت ونكمل الباقي
-        head_match = re.search(r"<head\b[^>]*>(.*?)</head>", report_html, re.S)
-        body_match = re.search(r"<body\b[^>]*>(.*?)</body>", report_html, re.S)
-        if not body_match:
-            continue
-        if head_html is None and head_match:
-            head_html = head_match.group(1)
-        page_break = "" if not body_sections else ' style="page-break-before:always;"'
-        body_sections.append(f"<div{page_break}>{body_match.group(1)}</div>")
-
+    head_html, body_sections = _collect_report_bodies(order_test_ids)
     if not body_sections:
         return None
     return (
@@ -6189,6 +6434,56 @@ def get_ordered_parameters(db, ot):
     return filtered or all_params
 
 
+
+# ------------------------------------------------------------------------
+# الإدخال السريع: اكتب اسم المريض أو رقم/باركود الريكويست ← يطلع مرضى اليوم ← اختر المريض ← اختر التحليل
+# ← تظهر حقوله (نفس شاشة إدخال النتائج ?only=) ← حفظ / حفظ وطباعة. يعرض فقط التحاليل غير المكتملة
+# (المكتمل ينتقل للاستقبال وصفحة النتائج المكتملة ويظهر هناك بالبحث). المسار بلا بادئة حتى يفتح من أي جهاز/واجهة.
+# ------------------------------------------------------------------------
+@app.route("/quick-entry")
+@login_required
+def quick_entry():
+    return render_template("front_desk/quick_entry.html")
+
+
+@app.route("/api/quick-entry/search")
+@login_required
+def api_quick_entry_search():
+    db = get_db()
+    q = (request.args.get("q") or "").strip()
+    all_days = request.args.get("all") == "1"
+    where = ["ot.status NOT IN ('Completed', 'Verified')", "COALESCE(ot.sent_to_reception, 0) = 0"]
+    params = []
+    if q:
+        where.append("(p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR ot.barcode LIKE ? "
+                     "OR v.id IN (SELECT o2.visit_id FROM order_tests ot2 JOIN orders o2 ON o2.id = ot2.order_id "
+                     "WHERE ot2.barcode LIKE ?))")
+        params += [f"%{q}%", _scan_like(q), f"%{q}%", f"%{q}%"]
+    if not all_days and not (q and q.isdigit() and len(q) >= 4):
+        where.append("substr(v.created_at,1,10) = ?")
+        params.append(datetime.now().strftime("%Y-%m-%d"))
+    rows = db.execute(
+        "SELECT v.id as visit_id, v.registration_number, v.created_at, p.full_name as patient_name, p.gender, p.age, p.age_unit, "
+        "ot.id as ot_id, ot.status, td.name as test_name, td.department "
+        "FROM order_tests ot JOIN orders o ON o.id = ot.order_id JOIN visits v ON v.id = o.visit_id "
+        "JOIN patients p ON p.id = v.patient_id JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "WHERE " + " AND ".join(where) + " ORDER BY v.id DESC, ot.id LIMIT 600", params).fetchall()
+    visits, order = {}, []
+    for r in rows:
+        v = visits.get(r["visit_id"])
+        if v is None:
+            if len(order) >= 40:
+                continue
+            v = visits[r["visit_id"]] = {
+                "visit_id": r["visit_id"], "reg": r["registration_number"], "name": r["patient_name"],
+                "meta": " · ".join(x for x in [r["gender"] or "", f"{r['age']} {r['age_unit'] or ''}".strip() if r["age"] else ""] if x),
+                "time": (r["created_at"] or "")[11:16], "tests": [],
+            }
+            order.append(r["visit_id"])
+        v["tests"].append({"id": r["ot_id"], "name": r["test_name"], "group": _dept_group(r["department"]), "status": r["status"]})
+    return jsonify({"visits": [visits[i] for i in order]})
+
+
 @app.route("/front-desk/visits/<int:visit_id>/results", methods=["GET", "POST"])
 @login_required
 def visit_results_entry(visit_id):
@@ -6242,6 +6537,12 @@ def visit_results_entry(visit_id):
         )
 
     if request.method == "POST":
+        # حماية من التداخل بين الأجهزة: الحفظ يخص فقط التحاليل المعروضة بهذي الشاشة (shown_ot_ids)،
+        # فجهاز ثاني يدخل نتائج تحليل آخر بنفس الزيارة ما يتأثر ولا يُستبدل بقيم قديمة.
+        _shown_raw = (request.form.get("shown_ot_ids") or "").strip()
+        if _shown_raw:
+            _shown_ids = {int(x) for x in _shown_raw.split(",") if x.strip().isdigit()}
+            order_tests = [_o for _o in order_tests if _o["id"] in _shown_ids]
         # نفس حماية النتيجة المكتملة (المطلوب 2)، لكن هنا مرة وحدة لكل
         # الطلب بدل كل تحليل لحاله -- إذا أي تحليل بهذي الزيارة مكتمل أصلاً،
         # نطلب كلمة المرور مرة وحدة قبل ما نحفظ أي شي من الدفعة كاملة
@@ -6306,6 +6607,16 @@ def visit_results_entry(visit_id):
             return jsonify({"ok": True, "saved": any_saved, "completed": _done_cnt})
         return redirect(url_for("visit_results_entry", visit_id=visit_id))
 
+    # ?only=12,15 : عرض تحاليل محددة فقط (يجي من \"الإدخال السريع\") مع رابط لعرض كل تحاليل الزيارة.
+    _only_raw = (request.args.get("only") or "").strip()
+    only_mode, only_hidden = False, 0
+    if _only_raw:
+        _only_ids = {int(x) for x in _only_raw.split(",") if x.strip().isdigit()}
+        _kept = [_o for _o in order_tests if _o["id"] in _only_ids]
+        if _kept:
+            only_mode, only_hidden = True, len(order_tests) - len(_kept)
+            order_tests = _kept
+
     boxes = []
     for ot in order_tests:
         parameters = get_ordered_parameters(db, ot)
@@ -6346,7 +6657,8 @@ def visit_results_entry(visit_id):
                             # زر "إرسال عبر واتساب" لكل نتائج الزيارة دفعة وحدة بجانب
                             # زر إدخال النتائج (راجع partials/whatsapp_send_button.html).
                             all_completed=all(ot["status"] in ("Completed", "Verified") for ot in order_tests),
-                            balance=_visit_balance(db, visit_id))
+                            balance=_visit_balance(db, visit_id),
+                            only_mode=only_mode, only_hidden=only_hidden)
 
 
 # ------------------------------------------------------------------------
@@ -6645,9 +6957,7 @@ def _form_text_style(prefix):
     return sanitize_text_style({k: request.form.get(f"{prefix}_{k}") for k in ("color", "font", "size", "case", "bold", "italic")})
 
 
-@app.route("/front-desk/visits/<int:visit_id>/print/combined-panel")
-@login_required
-def print_combined_panel(visit_id):
+def _print_combined_panel_core(visit_id):
     db = get_db()
     visit = db.execute(
         "SELECT v.*, p.full_name as patient_name, p.age, p.age_unit, p.gender, "
@@ -6849,6 +7159,67 @@ def print_combined_panel(visit_id):
     )
 
 
+@app.route("/front-desk/visits/<int:visit_id>/print/combined-panel")
+@login_required
+def print_combined_panel(visit_id):
+    """اللوحة المجمّعة (كيمياء/هرمونات/...) + تقارير التحاليل ذات القالب المستقل (GUE/GSE/SFA وتقارير
+    أمراض الدم...) بصفحة وحدة بعدها — بدل ما تُهمَل هذي التقارير وتطلع الصفحة فاضية."""
+    db = get_db()
+    cfg = get_result_layout(db)
+    kws = merged_exclude_keywords(cfg)
+    rows = db.execute(
+        "SELECT ot.id, td.code AS code, td.name AS name, td.department AS dept "
+        "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=? AND ot.status IN ('Completed','Verified') ORDER BY ot.id",
+        (visit_id,),
+    ).fetchall()
+    panel_ids, extra_ids = [], []
+    for r in rows:
+        code = r["code"] or ""
+        hay = (code + " " + (r["name"] or "")).lower()
+        if (code in REPORT_TEMPLATE_MAP and code != "COAG") or any(k in hay for k in kws):
+            extra_ids.append(r)
+        else:
+            panel_ids.append(r)
+    if not extra_ids:
+        return _print_combined_panel_core(visit_id)
+    extra_ids.sort(key=lambda r: (department_priority_rank(r["dept"]), r["id"]))
+    extra_ids = [r["id"] for r in extra_ids if not (r["code"] in BF_RETIC_LINK and BF_RETIC_LINK[r["code"]] in {x["code"] for x in rows})]
+    from werkzeug.datastructures import MultiDict
+    orig_args = request.args
+    want_auto = orig_args.get("auto") == "1"
+    try:
+        request.args = MultiDict([(k, v) for k, v in orig_args.items(multi=True) if k != "auto"])
+    except Exception:
+        pass
+    try:
+        panel_html = _print_combined_panel_core(visit_id) if panel_ids else None
+        head_html, bodies = _collect_report_bodies(extra_ids)
+    finally:
+        try:
+            request.args = orig_args
+        except Exception:
+            pass
+    sections = []
+    if isinstance(panel_html, str):
+        hm = re.search(r"<head\b[^>]*>(.*?)</head>", panel_html, re.S)
+        bm = re.search(r"<body\b[^>]*>(.*?)</body>", panel_html, re.S)
+        if bm:
+            sections.append(f"<div>{bm.group(1)}</div>")
+            head_html = (hm.group(1) if hm else "") or head_html
+    for b in bodies:
+        sections.append(b if sections else b.replace(' style="page-break-before:always;"', "", 1))
+    if not sections:
+        return _print_combined_panel_core(visit_id)
+    html_out = ('<!DOCTYPE html><html lang="ar" dir="rtl"><head>' + (head_html or "") + "</head><body>"
+                + "".join(s_ if i == 0 else s_.replace("<div>", '<div style="page-break-before:always;">', 1)
+                          if s_.startswith("<div>") else s_ for i, s_ in enumerate(sections)) + "</body></html>")
+    if want_auto:
+        html_out = html_out.replace("</body>", "<script>window.addEventListener('load',function(){setTimeout(function(){"
+                                    "window.print();},700);});</script></body>", 1)
+    return html_out
+
+
 @app.route("/reports/print/<int:order_test_id>")
 @login_required
 def print_report(order_test_id):
@@ -7001,7 +7372,8 @@ def _print_report_impl(order_test_id):
             (ot["order_id"], sibling_code),
         ).fetchone()
         if sibling_ot:
-            template_name = REPORT_TEMPLATE_MAP["BF"]
+            template_name = (REPORT_TEMPLATE_MAP[ot["test_code"]] if ot["test_code"] in ("SICKLE", "HBPREP")
+                             else REPORT_TEMPLATE_MAP["BF"])
 
     custom_template = None
     auto_template = False
@@ -9798,6 +10170,8 @@ def report_designs():
             v = request.form.get(fam, "")
             if v in ("1", "2", "3", "4") or (fam == "coag" and v == "table"):
                 set_setting(db, f"report_design_{fam}", v)
+        if "exam_abnormal_present" in request.form:
+            set_setting(db, "exam_abnormal_red", "1" if request.form.get("exam_abnormal_red") else "0")
         db.commit()
         flash("تم حفظ التصاميم المختارة.")
     return redirect(url_for("report_designer") + "#designs")

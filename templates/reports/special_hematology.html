@@ -1,0 +1,23 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+{# Special Hematological Tests: جدول Test / Result — يظهر صف Sickling و/أو Hb H حسب الموجود بالزيارة. #}
+<div class="report-heading" style="font-style:italic; text-decoration:underline;">Special Hematological Tests</div>
+<table style="width:100%; direction:ltr; border-collapse:collapse; margin-top:8px; font-size:17px;">
+  <tr>
+    <th style="border:1px solid #000; padding:8px 10px; text-align:left; width:50%; font-style:italic; text-decoration:underline;">Test</th>
+    <th style="border:1px solid #000; padding:8px 10px; text-align:center; font-style:italic; text-decoration:underline;">Result</th>
+  </tr>
+  {% if 'Sickling Test' in params %}
+  <tr>
+    <td style="border:1px solid #000; padding:8px 10px; font-weight:bold; font-style:italic;">Sickling Test:</td>
+    <td style="border:1px solid #000; padding:8px 10px; white-space:pre-wrap;">{{ params.get('Sickling Test', '') }}</td>
+  </tr>
+  {% endif %}
+  {% if 'Hb H preparation' in params %}
+  <tr>
+    <td style="border:1px solid #000; padding:8px 10px; font-weight:bold; font-style:italic;">Hb H preparation :</td>
+    <td style="border:1px solid #000; padding:8px 10px; white-space:pre-wrap;">{{ params.get('Hb H preparation', '') }}</td>
+  </tr>
+  {% endif %}
+</table>
+{% endblock %}

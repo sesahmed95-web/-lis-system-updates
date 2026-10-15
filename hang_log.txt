@@ -1,0 +1,2 @@
+[2026-10-14T11:34:43] SLOW 2.1s GET /management/report-designer/preview/6?design=2 (preview_report_design)
+[2026-10-14T11:34:43] SLOW 2.1s GET /management/report-designer/preview/6?design=table (preview_report_design)

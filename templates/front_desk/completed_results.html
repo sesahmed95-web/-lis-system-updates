@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block page_title %}✅ النتائج المكتملة{% endblock %}
+{% block content %}
+<style>
+  .ce-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .ce-tabs a { padding: 7px 14px; border: 1px solid #CBD5E1; border-radius: 8px; text-decoration: none; color: #334155; background: #fff; font-size: 14px; }
+  .ce-tabs a.on { background: #205072; color: #fff; border-color: #205072; }
+  .ce-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .ce-bar input[type=text] { flex: 1; min-width: 260px; padding: 9px 12px; font-size: 15px; }
+  .ce-chips { display: flex; flex-wrap: wrap; gap: 5px; max-width: 520px; }
+  .ce-chip { display: inline-flex; align-items: center; gap: 3px; border: 1px solid #94A3B8; border-radius: 999px; padding: 1px 4px 1px 8px; font-size: 12.5px; background: #F8FAFC; }
+  .ce-chip a { color: #1E3A8A; text-decoration: none; font-weight: 600; }
+  .ce-chip a:hover { text-decoration: underline; }
+  .ce-chip button { border: 0; background: transparent; cursor: pointer; padding: 1px 3px; font-size: 12px; }
+  .ce-name a { font-weight: 700; color: #0F172A; text-decoration: none; }
+  .ce-name a:hover { color: #1D4ED8; text-decoration: underline; }
+  .ce-acts { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
+  .ce-toast { position: fixed; bottom: 16px; inset-inline: 16px; z-index: 10000; background: #14213D; color: #fff; padding: 10px 14px; border-radius: 8px; text-align: center; display: none; }
+  .ce-toast.err { background: #B91C1C; }
+</style>
+<div class="ce-tabs">
+  <a href="{{ url_for('quick_entry') }}">⚡ الإدخال السريع</a>
+  <a href="{{ url_for('orders_list') if session.get('interface') == 'lab' else url_for('results_list') }}">📝 إدخال النتائج</a>
+  <a href="{{ url_for('completed_results') }}" class="on">✅ النتائج المكتملة</a>
+</div>
+<div class="card">
+  <form method="get" class="ce-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="بحث بالاسم / رقم التسجيل / الباركود (يبحث بكل الأيام)" autofocus>
+    <label style="display:inline-flex; align-items:center; gap:6px;">التاريخ: <input type="date" name="date" value="{{ day }}"></label>
+    <label style="display:inline-flex; align-items:center; gap:4px;"><input type="checkbox" name="all" value="1" {{ 'checked' if all_days }}> كل الأيام</label>
+    <button class="btn small" type="submit">بحث</button>
+    <label style="display:inline-flex; align-items:center; gap:4px; margin-inline-start:auto;"><input type="checkbox" id="ceFull"> أسماء التحاليل كاملة</label>
+  </form>
+  <p class="muted" style="margin:0 0 10px; font-size:13px;">اضغط <b>اسم المريض</b> لفتح كل تحاليله المكتملة بملف PDF واحد (جاهز للطباعة أو الإرسال)، أو اضغط <b>اسم التحليل</b> لفتح PDF لهذا التحليل فقط. 🖨 = طباعة مباشرة، 📱 = إرسال واتساب.</p>
+  <table style="width:100%;">
+    <thead><tr><th>المريض</th><th>رقم التسجيل</th><th>تاريخ السحب</th><th>التحاليل المكتملة</th><th>إجراءات</th></tr></thead>
+    <tbody>
+    {% for v in visits %}
+      <tr>
+        <td class="ce-name"><a href="{{ url_for('report_pdf_visit', visit_id=v.visit_id) }}" target="_blank" title="كل نتائج المريض المكتملة بملف PDF واحد">{{ v.name }}</a></td>
+        <td class="mono">{{ v.reg }}</td>
+        <td class="muted">{{ v.drawn }}</td>
+        <td>
+          <div class="ce-chips">
+            {% for t in v.tests %}
+            <span class="ce-chip">
+              <a href="{{ url_for('report_pdf_test', order_test_id=t.id) }}" target="_blank" class="ce-tn" data-short="{{ t.code }}" data-full="{{ t.name }}" title="{{ t.name }}">{{ t.code }}</a>
+              <button type="button" title="طباعة هذا التحليل" onclick="ceOpen('/reports/print/{{ t.id }}?auto=1')">🖨</button>
+              {% if v.phone %}<button type="button" title="إرسال هذا التحليل واتساب" onclick="ceSendOne({{ t.id }}, this)">📱</button>{% endif %}
+            </span>
+            {% endfor %}
+          </div>
+          {% if v.total > v.tests|length %}<div class="muted" style="font-size:12px; margin-top:3px;">{{ v.tests|length }} من {{ v.total }} مكتمل — الباقي لسا قيد الإدخال</div>{% endif %}
+        </td>
+        <td>
+          <div class="ce-acts">
+            <button type="button" class="btn small secondary" onclick="ceOpen('{{ url_for('print_combined_panel', visit_id=v.visit_id) }}?auto=1')">🧾 طباعة اللوحة المجمّعة</button>
+            <button type="button" class="btn small secondary" onclick="ceOpen('{{ url_for('print_visit_full_report', visit_id=v.visit_id) }}?autoprint=1')">🖨 طباعة كل النتائج</button>
+            {% if v.phone %}<button type="button" class="btn small" onclick="ceSendVisit({{ v.visit_id }}, 'combined', this)">📱 إرسال الكل (ملف واحد)</button>
+            <button type="button" class="btn small secondary" onclick="ceSendVisit({{ v.visit_id }}, 'separate', this)">📱 إرسال (ملفات منفصلة)</button>
+            {% else %}<span class="muted" style="font-size:12px;">لا يوجد رقم واتساب</span>{% endif %}
+          </div>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted" style="text-align:center; padding:30px;">لا توجد نتائج مكتملة {{ 'مطابقة للبحث' if q else ('بهذا اليوم' if not all_days else '') }}.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div id="ceToast" class="ce-toast"></div>
+<script>
+  function ceOpen(url) { var w = null; try { w = window.open(url + (url.indexOf('?') >= 0 ? '&' : '?') + '_ts=' + Date.now(), '_blank'); } catch (e) {} if (!w) location.href = url; }
+  function ceToast(msg, err) { var el = document.getElementById('ceToast'); el.textContent = msg; el.className = 'ce-toast' + (err ? ' err' : ''); el.style.display = 'block'; clearTimeout(window._ceT); window._ceT = setTimeout(function () { el.style.display = 'none'; }, 6000); }
+  function cePost(url, body, btn) {
+    var old = btn.textContent; btn.disabled = true; btn.textContent = '⏳';
+    fetch(url, { method: 'POST', body: body }).then(function (r) { return r.json(); })
+      .then(function (d) { ceToast(d.message, !d.ok); })
+      .catch(function () { ceToast('تعذّر الاتصال بالسيرفر — حاول مرة ثانية.', true); })
+      .finally(function () { btn.disabled = false; btn.textContent = old; });
+  }
+  function ceSendOne(id, btn) { cePost('/whatsapp/api/send-result/' + id, null, btn); }
+  function ceSendVisit(vid, mode, btn) { var f = new FormData(); f.append('mode', mode); cePost('/whatsapp/api/send-visit/' + vid, f, btn); }
+  var full = document.getElementById('ceFull');
+  try { full.checked = localStorage.getItem('lisCeFull') === '1'; } catch (e) {}
+  function ceNames() { document.querySelectorAll('.ce-tn').forEach(function (a) { a.textContent = full.checked ? a.dataset.full : a.dataset.short; }); }
+  full.addEventListener('change', function () { try { localStorage.setItem('lisCeFull', full.checked ? '1' : '0'); } catch (e) {} ceNames(); });
+  ceNames();
+</script>
+{% endblock %}

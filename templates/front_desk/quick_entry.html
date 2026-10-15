@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block page_title %}⚡ الإدخال السريع للنتائج{% endblock %}
+{% block content %}
+<style>
+  .qe-wrap { max-width: 1100px; margin: 0 auto; }
+  .qe-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .qe-bar input[type=text] { flex: 1; min-width: 260px; font-size: 17px; padding: 10px 14px; }
+  .qe-bar select { min-width: 200px; padding: 9px; }
+  .qe-note { font-size: 13px; color: #64748B; margin-bottom: 10px; }
+  .qe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+  .qe-card { border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px 12px; background: #fff; }
+  .qe-card h4 { margin: 0 0 2px; font-size: 15px; }
+  .qe-meta { font-size: 12.5px; color: #64748B; margin-bottom: 8px; }
+  .qe-tests { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .qe-chip { border: 1px solid #26529C; color: #26529C; background: #fff; border-radius: 999px; padding: 3px 10px; font-size: 12.5px; cursor: pointer; text-decoration: none; }
+  .qe-chip:hover { background: #26529C; color: #fff; }
+  .qe-chip.dim { opacity: .55; border-style: dashed; }
+  .qe-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .qe-empty { padding: 30px; text-align: center; color: #64748B; }
+  .qe-hidden-note { font-size: 12px; color: #92400E; margin-top: 6px; }
+</style>
+<div class="qe-wrap" dir="rtl">
+  <div class="card">
+    <h3 style="margin-top:0;">⚡ الإدخال السريع</h3>
+    <div class="qe-bar">
+      <input type="text" id="qeQ" placeholder="اكتب اسم المريض أو رقم التسجيل / الباركود الملصوق على الريكويست ثم Enter" autofocus autocomplete="off">
+      <label style="display:inline-flex; align-items:center; gap:6px;">قسم هذا الجهاز:
+        <select id="qeDept">
+          <option value="all">كل الأقسام</option>
+          <option value="hema">أمراض الدم (Hematology + التخثر)</option>
+          <option value="micro">الأحياء المجهرية / Others</option>
+          <option value="hema_micro">أمراض الدم + الأحياء المجهرية</option>
+          <option value="chem">الكيمياء والهرمونات</option>
+        </select>
+      </label>
+      <label style="display:inline-flex; align-items:center; gap:4px;"><input type="checkbox" id="qeAll"> كل الأيام</label>
+    </div>
+    <div class="qe-note">يُعرض فقط المرضى الذين عندهم تحاليل <b>لم تكتمل نتيجتها</b> (اليوم افتراضيًا). المريض المكتملة نتيجته ينتقل لصفحة النتائج المكتملة (ابحث عنه هناك للطباعة). التحاليل تظهر حسب ما سجّله الاستقبال؛ إذا ناقص تحليل يضيفه الاستقبال من «تعديل معلومات المريض».</div>
+    <div id="qeOut" class="qe-grid"></div>
+    <div id="qeEmpty" class="qe-empty" style="display:none;">لا يوجد مرضى بنتائج غير مكتملة مطابقين.</div>
+  </div>
+</div>
+<script>
+(function () {
+  var KEY = 'lisDeviceDept';
+  var $q = document.getElementById('qeQ'), $d = document.getElementById('qeDept'), $a = document.getElementById('qeAll');
+  var $out = document.getElementById('qeOut'), $empty = document.getElementById('qeEmpty');
+  var data = [], timer = null, forceAll = false;
+  try { $d.value = localStorage.getItem(KEY) || 'all'; } catch (e) {}
+  function allowed(g) { var m = $d.value; if (m === 'all') return true; if (m === 'hema_micro') return g === 'hema' || g === 'micro'; return g === m; }
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
+  var BASE = "{{ url_for('visit_results_entry', visit_id=0) }}".replace(/0\/results$/, '');
+  function entryUrl(vid, ids) { return BASE + vid + '/results' + (ids && ids.length ? '?only=' + ids.join(',') : ''); }
+  function render() {
+    var html = '';
+    data.forEach(function (v) {
+      var mine = v.tests.filter(function (t) { return allowed(t.group); });
+      var other = v.tests.length - mine.length;
+      if (!mine.length && !forceAll) { if (!v.tests.length) return; }
+      var shown = mine.length ? mine : v.tests;
+      html += '<div class="qe-card"><h4>' + esc(v.name) + ' <span class="muted mono">#' + esc(v.reg) + '</span></h4>' +
+        '<div class="qe-meta">' + esc(v.meta) + (v.time ? ' · ' + esc(v.time) : '') + '</div><div class="qe-tests">' +
+        shown.map(function (t) { return '<a class="qe-chip' + (mine.length ? '' : ' dim') + '" href="' + entryUrl(v.visit_id, [t.id]) + '" title="فتح حقول هذا التحليل">' + esc(t.name) + '</a>'; }).join('') +
+        '</div><div class="qe-actions">' +
+        '<a class="btn small" href="' + entryUrl(v.visit_id, shown.map(function (t) { return t.id; })) + '">فتح ' + (mine.length ? 'كل تحاليل قسمي' : 'التحاليل') + ' (' + shown.length + ')</a>' +
+        '<a class="btn small secondary" href="' + entryUrl(v.visit_id) + '">كل تحاليل الزيارة</a></div>' +
+        (mine.length && other ? '<div class="qe-hidden-note">+ ' + other + ' تحليل من أقسام أخرى مخفي</div>' : (!mine.length ? '<div class="qe-hidden-note">لا يوجد تحليل لقسم هذا الجهاز عند هذا المريض — معروضة كل تحاليله.</div>' : '')) +
+        '</div>';
+    });
+    $out.innerHTML = html; $empty.style.display = html ? 'none' : 'block';
+  }
+  function load() {
+    fetch('/api/quick-entry/search?q=' + encodeURIComponent($q.value.trim()) + ($a.checked ? '&all=1' : ''), { headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) { return r.json(); }).then(function (d) { data = d.visits || []; render(); })
+      .catch(function () { $out.innerHTML = ''; $empty.textContent = 'تعذّر الاتصال بالسيرفر'; $empty.style.display = 'block'; });
+  }
+  $q.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(load, 250); });
+  $q.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault(); clearTimeout(timer);
+    fetch('/api/quick-entry/search?q=' + encodeURIComponent($q.value.trim()) + ($a.checked ? '&all=1' : ''))
+      .then(function (r) { return r.json(); }).then(function (d) {
+        data = d.visits || []; render();
+        if (data.length === 1) {           // باركود واحد = نفتح مباشرة تحاليل قسم الجهاز
+          var v = data[0], mine = v.tests.filter(function (t) { return allowed(t.group); }), pick = mine.length ? mine : v.tests;
+          location.href = entryUrl(v.visit_id, pick.map(function (t) { return t.id; }));
+        }
+      });
+  });
+  $d.addEventListener('change', function () { try { localStorage.setItem(KEY, $d.value); } catch (e) {} render(); });
+  $a.addEventListener('change', load);
+  load();
+})();
+</script>
+{% endblock %}

@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block page_title %}{{ t('results') }}{% endblock %}
 {% block content %}
+<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+  <a class="btn small secondary" href="{{ url_for('quick_entry') }}" title="اكتب اسم المريض أو باركود الريكويست ← اختر المريض ← اختر التحليل ← أدخل النتائج">⚡ الإدخال السريع</a>
+  <a class="btn small" href="{{ url_for('results_list') }}">📝 إدخال النتائج</a>
+  <a class="btn small secondary" href="{{ url_for('completed_results') }}">✅ النتائج المكتملة</a>
+  <span class="muted" style="font-size:12.5px; align-self:center;">المريض المكتملة كل نتائجه ينتقل لصفحة «النتائج المكتملة» — البحث يبقى يظهر أي نتيجة.</span>
+</div>
 <div class="card">
   <table>
     <thead><tr>

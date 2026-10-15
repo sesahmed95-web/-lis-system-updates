@@ -80,6 +80,15 @@ var LD = (function () {
       '<label>أسماء التحاليل: <select id="ldTmode">' +
         [['full', 'الاسم الكامل'], ['short', 'مختصر'], ['none', 'بدون']].map(function (m) { return '<option value="' + m[0] + '"' + (layout.tmode === m[0] ? ' selected' : '') + '>' + m[1] + '</option>'; }).join('') +
       '</select></label></div>';
+    if (kind === 'tube') {
+      var presets = [[0, 'بدون (أدخل العرض يدويًا)'], [13, 'EDTA / Gel — قطر 13 مم'], [16, 'Gel — قطر 16 مم'], [-1, 'قطر آخر...']];
+      var dv = layout.d || 0, isPre = presets.some(function (p) { return p[0] === dv; });
+      h += '<div class="ld-inline"><label>قطر الأنبوب: <select id="ldDsel">' + presets.map(function (p) {
+        var sel = (isPre ? p[0] === dv : p[0] === -1) ? ' selected' : '';
+        return '<option value="' + p[0] + '"' + sel + '>' + p[1] + '</option>'; }).join('') + '</select></label>' +
+        '<label id="ldDcustom" style="' + (!isPre ? '' : 'display:none;') + '">القطر (مم): <input type="number" id="ldD" min="5" max="40" step="0.5" value="' + (dv || '') + '"></label></div>' +
+        '<div class="ld-hint" id="ldDinfo"></div>';
+    }
     if (kind === 'tube') h += '<div class="ld-hint">العرض/الارتفاع فارغ = القياس التلقائي الحالي.</div>';
     h += '<h4>الأسطر (من الأعلى للأسفل)</h4><div id="ldLines">' + layout.lines.map(lineRow).join('') + '</div>' +
       '<div style="margin-top:8px;"><button type="button" class="ld-mini" id="ldAdd">＋ إضافة سطر</button> ' +
@@ -102,6 +111,32 @@ var LD = (function () {
   function wire() {
     function num(id) { var v = parseFloat(document.getElementById(id).value); return isNaN(v) ? 0 : v; }
     ['ldW', 'ldH'].forEach(function (id) { document.getElementById(id).addEventListener('input', function () { layout.w = num('ldW'); layout.h = num('ldH'); changed(); }); });
+    if (kind === 'tube') {
+      function dInfo() {
+        var d = layout.d || 0, el = document.getElementById('ldDinfo'); if (!el) return;
+        if (!d) { el.textContent = 'اختر قطر الأنبوب حتى يُحسب أقصى عرض للملصق (المحيط − 6 مم) وما تتقابل الحافتان.'; return; }
+        var circ = Math.PI * d, mx = Math.round((circ - 6) * 10) / 10;
+        el.textContent = 'المحيط ≈ ' + (Math.round(circ * 10) / 10) + ' مم ← أقصى عرض للملصق ' + mx + ' مم (ما يلتف لفة كاملة). قيس أنابيبك بالفرجار لأن القطر يختلف شوي حسب الشركة.';
+      }
+      function applyD(d) {
+        layout.d = d || 0;
+        if (d) { var mx = Math.round((Math.PI * d - 6) * 10) / 10; if (!layout.w || layout.w > mx) { layout.w = mx; document.getElementById('ldW').value = mx; } }
+        dInfo(); changed();
+      }
+      document.getElementById('ldDsel').addEventListener('change', function () {
+        var v = parseFloat(this.value);
+        document.getElementById('ldDcustom').style.display = v === -1 ? '' : 'none';
+        if (v === -1) { return; }
+        applyD(v);
+      });
+      document.getElementById('ldD').addEventListener('input', function () { applyD(parseFloat(this.value) || 0); });
+      dInfo();
+      document.getElementById('ldW').addEventListener('input', function () {
+        var d = layout.d || 0; if (!d) return;
+        var mx = Math.round((Math.PI * d - 6) * 10) / 10;
+        if (parseFloat(this.value) > mx) { this.value = mx; layout.w = mx; changed(); alert('أقصى عرض لأنبوب قطره ' + d + ' مم هو ' + mx + ' مم حتى ما تتقابل حافتا الملصق.'); }
+      });
+    }
     document.getElementById('ldRoll').addEventListener('change', function () { layout.roll = this.checked; changed(); });
     document.getElementById('ldTmode').addEventListener('change', function () { layout.tmode = this.value; changed(); });
     document.getElementById('ldAdd').addEventListener('click', function () {

@@ -455,6 +455,8 @@
    مضبوط مسبقًا لهذا الصف (style.get('color') يبقى له الأسبقية دائمًا)،
    وفقط لو الإعداد auto_flag_color_enabled مفعّل. #}
 {% set auto_color = AUTO_FLAG_COLORS.get(flag) if (auto_flag_color_enabled is defined and auto_flag_color_enabled and not style.get('color') and flag) else none %}
+{# لون أحمر للنتيجة غير الطبيعية (خيار من مصمم التقارير) — الأولوية: لون يدوي ثم flag تلقائي ثم هذا #}
+{% set abn_color = exam_abnormal_color(result_value, range_row) if (exam_abnormal_color is defined and not style.get('color') and not auto_color) else '' %}
 <div class="result-row{% if is_hidden %} exam-row-hidden{% endif %}"
      data-param-name="{{ param['name'] }}"
      data-param-id="{{ param['id'] }}"
@@ -469,7 +471,7 @@
   <span class="rname">{{ display_name }}</span>
   <span class="rcolon">:</span>
   {% set _val_align = VALUE_ALIGN_CSS.get(style.get('align')) or resolve_value_align(param) %}
-  <span class="rval"{% if _val_align %} style="text-align:{{ _val_align }};"{% endif %}>{% if result_value not in (none, '') %}<span class="rval-num" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% elif auto_color %}style="color:{{ auto_color }};"{% endif %}>{{ result_value }}</span>{% if show_result_flag is defined and show_result_flag and flag and flag != 'Normal' %}<span class="flag-badge" style="font-size:0.75em; font-weight:bold; margin-inline-start:4px;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ flag }}</span>{% endif %}{% if unit %}{% if unit|trim == '%' %}<span class="runit" style="margin-inline-start:0;">%</span>{% else %} <span class="runit">{{ unit }}</span>{% endif %}{% endif %}{% endif %}</span>
+  <span class="rval"{% if _val_align %} style="text-align:{{ _val_align }};"{% endif %}>{% if result_value not in (none, '') %}<span class="rval-num" {% if style.get('color') %}style="color:{{ style.get('color') }};"{% elif auto_color %}style="color:{{ auto_color }};"{% elif abn_color %}style="color:{{ abn_color }}; font-weight:600;"{% endif %}>{{ result_value }}</span>{% if show_result_flag is defined and show_result_flag and flag and flag != 'Normal' %}<span class="flag-badge" style="font-size:0.75em; font-weight:bold; margin-inline-start:4px;{% if auto_color %} color:{{ auto_color }};{% endif %}">{{ flag }}</span>{% endif %}{% if unit %}{% if unit|trim == '%' %}<span class="runit" style="margin-inline-start:0;">%</span>{% else %} <span class="runit">{{ unit }}</span>{% endif %}{% endif %}{% endif %}</span>
   <span class="rnorm">
     {% if range_tiers|length > 1 %}
       {% for tier in range_tiers %}<div class="exam-range-tier">{% if tier.label %}<b>{{ tier.label }}</b>: {% endif %}{{ tier.value }}</div>{% endfor %}

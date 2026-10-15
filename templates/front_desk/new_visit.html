@@ -490,8 +490,11 @@
          /api/test-definitions/<id>/parameters. selected_params_<id> هو
          الحقل الحقيقي اللي يوصل السيرفر: فاضي = كل التحليل (كالسابق
          تماماً)، وإلا = بس معرّفات البارامترات المحددة. #}
+      {# GUE/GSE/SFA: تقرير واحد بسعر واحد — بدون قائمة بارامترات منفصلة بأسعار #}
+      {% if test['code'] not in ('GUE', 'GSE', 'SFA') %}
       <button type="button" class="nv-param-arrow" title="اختيار بارامترات معيّنة بس من هذا التحليل"
               onclick="nvToggleParamPanel('{{ test['id'] }}')">▾</button>
+      {% endif %}
       <button type="button" class="nv-param-arrow" title="تعديل اسم هذا التحليل"
               onclick="nvRenameTest('{{ test['id'] }}')">✏️</button>
       <input type="hidden" id="selected_params_{{ test['id'] }}" name="selected_params_{{ test['id'] }}" value="">

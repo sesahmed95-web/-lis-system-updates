@@ -1,0 +1,23 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+{# تقرير فحص نقي العظم (Bone marrow aspirate): كل الحقول نص حر. Aspirate No. = رقم عينة الزيارة. #}
+<div class="report-heading" style="text-align:left; direction:ltr; font-style:italic; text-decoration:underline; color:#1F3A7A;">Bone marrow aspirate examination report :</div>
+<table style="width:100%; direction:ltr; border-collapse:collapse; margin:4px 0 10px;">
+  <tr>
+    <td style="font-weight:bold; width:50%;">Aspirate No.: <span style="font-weight:600;">{{ sample_no or '' }}</span></td>
+    <td style="font-weight:bold;">Biopsy No.: <span style="font-weight:600;">{{ params.get('Biopsy No', '') }}</span></td>
+  </tr>
+</table>
+<div style="border:1.5px solid #000; padding:10px 14px; direction:ltr; text-align:left; font-size:15px;">
+  {% for label, key in [('Cellularity', 'Cellularity'), ('Megakaryocytes', 'Megakaryocytes'), ('Myelopoiesis', 'Myelopoiesis'), ('Erythropoiesis', 'Erythropoiesis')] %}
+  <div style="margin:8px 0 14px;">
+    <b style="color:#1F3A7A;">{{ label }}:</b>
+    <div style="white-space:pre-wrap; margin-top:3px; min-height:22px;">{{ params.get(key, '') }}</div>
+  </div>
+  {% endfor %}
+  <div style="margin:8px 0 6px;">
+    <b style="color:#1F3A7A; font-style:italic; text-decoration:underline;">Conclusion:</b>
+    <div style="white-space:pre-wrap; margin-top:3px; min-height:60px;">{{ params.get('Conclusion', '') | render_conclusion }}</div>
+  </div>
+</div>
+{% endblock %}

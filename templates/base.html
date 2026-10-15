@@ -125,7 +125,9 @@
         <a class="nav-link {{ 'active' if request.path == url_for('visits_list') else '' }}" href="{{ url_for('visits_list') }}">📋 {{ t('visits') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('recent_visits_page') else '' }}" href="{{ url_for('recent_visits_page') }}">🕒 {{ 'آخر الزيارات' if lang=='ar' else 'Recent Visits' }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('patients_list') else '' }}" href="{{ url_for('patients_list') }}">🧑‍🤝‍🧑 {{ t('patients') }}</a>
-        <a class="nav-link {{ 'active' if request.path == url_for('results_list') else '' }}" href="{{ url_for('results_list') }}">📄 {{ t('results') }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('quick_entry') else '' }}" href="{{ url_for('quick_entry') }}">⚡ {{ 'الإدخال السريع' if lang=='ar' else 'Quick Entry' }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('results_list') else '' }}" href="{{ url_for('results_list') }}">📝 {{ 'إدخال النتائج' if lang=='ar' else 'Enter Results' }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('completed_results') else '' }}" href="{{ url_for('completed_results') }}">✅ {{ 'النتائج المكتملة' if lang=='ar' else 'Completed Results' }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('pdf_archive') else '' }}" href="{{ url_for('pdf_archive') }}">🗄️ أرشيف PDF</a>
         <a class="nav-link {{ 'active' if request.path == url_for('followups_list') else '' }}" href="{{ url_for('followups_list') }}">📞 {{ t('patients_followup') }}</a>
         {% if can_reports or current_role in ['supervisor', 'admin'] %}
@@ -143,6 +145,10 @@
         <a class="nav-link {{ 'active' if request.path == url_for('orders_list') else '' }}" href="{{ url_for('orders_list') }}">🧬 {{ t('orders') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('samples_collection') else '' }}" href="{{ url_for('samples_collection') }}">🩸 {{ t('samples_collection') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('samples_accession') else '' }}" href="{{ url_for('samples_accession') }}">📥 {{ t('samples_accession') }}</a>
+        {% if session.get('interface') == 'lab' %}
+        <a class="nav-link {{ 'active' if request.path == url_for('quick_entry') else '' }}" href="{{ url_for('quick_entry') }}">⚡ {{ 'الإدخال السريع' if lang=='ar' else 'Quick Entry' }}</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('completed_results') else '' }}" href="{{ url_for('completed_results') }}">✅ {{ 'النتائج المكتملة' if lang=='ar' else 'Completed Results' }}</a>
+        {% endif %}
         </div>
       </div>
       {% endif %}

@@ -1191,6 +1191,31 @@ def ensure_bfretic_parameters(conn):
     conn.commit()
 
 
+# حقول تقارير نقي العظم (BMA / BM Biopsy) والفحوصات الدموية الخاصة (Sickling / Hb H): كلها نص حر (Text)
+# يقبل أي كتابة: كلمات وأرقام ورموز رياضية (≥ ≤ ± × ÷ % ° µ ...). تُزرع فقط لو التحليل ما عنده أي باراميتر.
+_BM_SPECIAL_PARAMS = {
+    "BMA": ["Cellularity", "Megakaryocytes", "Myelopoiesis", "Erythropoiesis", "Conclusion", "Biopsy No"],
+    "BMBIOPSY": ["Clinical notes", "Conclusion"],
+    "SICKLE": ["Sickling Test"],
+    "HBPREP": ["Hb H preparation"],
+}
+
+
+def ensure_bm_special_parameters(conn):
+    for code, names in _BM_SPECIAL_PARAMS.items():
+        row = conn.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
+        if not row:
+            continue
+        has = conn.execute("SELECT COUNT(*) AS c FROM test_parameters WHERE test_definition_id=?",
+                           (row["id"],)).fetchone()["c"]
+        if has:
+            continue
+        for n in names:
+            conn.execute("INSERT INTO test_parameters (test_definition_id, name, unit, result_type) "
+                         "VALUES (?, ?, '', 'Text')", (row["id"], n))
+    conn.commit()
+
+
 def ensure_retic_parameters(conn):
     """RETIC ('Retic Count' المفرد -- بدون لطاخة الدم) اتسجّل بالكتالوج ضمن
     EXAMINING_TEST_DEFS لكن ما انزرع له test_parameters إطلاقًا (خلافًا عن
@@ -1634,6 +1659,7 @@ def init_db():
     ensure_examining_tests(conn)
     ensure_bfretic_parameters(conn)
     ensure_retic_parameters(conn)
+    ensure_bm_special_parameters(conn)
     ensure_interface_accounts(conn)
     ensure_nrbc_parameter(conn)
     ensure_atypical_lymphocytes_parameter(conn)
@@ -1663,6 +1689,15 @@ _PRESET_KEYS = {
     "theme_primary_color", "theme_page_bg_color",
 }
 # أعمدة تصميم التقرير لكل تحليل (تُطابَق بالـcode): اسم الريبورت المجمّع، لون/فاصل صفحة اللوحة، تباعد الصفوف، سطر Done by.
+# شاشة الرئيسية (صورة الخلفية/الشعار الكبير) وإعداداتها تنتقل للعميل مع الـpreset.
+_PRESET_KEYS = set(_PRESET_KEYS) | {
+    "dashboard_bg_path", "dashboard_bg_overlay_opacity", "dashboard_bg_blur", "dashboard_bg_position",
+    "dashboard_bg_size_mode", "dashboard_bg_size_percent", "dashboard_overlay_color",
+    "dashboard_bg_brightness", "dashboard_hero_text_color",
+}
+# كل إعدادات التصميم/الملصقات/الشاشة الأولى الإضافية (بدون أي توكن/باسورد/ترخيص/بيانات مرضى).
+_PRESET_KEYS = set(_PRESET_KEYS) | {'report_design_exam', 'label_layout_tube', 'landing_lab_image_path', 'landing_title', 'landing_gradient_color', 'barcode_copies', 'landing_image_position', 'landing_image_opacity', 'landing_bg_banner_size', 'landing_bg_image_path', 'landing_bg_shape', 'landing_image_shape', 'label_layout_request', 'barcode_group_mode', 'landing_bg_position', 'report_design_coag', 'known_analyzers', 'landing_bg_overlay_opacity', 'landing_title_en', 'landing_together_image_path', 'exam_abnormal_red', 'landing_bg_logo_size', 'landing_reception_image_path', 'landing_bglogo_image_path', 'auto_flag_color_enabled', 'whatsapp_country_code'}
+_PENDING_FILES = []
 _PRESET_TEST_DESIGN_COLS = ("report_group", "panel_color", "panel_page_break", "row_spacing", "done_by_note")
 
 
@@ -1672,15 +1707,124 @@ _PENDING_LOGO = None
 def write_pending_preset_logo(upload_dir):
     """يكتب شعار الـpreset (إن وُجد) بمجلد static/uploads بعد ما يعرف app.py مساره. آمن لو ما فيه شي."""
     global _PENDING_LOGO
-    if not _PENDING_LOGO:
-        return
     try:
         os.makedirs(upload_dir, exist_ok=True)
-        with open(os.path.join(upload_dir, _PENDING_LOGO[0]), "wb") as fh:
-            fh.write(_PENDING_LOGO[1])
+        for fname, raw in list(_PENDING_FILES) + ([_PENDING_LOGO] if _PENDING_LOGO else []):
+            with open(os.path.join(upload_dir, fname), "wb") as fh:
+                fh.write(raw)
     except OSError:
         pass
+    _PENDING_FILES.clear()
     _PENDING_LOGO = None
+
+
+def _cols_of(conn, table):
+    return [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+
+
+def _pick(row, cols, skip=()):
+    return {c: row[c] for c in cols if c in row and c not in skip}
+
+
+def _apply_preset_catalog(conn, cat):
+    """يطابق التحاليل بالـcode والباراميترات بالاسم (ids تختلف بين البرنامجين). يحدّث الموجود ويضيف الناقص."""
+    td_cols = _cols_of(conn, "test_definitions")
+    tp_cols = _cols_of(conn, "test_parameters")
+    rr_cols = _cols_of(conn, "reference_ranges")
+    code_to_id = {}
+    for t in cat.get("tests") or []:
+        code = str(t.get("code") or "").strip()
+        if not code:
+            continue
+        vals = _pick(t, td_cols, skip=("id", "code"))
+        row = conn.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
+        if row:
+            if vals:
+                conn.execute("UPDATE test_definitions SET " + ", ".join(k + "=?" for k in vals) + " WHERE id=?",
+                             tuple(vals.values()) + (row["id"],))
+            code_to_id[code] = row["id"]
+        elif t.get("name"):
+            vals["code"] = code
+            cur = conn.execute("INSERT INTO test_definitions (" + ", ".join(vals) + ") VALUES (" + ",".join("?" * len(vals)) + ")",
+                               tuple(vals.values()))
+            code_to_id[code] = cur.lastrowid
+    for p in cat.get("parameters") or []:
+        tid = code_to_id.get(str(p.get("test_code") or "")) or None
+        name = str(p.get("name") or "").strip()
+        if not tid or not name:
+            continue
+        vals = _pick(p, tp_cols, skip=("id", "test_definition_id", "name"))
+        row = conn.execute("SELECT id FROM test_parameters WHERE test_definition_id=? AND name=?", (tid, name)).fetchone()
+        if row:
+            pid = row["id"]
+            if vals:
+                conn.execute("UPDATE test_parameters SET " + ", ".join(k + "=?" for k in vals) + " WHERE id=?",
+                             tuple(vals.values()) + (pid,))
+        else:
+            vals.update({"test_definition_id": tid, "name": name})
+            pid = conn.execute("INSERT INTO test_parameters (" + ", ".join(vals) + ") VALUES (" + ",".join("?" * len(vals)) + ")",
+                               tuple(vals.values())).lastrowid
+        if isinstance(p.get("ranges"), list):          # المدايات المرجعية: تُستبدل بالكامل لهذا الباراميتر
+            conn.execute("DELETE FROM reference_ranges WHERE test_parameter_id=?", (pid,))
+            for r in p["ranges"]:
+                rv = _pick(r, rr_cols, skip=("id", "test_parameter_id"))
+                rv["test_parameter_id"] = pid
+                conn.execute("INSERT INTO reference_ranges (" + ", ".join(rv) + ") VALUES (" + ",".join("?" * len(rv)) + ")",
+                             tuple(rv.values()))
+        if isinstance(p.get("suggestions"), list):
+            conn.execute("DELETE FROM suggestions WHERE test_parameter_id=?", (pid,))
+            for sg in p["suggestions"]:
+                conn.execute("INSERT INTO suggestions (test_parameter_id, content) VALUES (?, ?)", (pid, str(sg)))
+    for pk in cat.get("packages") or []:
+        nm = str(pk.get("name") or "").strip()
+        if not nm:
+            continue
+        row = conn.execute("SELECT id FROM packages WHERE name=?", (nm,)).fetchone()
+        if row:
+            pkid = row["id"]
+            conn.execute("UPDATE packages SET code=?, notes=?, is_active=? WHERE id=?",
+                         (pk.get("code"), pk.get("notes"), pk.get("is_active", 1), pkid))
+        else:
+            pkid = conn.execute("INSERT INTO packages (name, code, notes, is_active) VALUES (?, ?, ?, ?)",
+                                (nm, pk.get("code"), pk.get("notes"), pk.get("is_active", 1))).lastrowid
+        conn.execute("DELETE FROM package_tests WHERE package_id=?", (pkid,))
+        for c in pk.get("tests") or []:
+            if c in code_to_id or conn.execute("SELECT 1 FROM test_definitions WHERE code=?", (c,)).fetchone():
+                tid = code_to_id.get(c) or conn.execute("SELECT id FROM test_definitions WHERE code=?", (c,)).fetchone()["id"]
+                conn.execute("INSERT INTO package_tests (package_id, test_definition_id) VALUES (?, ?)", (pkid, tid))
+    if isinstance(cat.get("quick_add"), list):
+        conn.execute("DELETE FROM quick_add_items")
+        for q in cat["quick_add"]:
+            r = conn.execute("SELECT id FROM test_definitions WHERE code=?", (str(q.get("code") or ""),)).fetchone()
+            if r:
+                conn.execute("INSERT INTO quick_add_items (test_definition_id, display_order, is_active) VALUES (?, ?, ?)",
+                             (r["id"], q.get("display_order", 0), q.get("is_active", 1)))
+    for er in cat.get("examining_rates") or []:
+        r = conn.execute("SELECT id FROM test_definitions WHERE code=?", (str(er.get("code") or ""),)).fetchone()
+        if r and er.get("doctor_name"):
+            conn.execute("INSERT INTO examining_doctor_rates (doctor_name, test_definition_id, rate) VALUES (?, ?, ?) "
+                         "ON CONFLICT(doctor_name, test_definition_id) DO UPDATE SET rate=excluded.rate",
+                         (er["doctor_name"], r["id"], er.get("rate", 0)))
+
+
+def _apply_preset_users(conn, users):
+    """حسابات المستخدمين: الاسم/الدور/الحالة + كلمة سر مؤقتة موحّدة (hash جاهز من أداة التجهيز، ما تنتقل كلمات سرك الأصلية).
+    تُطابَق بالـusername: الموجود (مثل admin الافتراضي) يُحدَّث بنفس الكلمة المؤقتة، والناقص يُضاف."""
+    cols = _cols_of(conn, "users")
+    for u in users[:200]:
+        un = str(u.get("username") or "").strip()
+        if not un or un.startswith("__interface_") or not u.get("password_hash"):
+            continue
+        vals = {"password_hash": u["password_hash"], "full_name": u.get("full_name") or un,
+                "role": u.get("role") or "reception", "is_active": u.get("is_active", 1)}
+        row = conn.execute("SELECT id FROM users WHERE username=?", (un,)).fetchone()
+        if row:
+            conn.execute("UPDATE users SET " + ", ".join(k + "=?" for k in vals) + " WHERE id=?", tuple(vals.values()) + (row["id"],))
+        else:
+            vals["username"] = un
+            if "created_at" in cols:
+                vals["created_at"] = datetime.now().isoformat(timespec="seconds")
+            conn.execute("INSERT INTO users (" + ", ".join(vals) + ") VALUES (" + ",".join("?" * len(vals)) + ")", tuple(vals.values()))
 
 
 def apply_client_preset(conn):
@@ -1760,6 +1904,66 @@ def apply_client_preset(conn):
                         conn.execute("UPDATE settings SET value=? WHERE key='logo_path'", ("uploads/" + fname,))
                     else:
                         conn.execute("INSERT INTO settings (key, value) VALUES ('logo_path', ?)", ("uploads/" + fname,))
+        # تصميم كل تقرير مطبوع (سحب/إخفاء/لون/خط الباراميترات من المعاينة): report_layout_overrides بنطاق test فقط
+        # (استثناءات المرضى الفردية لا تنتقل)، وتُطابَق بـ code التحليل لأن ids تختلف بين البرنامجين.
+        lo = data.get("layout_overrides") if isinstance(data, dict) else None
+        if isinstance(lo, list):
+            for it in lo[:500]:
+                if not isinstance(it, dict) or not it.get("code") or not it.get("layout_json"):
+                    continue
+                try:
+                    json.loads(it["layout_json"])
+                    td = conn.execute("SELECT id FROM test_definitions WHERE code=?", (str(it["code"]),)).fetchone()
+                    if td:
+                        conn.execute("INSERT INTO report_layout_overrides (scope, scope_id, layout_json, updated_at) "
+                                     "VALUES ('test', ?, ?, ?) ON CONFLICT(scope, scope_id) DO UPDATE SET "
+                                     "layout_json=excluded.layout_json, updated_at=excluded.updated_at",
+                                     (td["id"], it["layout_json"], datetime.now().isoformat(timespec="seconds")))
+                except Exception:
+                    pass
+        # قوالب التقارير المصممة يدويًا (عنوان + صفوف) لكل تحليل بالـcode
+        rts = data.get("report_templates") if isinstance(data, dict) else None
+        if isinstance(rts, list):
+            for it in rts[:500]:
+                if not isinstance(it, dict) or not it.get("code"):
+                    continue
+                try:
+                    td = conn.execute("SELECT id FROM test_definitions WHERE code=?", (str(it["code"]),)).fetchone()
+                    if not td:
+                        continue
+                    cols = [r[1] for r in conn.execute("PRAGMA table_info(report_templates)")]
+                    vals = {c: it[c] for c in ("heading", "rows_json", "heading_align", "rows_align") if c in cols and c in it}
+                    ex = conn.execute("SELECT id FROM report_templates WHERE test_definition_id=?", (td["id"],)).fetchone()
+                    if ex and vals:
+                        conn.execute("UPDATE report_templates SET " + ", ".join(k + "=?" for k in vals) + " WHERE id=?",
+                                     tuple(vals.values()) + (ex["id"],))
+                    elif vals:
+                        vals["test_definition_id"] = td["id"]
+                        conn.execute("INSERT INTO report_templates (" + ", ".join(vals) + ") VALUES (" + ",".join("?" * len(vals)) + ")",
+                                     tuple(vals.values()))
+                except Exception:
+                    pass
+        # ملفات إضافية بمجلد uploads (صورة خلفية الشاشة الرئيسية...): نفس طريقة الشعار.
+        extra = data.get("files") if isinstance(data, dict) else None
+        if isinstance(extra, list):
+            import base64
+            for fl in extra[:20]:
+                if not isinstance(fl, dict) or not fl.get("b64"):
+                    continue
+                fn = re.sub(r"[^A-Za-z0-9_.-]", "_", str(fl.get("filename") or ""))[:80]
+                if fn and fn.rsplit(".", 1)[-1].lower() in ("png", "jpg", "jpeg", "gif", "webp", "svg"):
+                    raw = base64.b64decode(fl["b64"])
+                    if 0 < len(raw) <= 8 * 1024 * 1024:
+                        _PENDING_FILES.append((fn, raw))
+        # كتالوج التحاليل: أسعار/باراميترات/مدايات مرجعية/اقتراحات/باقات/إضافة سريعة/أجور الدكتور الفاحص + المستخدمين.
+        # يُطبَّق مرة وحدة فقط (أول تشغيل)؛ بعدها العميل يعدّل عليها بحرية من الشاشات العادية ولا يُكتب فوقها.
+        for _fn, _key in ((_apply_preset_catalog, "catalog"), (_apply_preset_users, "users")):
+            _part = data.get(_key) if isinstance(data, dict) else None
+            if _part:
+                try:
+                    _fn(conn, _part)
+                except Exception as _e:   # خطأ بجزء واحد ما يوقف باقي التجهيز
+                    print("preset", _key, "skipped:", type(_e).__name__, _e)
         conn.commit()
         os.replace(path, os.path.join(_BASE_DIR, "portal_preset.applied.json"))
     except (OSError, ValueError):

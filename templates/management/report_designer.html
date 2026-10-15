@@ -35,6 +35,14 @@
     </div>
   </div>
   {% endfor %}
+  <div class="card">
+    <h3>🔴 تلوين النتائج غير الطبيعية (GUE / GSE / SFA)</h3>
+    <input type="hidden" name="exam_abnormal_present" value="1">
+    <label style="display:flex; gap:8px; align-items:center; cursor:pointer;">
+      <input type="checkbox" name="exam_abnormal_red" value="1" {{ 'checked' if exam_abnormal_red_enabled() }}>
+      تلوين أي نتيجة تختلف عن المدى الطبيعي بالأحمر (مثلاً Glucose +++ بينما الطبيعي Negative). أطفئه لو تريد كل النتائج بلون واحد.
+    </label>
+  </div>
   <button class="btn" type="submit">💾 حفظ الاختيار</button>
   <p class="muted">المعاينات بيانات وهمية للتوضيح. تقدر تجرّب أي تصميم على تقرير حقيقي دون حفظ بإضافة <span class="mono">?design=2</span> لرابط الطباعة.</p>
 </form>
