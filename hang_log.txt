@@ -7,3 +7,8 @@
 [2026-10-15T12:31:19] SLOW 3.3s GET /management/report-designer/preview/6?design=3 (preview_report_design)
 [2026-10-15T12:31:20] SLOW 3.7s GET /management/report-designer/preview/22?design=2 (preview_report_design)
 [2026-10-15T12:31:20] SLOW 3.7s GET /management/report-designer/preview/22?design=1 (preview_report_design)
+[2026-10-16T12:42:36] SLOW 3.0s GET /management/report-designer/preview/6?design=2 (preview_report_design)
+[2026-10-16T12:42:37] SLOW 3.1s GET /management/report-designer/preview/6?design=4 (preview_report_design)
+[2026-10-16T12:42:36] SLOW 3.0s GET /management/report-designer/preview/6?design=table (preview_report_design)
+[2026-10-16T12:42:37] SLOW 3.1s GET /management/report-designer/preview/6?design=1 (preview_report_design)
+[2026-10-16T12:42:37] SLOW 3.3s GET /management/report-designer/preview/22?design=3 (preview_report_design)

@@ -63,7 +63,8 @@
         shown.map(function (t) { return '<a class="qe-chip' + (mine.length ? '' : ' dim') + '" href="' + entryUrl(v.visit_id, [t.id]) + '" title="فتح حقول هذا التحليل">' + esc(t.name) + '</a>'; }).join('') +
         '</div><div class="qe-actions">' +
         '<a class="btn small" href="' + entryUrl(v.visit_id, shown.map(function (t) { return t.id; })) + '">فتح ' + (mine.length ? 'كل تحاليل قسمي' : 'التحاليل') + ' (' + shown.length + ')</a>' +
-        '<a class="btn small secondary" href="' + entryUrl(v.visit_id) + '">كل تحاليل الزيارة</a></div>' +
+        '<a class="btn small secondary" href="' + entryUrl(v.visit_id) + '">كل تحاليل الزيارة</a>' +
+        '<a class="btn small secondary" target="_blank" href="/labels/visit/' + v.visit_id + '" title="باركودات إضافية">🏷</a></div>' +
         (mine.length && other ? '<div class="qe-hidden-note">+ ' + other + ' تحليل من أقسام أخرى مخفي</div>' : (!mine.length ? '<div class="qe-hidden-note">لا يوجد تحليل لقسم هذا الجهاز عند هذا المريض — معروضة كل تحاليله.</div>' : '')) +
         '</div>';
     });

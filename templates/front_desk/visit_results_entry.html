@@ -20,6 +20,14 @@
      title="يفتح نافذة تسديد المتبقي (ومنها تقدر تطبع ورقة المتبقي). بعد التسديد الكامل يختفي الزر">💵 المتبقي (<span id="lisBalanceAmt">{{ '{:,.0f}'.format(balance['remaining']) }}</span>) — تسديد</button>
   {% endif %}
   <details class="rb-more"><summary>⋯ خيارات إضافية (باركود، واتساب، السابقة…)</summary>
+  <span style="display:inline-flex; align-items:center; gap:3px; margin-inline-end:4px;">
+    <a class="btn small secondary" target="_blank" id="lisTubeLink" href="{{ url_for('print_sample_barcodes', visit_id=visit['id']) }}?autoprint=1"
+       title="طباعة باركود الأنابيب — يطلع معها باركود ورقة الطلب تلقائيًا إلا إذا ألغيت الخيار الصغير بجانبه">🧪 باركود الأنابيب</a>
+    <label class="btn small secondary" style="cursor:pointer; padding:3px 6px;" title="طباعة باركود الطلب تلقائيًا مع الأنابيب (ألغِ التحديد لعدم طباعته)">
+      <input type="checkbox" id="lisReqWithTubeCb" checked style="margin:0;"> 🏷</label>
+  </span>
+  <a class="btn small" target="_blank" href="{{ url_for('labels_center', visit_id=visit['id']) }}"
+     title="باركودات إضافية: أنابيب قسم محدد/تحاليل محددة، باركود الطلب بأنماط، وملصق التحاليل الخارجية">🏷 مركز الباركودات</a>
   <a class="btn small secondary" target="_blank" href="{{ url_for('print_request_label', visit_id=visit['id']) }}"
      title="ملصق خاص بورقة طلب المريض — محتواه وقياسه وعدده مستقل عن باركود الأنابيب">🏷 باركود الطلب</a>
   <a class="btn small secondary" target="_blank" href="{{ url_for('print_visit_portal_qr', visit_id=visit['id']) }}"
@@ -788,12 +796,14 @@
     {% for box in boxes %}
     {% set ot = box.ot %}
     {% set _txt_cnt = box.parameters|selectattr('result_type', 'equalto', 'Text')|list|length %}
-    <div class="card rb-box{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') %} rb-exam{% endif %}{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') or (box.parameters|length >= 8 and _txt_cnt == 0) %} rb-wide{% endif %}" id="rbox_{{ ot['id'] }}" data-dept="{{ dept_group(ot['test_department']) }}">
+    <div class="card rb-box{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') %} rb-exam{% endif %}{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') or (box.parameters|length >= 8 and _txt_cnt == 0) %} rb-wide{% endif %}" id="rbox_{{ ot['id'] }}" data-tdid="{{ ot['test_definition_id'] }}" data-dept="{{ dept_group(ot['test_department']) }}">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
         <h4 style="margin:0;">{{ ot['test_name'] }}</h4>
         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
           <button type="submit" class="btn small" title="حفظ كل نتائج هذه الصفحة (كل التحاليل الظاهرة، مو هذا التحليل بس)">💾 {{ t('save') }}</button>
           <button type="button" class="btn small secondary" onclick="lisPrintOne({{ ot['id'] }})" title="طباعة تقرير هذا التحليل (يحفظ النتيجة تلقائياً + نسخة PDF بالأرشيف). تعديل نتيجة مكتملة يحتاج مسؤول/مشرف، أما الطباعة بدون تعديل فمتاحة للجميع">🖨️</button>
+          {% if ot['status'] != 'Verified' %}<button type="button" class="btn small secondary" onclick="lisAddParamOpen({{ ot['id'] }})" title="إضافة حقل جديد لهذا التقرير بمكان تختاره مع نسبه الطبيعية">➕ حقل</button>{% endif %}
+          {% if ot['status'] != 'Verified' %}<button type="button" class="btn small secondary" onclick="lisDelParamOpen({{ ot['id'] }})" data-hidden='{{ box.hidden_params|tojson }}' id="lisDelBtn_{{ ot['id'] }}" title="حذف باراميتر (أو أكثر) من تقرير هذا المريض — تختاره من قائمة">🗑 حذف باراميتر{% if box.hidden_params %} ({{ box.hidden_params|length }}){% endif %}</button>{% endif %}
           <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span>
         </div>
       </div>
@@ -839,7 +849,7 @@
           {% set rng = box.ranges.get(p['id']) %}
           {% set sugg = box.suggestions_map.get(p['id'], []) %}
           {% set fid = 'p_' ~ ot['id'] ~ '_' ~ p['id'] %}
-          <tr>
+          <tr data-pid="{{ p['id'] }}">
             <td>{{ p['name'] }}</td>
             <td class="muted">{{ p['unit'] }}</td>
             <td class="muted">
@@ -1413,4 +1423,219 @@
   }, true);
 })();
 </script>
+
+<!-- ======================================================================
+     ➕ إضافة حقل (باراميتر) جديد لأي تقرير من شاشة إدخال النتائج
+     ====================================================================== -->
+<style>
+  #apmOverlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:10005; align-items:center; justify-content:center; padding:16px; }
+  #apmBox { background:#fff; border-radius:12px; width:100%; max-width:520px; max-height:94vh; overflow:auto; padding:18px 20px; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+  #apmBox h3 { margin:0 0 4px; } #apmBox .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+  #apmBox label.lbl { font-size:13px; min-width:92px; } #apmBox input[type=text], #apmBox input[type=number], #apmBox select { padding:5px 8px; }
+  #apmBox .num { width:84px; } #apmBox fieldset { border:1px solid #CBD5E1; border-radius:8px; padding:8px 10px; margin:10px 0; }
+  #apmBox legend { font-size:13px; padding:0 6px; color:#334155; } #apmNote { font-size:12px; color:#92400E; background:#FEF3C7; border-radius:6px; padding:5px 8px; margin-top:6px; display:none; }
+  tr.lis-newparam td { background:#ECFDF5 !important; }
+</style>
+<div id="apmOverlay">
+  <div id="apmBox" dir="rtl">
+    <h3>➕ إضافة حقل جديد</h3>
+    <p class="muted" id="apmTitle" style="margin:0 0 6px; font-size:13px;"></p>
+    <div class="row"><label class="lbl">اسم الحقل *</label><input type="text" id="apmName" style="flex:1; min-width:180px;" dir="ltr" placeholder="مثال: Vitamin D"></div>
+    <div class="row">
+      <label class="lbl">نوع النتيجة</label>
+      <select id="apmType"><option value="Numeric">رقم (له مدى طبيعي)</option><option value="Text">نص (Positive / Negative ...)</option></select>
+      <label class="lbl" style="min-width:auto;">الوحدة</label><input type="text" id="apmUnit" class="num" dir="ltr" placeholder="mg/dL">
+    </div>
+    <div class="row"><label class="lbl">مكان الحقل</label><select id="apmPos" style="flex:1; min-width:200px;"></select></div>
+    <fieldset id="apmRange">
+      <legend>النسبة الطبيعية (Reference range)</legend>
+      <div id="apmNumBox">
+        <div class="row">
+          <label><input type="radio" name="apmGen" value="both" checked> نفس المدى للجنسين</label>
+          <label><input type="radio" name="apmGen" value="split"> مختلف للذكور والإناث</label>
+        </div>
+        <div class="row" id="apmBothRow"><label class="lbl">المدى</label> من <input type="number" step="any" id="apmLow" class="num"> إلى <input type="number" step="any" id="apmHigh" class="num"></div>
+        <div id="apmSplitRows" style="display:none;">
+          <div class="row"><label class="lbl">ذكور</label> من <input type="number" step="any" id="apmMLow" class="num"> إلى <input type="number" step="any" id="apmMHigh" class="num"></div>
+          <div class="row"><label class="lbl">إناث</label> من <input type="number" step="any" id="apmFLow" class="num"> إلى <input type="number" step="any" id="apmFHigh" class="num"></div>
+        </div>
+      </div>
+      <div class="row"><label class="lbl">نص المدى</label><input type="text" id="apmText" style="flex:1; min-width:160px;" dir="ltr" placeholder="اختياري — مثال: Negative أو &lt; 5"></div>
+      <div class="muted" style="font-size:11.5px;">اترك الخانة الفارغة إذا ما تريد نسبة. إذا كتبت حدًا واحدًا فقط (مثلًا إلى 5) يُكتب المدى تلقائيًا «&lt; 5».</div>
+    </fieldset>
+    <div id="apmNote"></div>
+    <div id="apmErr" style="color:#B91C1C; font-size:13px; min-height:18px;"></div>
+    <div style="display:flex; gap:8px; margin-top:6px;">
+      <button type="button" class="btn" id="apmSave">إضافة الحقل</button>
+      <button type="button" class="btn secondary" id="apmCancel">إلغاء (Esc)</button>
+    </div>
+    <p class="muted" style="font-size:11.5px; margin:8px 0 0;">يُضاف الحقل لتعريف هذا التحليل (يظهر لكل المرضى لاحقًا). قيمك غير المحفوظة بالصفحة تبقى بعد الإضافة.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  var VISIT_ID = {{ visit['id'] }};
+  var STASH_KEY = 'lisStash_' + VISIT_ID, FOCUS_KEY = 'lisFocus_' + VISIT_ID;
+  var ov = document.getElementById('apmOverlay'), cur = null;
+  function $(id) { return document.getElementById(id); }
+  function num(v) { return String(v || '').trim(); }
+
+  window.lisAddParamOpen = function (otId) {
+    var box = document.getElementById('rbox_' + otId); if (!box) return;
+    cur = { otId: otId, tdid: box.getAttribute('data-tdid'), exam: box.classList.contains('rb-exam') };
+    $('apmTitle').textContent = 'التقرير: ' + ((box.querySelector('h4') || {}).textContent || '').trim();
+    var sel = $('apmPos'); sel.innerHTML = '';
+    var o = document.createElement('option'); o.value = 'start'; o.textContent = '📌 في بداية التقرير'; sel.appendChild(o);
+    var rows = box.querySelectorAll('tbody tr[data-pid]');
+    rows.forEach(function (tr) {
+      var op = document.createElement('option'); op.value = tr.getAttribute('data-pid');
+      op.textContent = 'بعد: ' + ((tr.cells[0] || {}).textContent || '').trim(); sel.appendChild(op);
+    });
+    sel.selectedIndex = sel.options.length - 1;                       // الافتراضي: بآخر التقرير
+    ['apmName', 'apmUnit', 'apmLow', 'apmHigh', 'apmMLow', 'apmMHigh', 'apmFLow', 'apmFHigh', 'apmText'].forEach(function (i) { $(i).value = ''; });
+    $('apmType').value = 'Numeric'; document.querySelector('input[name=apmGen][value=both]').checked = true;
+    $('apmErr').textContent = ''; sync();
+    var n = $('apmNote');
+    if (cur.exam) { n.style.display = 'block'; n.textContent = 'تقارير GUE/GSE/SFA: بالتقرير المطبوع يظهر الحقل أولًا تحت «Other Results» لين تسحبه لمكانه من تصميم التقرير.'; }
+    else n.style.display = 'none';
+    ov.style.display = 'flex'; setTimeout(function () { $('apmName').focus(); }, 30);
+  };
+  function close() { ov.style.display = 'none'; }
+  function sync() {
+    var numeric = $('apmType').value === 'Numeric';
+    $('apmNumBox').style.display = numeric ? '' : 'none';
+    var split = numeric && document.querySelector('input[name=apmGen]:checked').value === 'split';
+    $('apmBothRow').style.display = split ? 'none' : ''; $('apmSplitRows').style.display = split ? '' : 'none';
+  }
+  $('apmType').addEventListener('change', sync);
+  document.querySelectorAll('input[name=apmGen]').forEach(function (r) { r.addEventListener('change', sync); });
+  $('apmCancel').addEventListener('click', close);
+  ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+  window.addEventListener('keydown', function (e) {
+    if (ov.style.display !== 'flex') return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && e.target.type !== 'radio') { e.preventDefault(); e.stopPropagation(); save(); }
+  }, true);
+
+  function stashForm() {
+    var data = {};
+    document.querySelectorAll('#visitResultsForm input[name^="ot"], #visitResultsForm textarea[name^="ot"]').forEach(function (el) {
+      if (/^ot\d+_(param_\d+|analyzer)$/.test(el.name) && el.value !== el.defaultValue) data[el.name] = el.value;
+    });
+    try { sessionStorage.setItem(STASH_KEY, JSON.stringify(data)); } catch (e) {}
+  }
+  function save() {
+    if (!cur) return;
+    var name = num($('apmName').value); if (!name) { $('apmErr').textContent = 'اكتب اسم الحقل.'; $('apmName').focus(); return; }
+    var numeric = $('apmType').value === 'Numeric', text = num($('apmText').value), ranges = [];
+    if (!numeric) { if (text) ranges.push({ gender: 'Both', text: text }); }
+    else if (document.querySelector('input[name=apmGen]:checked').value === 'split') {
+      ranges.push({ gender: 'Male', low: num($('apmMLow').value), high: num($('apmMHigh').value), text: text });
+      ranges.push({ gender: 'Female', low: num($('apmFLow').value), high: num($('apmFHigh').value), text: text });
+    } else ranges.push({ gender: 'Both', low: num($('apmLow').value), high: num($('apmHigh').value), text: text });
+    $('apmSave').disabled = true; $('apmErr').textContent = '';
+    fetch('/api/test-definitions/' + cur.tdid + '/add-parameter', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, unit: num($('apmUnit').value), result_type: $('apmType').value, after: $('apmPos').value, ranges: ranges })
+    }).then(function (r) {
+      if (r.redirected) throw new Error('perm');
+      return r.text().then(function (t) { try { return JSON.parse(t); } catch (e) { throw new Error('perm'); } });
+    }).then(function (d) {
+      $('apmSave').disabled = false;
+      if (!d.ok) { $('apmErr').textContent = d.error || 'تعذّرت الإضافة'; return; }
+      stashForm();
+      try { sessionStorage.setItem(FOCUS_KEY, 'ot' + cur.otId + '_param_' + d.id); } catch (e) {}
+      window.location.reload();
+    }).catch(function (e) {
+      $('apmSave').disabled = false;
+      $('apmErr').textContent = (e && e.message === 'perm') ? 'ليست لديك صلاحية لهذا الإجراء، أو انتهت الجلسة.' : 'تعذّر الاتصال بالسيرفر';
+    });
+  }
+  $('apmSave').addEventListener('click', save);
+
+  // بعد إعادة التحميل: نرجّع القيم اللي كانت مكتوبة وغير محفوظة، ونؤشر الحقل الجديد
+  (function restore() {
+    var form = document.getElementById('visitResultsForm'); if (!form) return;
+    var raw = null, foc = null;
+    try { raw = sessionStorage.getItem(STASH_KEY); foc = sessionStorage.getItem(FOCUS_KEY); sessionStorage.removeItem(STASH_KEY); sessionStorage.removeItem(FOCUS_KEY); } catch (e) {}
+    if (raw) {
+      try { var data = JSON.parse(raw); Object.keys(data).forEach(function (n) {
+        var el = form.elements[n]; if (!el || el.value === data[n]) return;
+        el.value = data[n]; el.dispatchEvent(new Event('input', { bubbles: true }));
+      }); } catch (e) {}
+    }
+    if (foc) {
+      var f = form.elements[foc];
+      if (f) { var tr = f.closest('tr'); if (tr) tr.classList.add('lis-newparam');
+        setTimeout(function () { try { f.scrollIntoView({ block: 'center' }); f.focus(); } catch (e) {} }, 150); }
+    }
+  })();
+})();
+</script>
+
+<!-- حذف باراميتر من تقرير هذا المريض -->
+<div id="lisDelOverlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:10001; align-items:center; justify-content:center; padding:16px;">
+  <div style="background:#fff; border-radius:10px; width:min(520px,96vw); max-height:88vh; overflow:auto; padding:16px;" dir="rtl">
+    <h4 style="margin:0 0 4px;">🗑 حذف باراميتر — <span id="lisDelTitle"></span></h4>
+    <div class="muted" style="font-size:12.5px; margin-bottom:8px;">اختر البارامترات اللي تريد حذفها من <b>تقرير هذا المريض فقط</b> (لا يتأثر تعريف التحليل ولا باقي المرضى). القيم المُدخلة فيها تُمسح.</div>
+    <div id="lisDelList" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 10px; margin-bottom:10px;"></div>
+    <div id="lisDelHiddenWrap" style="display:none; border-top:1px dashed #CBD5E1; padding-top:8px; margin-bottom:8px;">
+      <div style="font-size:12.5px; font-weight:700; margin-bottom:4px;">محذوفة سابقًا (حدّد لإعادتها):</div>
+      <div id="lisDelHidden" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 10px;"></div>
+    </div>
+    <div id="lisDelMsg" style="font-size:12.5px; color:#B91C1C; min-height:16px;"></div>
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button type="button" class="btn secondary" onclick="lisDelClose()">إلغاء</button>
+      <button type="button" class="btn" style="background:#B91C1C;" onclick="lisDelApply()">🗑 تطبيق</button>
+    </div>
+  </div>
+</div>
+<script>
+  (function () {
+    var curOt = null;
+    function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+    window.lisDelParamOpen = function (otId) {
+      curOt = otId;
+      var box = document.getElementById('rbox_' + otId), btn = document.getElementById('lisDelBtn_' + otId);
+      document.getElementById('lisDelTitle').textContent = box.querySelector('h4').textContent;
+      var html = '';
+      Array.prototype.forEach.call(box.querySelectorAll('tr[data-pid]'), function (tr) {
+        var name = tr.children[0] ? tr.children[0].textContent.trim() : tr.getAttribute('data-pid');
+        var filled = Array.prototype.some.call(tr.querySelectorAll('input[type=text],input[type=number],textarea,select'), function (el) { return (el.value || '').trim() !== ''; });
+        html += '<label style="display:flex; gap:6px; align-items:center; font-size:13.5px; cursor:pointer;"><input type="checkbox" class="lis-del-cb" value="' + tr.getAttribute('data-pid') + '"> ' + esc(name) + (filled ? ' <span class="muted" style="font-size:11px;">(فيه قيمة)</span>' : '') + '</label>';
+      });
+      document.getElementById('lisDelList').innerHTML = html || '<span class="muted">لا توجد بارامترات.</span>';
+      var hidden = []; try { hidden = JSON.parse(btn.getAttribute('data-hidden') || '[]'); } catch (e) {}
+      document.getElementById('lisDelHiddenWrap').style.display = hidden.length ? 'block' : 'none';
+      document.getElementById('lisDelHidden').innerHTML = hidden.map(function (h) { return '<label style="display:flex; gap:6px; align-items:center; font-size:13.5px; cursor:pointer;"><input type="checkbox" class="lis-res-cb" value="' + h.id + '"> ' + esc(h.name) + '</label>'; }).join('');
+      document.getElementById('lisDelMsg').textContent = '';
+      document.getElementById('lisDelOverlay').style.display = 'flex';
+    };
+    window.lisDelClose = function () { document.getElementById('lisDelOverlay').style.display = 'none'; };
+    window.lisDelApply = function () {
+      var del = Array.prototype.map.call(document.querySelectorAll('.lis-del-cb:checked'), function (c) { return +c.value; });
+      var res = Array.prototype.map.call(document.querySelectorAll('.lis-res-cb:checked'), function (c) { return +c.value; });
+      if (!del.length && !res.length) { document.getElementById('lisDelMsg').textContent = 'اختر باراميتر واحد على الأقل.'; return; }
+      if (del.length && !confirm('حذف ' + del.length + ' باراميتر من تقرير هذا المريض؟')) return;
+      fetch('/api/order-tests/' + curOt + '/hide-params', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ param_ids: del, restore: res }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.ok) { document.getElementById('lisDelMsg').textContent = d.error || 'تعذّر الحذف'; return; }
+          location.reload();
+        })
+        .catch(function () { document.getElementById('lisDelMsg').textContent = 'تعذّر الاتصال بالسيرفر.'; });
+    };
+    // خيار "باركود الطلب مع الأنابيب" (محفوظ بالجهاز، نفس مفتاح صفحة طباعة الأنابيب)
+    document.addEventListener('DOMContentLoaded', function () {
+      var cb = document.getElementById('lisReqWithTubeCb'), link = document.getElementById('lisTubeLink');
+      if (!cb || !link) return;
+      var base = link.getAttribute('href').split('&req=')[0];
+      function sync() { link.setAttribute('href', base + (cb.checked ? '' : '&req=0')); try { localStorage.setItem('lisReqWithTube', cb.checked ? '1' : '0'); } catch (e) {} }
+      try { cb.checked = localStorage.getItem('lisReqWithTube') !== '0'; } catch (e) {}
+      cb.addEventListener('change', sync); sync();
+    });
+  })();
+</script>
+
 {% endblock %}

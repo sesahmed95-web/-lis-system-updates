@@ -55,6 +55,7 @@
         <td>
           <div class="ce-acts">
             <button type="button" class="btn small secondary" onclick="ceOpen('{{ url_for('print_combined_panel', visit_id=v.visit_id) }}?auto=1')">🧾 طباعة اللوحة المجمّعة</button>
+            <a class="btn small secondary" target="_blank" href="{{ url_for('labels_center', visit_id=v.visit_id) }}" title="باركودات إضافية: أنابيب/طلب/تحاليل خارجية">🏷 باركودات</a>
             <button type="button" class="btn small secondary" onclick="ceOpen('{{ url_for('print_visit_full_report', visit_id=v.visit_id) }}?autoprint=1')">🖨 طباعة كل النتائج</button>
             {% if v.phone %}<button type="button" class="btn small" onclick="ceSendVisit({{ v.visit_id }}, 'combined', this)">📱 إرسال الكل (ملف واحد)</button>
             <button type="button" class="btn small secondary" onclick="ceSendVisit({{ v.visit_id }}, 'separate', this)">📱 إرسال (ملفات منفصلة)</button>

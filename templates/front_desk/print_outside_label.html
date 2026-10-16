@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>ملصق تحاليل خارجية — {{ visit['full_name'] }}</title>
+<style id="pageSize">@page { size: 60mm 40mm; margin: 0; }</style>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Tahoma, Arial, sans-serif; background: #F1F5F9; }
+  .bar { background: #205072; color: #fff; padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  .bar label { display: flex; flex-direction: column; font-size: 12px; gap: 2px; }
+  .bar input, .bar textarea, .bar select { font: 13px Tahoma, Arial; padding: 4px 6px; border-radius: 5px; border: 0; }
+  .bar button { background: #fff; color: #205072; border: 0; border-radius: 6px; padding: 8px 16px; font-weight: 700; cursor: pointer; }
+  .stage { padding: 16px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  .label { background: #fff; overflow: hidden; color: #000; text-align: center; display: flex; flex-direction: column; justify-content: center; padding: 1.5mm 2mm; page-break-after: always; box-shadow: 0 1px 6px rgba(0,0,0,.25); }
+  .label .nm { font-weight: 700; line-height: 1.15; word-break: break-word; }
+  .label .ts { line-height: 1.2; margin: .6mm 0; white-space: pre-line; }
+  .label .dt { direction: ltr; line-height: 1.2; }
+  .label .lb { line-height: 1.2; margin-top: .6mm; opacity: .85; }
+  .label.boxed { border: .4mm solid #000; }
+  .label.compact .ts { white-space: normal; }
+  @media print {
+    body { background: #fff; } .bar { display: none; } .stage { padding: 0; display: block; }
+    .label { box-shadow: none; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="bar">
+  <label>اسم المريض <input id="fNm" value="{{ visit['full_name']|e }}" style="width:170px;"></label>
+  <label>التحاليل (سطر لكل تحليل) <textarea id="fTs" rows="3" style="width:230px;">{{ tests_text|e }}</textarea></label>
+  <label>تاريخ ووقت السحب <input id="fDt" value="{{ draw_time }}" style="width:130px;"></label>
+  <label>اسم المختبر <input id="fLb" value="{{ lab_name|e }}" style="width:170px;"></label>
+  <label>العرض (مم) <input id="fW" type="number" value="60" style="width:62px;"></label>
+  <label>الارتفاع (مم) <input id="fH" type="number" value="40" style="width:62px;"></label>
+  <label>حجم الخط <input id="fS" type="number" value="9" step="0.5" style="width:62px;"></label>
+  <label>النمط <select id="fSt"><option value="centered">مركزي</option><option value="boxed">بإطار</option><option value="compact">مضغوط</option></select></label>
+  <label>النسخ <input id="fC" type="number" value="{{ copies }}" min="1" max="50" style="width:56px;"></label>
+  <button type="button" onclick="window.print()">🖨 طباعة</button>
+</div>
+<div class="stage" id="stage"></div>
+<script>
+  function g(id) { return document.getElementById(id); }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  g('fSt').value = {{ style|tojson }};
+  function render() {
+    var w = +g('fW').value || 60, h = +g('fH').value || 40, s = +g('fS').value || 9, c = Math.max(1, Math.min(50, +g('fC').value || 1)), st = g('fSt').value;
+    g('pageSize').textContent = '@page { size: ' + w + 'mm ' + h + 'mm; margin: 0; }';
+    var one = '<div class="label ' + (st === 'boxed' ? 'boxed' : (st === 'compact' ? 'compact' : '')) + '" style="width:' + w + 'mm;height:' + h + 'mm;font-size:' + s + 'pt;">' +
+      '<div class="nm" style="font-size:' + (s + 2) + 'pt;">' + esc(g('fNm').value) + '</div>' +
+      '<div class="ts">' + esc(g('fTs').value) + '</div>' +
+      '<div class="dt">' + esc(g('fDt').value) + '</div>' +
+      '<div class="lb" style="font-size:' + (s - 1) + 'pt;">' + esc(g('fLb').value) + '</div></div>';
+    g('stage').innerHTML = new Array(c + 1).join(one);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.bar input, .bar textarea, .bar select'), function (el) { el.addEventListener('input', render); });
+  render();
+</script>
+</body>
+</html>

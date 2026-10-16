@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block page_title %}🏷 مركز الباركودات{% endblock %}
+{% block content %}
+<style>
+  .lc-sec { margin-bottom: 14px; }
+  .lc-sec h4 { margin: 0 0 8px; }
+  .lc-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .lc-tests { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 12px; margin: 6px 0 10px; }
+  .lc-dept { margin: 8px 0 2px; font-weight: 700; color: #205072; }
+  .lc-tests label { display: flex; gap: 6px; align-items: center; font-size: 13.5px; cursor: pointer; }
+  .lc-note { font-size: 12.5px; color: #64748B; }
+  .lc-prev { border: 1px dashed #94A3B8; border-radius: 6px; padding: 8px; background: #fff; text-align: center; min-width: 200px; }
+  .lc-prev b { display: block; font-size: 15px; } .lc-prev span { display: block; font-size: 11px; color: #475569; } .lc-prev i { display: block; margin-top: 4px; font-style: normal; letter-spacing: 2px; font-family: monospace; }
+</style>
+<div class="card" dir="rtl">
+  <h3 style="margin-top:0;">🏷 مركز الباركودات — {{ visit['full_name'] }} <span class="muted mono">#{{ visit['registration_number'] }}</span></h3>
+  <p class="muted" style="margin:0 0 6px;">وقت السحب: <b>{{ draw_time }}</b> · {{ lab_name }}</p>
+  <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;" title="يُحفظ على هذا الجهاز">
+    <input type="checkbox" id="lcReqWithTube"> 🏷 اطبع باركود الطلب تلقائيًا مع باركود الأنابيب</label>
+  <span class="lc-note">(نفس الزر الصغير بصفحة طباعة الأنابيب)</span>
+</div>
+
+<div class="card lc-sec" dir="rtl">
+  <h4>1) باركود الأنابيب</h4>
+  <div class="lc-tests">
+    {% for dept, items in groups.items() %}
+      <div class="lc-dept" style="grid-column:1/-1;">{{ dept }}
+        <button type="button" class="btn small secondary" style="margin-inline-start:8px;" onclick="lcPrintTubes({dept: {{ dept|tojson }}})">🧪 أنابيب هذا القسم فقط</button></div>
+      {% for t in items %}<label><input type="checkbox" class="lc-ot" value="{{ t.id }}" data-name="{{ t.name }}"> {{ t.name }} <span class="muted">({{ t.code }})</span></label>{% endfor %}
+    {% endfor %}
+  </div>
+  <div class="lc-row">
+    <label>عدد النسخ: <input type="number" id="lcTubeCopies" value="1" min="1" max="20" style="width:70px;"></label>
+    <button type="button" class="btn" onclick="lcPrintTubes({})">🧪 كل أنابيب المريض</button>
+    <button type="button" class="btn secondary" onclick="lcPrintTubes({sel:true})">🧪 للتحاليل المحددة فقط</button>
+  </div>
+</div>
+
+<div class="card lc-sec" dir="rtl">
+  <h4>2) باركود ورقة الطلب (Request)</h4>
+  <div class="lc-row">
+    <label>النمط: <select id="lcStyle">{% for k, title in request_styles %}<option value="{{ k }}">{{ title }}</option>{% endfor %}</select></label>
+    <label>النسخ: <input type="number" id="lcReqCopies" value="1" min="1" max="50" style="width:70px;"></label>
+    <button type="button" class="btn" onclick="lcPrintReq()">🖨 طباعة</button>
+    <button type="button" class="btn secondary" onclick="lcSaveStyle()">💾 اعتماد هذا النمط كافتراضي</button>
+    <span id="lcStyleMsg" class="lc-note"></span>
+  </div>
+  <div class="lc-prev" id="lcPrev"></div>
+  <div class="lc-note" style="margin-top:6px;">كل نمط يمكن تعديله بالتفصيل (حجم، خطوط، أسطر) من مصمم الملصق أعلى صفحة طباعة باركود الطلب.</div>
+</div>
+
+<div class="card lc-sec" dir="rtl">
+  <h4>3) ملصق التحاليل الخارجية (غير الموجودة بالمختبر)</h4>
+  <div class="lc-note" style="margin-bottom:6px;">اختر تحاليل من الأعلى (نفس القائمة) و/أو اكتب أسماء تحاليل إضافية هنا، سطر لكل تحليل. يطلع: اسم المريض ← التحاليل ← تاريخ ووقت السحب ← اسم المختبر، وكلها قابلة للتعديل قبل الطباعة.</div>
+  <textarea id="lcExtra" rows="3" style="width:100%; max-width:520px;" placeholder="أسماء تحاليل إضافية (سطر لكل تحليل)"></textarea>
+  <div class="lc-row" style="margin-top:6px;">
+    <label>النمط: <select id="lcOutStyle"><option value="centered">مركزي</option><option value="boxed">بإطار</option><option value="compact">مضغوط</option></select></label>
+    <button type="button" class="btn" onclick="lcOutside()">🖨 معاينة وتعديل وطباعة</button>
+  </div>
+</div>
+
+<script>
+  var VID = {{ visit['id'] }};
+  var TUBE_URL = {{ url_for('print_sample_barcodes', visit_id=visit['id'])|tojson }};
+  var REQ_URL = {{ url_for('print_request_label', visit_id=visit['id'])|tojson }};
+  var OUT_URL = {{ url_for('labels_outside_print', visit_id=visit['id'])|tojson }};
+  var STYLES = {{ request_styles_json|safe }};
+  function sel() { return Array.prototype.map.call(document.querySelectorAll('.lc-ot:checked'), function (c) { return c.value; }); }
+  function openw(u) { var w = null; try { w = window.open(u, '_blank'); } catch (e) {} if (!w) location.href = u; }
+  function lcPrintTubes(o) {
+    var q = ['autoprint=1', 'copies=' + (document.getElementById('lcTubeCopies').value || 1)];
+    if (o.dept) q.push('dept=' + encodeURIComponent(o.dept));
+    if (o.sel) { var ids = sel(); if (!ids.length) { alert('حدّد تحليلًا واحدًا على الأقل.'); return; } q.push('ots=' + ids.join(',')); }
+    openw(TUBE_URL + '?' + q.join('&'));
+  }
+  function lcPrintReq() { openw(REQ_URL + '?autoprint=1&style=' + document.getElementById('lcStyle').value + '&copies=' + (document.getElementById('lcReqCopies').value || 1)); }
+  function lcSaveStyle() {
+    var k = document.getElementById('lcStyle').value, st = JSON.parse(JSON.stringify(STYLES[k])); delete st.title; st.roll = true; st.copies = 1;
+    fetch('/api/settings/label-layout/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(st) })
+      .then(function (r) { return r.json(); }).then(function (d) { document.getElementById('lcStyleMsg').textContent = d.ok ? '✔ تم اعتماد النمط كافتراضي لكل الطباعات' : 'تعذّر الحفظ'; });
+  }
+  function lcOutside() {
+    var ids = sel(), ex = document.getElementById('lcExtra').value.trim();
+    if (!ids.length && !ex) { alert('اختر تحليلًا أو اكتب اسم تحليل خارجي.'); return; }
+    openw(OUT_URL + '?ots=' + ids.join(',') + '&extra=' + encodeURIComponent(ex) + '&style=' + document.getElementById('lcOutStyle').value);
+  }
+  function prev() {
+    var st = STYLES[document.getElementById('lcStyle').value], box = document.getElementById('lcPrev');
+    box.innerHTML = st.lines.map(function (l) { return l.f === 'patient_name' ? '<b>{{ visit["full_name"]|e }}</b>' : (l.f === 'datetime' ? '<span>{{ draw_time }}</span>' : (l.f === 'lab_name' ? '<span>{{ lab_name|e }}</span>' : '<span>أكواد التحاليل</span>')); }).join('') + '<i>' + (st.bc.type === 'qr' ? '▦▦▦' : '||| || ||| |') + '</i>';
+    box.style.width = Math.max(160, st.w * 3.2) + 'px';
+  }
+  document.getElementById('lcStyle').addEventListener('change', prev); prev();
+  var cb = document.getElementById('lcReqWithTube');
+  try { cb.checked = localStorage.getItem('lisReqWithTube') !== '0'; } catch (e) { cb.checked = true; }
+  cb.addEventListener('change', function () { try { localStorage.setItem('lisReqWithTube', cb.checked ? '1' : '0'); } catch (e) {} });
+</script>
+{% endblock %}

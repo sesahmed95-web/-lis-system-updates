@@ -1627,7 +1627,10 @@ def enforce_interface_scope():
     # صفحات مشتركة: سجل المريض + تقرير الطباعة مفتوحة لكل الواجهات (استقبال/
     # مختبر/الاثنين) حتى موظف المختبر يقدر يطبع ويتابع نتائج المريض.
     if request.endpoint in ("patient_history", "print_visit_full_report", "visit_results_entry", "print_combined_panel",
-                            "quick_entry", "api_quick_entry_search"):
+                            "quick_entry", "api_quick_entry_search", "labels_center", "labels_outside_print",
+                            "print_sample_barcodes", "print_request_label", "visit_request_qr", "visit_barcode_code128",
+                            "print_visit_barcode", "completed_results", "report_pdf_test", "report_pdf_visit",
+                            "api_order_test_hide_params"):
         return   # أي جهاز (حتى واجهة المختبر) يقدر يدخل النتائج من شاشة الزيارة/الإدخال السريع
     if interface == "reception" and path.startswith("/workbench"):
         flash("هذي الصفحة خاصة بواجهة المختبر فقط.")
@@ -4963,8 +4966,8 @@ _DEFAULT_LABEL_LAYOUTS = {
         "w": 60, "h": 40, "roll": True, "copies": 1, "tmode": "full",
         # الافتراضي (حسب طلب المختبر): اسم المريض + تاريخ ووقت سحب العينة فقط.
         # أي سطر إضافي (نص حر أو حقل ثاني) يُضاف من مصمم الملصق أعلى صفحة الطباعة.
-        "lines": [{"f": "patient_name", "s": 10, "b": 1}, {"f": "datetime", "s": 8}],
-        "bc": {"type": "qr", "pos": "side", "h": 18},
+        "lines": [{"f": "patient_name", "s": 11, "b": 1, "a": "center"}, {"f": "datetime", "s": 8, "a": "center"}],
+        "bc": {"type": "code128", "pos": "bottom", "h": 16},
         "scan": ["reg_no", "patient_name", "datetime"],
     },
 }
@@ -5160,6 +5163,32 @@ def visit_request_qr(visit_id):
     return send_file(buf, mimetype="image/png")
 
 
+# أنماط جاهزة لملصق باركود ورقة الطلب (اسم المريض بالمنتصف ← التاريخ والوقت بالمنتصف تحته ← الباركود). تُختار من "مركز الباركودات"
+# أو ?style=key بطباعة الملصق (للطباعة الحالية فقط)، وتُحفظ كافتراضي من نفس الصفحة. كل نمط يبقى قابلًا للتعديل بمصمم الملصق.
+_REQUEST_LABEL_STYLES = {
+    "centered": {"title": "مركزي (الأساسي): الاسم + التاريخ والوقت + باركود", "w": 60, "h": 40,
+                 "lines": [{"f": "patient_name", "s": 11, "b": 1, "a": "center"}, {"f": "datetime", "s": 8, "a": "center"}],
+                 "bc": {"type": "code128", "pos": "bottom", "h": 16}},
+    "centered_qr": {"title": "مركزي مع QR", "w": 50, "h": 50,
+                    "lines": [{"f": "patient_name", "s": 11, "b": 1, "a": "center"}, {"f": "datetime", "s": 8, "a": "center"}],
+                    "bc": {"type": "qr", "pos": "bottom", "h": 22}},
+    "big_name": {"title": "اسم كبير", "w": 70, "h": 40,
+                 "lines": [{"f": "patient_name", "s": 15, "b": 1, "a": "center"}, {"f": "datetime", "s": 9, "a": "center"}],
+                 "bc": {"type": "code128", "pos": "bottom", "h": 14}},
+    "compact": {"title": "صغير مضغوط", "w": 50, "h": 25,
+                "lines": [{"f": "patient_name", "s": 9, "b": 1, "a": "center"}, {"f": "datetime", "s": 7, "a": "center"}],
+                "bc": {"type": "code128", "pos": "bottom", "h": 9}},
+    "with_tests": {"title": "مع أكواد التحاليل", "w": 60, "h": 50,
+                   "lines": [{"f": "patient_name", "s": 11, "b": 1, "a": "center"}, {"f": "datetime", "s": 8, "a": "center"},
+                             {"f": "tests_codes", "s": 7, "a": "center"}],
+                   "bc": {"type": "code128", "pos": "bottom", "h": 14}},
+    "with_lab": {"title": "مع اسم المختبر بالأعلى", "w": 60, "h": 45,
+                 "lines": [{"f": "lab_name", "s": 7, "a": "center"}, {"f": "patient_name", "s": 11, "b": 1, "a": "center"},
+                           {"f": "datetime", "s": 8, "a": "center"}],
+                 "bc": {"type": "code128", "pos": "bottom", "h": 14}},
+}
+
+
 @app.route("/front-desk/visits/<int:visit_id>/print/request-label")
 @login_required
 def print_request_label(visit_id):
@@ -5170,6 +5199,11 @@ def print_request_label(visit_id):
         return "Not found", 404
     lab_name = get_setting(db, "app_name_ar", "") or get_setting(db, "app_name", "")
     label_layout = dict(_get_label_layout(db, "request"))
+    _st = request.args.get("style")
+    if _st in _REQUEST_LABEL_STYLES:   # نمط جاهز للطباعة الحالية فقط (بدون حفظ)
+        _pre = dict(_REQUEST_LABEL_STYLES[_st]); _pre.pop("title", None)
+        _pre["roll"] = True; _pre["copies"] = label_layout.get("copies", 1)
+        label_layout = _sanitize_label_layout("request", _pre)
     # ?copies=N (من شاشة زيارة جديدة) يتجاوز العدد المحفوظ لهذه الطباعة فقط
     _cp = request.args.get("copies", type=int)
     if _cp and 1 <= _cp <= 50:
@@ -5182,6 +5216,56 @@ def print_request_label(visit_id):
         field_titles=[(k, LABEL_FIELD_TITLES[k]) for k in LABEL_FIELDS_BY_KIND["request"]],
         scan_titles=list(LABEL_SCAN_TITLES.items()),
     )
+
+
+# ------------------------------------------------------------------------
+# "مركز الباركودات": المريض اللي عنده تحاليل بالمختبر وتم البحث عنه تقدر من أي جهاز/واجهة تطبع له باركودات إضافية:
+# أنابيب (الكل / قسم محدد / تحاليل محددة)، باركود ورقة الطلب (أكثر من نمط)، وملصق للتحاليل الخارجية (غير الموجودة
+# بالمختبر): اسم المريض ← أسماء التحاليل ← تاريخ ووقت السحب ← اسم المختبر، وكلها قابلة للتعديل قبل الطباعة.
+# ------------------------------------------------------------------------
+@app.route("/labels/visit/<int:visit_id>")
+@login_required
+def labels_center(visit_id):
+    db = get_db()
+    visit, tests, draw_time = _visit_barcode_context(db, visit_id)
+    if not visit:
+        return "Not found", 404
+    rows = db.execute(
+        "SELECT ot.id, ot.status, td.name, td.short_name, td.code, COALESCE(NULLIF(TRIM(td.department), ''), 'بدون قسم') as department "
+        "FROM order_tests ot JOIN orders o ON o.id = ot.order_id JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "WHERE o.visit_id=? AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected') ORDER BY td.department, ot.id",
+        (visit_id,)).fetchall()
+    groups = {}
+    for r in rows:
+        groups.setdefault(r["department"], []).append(dict(r))
+    lab_name = get_setting(db, "app_name_ar", "") or get_setting(db, "app_name", "")
+    return render_template(
+        "front_desk/labels_center.html", visit=visit, groups=groups, draw_time=_fmt_dt(draw_time), lab_name=lab_name,
+        request_styles=[(k, v["title"]) for k, v in _REQUEST_LABEL_STYLES.items()],
+        request_styles_json=json.dumps(_REQUEST_LABEL_STYLES, ensure_ascii=False))
+
+
+@app.route("/labels/visit/<int:visit_id>/outside")
+@login_required
+def labels_outside_print(visit_id):
+    """ملصق التحاليل غير الموجودة بالمختبر (تُرسل لمختبر خارجي): اسم المريض ← التحاليل ← تاريخ/وقت السحب ← اسم المختبر."""
+    db = get_db()
+    visit, tests, draw_time = _visit_barcode_context(db, visit_id)
+    if not visit:
+        return "Not found", 404
+    ids = [int(x) for x in (request.args.get("ots") or "").split(",") if x.strip().isdigit()]
+    names = []
+    if ids:
+        ph = ",".join("?" * len(ids))
+        names = [(r["name"] or r["short_name"]) for r in db.execute(
+            f"SELECT td.name, td.short_name FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id "
+            f"JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=? AND ot.id IN ({ph}) ORDER BY ot.id", (visit_id, *ids)).fetchall()]
+    names += [x.strip() for x in (request.args.get("extra") or "").splitlines() if x.strip()]
+    lab_name = get_setting(db, "app_name_ar", "") or get_setting(db, "app_name", "")
+    return render_template("front_desk/print_outside_label.html", visit=visit, tests_text="\n".join(names),
+                           draw_time=_fmt_dt(draw_time), lab_name=lab_name,
+                           style=request.args.get("style") or "centered", copies=request.args.get("copies", type=int) or 1)
+
 
 @app.route("/front-desk/visits/<int:visit_id>/print/barcode")
 @login_required
@@ -5365,6 +5449,33 @@ def api_patient_recent_visits(patient_id):
     return jsonify(out)
 
 
+def _inject_request_label_with_tubes(html, visit_id):
+    """بمجرد فتح طباعة باركود الأنابيب يطلع ملصق باركود الطلب (ورقة المريض) تلقائيًا، وزر صغير (☑) بزاوية الصفحة
+    يوقف/يشغّل ذلك (محفوظ بالجهاز). ?req=0 يعطّله لهذه الطباعة، ?req=1 يفرضه. لو المتصفح منع النافذة يظهر زر يدوي."""
+    if request.args.get("req") == "0" or "</body>" not in html:
+        return html
+    req_url = url_for("print_request_label", visit_id=visit_id) + "?autoprint=1"
+    script = """
+<style>@media print{#lisReqTubeBox{display:none!important}}</style>
+<div id="lisReqTubeBox" style="position:fixed;top:6px;left:6px;z-index:99999;background:#fff;border:1px solid #94A3B8;border-radius:8px;padding:3px 8px;font:12px Tahoma,Arial,sans-serif;direction:rtl;box-shadow:0 2px 8px rgba(0,0,0,.2);">
+<label style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><input type="checkbox" id="lisReqTubeCb" checked> 🏷 مع باركود الطلب</label>
+<a href="#" id="lisReqTubeNow" style="display:none;margin-inline-start:8px;">اطبعه الآن</a></div>
+<script>(function(){
+  var URL_=%s, KEY='lisReqWithTube', on=true;
+  try{ on = localStorage.getItem(KEY)!=='0'; }catch(e){}
+  if(new URLSearchParams(location.search).get('req')==='1') on=true;
+  var cb=document.getElementById('lisReqTubeCb'), now=document.getElementById('lisReqTubeNow');
+  cb.checked=on;
+  function openReq(){ var w=null; try{ w=window.open(URL_+'&_ts='+Date.now(),'_blank'); }catch(e){} return !!w; }
+  cb.addEventListener('change',function(){ try{ localStorage.setItem(KEY, cb.checked?'1':'0'); }catch(e){} });
+  now.addEventListener('click',function(e){ e.preventDefault(); openReq(); });
+  if(on){ window.addEventListener('load',function(){ setTimeout(function(){ if(!openReq()) now.style.display='inline'; },300); }); }
+  else { now.style.display='inline'; }
+})();</script>
+""" % json.dumps(req_url)
+    return html.replace("</body>", script + "</body>", 1)
+
+
 @app.route("/front-desk/visits/<int:visit_id>/print/samples")
 @login_required
 def print_sample_barcodes(visit_id):
@@ -5382,6 +5493,13 @@ def print_sample_barcodes(visit_id):
         "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
         (visit_id,),
     ).fetchall()
+    # فلترة اختيارية من "مركز الباركودات": ?dept=Hematology|Chemistry (قسم/أقسام بعينها) و/أو ?ots=1,2 (تحاليل محددة)
+    _f_ots = {int(x) for x in (request.args.get("ots") or "").split(",") if x.strip().isdigit()}
+    _f_dept = {x.strip().lower() for x in (request.args.get("dept") or "").split("|") if x.strip()}
+    if _f_ots:
+        rows = [r for r in rows if r["id"] in _f_ots]
+    if _f_dept:
+        rows = [r for r in rows if (r["department"] or "").strip().lower() in _f_dept]
 
     # تجميع تحاليل هذي الزيارة حسب نوع العينة (sample_type) — كل التحاليل
     # اللي تحتاج نفس الأنبوب (Serum مثلاً) تشترك بباركود وحد بدل باركود
@@ -5516,7 +5634,7 @@ def print_sample_barcodes(visit_id):
         _s["fields"] = {**_base, "sample_type": _s["sample_type"] or "", "tests_full": [_s["test_name"]],
                         "tests_short": [_s["test_short_name"]], "tests_codes": ""}
 
-    return render_template(
+    _tube_html = render_template(
         "front_desk/print_sample_barcodes.html", visit=visit,
         tube_samples=tube_samples, individual_samples=individual_samples,
         samples=individual_samples,  # توافق مع أي نسخة قديمة من القالب لسا تستخدم "samples"
@@ -5527,6 +5645,7 @@ def print_sample_barcodes(visit_id):
         barcode_copies=barcode_copies,
         barcode_test_names_mode=barcode_test_names_mode,
     )
+    return _inject_request_label_with_tubes(_tube_html, visit_id)
 
 
 # ============== حفظ تفضيلات طباعة الباركود (عدد النسخ / عرض أسماء التحاليل) ==============
@@ -6888,7 +7007,79 @@ def result_entry(order_test_id):
 # واحد يحفظ كل ما تمت تعبئته دفعة واحدة. فور الحفظ تصبح النتائج متاحة مباشرة
 # بريبورت كل تحليل (زر طباعة أمام كل بطاقة)، مع بقاء إمكانية التعديل والحفظ
 # مجددًا بنفس الصفحة قبل الطباعة الفعلية.
+_HIDDEN_COL_OK = False
+
+
+def _ensure_hidden_col(db):
+    """عمود order_tests.hidden_param_ids (بارامترات محذوفة من تقرير هذا المريض فقط) — يُضاف تلقائيًا مرة وحدة."""
+    global _HIDDEN_COL_OK
+    if _HIDDEN_COL_OK:
+        return
+    try:
+        cols = [r[1] for r in db.execute("PRAGMA table_info(order_tests)")]
+        if "hidden_param_ids" not in cols:
+            db.execute("ALTER TABLE order_tests ADD COLUMN hidden_param_ids TEXT")
+            db.commit()
+        _HIDDEN_COL_OK = True
+    except Exception:
+        pass
+
+
+def _hidden_param_ids(db, order_test_id):
+    _ensure_hidden_col(db)
+    try:
+        row = db.execute("SELECT hidden_param_ids FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    except Exception:
+        return set()
+    raw = (row["hidden_param_ids"] if row else "") or ""
+    return {int(x) for x in raw.split(",") if x.strip().isdigit()}
+
+
+@app.route("/api/order-tests/<int:order_test_id>/hide-params", methods=["POST"])
+@login_required
+def api_order_test_hide_params(order_test_id):
+    """حذف باراميتر/أكثر من تقرير هذا المريض فقط (لا يمس تعريف التحليل ولا باقي المرضى).
+    body: {param_ids:[..]} حذف، أو {restore:[..]} إعادة. القيم المُدخلة لهذي البارامترات تُمسح. التحليل المكتمل يحتاج مسؤول/مشرف."""
+    db = get_db()
+    _ensure_hidden_col(db)
+    ot = db.execute("SELECT id, status, test_definition_id FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    if not ot:
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    if ot["status"] == "Verified":
+        return jsonify({"ok": False, "error": "النتيجة معتمدة — لا يمكن حذف بارامترات منها."}), 400
+    if ot["status"] == "Completed" and session.get("role") not in ("admin", "supervisor"):
+        return jsonify({"ok": False, "error": "تعديل نتيجة مكتملة يحتاج مسؤول/مشرف."}), 403
+    body = request.get_json(silent=True) or {}
+    valid = {r["id"] for r in db.execute("SELECT id FROM test_parameters WHERE test_definition_id=?", (ot["test_definition_id"],))}
+    hidden = _hidden_param_ids(db, order_test_id)
+    add = {int(x) for x in (body.get("param_ids") or []) if str(x).isdigit()} & valid
+    restore = {int(x) for x in (body.get("restore") or []) if str(x).isdigit()}
+    if add and not (valid - hidden - add):
+        return jsonify({"ok": False, "error": "لا يمكن حذف كل البارامترات — يجب أن يبقى باراميتر واحد على الأقل."}), 400
+    hidden = (hidden | add) - restore
+    db.execute("UPDATE order_tests SET hidden_param_ids=? WHERE id=?",
+               (",".join(str(i) for i in sorted(hidden)) or None, order_test_id))
+    if add:
+        ph = ",".join("?" * len(add))
+        db.execute(f"DELETE FROM results WHERE order_test_id=? AND test_parameter_id IN ({ph})", (order_test_id, *add))
+    db.commit()
+    log_action("HideParams", "order_tests", order_test_id, f"hide={sorted(add)} restore={sorted(restore)}")
+    return jsonify({"ok": True, "hidden": sorted(hidden)})
+
+
 def get_ordered_parameters(db, ot):
+    _all = _get_ordered_parameters_raw(db, ot)
+    try:
+        _hid = _hidden_param_ids(db, ot["id"])
+    except Exception:
+        _hid = set()
+    if _hid:
+        _kept = [p for p in _all if p["id"] not in _hid]
+        return _kept or _all
+    return _all
+
+
+def _get_ordered_parameters_raw(db, ot):
     """يرجّع بارامترات order_test هذا — كلها إذا طُلب التحليل كامل
     (السلوك الافتراضي)، أو بس البارامترات المحدَّدة فعليًا لو استُخدم سهم
     "اختيار بارامترات معيّنة" بشاشة زيارة جديدة (راجع
@@ -7118,9 +7309,14 @@ def visit_results_entry(visit_id):
                 "ORDER BY id DESC LIMIT 1",
                 (ot["id"], p["id"]),
             ).fetchone()
+        _hid_ids = _hidden_param_ids(db, ot["id"])
+        _hidden_params = [{"id": hp["id"], "name": hp["name"]} for hp in db.execute(
+            "SELECT id, name FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
+            (ot["test_definition_id"],)).fetchall() if hp["id"] in _hid_ids]
         boxes.append({
             "ot": ot, "parameters": parameters, "results_by_param": results_by_param,
             "ranges": ranges, "suggestions_map": suggestions_map, "history_map": history_map,
+            "hidden_params": _hidden_params,
         })
 
     _pv_cfg = get_result_layout(db)
@@ -7900,6 +8096,14 @@ def _print_report_impl(order_test_id):
                 parameters.append(p)
                 seen_param_names.add(p["name"])
 
+    # بارامترات محذوفة من تقرير هذا المريض فقط (زر 🗑 بشاشة الإدخال) لا تظهر بالطباعة/الـPDF
+    _hid_print = set()
+    for _oid in order_test_ids:
+        _hid_print |= _hidden_param_ids(db, _oid)
+    if _hid_print:
+        _kept_print = [p for p in parameters if p["id"] not in _hid_print]
+        parameters = _kept_print or parameters
+
     # قاموس اسم -> صف test_parameters (المطلوب 9ب/11) — يستخدمه custom_rows
     # وcbc_groups أدناه لجلب display_label/value_align لكل باراميتر بدون
     # إعادة الاستعلام لكل صف لحاله.
@@ -8488,6 +8692,80 @@ def api_add_test_parameter():
     db.commit()
     log_action("AddTestParameter", "test_parameters", cur.lastrowid, name)
     return jsonify({"ok": True, "id": cur.lastrowid, "name": name})
+
+
+# ============== v56: إضافة حقل (باراميتر) لأي تقرير من شاشة إدخال النتائج ==============
+# المستخدم يكتب الاسم/الوحدة/النوع، يختار المكان (بداية التقرير أو بعد أي باراميتر موجود)،
+# ويحدد المدى الطبيعي (مدى واحد للجنسين أو مختلف للذكور/الإناث، أو نص مثل Negative).
+# يُضاف لتعريف التحليل نفسه (يظهر لكل المرضى لاحقًا) وتُعاد ترقيم sort_order للباراميترات
+# بحيث تبقى بنفس ترتيبها القديم والجديد بالمكان المطلوب.
+@app.route("/api/test-definitions/<int:tdid>/add-parameter", methods=["POST"])
+@roles_required("supervisor")
+def api_add_parameter_with_ranges(tdid):
+    db = get_db()
+    td = db.execute("SELECT id, name FROM test_definitions WHERE id=?", (tdid,)).fetchone()
+    if not td:
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "اسم الحقل مطلوب"}), 400
+    unit = str(body.get("unit") or "").strip()
+    rtype = body.get("result_type")
+    rtype = rtype if rtype in ("Numeric", "Text") else "Numeric"
+    if db.execute("SELECT 1 FROM test_parameters WHERE test_definition_id=? AND LOWER(TRIM(name))=LOWER(?)",
+                  (tdid, name)).fetchone():
+        return jsonify({"ok": False, "error": "يوجد حقل بنفس الاسم بهذا التقرير"}), 409
+
+    def _num(v):
+        if v is None or str(v).strip() == "":
+            return None
+        return float(str(v).strip().replace(",", ""))
+
+    clean_ranges = []
+    for r in (body.get("ranges") or [])[:3]:
+        gender = r.get("gender") if r.get("gender") in ("Both", "Male", "Female") else "Both"
+        try:
+            low, high = _num(r.get("low")), _num(r.get("high"))
+        except ValueError:
+            return jsonify({"ok": False, "error": "المدى الطبيعي لازم أرقام فقط (النص يُكتب بخانة نص المدى)"}), 400
+        text = str(r.get("text") or "").strip() or None
+        if rtype == "Text":
+            low = high = None
+        if low is not None and high is not None and low > high:
+            return jsonify({"ok": False, "error": "بداية المدى أكبر من نهايته"}), 400
+        if low is None and high is None and not text:
+            continue
+        if text is None and (low is None) != (high is None):      # مدى بحد واحد: نكتب نصه للعرض
+            text = ("> %g" % low) if high is None else ("< %g" % high)
+        clean_ranges.append((gender, low, high, text))
+
+    ids = [r["id"] for r in db.execute(
+        "SELECT id FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (tdid,)).fetchall()]
+    cur = db.execute(
+        "INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, ?, ?, ?)",
+        (tdid, name, unit, rtype))
+    new_id = cur.lastrowid
+    after = body.get("after")
+    if after == "start":
+        pos = 0
+    else:
+        try:
+            aid = int(after)
+            pos = ids.index(aid) + 1 if aid in ids else len(ids)
+        except (TypeError, ValueError):
+            pos = len(ids)
+    ids.insert(pos, new_id)
+    for i, pid in enumerate(ids, start=1):
+        db.execute("UPDATE test_parameters SET sort_order=? WHERE id=?", (i, pid))
+    for gender, low, high, text in clean_ranges:
+        db.execute(
+            "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, "
+            "low, high, range_text) VALUES (?, ?, 0, 'Years', 120, 'Years', ?, ?, ?)",
+            (new_id, gender, low, high, text))
+    db.commit()
+    log_action("AddTestParameter", "test_parameters", new_id, f"{td['name']} / {name} (pos {pos + 1})")
+    return jsonify({"ok": True, "id": new_id, "name": name, "position": pos + 1})
 
 
 # ============== تحديد/تعديل سعر باراميتر مفرد ==============

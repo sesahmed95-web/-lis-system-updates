@@ -1771,7 +1771,8 @@
   window.printCreatedSampleBarcodes = function () {
     if (!lastCreatedVisitId) return;
     var cp = parseInt((document.getElementById('barcodeCopiesInput') || {}).value, 10);
-    var q = (cp >= 1 && cp <= 20) ? ('?copies=' + cp) : '';
+    // req=0: هذي الصفحة تفتح ملصق الطلب بنفسها (مفتاح "باركود الطلب") فنمنع الفتح التلقائي المكرر من صفحة الأنابيب
+    var q = ((cp >= 1 && cp <= 20) ? ('?copies=' + cp + '&') : '?') + 'req=0';
     window.open('/front-desk/visits/' + lastCreatedVisitId + '/print/samples' + q, '_blank');
     // مفتاح "باركود الطلب" مفعّل: يُفتح ملصق الطلب مع ملصقات الأنابيب وبالعدد المحدّد
     if (document.getElementById('toggleRequestLabel').checked) {
