@@ -1266,58 +1266,6 @@ def _inject_sky_table_headers(resp):
 
 
 
-@app.route("/api/daily/edit", methods=["POST"])
-@login_required
-def api_daily_edit():
-    """تعديل من صفحة الحسابات اليومية. التحاليل: لأي موظف مختبر. بقية الحقول: مسؤول/مشرف بكلمة مرور."""
-    db = get_db()
-    d = request.get_json(silent=True) or {}
-    try:
-        vid = int(d.get("visit_id"))
-    except (TypeError, ValueError):
-        return jsonify(ok=False, error="زيارة غير صالحة"), 400
-    field = d.get("field")
-    val = str(d.get("value", "")).strip()
-    v = db.execute("SELECT id, patient_id FROM visits WHERE id=?", (vid,)).fetchone()
-    if not v:
-        return jsonify(ok=False, error="الزيارة غير موجودة"), 404
-    if field != "tests":
-        ok, err = _check_completed_result_gate(db, d)
-        if not ok:
-            return jsonify(ok=False, error=err), 403
-    if field == "tests":
-        db.execute("UPDATE visits SET tests_display=? WHERE id=?", (val or None, vid))
-    elif field == "name":
-        if not val:
-            return jsonify(ok=False, error="الاسم فارغ"), 400
-        db.execute("UPDATE patients SET full_name=? WHERE id=?", (val, v["patient_id"]))
-    elif field == "gender":
-        db.execute("UPDATE patients SET gender=? WHERE id=?", (val, v["patient_id"]))
-    elif field == "age":
-        try:
-            a = float(val)
-            a = int(a) if a == int(a) else a
-        except ValueError:
-            return jsonify(ok=False, error="عمر غير صالح"), 400
-        db.execute("UPDATE patients SET age=? WHERE id=?", (a, v["patient_id"]))
-    elif field == "notes":
-        db.execute("UPDATE visits SET notes=? WHERE id=?", (val, vid))
-    elif field == "expenses":
-        try:
-            x = float(val.replace(",", ""))
-        except ValueError:
-            return jsonify(ok=False, error="رقم غير صالح"), 400
-        db.execute("UPDATE visits SET expenses=? WHERE id=?", (x, vid))
-    else:
-        return jsonify(ok=False, error="حقل غير مسموح"), 400
-    db.commit()
-    try:
-        log_action("daily_edit", "visit", vid, f"{field} -> {val[:80]}")
-    except Exception:
-        pass
-    return jsonify(ok=True, value=val)
-
-
 @app.context_processor
 def inject_globals():
     db = get_db()
@@ -6367,6 +6315,58 @@ def daily_report():
                             grand_general_expenses=grand_general_expenses,
                             grand_forwarded_total=grand_forwarded_total,
                             grand_net=grand_total - grand_total_expenses, grand_remaining=grand_remaining)
+
+
+@app.route("/api/daily/edit", methods=["POST"])
+@login_required
+def api_daily_edit():
+    """تعديل من صفحة الحسابات اليومية. التحاليل: لأي موظف مختبر. بقية الحقول: مسؤول/مشرف بكلمة مرور."""
+    db = get_db()
+    d = request.get_json(silent=True) or {}
+    try:
+        vid = int(d.get("visit_id"))
+    except (TypeError, ValueError):
+        return jsonify(ok=False, error="زيارة غير صالحة"), 400
+    field = d.get("field")
+    val = str(d.get("value", "")).strip()
+    v = db.execute("SELECT id, patient_id FROM visits WHERE id=?", (vid,)).fetchone()
+    if not v:
+        return jsonify(ok=False, error="الزيارة غير موجودة"), 404
+    if field != "tests":
+        ok, err = _check_completed_result_gate(db, d)
+        if not ok:
+            return jsonify(ok=False, error=err), 403
+    if field == "tests":
+        db.execute("UPDATE visits SET tests_display=? WHERE id=?", (val or None, vid))
+    elif field == "name":
+        if not val:
+            return jsonify(ok=False, error="الاسم فارغ"), 400
+        db.execute("UPDATE patients SET full_name=? WHERE id=?", (val, v["patient_id"]))
+    elif field == "gender":
+        db.execute("UPDATE patients SET gender=? WHERE id=?", (val, v["patient_id"]))
+    elif field == "age":
+        try:
+            a = float(val)
+            a = int(a) if a == int(a) else a
+        except ValueError:
+            return jsonify(ok=False, error="عمر غير صالح"), 400
+        db.execute("UPDATE patients SET age=? WHERE id=?", (a, v["patient_id"]))
+    elif field == "notes":
+        db.execute("UPDATE visits SET notes=? WHERE id=?", (val, vid))
+    elif field == "expenses":
+        try:
+            x = float(val.replace(",", ""))
+        except ValueError:
+            return jsonify(ok=False, error="رقم غير صالح"), 400
+        db.execute("UPDATE visits SET expenses=? WHERE id=?", (x, vid))
+    else:
+        return jsonify(ok=False, error="حقل غير مسموح"), 400
+    db.commit()
+    try:
+        log_action("daily_edit", "visit", vid, f"{field} -> {val[:80]}")
+    except Exception:
+        pass
+    return jsonify(ok=True, value=val)
 
 
 @app.route("/reports/monthly")
