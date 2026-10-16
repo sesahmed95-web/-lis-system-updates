@@ -129,6 +129,10 @@
   });
   $copies.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('printBtn').click(); } });
   render();
+  {% if autoprint %}
+  // فتح من شاشة "زيارة جديدة" (طباعة ملصقات العينات + ملصق الطلب): يطبع تلقائيًا بعد تحميل الصورة
+  window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 700); });
+  {% endif %}
 })();
 </script>
 </body>

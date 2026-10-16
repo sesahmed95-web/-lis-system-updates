@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block page_title %}مظهر الواجهة{% endblock %}
+{% block content %}
+<div class="card" style="max-width:640px;">
+  <h3>🧊 مظهر الواجهة (3D)</h3>
+  <p class="muted" style="font-size:13.5px;">يعطي البطاقات والأزرار وحقول الإدخال والقوائم عمقًا وظلالًا. إيقافه يرجّع الشكل المسطّح القديم لكل المستخدمين. لا يؤثر على الطباعة ولا على النتائج.</p>
+  <label style="display:flex; align-items:center; gap:10px; font-size:15px; font-weight:600; margin:14px 0; cursor:pointer;">
+    <input type="checkbox" id="ui3dSwitch" {{ 'checked' if ui_3d }} style="width:20px; height:20px;">
+    تفعيل مظهر 3D
+  </label>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <button type="button" class="btn" id="ui3dSave">💾 حفظ</button>
+    <span id="ui3dMsg" class="muted"></span>
+  </div>
+  <p class="muted" style="font-size:12px; margin-top:12px;">المربع أعلاه يعاين مباشرة على هذه الصفحة؛ الحفظ يطبّقه على جميع الأجهزة (يتحدّث بعد إعادة تحميل الصفحة).</p>
+</div>
+<script>
+(function () {
+  var sw = document.getElementById('ui3dSwitch'), msg = document.getElementById('ui3dMsg');
+  sw.addEventListener('change', function () { document.documentElement.classList.toggle('ui3d', sw.checked); msg.textContent = 'معاينة — لم يُحفظ بعد'; });
+  document.getElementById('ui3dSave').addEventListener('click', function () {
+    var fd = new FormData(); fd.append('on', sw.checked ? '1' : '0');
+    fetch('/api/settings/ui-3d', { method: 'POST', body: fd }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) { try { localStorage.removeItem('lis-ui3d-preview'); } catch (e) {} msg.textContent = '✔ تم الحفظ'; setTimeout(function () { location.reload(); }, 400); }
+      else msg.textContent = '❌ تعذّر الحفظ';
+    }).catch(function () { msg.textContent = '❌ تعذّر الحفظ'; });
+  });
+})();
+</script>
+{% endblock %}

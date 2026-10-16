@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block page_title %}{{ t('enter_results') }} — {{ visit['patient_name'] }}{% endblock %}
 {% block content %}
-<div class="card" style="margin-bottom:14px;">
+<div class="card rb-headcard" style="margin-bottom:8px;">
   <h3>{{ visit['patient_name'] }} <span class="muted mono">#{{ visit['registration_number'] }}</span></h3>
-  <p class="muted">{{ visit['gender'] }} · {{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['created_at'] }}</p>
+  <p class="muted rb-sub">{{ visit['gender'] }} · {{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['created_at'] }}</p>
   <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
   <button type="button" class="btn small secondary print-link" id="printAllLink"
      onclick="lisTopPrintBtn('{{ url_for('print_visit_full_report', visit_id=visit['id']) }}?autoprint=1', 'طباعة النتائج المكتملة')"
@@ -19,6 +19,7 @@
      onclick="lisPayRemaining()"
      title="يفتح نافذة تسديد المتبقي (ومنها تقدر تطبع ورقة المتبقي). بعد التسديد الكامل يختفي الزر">💵 المتبقي (<span id="lisBalanceAmt">{{ '{:,.0f}'.format(balance['remaining']) }}</span>) — تسديد</button>
   {% endif %}
+  <details class="rb-more"><summary>⋯ خيارات إضافية (باركود، واتساب، السابقة…)</summary>
   <a class="btn small secondary" target="_blank" href="{{ url_for('print_request_label', visit_id=visit['id']) }}"
      title="ملصق خاص بورقة طلب المريض — محتواه وقياسه وعدده مستقل عن باركود الأنابيب">🏷 باركود الطلب</a>
   <a class="btn small secondary" target="_blank" href="{{ url_for('print_visit_portal_qr', visit_id=visit['id']) }}"
@@ -58,6 +59,7 @@
     <input type="checkbox" id="showPrevToggle" checked onchange="lisApplyShowPrev()">
     إظهار النتيجة السابقة بالتقارير المطبوعة (لتحاليل الكيمياء/التخثر)
   </label>
+  </details>
 </div>
 
 <!-- نافذة الطباعة المنبثقة (modal) — نفس النمط المستخدم بصفحتي
@@ -686,6 +688,53 @@
     });
   }
 </script>
+
+<style>
+  /* ===== تقليل النزول (المسطرة الجانبية) بشاشة إدخال النتائج ===== */
+  .rb-headcard { padding: 8px 12px !important; }
+  .rb-headcard h3 { display: inline-block; margin: 0 8px 0 0; font-size: 1.05em; }
+  .rb-headcard .rb-sub { display: inline-block; margin: 0 10px 4px 0; }
+  .rb-headcard .btn.small { padding: 3px 9px; font-size: 12px; margin: 2px 2px; }
+  .rb-more { display: inline-block; margin-inline-start: 6px; vertical-align: top; }
+  .rb-more > summary { cursor: pointer; font-size: 12.5px; padding: 3px 9px; border: 1px solid #CBD5E1; border-radius: 6px; background: #F8FAFC; list-style: none; display: inline-block; }
+  .rb-more[open] { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #E2E8F0; }
+  #lisDeptBar { padding: 4px 10px !important; margin-bottom: 4px !important; }
+  #lisDeptBar select { padding: 2px 6px; min-height: 28px; }
+  .rb-grid:not(.rb-normal) { columns: 3 320px; column-gap: 10px; }
+  .rb-grid:not(.rb-normal) .rb-box { margin-bottom: 8px; padding: 8px 10px; }
+  /* الجهاز + الباركود بسطر العنوان بدل سطرين إضافيين */
+  .rb-grid:not(.rb-normal) .rb-box > p.muted { display: inline-block; margin: 0 0 4px !important; font-size: 11px; }
+  .rb-grid:not(.rb-normal) .rb-box > .form-field { display: inline-block; max-width: 170px !important; margin: 0 8px 4px !important; vertical-align: middle; }
+  .rb-grid:not(.rb-normal) .rb-box > .form-field > label { display: none; }
+  .rb-grid:not(.rb-normal) .rb-box > .form-field input { min-height: 24px !important; padding: 2px 6px !important; font-size: 12px; }
+  .rb-grid:not(.rb-normal) .rb-box table th { font-size: 11.5px; padding: 2px 6px !important; }
+  .rb-grid:not(.rb-normal) .rb-box .btn.small { padding: 2px 8px; font-size: 12px; }
+  .rb-grid:not(.rb-normal) .rb-box > div:first-child h4 { font-size: .95em; }
+  #lisFocusBtn { margin-inline-start: 6px; }
+</style>
+<script>
+  /* وضع التركيز: القائمة الجانبية للبرنامج تختفي تلقائيًا بهذي الشاشة (توسّع مساحة الإدخال)
+     بدون تغيير تفضيلك العام؛ زر "☰ القائمة" يرجّعها، وتبقى هالشاشة تتذكر اختيارك. */
+  (function () {
+    var key = 'lis-results-focus', html = document.documentElement;
+    function get() { try { return localStorage.getItem(key) !== '0'; } catch (e) { return true; } }
+    function apply(on) { html.classList.toggle('sidebar-hidden', on || (function(){try{return localStorage.getItem('lis-sidebar-hidden')==='1'}catch(e){return false}})()); }
+    var focusOn = get();
+    if (focusOn) html.classList.add('sidebar-hidden');
+    document.addEventListener('DOMContentLoaded', function () {
+      var bar = document.getElementById('lisDeptBar'); if (!bar) return;
+      var b = document.createElement('button'); b.type = 'button'; b.id = 'lisFocusBtn'; b.className = 'btn small secondary';
+      function label() { b.textContent = get() ? '☰ إظهار القائمة' : '⛶ وضع التركيز'; }
+      b.onclick = function () {
+        var on = !get(); try { localStorage.setItem(key, on ? '1' : '0'); } catch (e) {}
+        if (on) html.classList.add('sidebar-hidden');
+        else { try { if (localStorage.getItem('lis-sidebar-hidden') !== '1') html.classList.remove('sidebar-hidden'); } catch (e) { html.classList.remove('sidebar-hidden'); } }
+        label();
+      };
+      label(); bar.appendChild(b);
+    });
+  })();
+</script>
 <form method="POST" id="visitResultsForm">
   <input type="hidden" name="shown_ot_ids" id="lisShownIds" value="{% for b in boxes %}{{ b.ot['id'] }}{{ ',' if not loop.last }}{% endfor %}">
   <div id="lisDeptBar" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px; padding:8px 12px; background:#F1F5F9; border:1px solid #E2E8F0; border-radius:8px;">
@@ -1104,5 +1153,237 @@
       if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
     }, true);
   })();
+</script>
+
+<!-- ======================================================================
+     Enter = حفظ + الانتقال للباراميتر التالي (حتى لو بتحليل ثاني لنفس المريض).
+     آخر Enter = نافذة الإنهاء: طباعة / لوحة مجمّعة / حفظ PDF / واتساب.
+     ملاحظة: الحفظ يتم عند إنهاء كل تحليل (آخر باراميتر بالبطاقة) وعند آخر Enter، وليس بعد كل
+     خانة لحالها، لأن أول قيمة تنحفظ بالتحليل تحوّله إلى Completed، وإذا صارت كل تحاليل الزيارة
+     Completed يرسل السيرفر واتساب تلقائيًا — فكنا نرسل تقرير ناقص للمريض.
+     ====================================================================== -->
+<style>
+  #lisEntToast { position: fixed; bottom: 18px; inset-inline-start: 18px; z-index: 10003; display: none;
+    padding: 8px 14px; border-radius: 8px; font-size: 13px; color: #fff; background: #334155;
+    box-shadow: 0 6px 20px rgba(0,0,0,.25); max-width: 70vw; }
+  #lisEntToast.ok { background: #15803D; } #lisEntToast.err { background: #B91C1C; }
+  .rb-box.lis-ent-dirty { outline: 2px dashed #F59E0B; outline-offset: 2px; }
+  .rb-box.lis-ent-saved { outline: 2px solid #22C55E; outline-offset: 2px; }
+</style>
+<div id="lisEntToast"></div>
+
+<div id="lisFinOverlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:10004; align-items:center; justify-content:center; padding:20px;">
+  <div dir="rtl" style="background:#fff; border-radius:12px; width:100%; max-width:460px; padding:20px 22px; box-shadow:0 20px 60px rgba(0,0,0,.35);">
+    <h3 style="margin:0 0 4px;">✅ اكتمل إدخال النتائج</h3>
+    <p id="lisFinInfo" class="muted" style="margin:0 0 12px; font-size:13px;"></p>
+    <label style="display:flex; gap:8px; align-items:center; margin-bottom:9px; cursor:pointer;">
+      <input type="radio" name="lisFinMode" value="all"> <span>🖨 طباعة النتائج المكتملة (ملف كامل) <small class="muted">(1)</small></span>
+    </label>
+    <label style="display:flex; gap:8px; align-items:center; margin-bottom:9px; cursor:pointer;">
+      <input type="radio" name="lisFinMode" value="panel"> <span>🧾 طباعة اللوحة المجمّعة <small class="muted">(2)</small></span>
+    </label>
+    <label style="display:flex; gap:8px; align-items:center; margin-bottom:9px; cursor:pointer;">
+      <input type="radio" name="lisFinMode" value="pdf"> <span>📄 حفظ PDF (يفتح الملف لتحفظه) <small class="muted">(3)</small></span>
+    </label>
+    {% if visit['phone'] %}
+    <label style="display:flex; gap:8px; align-items:center; margin-bottom:9px; cursor:pointer;">
+      <input type="radio" name="lisFinMode" value="wa"> <span>📱 إرسال واتساب (ملف واحد) <small class="muted">(4)</small></span>
+    </label>
+    {% endif %}
+    <label style="display:flex; gap:6px; align-items:center; margin:12px 0 14px; font-size:13px; cursor:pointer;">
+      <input type="checkbox" id="lisFinPin"> 📌 تثبيت هذا الخيار للمرات القادمة (على هذا الجهاز)
+    </label>
+    <div style="display:flex; gap:8px;">
+      <button type="button" class="btn" id="lisFinGo">تنفيذ (Enter)</button>
+      <button type="button" class="btn secondary" id="lisFinCancel">إلغاء (Esc)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById('visitResultsForm');
+  if (!form) return;
+  var FIELD_RE = /^ot(\d+)_param_\d+$/;
+  var ALL_URL = "{{ url_for('print_visit_full_report', visit_id=visit['id']) }}?autoprint=1";
+  var PANEL_URL = "{{ url_for('print_combined_panel', visit_id=visit['id']) }}";
+  var PDF_URL = "{{ url_for('report_pdf_visit', visit_id=visit['id']) }}";
+  var WA_URL = "{{ url_for('whatsapp_api_send_visit', visit_id=visit['id']) }}";
+  var HAS_PHONE = {{ 'true' if visit['phone'] else 'false' }};
+
+  var dirty = {};            // {otId: true} بطاقات فيها تعديل غير محفوظ
+  var pendingIds = {};
+  var inflight = false, lastFailed = false, waiters = [], entGate = null;
+
+  // ---------- أدوات ----------
+  function cardOf(el) { var b = el.closest('.rb-box'); return b ? b.id.replace('rbox_', '') : ''; }
+  function fields() {
+    return Array.prototype.filter.call(form.querySelectorAll('input[name^="ot"], textarea[name^="ot"]'), function (el) {
+      return FIELD_RE.test(el.name) && !el.disabled && !el.readOnly && el.offsetParent !== null &&
+             el.type !== 'hidden' && el.type !== 'checkbox' && el.type !== 'radio';
+    });
+  }
+  function isLong(el) {            // خانات النص الطويل (Conclusion...) Enter فيها سطر جديد، Ctrl+Enter = التالي
+    var td = el.closest('td');
+    return el.tagName === 'TEXTAREA' && !!(td && td.querySelector('.math-toolbar'));
+  }
+  function focusField(el) {
+    el.focus();
+    try { if (el.select) el.select(); } catch (e) {}
+    try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
+  }
+  var toastTimer = null;
+  function toast(msg, kind, keep) {
+    var t = document.getElementById('lisEntToast');
+    t.textContent = msg; t.className = kind || ''; t.style.display = 'block';
+    clearTimeout(toastTimer);
+    if (!keep) toastTimer = setTimeout(function () { t.style.display = 'none'; }, 2200);
+  }
+  function markCard(id, cls, on) {
+    var b = document.getElementById('rbox_' + id); if (b) b.classList.toggle(cls, !!on);
+  }
+
+  // ---------- تتبّع التعديلات ----------
+  function onEdit(e) {
+    var m = FIELD_RE.exec((e.target && e.target.name) || '');
+    if (!m) return;
+    dirty[m[1]] = true; markCard(m[1], 'lis-ent-dirty', true); markCard(m[1], 'lis-ent-saved', false);
+  }
+  form.addEventListener('input', onEdit);
+  form.addEventListener('change', onEdit);
+
+  // ---------- الحفظ الصامت (متسلسل) ----------
+  function askGate() { return (typeof lisAskGate === 'function') ? lisAskGate() : null; }
+  function pump() {
+    if (inflight) return;
+    var ids = Object.keys(pendingIds);
+    if (!ids.length) { var w = waiters; waiters = []; w.forEach(function (f) { f(!lastFailed); }); return; }
+    pendingIds = {}; inflight = true; lastFailed = false;
+    toast('💾 جارِ الحفظ…', '', true);
+    var fd = new FormData(form);
+    fd.set('shown_ot_ids', ids.join(','));
+    if (entGate) { fd.set('gate_username', entGate.u); fd.set('gate_password', entGate.p); }
+    fetch(window.location.href, { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        inflight = false;
+        if (d.ok) {
+          ids.forEach(function (id) {
+            delete dirty[id]; markCard(id, 'lis-ent-dirty', false); markCard(id, 'lis-ent-saved', true);
+            var b = document.getElementById('rbox_' + id), bd = b && b.querySelector('.badge');
+            if (bd && d.saved && !/Verified/.test(bd.className)) { bd.textContent = 'Completed'; bd.className = 'badge badge-Completed'; }
+          });
+          if (!Object.keys(dirty).length && typeof lisDirty !== 'undefined') lisDirty = false;
+          toast('✓ تم الحفظ', 'ok');
+        } else if (d.needs_gate) {
+          if (entGate) { toast(d.error || 'بيانات المسؤول غير صحيحة', 'err'); entGate = null; }
+          var g = askGate();
+          if (g) { entGate = g; ids.forEach(function (id) { pendingIds[id] = true; }); }
+          else { lastFailed = true; toast('⚠ لم تُحفظ النتيجة (تعديل نتيجة مكتملة يحتاج مسؤول)', 'err'); }
+        } else {
+          lastFailed = true; toast('⚠ ' + (d.error || 'تعذّر الحفظ'), 'err');
+        }
+        pump();
+      })
+      .catch(function () { inflight = false; lastFailed = true; toast('⚠ خطأ بالاتصال — لم تُحفظ النتيجة', 'err'); pump(); });
+  }
+  function saveDirty(cb) {
+    Object.keys(dirty).forEach(function (id) { pendingIds[id] = true; });
+    if (cb) waiters.push(cb);
+    pump();
+  }
+
+  // ---------- Enter ----------
+  form.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.isComposing || e.repeat) return;
+    var el = e.target;
+    if (!el || !el.name) return;
+    var analyzer = /^ot\d+_analyzer$/.test(el.name);
+    if (!analyzer && !FIELD_RE.test(el.name)) return;
+    if (el.tagName === 'TEXTAREA') {
+      if (isLong(el)) { if (!(e.ctrlKey || e.metaKey)) return; }
+      else if (e.shiftKey) return;
+    } else if (el.tagName !== 'INPUT' || el.type === 'checkbox' || el.type === 'radio' || el.type === 'button' || el.type === 'submit') return;
+    e.preventDefault(); e.stopPropagation();
+
+    var list = fields();
+    if (analyzer) {                               // خانة الجهاز → أول باراميتر بنفس البطاقة
+      var cid = cardOf(el);
+      var first = list.filter(function (f) { return cardOf(f) === cid; })[0];
+      if (first) focusField(first);
+      return;
+    }
+    var i = list.indexOf(el); if (i < 0) return;
+    var next = list[i + 1];
+    var boundary = !next || cardOf(next) !== cardOf(el);
+    if (!next) { finish(el); return; }
+    if (boundary && Object.keys(dirty).length) saveDirty();   // انتهى هذا التحليل → احفظه بالخلفية
+    focusField(next);
+  }, true);
+
+  // ---------- نافذة الإنهاء ----------
+  var ov = document.getElementById('lisFinOverlay'), openedAt = 0, lastEl = null;
+  function radios() { return Array.prototype.slice.call(document.querySelectorAll('input[name=lisFinMode]')); }
+  function setMode(v) { radios().forEach(function (r) { r.checked = (r.value === v); }); }
+  function curMode() { var r = radios().filter(function (x) { return x.checked; })[0]; return r ? r.value : 'all'; }
+  function finOpen() { return ov.style.display === 'flex'; }
+  function finish(el) {
+    lastEl = el;
+    saveDirty(function (ok) {
+      if (!ok) { if (lastEl) lastEl.focus(); return; }
+      var empties = fields().filter(function (f) { return !String(f.value || '').trim(); }).length;
+      document.getElementById('lisFinInfo').textContent = empties ? ('ملاحظة: ' + empties + ' خانة نتيجة فارغة.') : 'كل خانات النتائج معبّأة.';
+      var pinned = null; try { pinned = localStorage.getItem('lisFinMode'); } catch (e) {}
+      if (pinned === 'wa' && !HAS_PHONE) pinned = null;
+      setMode(pinned || 'all');
+      document.getElementById('lisFinPin').checked = !!pinned;
+      ov.style.display = 'flex'; openedAt = Date.now();
+      var r = radios().filter(function (x) { return x.checked; })[0]; if (r) r.focus();
+    });
+  }
+  function finClose() { ov.style.display = 'none'; if (lastEl) { try { lastEl.focus(); } catch (e) {} } }
+  function pdfOrWa(kind) {
+    if (typeof lisPreOpen === 'function' && kind === 'pdf') lisPreOpen();
+    lisPaymentGate(function () {
+      if (kind === 'pdf') { openReportModal(PDF_URL, 'PDF — كل النتائج'); return; }
+      var fd = new FormData(); fd.set('mode', 'combined');
+      fetch(WA_URL, { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch' } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { alert(d.message || (d.ok ? 'تم الإرسال' : 'تعذّر الإرسال')); })
+        .catch(function () { alert('تعذّر الاتصال بالسيرفر'); });
+    });
+  }
+  function finGo() {
+    var mode = curMode();
+    try {
+      if (document.getElementById('lisFinPin').checked) localStorage.setItem('lisFinMode', mode);
+      else localStorage.removeItem('lisFinMode');
+    } catch (e) {}
+    ov.style.display = 'none';
+    if (mode === 'all') lisTopPrintBtn(ALL_URL, 'طباعة النتائج المكتملة');
+    else if (mode === 'panel') lisTopPrintBtn(PANEL_URL, 'اللوحة المجمّعة');
+    else if (mode === 'pdf') pdfOrWa('pdf');
+    else if (mode === 'wa') pdfOrWa('wa');
+  }
+  document.getElementById('lisFinGo').addEventListener('click', finGo);
+  document.getElementById('lisFinCancel').addEventListener('click', finClose);
+  ov.addEventListener('click', function (e) { if (e.target === ov) finClose(); });
+  window.addEventListener('keydown', function (e) {
+    if (!finOpen()) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finClose(); return; }
+    if (e.key === 'Enter') {
+      if (e.target && e.target.id === 'lisFinCancel') return;
+      e.preventDefault(); e.stopPropagation();
+      if (e.repeat || Date.now() - openedAt < 400) return;   // لا نطبع بالغلط من ضغطة Enter نفسها
+      finGo(); return;
+    }
+    var m = /^(?:Digit|Numpad)([1-4])$/.exec(e.code || '');
+    if (m) {
+      var target = ['all', 'panel', 'pdf', 'wa'][parseInt(m[1], 10) - 1];
+      if (target === 'wa' && !HAS_PHONE) return;
+      setMode(target); e.preventDefault();
+    }
+  }, true);
+})();
 </script>
 {% endblock %}

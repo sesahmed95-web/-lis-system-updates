@@ -646,6 +646,14 @@
         <span>عدد الباركود</span>
         <input type="number" id="barcodeCopiesInput" min="1" max="20" placeholder="تلقائي" style="width:64px; padding:2px 4px;">
       </div>
+      <div class="nv-toggle-wrap" title="يطبع ملصق باركود خاص بالطلب (اسم المريض + تاريخ ووقت السحب) مع ملصقات العينات">
+        <span>باركود الطلب</span>
+        <label class="nv-switch">
+          <input type="checkbox" id="toggleRequestLabel" checked>
+          <span class="nv-switch-slider"></span>
+        </label>
+        <input type="number" id="requestCopiesInput" min="1" max="50" value="1" title="عدد ملصقات الطلب" style="width:56px; padding:2px 4px;">
+      </div>
       <div class="nv-toggle-wrap">
         <span>Sample-wise</span>
         <label class="nv-switch">
@@ -669,6 +677,7 @@
   <div class="actions">
     <button type="button" class="btn" id="createdPrintBarcodeBtn" onclick="printCreatedVisitBarcode()">🏷️ طباعة الباركود</button>
     <button type="button" class="btn" id="createdPrintSampleWiseBtn" onclick="printCreatedSampleBarcodes()">🧪🏷️ طباعة ملصقات العينات</button>
+    <button type="button" class="btn" id="createdPrintRequestBtn" onclick="printCreatedRequestLabel()">🏷️ باركود الطلب</button>
     <button type="button" class="btn" id="createdPrintInvoiceBtn" onclick="printCreatedInvoice()">🧾 طباعة الفاتورة</button>
     <button type="button" class="btn" id="createdPrintQrBtn" onclick="printCreatedQr()">📱 QR المريض</button>
     <a class="btn secondary" id="goToVisitsBtn" href="#">📋 قائمة الزيارات</a>
@@ -1731,6 +1740,8 @@
             document.getElementById('toggleVisitBarcode').checked ? '' : 'none';
           document.getElementById('createdPrintSampleWiseBtn').style.display =
             document.getElementById('toggleSampleWise').checked ? '' : 'none';
+          document.getElementById('createdPrintRequestBtn').style.display =
+            document.getElementById('toggleRequestLabel').checked ? '' : 'none';
           document.getElementById('createdPrintInvoiceBtn').style.display =
             document.getElementById('toggleInvoice').checked ? '' : 'none';
 
@@ -1762,6 +1773,17 @@
     var cp = parseInt((document.getElementById('barcodeCopiesInput') || {}).value, 10);
     var q = (cp >= 1 && cp <= 20) ? ('?copies=' + cp) : '';
     window.open('/front-desk/visits/' + lastCreatedVisitId + '/print/samples' + q, '_blank');
+    // مفتاح "باركود الطلب" مفعّل: يُفتح ملصق الطلب مع ملصقات الأنابيب وبالعدد المحدّد
+    if (document.getElementById('toggleRequestLabel').checked) {
+      setTimeout(function () { window.printCreatedRequestLabel(true); }, 400);
+    }
+  };
+
+  window.printCreatedRequestLabel = function (auto) {
+    if (!lastCreatedVisitId) return;
+    var n = parseInt((document.getElementById('requestCopiesInput') || {}).value, 10);
+    var qs = '?copies=' + ((n >= 1 && n <= 50) ? n : 1) + (auto ? '&autoprint=1' : '');
+    window.open('/front-desk/visits/' + lastCreatedVisitId + '/print/request-label' + qs, '_blank');
   };
 
   window.printCreatedQr = function () {

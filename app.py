@@ -1328,6 +1328,8 @@ def inject_globals():
     # لحاله أول.
     theme_primary_color = get_setting(db, "theme_primary_color", "#205072")
     theme_page_bg_color = get_setting(db, "theme_page_bg_color", "#F3F6F8")
+    # مظهر 3D للواجهة (اختياري): الإعداد العام للجميع؛ المعاينة تتم محليًا بالمتصفح قبل التطبيق
+    ui_3d = get_setting(db, "ui_3d", "1") == "1"
     # إعدادات مظهر شاشة الترحيب/الألوان الخاصة بكل واجهة (استقبال/مختبر/الاثنين):
     # لو الواجهة الحالية لها قيمة محفوظة بمفتاح "<المفتاح>__<الواجهة>" تُستخدم بدل
     # العامة، وغير هيك تبقى القيمة العامة كما هي (فما ينكسر شي عند من ما ضبط شي).
@@ -1386,7 +1388,7 @@ def inject_globals():
         if lic["status"] == "active" and lic.get("is_trial") and lic.get("days_left") is not None:
             license_banner = f"متبقي {lic['days_left']} يوم على انتهاء الفترة التجريبية"
     db.close()
-    return dict(t=lambda key: t(lang, key), lang=lang,
+    return dict(t=lambda key: t(lang, key), lang=lang, ui_3d=ui_3d,
                 current_user=session.get("full_name") or ("المصمم" if session.get("designer_id") else None),
                 current_role=session.get("role") or ("designer" if session.get("designer_id") else None),
                 brand_name=brand_name, logo_url=logo_url,
@@ -4959,11 +4961,11 @@ _DEFAULT_LABEL_LAYOUTS = {
     },
     "request": {
         "w": 60, "h": 40, "roll": True, "copies": 1, "tmode": "full",
-        "lines": [{"f": "lab_name", "s": 6, "b": 1}, {"f": "patient_name", "s": 9, "b": 1},
-                  {"f": "age_gender", "s": 7}, {"f": "reg_no", "s": 7, "b": 1},
-                  {"f": "datetime", "s": 7}, {"f": "tests", "s": 7, "b": 1, "w": 1}],
+        # الافتراضي (حسب طلب المختبر): اسم المريض + تاريخ ووقت سحب العينة فقط.
+        # أي سطر إضافي (نص حر أو حقل ثاني) يُضاف من مصمم الملصق أعلى صفحة الطباعة.
+        "lines": [{"f": "patient_name", "s": 10, "b": 1}, {"f": "datetime", "s": 8}],
         "bc": {"type": "qr", "pos": "side", "h": 18},
-        "scan": ["reg_no", "patient_name", "age_gender", "datetime", "tests"],
+        "scan": ["reg_no", "patient_name", "datetime"],
     },
 }
 
@@ -5038,6 +5040,23 @@ def _get_label_layout(db, kind):
     except ValueError:
         raw = None
     return _sanitize_label_layout(kind, raw)
+
+
+@app.route("/management/ui-style")
+@roles_required("admin")
+def ui_style_page():
+    return render_template("management/ui_style.html")
+
+
+@app.route("/api/settings/ui-3d", methods=["POST"])
+@roles_required("admin")
+def api_set_ui_3d():
+    """تطبيق/إلغاء مظهر 3D لكل المستخدمين (المعاينة المحلية لا تحتاج هذا الطلب)."""
+    on = request.form.get("on") == "1"
+    db = get_db()
+    set_setting(db, "ui_3d", "1" if on else "0")
+    db.commit()
+    return jsonify({"ok": True, "on": on})
 
 
 @app.route("/api/settings/label-layout/<kind>", methods=["POST"])
@@ -5150,10 +5169,16 @@ def print_request_label(visit_id):
     if not visit:
         return "Not found", 404
     lab_name = get_setting(db, "app_name_ar", "") or get_setting(db, "app_name", "")
+    label_layout = dict(_get_label_layout(db, "request"))
+    # ?copies=N (من شاشة زيارة جديدة) يتجاوز العدد المحفوظ لهذه الطباعة فقط
+    _cp = request.args.get("copies", type=int)
+    if _cp and 1 <= _cp <= 50:
+        label_layout["copies"] = _cp
     return render_template(
         "front_desk/print_request_label.html", visit=visit,
+        autoprint=request.args.get("autoprint") == "1",
         label_data=_label_visit_fields(visit, lab_name, tests, draw_time),
-        label_layout=_get_label_layout(db, "request"),
+        label_layout=label_layout,
         field_titles=[(k, LABEL_FIELD_TITLES[k]) for k in LABEL_FIELDS_BY_KIND["request"]],
         scan_titles=list(LABEL_SCAN_TITLES.items()),
     )
