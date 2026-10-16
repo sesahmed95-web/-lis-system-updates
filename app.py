@@ -1236,6 +1236,34 @@ def current_lang():
     return session.get("lang", "en")
 
 
+_SKY_TH_CSS = (
+    b"<style id=\"lis-sky-th\">"
+    b"table thead th, table th, html.ui3d table thead th, html.ui3d table th, html.ui3d .rb-box table th {"
+    b"background: linear-gradient(180deg, #C8F0FF 0%, #6FD0FF 55%, #4CC2FA 100%) !important;"
+    b"color: #000 !important; font-weight: 800 !important;"
+    b"text-shadow: 0 1px 0 rgba(255,255,255,.75), 0 0 1px rgba(0,0,0,.25);"
+    b"border-bottom: 2px solid #1FA9EC !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.85);}"
+    b"</style>"
+)
+
+
+@app.after_request
+def _inject_sky_table_headers(resp):
+    """عناوين كل الجداول بصفحات البرنامج (اللي ترث base.html): سمائي فاتح زاهي + نص أسود.
+    يُحقن بنهاية <head> فيغلب أي لون قديم بدون تعديل كل قالب. صفحات الطباعة/التقارير لا تتأثر
+    (ما ترث base.html فلا يوجد فيها مفتاح lis-sidebar-hidden)."""
+    try:
+        if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        data = resp.get_data()
+        if b"lis-sidebar-hidden" not in data or b'id="lis-sky-th"' in data or b"</head>" not in data:
+            return resp
+        resp.set_data(data.replace(b"</head>", _SKY_TH_CSS + b"</head>", 1))
+    except Exception:
+        pass
+    return resp
+
+
 @app.context_processor
 def inject_globals():
     db = get_db()

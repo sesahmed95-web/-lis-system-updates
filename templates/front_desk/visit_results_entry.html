@@ -796,7 +796,7 @@
     {% for box in boxes %}
     {% set ot = box.ot %}
     {% set _txt_cnt = box.parameters|selectattr('result_type', 'equalto', 'Text')|list|length %}
-    <div class="card rb-box{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') %} rb-exam{% endif %}{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') or (box.parameters|length >= 8 and _txt_cnt == 0) %} rb-wide{% endif %}" id="rbox_{{ ot['id'] }}" data-status="{{ ot['status'] }}" data-tdid="{{ ot['test_definition_id'] }}" data-dept="{{ dept_group(ot['test_department']) }}">
+    <div class="card rb-box{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') %} rb-exam{% endif %}{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') or (box.parameters|length >= 8 and _txt_cnt == 0) %} rb-wide{% endif %}" id="rbox_{{ ot['id'] }}" data-code="{{ ot['test_code'] }}" data-np="{{ box.parameters|length }}" data-txt="{{ _txt_cnt }}" data-status="{{ ot['status'] }}" data-tdid="{{ ot['test_definition_id'] }}" data-dept="{{ dept_group(ot['test_department']) }}">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
         <h4 style="margin:0;">{{ ot['test_name'] }}</h4>
         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
@@ -1761,6 +1761,92 @@
         })
         .catch(function () { lisEdBack(); $('lisEdMsg').textContent = 'تعذّر الاتصال بالسيرفر.'; });
     };
+  })();
+</script>
+
+
+<style>
+  /* ===== v56: ترتيب ثابت بمسارين (CBC يسار — Blood film فوق Retic يمين) + بدون تكسير كلمات/أعمدة ===== */
+  .rb-grid, .rb-grid:not(.rb-normal), .rb-grid.rb-normal {
+    columns: auto !important; column-count: auto !important; column-width: auto !important;
+    display: flex !important; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+  html[dir=rtl] .rb-grid { flex-direction: row-reverse; }
+  .rb-lane { flex: 1 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .rb-lane.rb-lane-r { flex: 1.15 1 600px; }
+  .rb-lane.rb-lane-single { flex: 1 1 100%; }
+  .rb-grid .rb-box, .rb-grid .rb-box.rb-wide { margin: 0 !important; width: 100% !important; box-sizing: border-box; }
+  /* الجداول: عرض الأعمدة حسب المحتوى — الكلمة ما تنكسر أبدًا (تنزل لسطر جديد عند المسافات فقط) */
+  .rb-grid .rb-box table { table-layout: auto !important; width: 100% !important; }
+  .rb-grid .rb-box table th, .rb-grid .rb-box table td { width: auto !important; }
+  .rb-grid .rb-box table td, .rb-grid .rb-box table th { word-break: normal !important; overflow-wrap: normal !important; hyphens: none !important; overflow: visible !important; }
+  .rb-grid .rb-box table td.lis-pname { white-space: normal; min-width: 90px; font-weight: 600; }
+  .rb-grid .rb-box table td.lis-unit { white-space: nowrap !important; min-width: 62px; }
+  .rb-grid .rb-box table td.lis-range { white-space: nowrap; }
+  .rb-grid .rb-box table td.lis-range.rb-longrange { white-space: normal; min-width: 130px; }
+  .rb-grid .rb-box table th { white-space: nowrap !important; }
+  .rb-grid .rb-box table td:nth-child(4), .rb-grid .rb-box table th:nth-child(4) { width: 46% !important; min-width: 170px; }
+  .rb-grid .rb-box.rb-text table td:nth-child(4), .rb-grid .rb-box.rb-text table th:nth-child(4) { width: 62% !important; min-width: 260px; }
+  .rb-grid .rb-box table td:nth-child(5), .rb-grid .rb-box table th:nth-child(5) { width: 1% !important; white-space: nowrap; }
+  .rb-grid .rb-box table td input[type=text], .rb-grid .rb-box table td textarea { width: 100% !important; min-width: 150px; box-sizing: border-box; }
+  .rb-grid .rb-box.rb-text table td textarea { min-width: 240px; }
+</style>
+<script>
+  /* توزيع الصناديق على مسارين ثابتين: يسار = CBC وبقية التحاليل الرقمية، يمين = Blood film ثم Retic ثم BMA/BMP والتحاليل الكتابية.
+     صندوق واحد فقط = بعرض الصفحة كلها. إخفاء/إظهار الأقسام (قسم هذا الجهاز) يعيد التوزيع تلقائيًا. */
+  (function () {
+    var RIGHT = ['BF', 'BFRETIC', 'RETIC', 'HBPREP', 'SICKLE', 'FLUIDEXAM', 'WBCDIFF', 'BMA', 'BMBIOPSY', 'BMP'];
+    var grid = document.getElementById('rbGrid');
+    if (!grid) return;
+    var lastSig = null, busy = false;
+    function rows(b) { return b.querySelectorAll('tbody tr').length || 1; }
+    function weight(b) { return rows(b) + 2.5 * b.querySelectorAll('textarea').length; }
+    function isText(b) {
+      var np = parseInt(b.dataset.np, 10) || 1, tx = parseInt(b.dataset.txt, 10) || 0;
+      return RIGHT.indexOf(b.dataset.code) >= 0 || tx / np >= 0.4;
+    }
+    function isVisible(b) { return b.style.display !== 'none'; }
+    function layout(force) {
+      if (busy) return; busy = true;
+      var boxes = Array.prototype.slice.call(grid.querySelectorAll('.rb-box'));
+      var sig = boxes.map(function (b) { return b.id + (isVisible(b) ? '1' : '0'); }).join(',');
+      if (!force && sig === lastSig) { busy = false; return; }
+      lastSig = sig;
+      boxes.forEach(function (b) { b.classList.toggle('rb-text', isText(b));
+        b.querySelectorAll('td.lis-range').forEach(function (td) { td.classList.toggle('rb-longrange', (td.textContent || '').trim().length > 16); }); });
+      var vis = boxes.filter(isVisible), hid = boxes.filter(function (b) { return !isVisible(b); });
+      var L = [], R = [];
+      vis.forEach(function (b) { (isText(b) ? R : L).push(b); });
+      // ترتيب اليمين: BF ثم Retic ثم بقية الكتابية؛ اليسار: CBC أولًا
+      R.sort(function (a, b) { var ia = RIGHT.indexOf(a.dataset.code), ib = RIGHT.indexOf(b.dataset.code);
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+      L.sort(function (a, b) { return (b.dataset.code === 'CBC') - (a.dataset.code === 'CBC'); });
+      function sum(a) { return a.reduce(function (t, b) { return t + weight(b); }, 0); }
+      if (vis.length >= 2) {
+        if (!L.length || !R.length) {          // مسار فاضي: وزّع بالتساوي حسب الارتفاع
+          var all = L.length ? L : R, left = [], right = [];
+          all.forEach(function (b) { (sum(left) <= sum(right) ? left : right).push(b); });
+          L = left; R = right;
+        } else {                                // توازن: انقل من آخر اليسار لو كان أطول بكثير
+          while (L.length > 1 && sum(L) > sum(R) * 1.8 && L[L.length - 1].dataset.code !== 'CBC') R.push(L.pop());
+        }
+      }
+      var mk = function (cls) { var d = document.createElement('div'); d.className = 'rb-lane ' + cls; return d; };
+      var laneL = mk(''), laneR = mk('rb-lane-r');
+      L.forEach(function (b) { laneL.appendChild(b); });
+      R.forEach(function (b) { laneR.appendChild(b); });
+      hid.forEach(function (b) { laneL.appendChild(b); });
+      Array.prototype.slice.call(grid.querySelectorAll('.rb-lane')).forEach(function (l) { l.remove(); });
+      var lanes = [laneL, laneR].filter(function (l) { return l.querySelector('.rb-box'); });
+      if (vis.length <= 1 || lanes.length === 1) { lanes.forEach(function (l) { l.classList.add('rb-lane-single'); }); }
+      lanes.forEach(function (l) { grid.appendChild(l); });
+      // الأيمن بالـRTL/LTR: CBC أول مسار (يسار بالصفحة الإنكليزية)
+      busy = false;
+    }
+    window.lisRelayout = function () { layout(true); };
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(function () { layout(true); }, 0); });
+    var t = null;
+    new MutationObserver(function () { clearTimeout(t); t = setTimeout(function () { layout(false); }, 60); })
+      .observe(grid, { attributes: true, attributeFilter: ['style'], subtree: true });
   })();
 </script>
 
