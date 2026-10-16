@@ -221,6 +221,7 @@
           if (!g) { lisClosePending(); return; }
           return attempt(g);
         }
+        lisClosePending();
         alert(data.error || 'تعذّر حفظ/طباعة النتيجة');
       });
     }
@@ -711,6 +712,30 @@
   .rb-grid:not(.rb-normal) .rb-box .btn.small { padding: 2px 8px; font-size: 12px; }
   .rb-grid:not(.rb-normal) .rb-box > div:first-child h4 { font-size: .95em; }
   #lisFocusBtn { margin-inline-start: 6px; }
+  /* ===== استغلال عرض الشاشة: التقارير الطويلة (GSE/GUE/SFA وغيرها) تمتد بعرض الصفحة كاملة وبارامتراتها بعدة أعمدة ===== */
+  .rb-grid:not(.rb-normal) .rb-box.rb-wide { display: block !important; width: 100% !important; column-span: all; }
+  .rb-grid:not(.rb-normal) .rb-wide tbody { column-count: auto !important; column-width: 400px; column-gap: 22px; }
+  .rb-grid:not(.rb-normal) .rb-wide tbody tr {
+    grid-template-columns: minmax(70px, 1.1fr) 40px minmax(60px, .8fr) minmax(120px, 2.2fr) 56px !important; }
+  .rb-grid:not(.rb-normal) .rb-wide tbody tr td { overflow: visible; }
+  /* حقول النص: سطر واحد وتكبر حسب النص (لا تكدّس ولا ارتفاع ثابت كبير) */
+  .rb-grid:not(.rb-normal) .rb-box textarea {
+    field-sizing: content; min-height: 30px !important; max-height: 96px; height: auto; resize: none;
+    width: 100%; box-sizing: border-box; overflow-y: auto; }
+  .rb-grid:not(.rb-normal) .rb-box table td { vertical-align: middle; }
+  /* الصناديق العادية: الجدول يلتزم بعرض الصندوق (ما يطلع عمود FLAG برا الحدود) */
+  .rb-grid:not(.rb-normal) .rb-box:not(.rb-wide) table { table-layout: fixed; width: 100%; }
+  .rb-grid:not(.rb-normal) .rb-box:not(.rb-wide) table th:nth-child(1) { width: 27%; }
+  .rb-grid:not(.rb-normal) .rb-box:not(.rb-wide) table th:nth-child(2) { width: 11%; }
+  .rb-grid:not(.rb-normal) .rb-box:not(.rb-wide) table th:nth-child(3) { width: 22%; }
+  .rb-grid:not(.rb-normal) .rb-box:not(.rb-wide) table th:nth-child(5) { width: 11%; }
+  .rb-grid:not(.rb-normal) .rb-box table td input, .rb-grid:not(.rb-normal) .rb-box table td textarea, .rb-grid:not(.rb-normal) .rb-box table td select { max-width: 100%; box-sizing: border-box; }
+  .rb-grid:not(.rb-normal) .rb-box:not(.rb-wide) table td { overflow-wrap: anywhere; }
+  .rb-box { box-sizing: border-box; }
+  /* العرض العادي: عمودان بدل عمود واحد عريض فاضي */
+  .rb-grid.rb-normal { columns: 2 480px; column-gap: 14px; }
+  .rb-grid.rb-normal .rb-box.rb-wide { column-span: all; display: block; width: 100%; }
+  .rb-grid.rb-normal .rb-box textarea { field-sizing: content; min-height: 34px; max-height: 120px; resize: none; }
 </style>
 <script>
   /* وضع التركيز: القائمة الجانبية للبرنامج تختفي تلقائيًا بهذي الشاشة (توسّع مساحة الإدخال)
@@ -913,7 +938,9 @@
       </table>
 
       <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-        <a class="btn small secondary print-link" href="{{ url_for('print_report', order_test_id=ot['id']) }}">🖨 طباعة التقرير</a>
+        <a class="btn small secondary print-link" href="{{ url_for('print_report', order_test_id=ot['id']) }}"
+           onclick="lisPrintOne({{ ot['id'] }}); return false;"
+           title="يحفظ النتيجة ثم يطبع؛ إذا ما انكتبت أي نتيجة يظهر تنبيه «أكمل النتيجة» بدل نافذة الطباعة">🖨 طباعة التقرير</a>
         {% if visit['phone'] and ot['status'] in ['Completed', 'Verified'] %}
         <form method="POST" action="{{ url_for('whatsapp_send_result', order_test_id=ot['id']) }}" style="display:inline;"
               onsubmit="return confirm('إرسال نتيجة {{ ot['test_name'] }} فقط عبر واتساب لرقم المريض؟');">

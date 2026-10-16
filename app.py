@@ -6611,7 +6611,7 @@ def front_desk_notifications_mark_seen():
     return jsonify({"ok": True})
 
 
-def save_order_test_results(db, ot, parameters, form, user_id, field_prefix="", patient_id=None):
+def save_order_test_results(db, ot, parameters, form, user_id, field_prefix="", patient_id=None, fill_normal=False):
     """يحفظ نتائج تحليل واحد (order_test) من بيانات نموذج مُرسل، بنفس منطق
     الأعلام (Flag) والمرجعيات وتسجيل التأريخ المستخدم بشاشة إدخال النتائج —
     مشتركة بين شاشة الإدخال المفردة وشاشة الإدخال المُجمّع لكل تحاليل الزيارة
@@ -6637,9 +6637,31 @@ def save_order_test_results(db, ot, parameters, form, user_id, field_prefix="", 
 
     now = datetime.now().isoformat(timespec="seconds")
     touched = False
+    # GSE / GUE / SFA: الحقل اللي ما انكتب فيه شي ينزل تلقائيًا بالقيمة الطبيعية (range_text).
+    # يُطبَّق (أ) إذا انكتب أي حقل بنفس التحليل → الباقي الفارغ يتعبّى طبيعي، أو
+    # (ب) عند الطباعة المباشرة لهذا التحليل (fill_normal=True) حتى لو كل الحقول فارغة.
+    # الحفظ العادي لتحليل ما انلمس إطلاقًا لا يعبّي شي (حتى ما يكتمل تحليل لسا ما انفحص).
+    _code = ot["test_code"] if "test_code" in ot.keys() else None
+    if _code is None:
+        _r = db.execute("SELECT code FROM test_definitions WHERE id=?", (ot["test_definition_id"],)).fetchone()
+        _code = _r["code"] if _r else None
+    _is_exam = _code in ("GUE", "GSE", "SFA")
+    _any_typed = _is_exam and any((form.get(f"{field_prefix}param_{p['id']}", "") or "").strip() for p in parameters)
+    _auto_normal = _is_exam and (_any_typed or fill_normal)
     for param in parameters:
         field = f"{field_prefix}param_{param['id']}"
         value = form.get(field, "").strip()
+        if value == "" and _auto_normal:
+            _rr = find_reference_range(db, param["id"], ot["gender"], ot["age"], ot["age_unit"],
+                                       patient_id=patient_id, analyzer=analyzer_value)
+            _txt = ""
+            if _rr is not None:
+                try:
+                    _txt = (_rr["range_text"] or "").strip()
+                except (KeyError, IndexError, TypeError):
+                    _txt = ""
+            if _txt:
+                value = _txt
         if value == "":
             continue
         touched = True
@@ -8892,7 +8914,8 @@ def print_and_save_result(order_test_id):
         if t["status"] in done and not changed:
             continue
         if save_order_test_results(db, t, params, request.form, session.get("user_id"),
-                                   field_prefix=prefix, patient_id=t["patient_id"]):
+                                   field_prefix=prefix, patient_id=t["patient_id"],
+                                   fill_normal=(t["id"] == order_test_id)):
             saved_any = True
     for t, _p, _pre, _c in plan:
         has_res = db.execute("SELECT COUNT(*) c FROM results WHERE order_test_id=?", (t["id"],)).fetchone()["c"]
