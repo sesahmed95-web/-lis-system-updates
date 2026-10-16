@@ -1264,6 +1264,60 @@ def _inject_sky_table_headers(resp):
     return resp
 
 
+
+
+@app.route("/api/daily/edit", methods=["POST"])
+@login_required
+def api_daily_edit():
+    """تعديل من صفحة الحسابات اليومية. التحاليل: لأي موظف مختبر. بقية الحقول: مسؤول/مشرف بكلمة مرور."""
+    db = get_db()
+    d = request.get_json(silent=True) or {}
+    try:
+        vid = int(d.get("visit_id"))
+    except (TypeError, ValueError):
+        return jsonify(ok=False, error="زيارة غير صالحة"), 400
+    field = d.get("field")
+    val = str(d.get("value", "")).strip()
+    v = db.execute("SELECT id, patient_id FROM visits WHERE id=?", (vid,)).fetchone()
+    if not v:
+        return jsonify(ok=False, error="الزيارة غير موجودة"), 404
+    if field != "tests":
+        ok, err = _check_completed_result_gate(db, d)
+        if not ok:
+            return jsonify(ok=False, error=err), 403
+    if field == "tests":
+        db.execute("UPDATE visits SET tests_display=? WHERE id=?", (val or None, vid))
+    elif field == "name":
+        if not val:
+            return jsonify(ok=False, error="الاسم فارغ"), 400
+        db.execute("UPDATE patients SET full_name=? WHERE id=?", (val, v["patient_id"]))
+    elif field == "gender":
+        db.execute("UPDATE patients SET gender=? WHERE id=?", (val, v["patient_id"]))
+    elif field == "age":
+        try:
+            a = float(val)
+            a = int(a) if a == int(a) else a
+        except ValueError:
+            return jsonify(ok=False, error="عمر غير صالح"), 400
+        db.execute("UPDATE patients SET age=? WHERE id=?", (a, v["patient_id"]))
+    elif field == "notes":
+        db.execute("UPDATE visits SET notes=? WHERE id=?", (val, vid))
+    elif field == "expenses":
+        try:
+            x = float(val.replace(",", ""))
+        except ValueError:
+            return jsonify(ok=False, error="رقم غير صالح"), 400
+        db.execute("UPDATE visits SET expenses=? WHERE id=?", (x, vid))
+    else:
+        return jsonify(ok=False, error="حقل غير مسموح"), 400
+    db.commit()
+    try:
+        log_action("daily_edit", "visit", vid, f"{field} -> {val[:80]}")
+    except Exception:
+        pass
+    return jsonify(ok=True, value=val)
+
+
 @app.context_processor
 def inject_globals():
     db = get_db()
@@ -6155,6 +6209,40 @@ def period_breakdown(db, group_len, base_where, base_params):
     return rows, totals
 
 
+_COMMON_TEST_ABBR = [
+    ("general urine", "GUE"), ("urine general", "GUE"), ("general stool", "GSE"), ("stool general", "GSE"),
+    ("seminal fluid", "SFA"), ("semen", "SFA"), ("complete blood count", "CBC"), ("full blood count", "CBC"),
+    ("fasting blood sugar", "FBS"), ("fasting blood glucose", "FBS"), ("random blood sugar", "RBS"),
+    ("random blood glucose", "RBS"), ("hemoglobin a1c", "HbA1c"), ("glycated hemoglobin", "HbA1c"),
+    ("glycosylated", "HbA1c"), ("blood film", "BF"), ("reticulocyte", "Retic"), ("erythrocyte sedimentation", "ESR"),
+    ("blood urea", "B.Urea"), ("serum creatinine", "S.Creat"), ("creatinine", "Creat"), ("uric acid", "U.A"),
+    ("total bilirubin", "T.Bil"), ("direct bilirubin", "D.Bil"), ("alkaline phosphatase", "ALP"),
+    ("prothrombin time", "PT"), ("partial thromboplastin", "PTT"), ("bleeding time", "BT"), ("clotting time", "CT"),
+    ("thyroid stimulating", "TSH"), ("vitamin d", "Vit.D"), ("vitamin b12", "B12"), ("c-reactive", "CRP"),
+    ("rheumatoid factor", "RF"), ("blood group", "ABO"), ("bone marrow aspirat", "BMA"),
+    ("hepatitis b surface", "HBsAg"), ("hiv", "HIV"), ("widal", "Widal"), ("h. pylori", "H.pylori"),
+]
+
+
+def _abbr_test(name, short_name=None, code=None):
+    """اسم التحليل المختصر لعمود "التحاليل" بالتقرير اليومي: short_name إن وُجد، وإلا المختصر المتعارف عليه
+    (جدول أعلاه)، وإلا كود التحليل لو قصير، وإلا الأحرف الأولى من الاسم."""
+    sn = (short_name or "").strip()
+    if sn:
+        return sn
+    low = (name or "").lower()
+    for key, ab in _COMMON_TEST_ABBR:
+        if key in low:
+            return ab
+    cd = (code or "").strip()
+    if cd and len(cd) <= 8 and not cd.isdigit():
+        return cd
+    words = [w for w in re.split(r"[\s/\-_,()]+", name or "") if w]
+    if len(words) >= 2:
+        return "".join(w[0].upper() for w in words[:6] if w[0].isalnum())
+    return (name or "")[:10]
+
+
 @app.route("/reports/daily")
 @login_required
 def daily_report():
@@ -6162,7 +6250,7 @@ def daily_report():
     report_date = request.args.get("date", date.today().isoformat())
     visits = db.execute(
         "SELECT v.id, v.registration_number, v.examining_doctor, v.expenses, v.examining_doctor_fee, "
-        "rd.full_name as referring_doctor_name, "
+        "rd.full_name as referring_doctor_name, v.tests_display, "
         "v.notes, p.full_name, p.gender, p.age FROM visits v "
         "JOIN patients p ON p.id = v.patient_id "
         "LEFT JOIN doctors rd ON rd.id = v.doctor_id "
@@ -6185,7 +6273,7 @@ def daily_report():
         # - hidden_from_log=1: يُستثنى اسمه من عمود "التحاليل" (ما يظهر
         #   إطلاقًا بهذا التقرير)، مع بقاء نتيجته محفوظة بقاعدة البيانات.
         items = db.execute(
-            "SELECT td.name, td.code as test_code, td.is_examining_test, "
+            "SELECT td.name, td.short_name, td.code as test_code, td.is_examining_test, "
             "COALESCE(ot.price, td.price) as price, ot.doctor_id, "
             "ot.fee_waived, ot.hidden_from_log, ot.forwarded_cost, ot.forwarded_lab_name FROM order_tests ot "
             "JOIN test_definitions td ON td.id = ot.test_definition_id "
@@ -6193,9 +6281,12 @@ def daily_report():
             (v["id"],),
         ).fetchall()
         visible_items = [i for i in items if not i["hidden_from_log"]]
-        test_names = ", ".join(
-            i["name"] + (" (مجاني)" if i["fee_waived"] else "") for i in visible_items
+        _auto_tests = ", ".join(
+            _abbr_test(i["name"], i["short_name"], i["test_code"]) + (" (مجاني)" if i["fee_waived"] else "")
+            for i in visible_items
         )
+        # تعديل يدوي من موظف المختبر على عمود التحاليل (visits.tests_display) يتقدّم على المختصر التلقائي
+        test_names = (v["tests_display"] or "").strip() or _auto_tests
         total = sum((i["price"] or 0) for i in items if not i["fee_waived"])
         grand_total += total
         # forwarded_cost لكل تحليل بهذي الزيارة أُرسل فعليًا لمختبر آخر
@@ -6207,7 +6298,7 @@ def daily_report():
         # اسم كل تحليل مُرسَل + اسم المختبر + كلفته، بدل رقم إجمالي فقط).
         forwarded_items = [i for i in items if (i["forwarded_cost"] or 0)]
         forwarded_display = ", ".join(
-            f"{i['name']} → {i['forwarded_lab_name'] or '-'} ({i['forwarded_cost']:.0f})"
+            f"{_abbr_test(i['name'], i['short_name'], i['test_code'])} → {i['forwarded_lab_name'] or '-'} ({i['forwarded_cost']:.0f})"
             for i in forwarded_items
         )
         forwarded_total = sum((i["forwarded_cost"] or 0) for i in items)
@@ -6230,7 +6321,7 @@ def daily_report():
         # حتى تبقى "أي تحليل يحتاج توقيع دكتور فاحص" معرَّفة بمكان واحد
         # بمنطق واحد بكل التطبيق، بدل معيارين مختلفين لنفس الفكرة.
         exam_names = [
-            i["name"] for i in visible_items
+            _abbr_test(i["name"], i["short_name"], i["test_code"]) for i in visible_items
             if i["test_code"] in EXAM_SIGNATURE_TEST_CODES or bool(i["is_examining_test"])
         ]
         examining_doctor_display = v["examining_doctor"] or "-"
@@ -6253,7 +6344,7 @@ def daily_report():
         grand_remaining += remaining
 
         rows.append({
-            "reg": v["registration_number"], "name": v["full_name"],
+            "id": v["id"], "reg": v["registration_number"], "name": v["full_name"],
             "gender": v["gender"] or "-", "age": v["age"] if v["age"] is not None else "-",
             "referring_doctor": v["referring_doctor_name"] or "-",  # الطبيب المرسل
             "tests": test_names, "total": total, "doctors": ", ".join(doctor_names),
