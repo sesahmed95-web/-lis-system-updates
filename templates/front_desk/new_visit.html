@@ -1771,13 +1771,12 @@
   window.printCreatedSampleBarcodes = function () {
     if (!lastCreatedVisitId) return;
     var cp = parseInt((document.getElementById('barcodeCopiesInput') || {}).value, 10);
-    // req=0: هذي الصفحة تفتح ملصق الطلب بنفسها (مفتاح "باركود الطلب") فنمنع الفتح التلقائي المكرر من صفحة الأنابيب
-    var q = ((cp >= 1 && cp <= 20) ? ('?copies=' + cp + '&') : '?') + 'req=0';
+    // مفتاح "باركود الطلب": ملصق الطلب يُدمج بنفس صفحة ملصقات الأنابيب (بنفس أمر الطباعة) وبالعدد المحدّد،
+    // بدل نافذة منفصلة تحجبها المتصفحات.
+    var rq = document.getElementById('toggleRequestLabel').checked;
+    var rn = parseInt((document.getElementById('requestCopiesInput') || {}).value, 10);
+    var q = '?' + ((cp >= 1 && cp <= 20) ? ('copies=' + cp + '&') : '') + 'req=' + (rq ? '1' : '0') + ((rq && rn >= 1 && rn <= 50) ? ('&rcopies=' + rn) : '');
     window.open('/front-desk/visits/' + lastCreatedVisitId + '/print/samples' + q, '_blank');
-    // مفتاح "باركود الطلب" مفعّل: يُفتح ملصق الطلب مع ملصقات الأنابيب وبالعدد المحدّد
-    if (document.getElementById('toggleRequestLabel').checked) {
-      setTimeout(function () { window.printCreatedRequestLabel(true); }, 400);
-    }
   };
 
   window.printCreatedRequestLabel = function (auto) {

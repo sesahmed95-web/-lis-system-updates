@@ -12,6 +12,7 @@ import subprocess
 import webbrowser
 import shutil
 import sqlite3
+from markupsafe import escape as html_escape
 import tempfile
 import zipfile
 import threading
@@ -5450,30 +5451,79 @@ def api_patient_recent_visits(patient_id):
 
 
 def _inject_request_label_with_tubes(html, visit_id):
-    """بمجرد فتح طباعة باركود الأنابيب يطلع ملصق باركود الطلب (ورقة المريض) تلقائيًا، وزر صغير (☑) بزاوية الصفحة
-    يوقف/يشغّل ذلك (محفوظ بالجهاز). ?req=0 يعطّله لهذه الطباعة، ?req=1 يفرضه. لو المتصفح منع النافذة يظهر زر يدوي."""
-    if request.args.get("req") == "0" or "</body>" not in html:
+    """يضيف ملصق باركود الطلب (اسم المريض بالمنتصف + التاريخ والوقت + الباركود) داخل نفس صفحة طباعة الأنابيب،
+    فيطلع بنفس أمر الطباعة (نفس النافذة، بدون نوافذ منبثقة تحجبها المتصفحات) وبقياسه الخاص عبر @page مسماة.
+    مفتاح صغير 🏷 بزاوية الصفحة يشغّل/يوقف ذلك (محفوظ بالجهاز) + عدد النسخ. ?req=0 يعطّله، ?req=1 يفرضه، ?rcopies=N للنسخ."""
+    if "</body>" not in html:
         return html
-    req_url = url_for("print_request_label", visit_id=visit_id) + "?autoprint=1"
-    script = """
-<style>@media print{#lisReqTubeBox{display:none!important}}</style>
-<div id="lisReqTubeBox" style="position:fixed;top:6px;left:6px;z-index:99999;background:#fff;border:1px solid #94A3B8;border-radius:8px;padding:3px 8px;font:12px Tahoma,Arial,sans-serif;direction:rtl;box-shadow:0 2px 8px rgba(0,0,0,.2);">
-<label style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><input type="checkbox" id="lisReqTubeCb" checked> 🏷 مع باركود الطلب</label>
-<a href="#" id="lisReqTubeNow" style="display:none;margin-inline-start:8px;">اطبعه الآن</a></div>
-<script>(function(){
-  var URL_=%s, KEY='lisReqWithTube', on=true;
-  try{ on = localStorage.getItem(KEY)!=='0'; }catch(e){}
-  if(new URLSearchParams(location.search).get('req')==='1') on=true;
-  var cb=document.getElementById('lisReqTubeCb'), now=document.getElementById('lisReqTubeNow');
-  cb.checked=on;
-  function openReq(){ var w=null; try{ w=window.open(URL_+'&_ts='+Date.now(),'_blank'); }catch(e){} return !!w; }
-  cb.addEventListener('change',function(){ try{ localStorage.setItem(KEY, cb.checked?'1':'0'); }catch(e){} });
-  now.addEventListener('click',function(e){ e.preventDefault(); openReq(); });
-  if(on){ window.addEventListener('load',function(){ setTimeout(function(){ if(!openReq()) now.style.display='inline'; },300); }); }
-  else { now.style.display='inline'; }
-})();</script>
-""" % json.dumps(req_url)
-    return html.replace("</body>", script + "</body>", 1)
+    db = get_db()
+    visit, tests, draw_time = _visit_barcode_context(db, visit_id)
+    if not visit:
+        return html
+    lab_name = get_setting(db, "app_name_ar", "") or get_setting(db, "app_name", "")
+    lay = _get_label_layout(db, "request")
+    f = _label_visit_fields(visit, lab_name, tests, draw_time)
+    tmode = lay.get("tmode", "full")
+    names = {"full": f.get("tests_full", []), "short": f.get("tests_short", [])}.get(tmode, [])
+    tests_text = ", ".join(names) if names else f.get("tests_codes", "")
+    lines_html = ""
+    for ln in lay.get("lines", []):
+        k = ln.get("f")
+        txt = ln.get("t", "") if k == "custom" else (tests_text if k == "tests" else f.get(k, ""))
+        if not txt:
+            continue
+        st = f"font-size:{ln.get('s', 9)}pt;text-align:{ln.get('a', 'center')};" + ("font-weight:700;" if ln.get("b") else "")
+        lines_html += f'<div class="lrq-ln" style="{st}">{html_escape(str(txt))}</div>'
+    bc = lay.get("bc") or {}
+    bh = bc.get("h", 16)
+    if bc.get("type") == "qr":
+        src = url_for("visit_request_qr", visit_id=visit_id) + "?scan=" + ",".join(lay.get("scan") or ["reg_no"]) + "&tm=" + ("full" if tmode == "full" else "short")
+    else:
+        src = url_for("visit_barcode_code128", visit_id=visit_id)
+    side = bc.get("pos") == "side"
+    img = (f'<img src="{src}" style="height:{bh}mm;max-width:{"45%" if side else "100%"};'
+           f'{"" if bc.get("type") == "qr" else ("width:100%;" if not side else "")}object-fit:contain;image-rendering:pixelated;">')
+    w, h = lay.get("w") or 60, lay.get("h") or 40
+    copies = request.args.get("rcopies", type=int) or lay.get("copies", 1) or 1
+    copies = max(1, min(50, copies))
+    forced = request.args.get("req")
+    label = (f'<div class="lrq-label" style="width:{w}mm;height:{h}mm;">'
+             f'<div class="lrq-body" style="flex-direction:{"row" if side else "column"};">'
+             f'<div class="lrq-txt">{lines_html}</div><div class="lrq-bc">{img}</div></div></div>')
+    block = f"""
+<style>
+  @page lrqpage {{ size: {w}mm {h}mm; margin: 0; }}
+  #lisReqSection {{ margin: 18px auto; text-align: center; }}
+  #lisReqSection .lrq-head {{ font: 700 14px Tahoma, Arial, sans-serif; color: #205072; margin-bottom: 8px; }}
+  .lrq-label {{ display: inline-block; vertical-align: top; margin: 4px; background: #fff; border: 1px dashed #94A3B8; border-radius: 4px; overflow: hidden; padding: 1.2mm 2mm; box-sizing: border-box; color: #000; }}
+  .lrq-body {{ width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; gap: 1.5mm; }}
+  .lrq-txt {{ flex: 1 1 auto; min-width: 0; }} .lrq-ln {{ line-height: 1.18; word-break: break-word; unicode-bidi: plaintext; }}
+  .lrq-bc {{ flex: 0 0 auto; display: flex; justify-content: center; max-width: 100%; }} .lrq-body[style*="column"] .lrq-bc {{ width: 100%; }}
+  #lisReqBox {{ position: fixed; top: 6px; left: 6px; z-index: 99999; background: #fff; border: 1px solid #94A3B8; border-radius: 8px; padding: 3px 8px; font: 12px Tahoma, Arial, sans-serif; direction: rtl; box-shadow: 0 2px 8px rgba(0,0,0,.2); }}
+  @media print {{
+    #lisReqBox, #lisReqSection .lrq-head {{ display: none !important; }}
+    #lisReqSection {{ margin: 0; display: block; }}
+    .lrq-label {{ page: lrqpage; display: block; margin: 0; border: none; border-radius: 0; page-break-after: always; break-after: page; }}
+    .lrq-label:first-of-type {{ page-break-before: always; break-before: page; }}
+    #lisReqSection .lrq-label:last-child {{ page-break-after: auto; break-after: auto; }}
+  }}
+</style>
+<div id="lisReqSection"><div class="lrq-head">🏷 باركود الطلب — يُطبع مع الأنابيب بنفس أمر الطباعة</div><div id="lisReqLabels">{label * copies}</div></div>
+<div id="lisReqBox"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><input type="checkbox" id="lisReqCb"> 🏷 مع باركود الطلب</label>
+ <input type="number" id="lisReqN" min="1" max="50" value="{copies}" title="عدد نسخ ملصق الطلب" style="width:46px;padding:1px 3px;"></div>
+<script>(function(){{
+  var KEY='lisReqWithTube', forced={json.dumps(forced)}, on=true;
+  try{{ on = localStorage.getItem(KEY)!=='0'; }}catch(e){{}}
+  if(forced==='0') on=false; if(forced==='1') on=true;
+  var cb=document.getElementById('lisReqCb'), sec=document.getElementById('lisReqSection'), n=document.getElementById('lisReqN'), box=document.getElementById('lisReqLabels');
+  var one=box.querySelector('.lrq-label').outerHTML;
+  function show(){{ sec.style.display = cb.checked ? '' : 'none'; }}
+  cb.checked=on; show();
+  cb.addEventListener('change',function(){{ try{{ localStorage.setItem(KEY, cb.checked?'1':'0'); }}catch(e){{}} show(); }});
+  n.addEventListener('input',function(){{ var c=Math.max(1,Math.min(50,parseInt(n.value,10)||1)); box.innerHTML=new Array(c+1).join(one); }});
+}})();</script>
+"""
+    return html.replace("</body>", block + "</body>", 1)
 
 
 @app.route("/front-desk/visits/<int:visit_id>/print/samples")
