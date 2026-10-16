@@ -1550,9 +1550,23 @@ def find_reference_range(conn, test_parameter_id, gender, age, age_unit, patient
     return candidates[0]
 
 
-def get_test_price(db, test_definition_id, doctor_id=None):
-    """Price to charge for a test: the doctor's own rate if one is set for
-    that doctor+test, otherwise the lab's default price."""
+def center_has_price_list(db, center_id):
+    """True إذا هذا المختبر المُرسِل عنده قائمة أسعار خاصة (سطر واحد على الأقل بجدول center_test_prices)."""
+    if not center_id:
+        return False
+    return db.execute("SELECT 1 FROM center_test_prices WHERE center_id=? LIMIT 1", (center_id,)).fetchone() is not None
+
+
+def get_test_price(db, test_definition_id, doctor_id=None, center_id=None):
+    """Price to charge for a test.
+    - مختبر مُرسِل عنده قائمة أسعار: سعره الخاص فقط؛ إذا التحليل بدون سعر عنده يرجع None (فارغ + تنبيه بالواجهة).
+    - غير ذلك: سعر الدكتور (إن وُجد) وإلا السعر الافتراضي للمختبر."""
+    if center_id and center_has_price_list(db, center_id):
+        row = db.execute(
+            "SELECT price FROM center_test_prices WHERE center_id=? AND test_definition_id=?",
+            (center_id, test_definition_id),
+        ).fetchone()
+        return row["price"] if row is not None else None
     if doctor_id:
         row = db.execute(
             "SELECT price FROM doctor_test_prices WHERE doctor_id=? AND test_definition_id=?",
@@ -1562,6 +1576,88 @@ def get_test_price(db, test_definition_id, doctor_id=None):
             return row["price"]
     row = db.execute("SELECT price FROM test_definitions WHERE id=?", (test_definition_id,)).fetchone()
     return row["price"] if row else 0.0
+
+
+def expand_required_tests(db, test_ids):
+    """يضيف التحاليل المطلوبة تلقائيًا (مثلاً BF يحتاج CBC). test_definitions.requires_codes = أكواد مفصولة بفاصلة.
+    CBC لا يحتاج BF (الشرط باتجاه واحد). يرجّع قائمة نصوص ids بنفس الترتيب + المضاف بالآخر."""
+    out = [str(t) for t in test_ids]
+    seen = set(out)
+    i = 0
+    while i < len(out):
+        row = db.execute("SELECT requires_codes FROM test_definitions WHERE id=?", (out[i],)).fetchone()
+        i += 1
+        if not row or not (row["requires_codes"] or "").strip():
+            continue
+        for code in [c.strip() for c in row["requires_codes"].split(",") if c.strip()]:
+            r = db.execute("SELECT id FROM test_definitions WHERE UPPER(code)=UPPER(?) AND is_active=1", (code,)).fetchone()
+            if r and str(r["id"]) not in seen:
+                seen.add(str(r["id"]))
+                out.append(str(r["id"]))
+    return out
+
+
+def sync_test_sections(db):
+    """كل تحليل بدون section_id وعنده department يُربط بقسم بنفس الاسم (يُنشأ إن لم يوجد).
+    هذا يغطي التحاليل المضافة من نافذة + Add Test أو الإضافة السريعة."""
+    rows = db.execute(
+        "SELECT id, department FROM test_definitions WHERE section_id IS NULL AND TRIM(COALESCE(department,''))<>''"
+    ).fetchall()
+    if not rows:
+        return
+    cache = {}
+    for sc in db.execute("SELECT id, name, dept_name FROM sections").fetchall():
+        cache[((sc["dept_name"] or sc["name"] or "").strip().lower())] = sc["id"]
+    for r in rows:
+        dep = r["department"].strip()
+        sid = cache.get(dep.lower())
+        if sid is None:
+            nxt = db.execute("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM sections").fetchone()["n"]
+            sid = db.execute("INSERT INTO sections (name, parent_id, dept_name, sort_order) VALUES (?, NULL, ?, ?)",
+                             (dep, dep, nxt)).lastrowid
+            cache[dep.lower()] = sid
+        db.execute("UPDATE test_definitions SET section_id=? WHERE id=?", (sid, r["id"]))
+    db.commit()
+
+
+def ensure_sections_schema(conn):
+    """v54: شجرة الأقسام + أسعار المختبرات المُرسِلة + رموز بديلة + شرط ارتباط التحاليل (BF -> CBC)."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS sections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            parent_id INTEGER,
+            dept_name TEXT,
+            sort_order INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS center_test_prices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            center_id INTEGER NOT NULL,
+            test_definition_id INTEGER NOT NULL,
+            price REAL NOT NULL,
+            UNIQUE(center_id, test_definition_id)
+        );
+        """
+    )
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(test_definitions)").fetchall()}
+    for col, typ in (("section_id", "INTEGER"), ("aliases", "TEXT"), ("requires_codes", "TEXT")):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE test_definitions ADD COLUMN {col} {typ}")
+    ocols = {r[1] for r in conn.execute("PRAGMA table_info(order_tests)").fetchall()}
+    if "price_missing" not in ocols:   # 1 = التحليل بدون سعر عند المختبر المُرسِل (السعر المخزّن 0)
+        conn.execute("ALTER TABLE order_tests ADD COLUMN price_missing INTEGER DEFAULT 0")
+    conn.commit()
+    sync_test_sections(conn)
+    # بذور مرة وحدة: BF يحتاج CBC + رموز بديلة شائعة (لا تُكتب فوق تعديلك لاحقًا)
+    done = conn.execute("SELECT value FROM settings WHERE key='v54_seeded'").fetchone()
+    if not done:
+        conn.execute("UPDATE test_definitions SET requires_codes='CBC' WHERE UPPER(code)='BF' AND COALESCE(requires_codes,'')=''")
+        for code, al in (("BF", "BLOOD FILM,FILM"), ("RETIC", "RETICULOCYTE,RETIC COUNT"),
+                         ("FIBRINOGEN", "FIBRIONGEN,FIB"), ("ESR", "ESR 1H")):
+            conn.execute("UPDATE test_definitions SET aliases=? WHERE UPPER(code)=? AND COALESCE(aliases,'')=''", (al, code))
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('v54_seeded', '1')")
+        conn.commit()
 
 
 def find_or_create_doctor(db, name):
@@ -1656,6 +1752,7 @@ def init_db():
             conn.rollback()
     if fresh:
         seed(conn)
+    ensure_sections_schema(conn)
     ensure_examining_tests(conn)
     ensure_bfretic_parameters(conn)
     ensure_retic_parameters(conn)
@@ -1669,6 +1766,10 @@ def init_db():
     ensure_coag_parameters(conn)
     ensure_vldl_parameter(conn)
     apply_client_preset(conn)
+    try:
+        sync_test_sections(conn)   # التحاليل المزروعة/المستوردة أعلاه تُربط بأقسامها
+    except Exception as _e:
+        print('sync_test_sections skipped:', _e)
     conn.close()
 
 
@@ -1729,6 +1830,24 @@ def _pick(row, cols, skip=()):
 def _apply_preset_catalog(conn, cat):
     """يطابق التحاليل بالـcode والباراميترات بالاسم (ids تختلف بين البرنامجين). يحدّث الموجود ويضيف الناقص."""
     td_cols = _cols_of(conn, "test_definitions")
+    try:   # الأقسام: تُنشأ بالاسم (الأب أولاً) ولا تُحذف أقسام العميل الموجودة
+        _secs = list(cat.get("sections") or [])
+        for _pass in range(3):
+            for sc in _secs:
+                nm = str(sc.get("name") or "").strip()
+                if not nm or conn.execute("SELECT 1 FROM sections WHERE LOWER(name)=LOWER(?)", (nm,)).fetchone():
+                    continue
+                pn = str(sc.get("parent_name") or "").strip()
+                pid = None
+                if pn:
+                    pr = conn.execute("SELECT id FROM sections WHERE LOWER(name)=LOWER(?)", (pn,)).fetchone()
+                    if not pr:
+                        continue
+                    pid = pr["id"]
+                conn.execute("INSERT INTO sections (name, parent_id, dept_name, sort_order) VALUES (?, ?, ?, ?)",
+                             (nm, pid, sc.get("dept_name"), sc.get("sort_order") or 0))
+    except Exception as _e:
+        print("preset sections skipped:", type(_e).__name__, _e)
     tp_cols = _cols_of(conn, "test_parameters")
     rr_cols = _cols_of(conn, "reference_ranges")
     code_to_id = {}
@@ -1736,7 +1855,12 @@ def _apply_preset_catalog(conn, cat):
         code = str(t.get("code") or "").strip()
         if not code:
             continue
-        vals = _pick(t, td_cols, skip=("id", "code"))
+        vals = _pick(t, td_cols, skip=("id", "code", "section_id"))
+        _sec = str(t.get("section_name") or "").strip()
+        if _sec and "section_id" in td_cols:
+            _sr = conn.execute("SELECT id FROM sections WHERE LOWER(name)=LOWER(?)", (_sec,)).fetchone()
+            if _sr:
+                vals["section_id"] = _sr["id"]
         row = conn.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
         if row:
             if vals:

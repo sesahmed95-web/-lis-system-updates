@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block page_title %}💲 أسعار المختبرات المُرسِلة{% endblock %}
+{% block content %}
+<div class="card" dir="rtl">
+  <h3>💲 أسعار المختبرات المُرسِلة</h3>
+  <p class="muted">لكل مختبر قائمة أسعار مستقلة. <b>الخانة الفارغة = بدون سعر</b>: يظهر تنبيه بصفحة الزيارة ولا يدخل بالمجموع، ويظهر بكشف الحساب الشهري كتحليل غير مسعّر.
+  المختبر الذي ليس عنده أي سعر هنا يبقى بالسعر الافتراضي كالسابق.</p>
+  <form method="get" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px">
+    <div><label>المختبر</label><br>
+      <select name="center_id" onchange="this.form.submit()"><option value="">— اختر —</option>
+      {% for l in labs %}<option value="{{ l['id'] }}" {{ 'selected' if l['id'] == center_id else '' }}>{{ l['name'] }}</option>{% endfor %}</select></div>
+    <a class="btn secondary" href="{{ url_for('referral_labs_list') }}">إدارة المختبرات</a>
+  </form>
+
+  {% if center_id %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    <form method="post"><input type="hidden" name="center_id" value="{{ center_id }}"><input type="hidden" name="action" value="copy_default">
+      <button class="btn secondary" type="submit" onclick="return confirm('نسخ الأسعار الافتراضية للتحاليل الناقصة؟')">نسخ الأسعار الافتراضية</button></form>
+    <form method="post" style="display:flex;gap:6px"><input type="hidden" name="center_id" value="{{ center_id }}"><input type="hidden" name="action" value="copy_from">
+      <select name="src_center_id">{% for l in labs if l['id'] != center_id %}<option value="{{ l['id'] }}">{{ l['name'] }}</option>{% endfor %}</select>
+      <button class="btn secondary" type="submit">نسخ من مختبر</button></form>
+    <input id="lpFilter" placeholder="🔎 بحث…" autocomplete="off">
+  </div>
+  <form method="post">
+    <input type="hidden" name="center_id" value="{{ center_id }}"><input type="hidden" name="action" value="save">
+    <table style="width:100%">
+      <thead><tr><th>القسم</th><th>الرمز</th><th>التحليل</th><th>السعر الافتراضي</th><th>سعر هذا المختبر</th></tr></thead>
+      <tbody>
+      {% for t in tests %}
+      <tr class="lp-row"><td>{{ t['sec'] }}</td><td dir="ltr"><b>{{ t['code'] }}</b></td><td>{{ t['name'] }}</td>
+        <td class="muted">{{ t['price']|int if t['price'] else '—' }}</td>
+        <td><input type="number" step="any" min="0" name="price_{{ t['id'] }}" value="{{ prices.get(t['id'], '') }}" placeholder="بدون سعر" style="width:120px"></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <button class="btn" type="submit" style="margin-top:10px">💾 حفظ أسعار المختبر</button>
+  </form>
+  <script>(function(){var i=document.getElementById('lpFilter');i.addEventListener('input',function(){var q=i.value.toLowerCase().trim();
+    document.querySelectorAll('.lp-row').forEach(function(r){r.style.display=(!q||r.textContent.toLowerCase().indexOf(q)!==-1)?'':'none';});});})();</script>
+  {% endif %}
+</div>
+{% endblock %}

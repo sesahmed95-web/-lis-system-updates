@@ -104,6 +104,21 @@
   .nv-param-panel .nv-param-row label { flex: 1; font-weight: normal; }
   .nv-param-panel input[type="number"] { width: 64px; font-size: 11.5px; }
   .nv-param-panel .nv-param-hint { color: #64748B; font-size: 11px; margin-bottom: 4px; }
+  /* قسم بتحليل واحد باسم القسم نفسه: نعرض البارامترات مباشرة بدون سطر مكرر */
+  .nv-sec.nv-flat .nv-sec-grid { display: block; padding: 2px 16px 8px; }
+  .nv-sec.nv-flat .checkbox-item-wrap { display: block; width: 100%; }
+  .nv-sec.nv-flat .checkbox-item-wrap > .nv-param-arrow { display: none; }
+  .nv-sec.nv-flat .checkbox-item { display: flex; align-items: center; gap: 4px; }
+  .nv-sec.nv-flat .checkbox-item > span[id^="test_label_"] { display: none; }
+  .nv-sec.nv-flat .checkbox-item::after { content: 'تحديد الكل'; order: 1; }
+  .nv-sec.nv-flat .checkbox-item > .muted { order: 2; }
+  .nv-sec.nv-flat .nv-param-panel { position: static; display: block; box-shadow: none; border: 0;
+    border-top: 1px dashed #E2E8F0; border-radius: 0; padding: 4px 0 0; min-width: 0; }
+  .nv-sec-actions { display: inline-flex; gap: 2px; margin-inline-start: 6px; }
+  .nv-sec-actions button { border: none; background: transparent; cursor: pointer; font-size: 12px; padding: 0 3px; line-height: 1; opacity: .7; }
+  .nv-sec-actions button:hover { opacity: 1; }
+  .nv-typed-tools { display: flex; gap: 6px; margin-top: 4px; }
+  .nv-typed-tools button:disabled { opacity: .45; cursor: default; }
   .nv-partial-badge { font-size: 10.5px; color: #B45309; background: #FEF3C7; border-radius: 4px;
     padding: 0 4px; margin-inline-start: 3px; }
 
@@ -140,6 +155,24 @@
     max-height: calc(100vh - 370px); min-height: 220px; overflow-y: auto;
     padding: 6px 8px; border: 1px solid #E2E8F0; border-radius: 8px; align-content: start; }
   .nv-checkbox-grid .checkbox-item { font-size: 12.5px; line-height: 1.25; }
+  .nv-sec { grid-column: 1 / -1; border-bottom: 1px solid #EEF2F7; padding: 1px 0; }
+  .nv-sec .nv-sec { margin-inline-start: 14px; border-bottom: 0; }
+  .nv-sec > summary { cursor: pointer; font-weight: 600; font-size: 13px; padding: 4px 2px; list-style: none; display: flex; gap: 6px; align-items: center; }
+  .nv-sec > summary::-webkit-details-marker { display: none; }
+  .nv-sec > summary::before { content: '\25C2'; color: #64748B; display: inline-block; transition: transform .15s; }
+  .nv-sec[open] > summary::before { transform: rotate(-90deg); }
+  .nv-sec-sel { margin-inline-start: auto; font-size: 11px; font-weight: 600; color: #1D4ED8; }
+  .nv-sec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 3px 8px; padding: 2px 16px 8px; }
+  .nv-sec-tools { display: flex; gap: 6px; margin-bottom: 4px; }
+  .nv-typed { margin-bottom: 8px; }
+  .nv-typed label { font-size: 12.5px; font-weight: 600; display: block; margin-bottom: 3px; }
+  .nv-typed input { width: 100%; }
+  .nv-warn { margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: #FEF3C7; color: #92400E; font-size: 12.5px; line-height: 1.6; }
+  .nv-sel-summary { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12.5px; }
+  .nv-sel-summary td { padding: 3px 6px; border-top: 1px solid #EEF2F7; }
+  .nv-sel-summary .nv-p { text-align: left; white-space: nowrap; }
+  .nv-nop { color: #B91C1C; background: #FEE2E2; padding: 1px 6px; border-radius: 6px; font-size: 11.5px; }
+  .nv-auto { color: #1D4ED8; background: #DBEAFE; padding: 1px 6px; border-radius: 6px; font-size: 11px; margin-inline-start: 6px; }
   .nv-custom { margin-bottom: 6px; }
   .nv-custom > summary, .nv-extra > summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: #1D4ED8;
     padding: 2px 0; list-style: none; }
@@ -462,6 +495,16 @@
     </div>
     {% endif %}
 
+    <div class="nv-typed">
+      <label for="typedTests">⌨️ اكتب رموز التحاليل (فاصلة بين كل تحليل) ثم Enter</label>
+      <input type="text" id="typedTests" dir="ltr" autocomplete="off" placeholder="LFT, RFT, TFT, BF, Retic, ESR, PT, PTT, Fibrinogen">
+      <div class="nv-typed-tools">
+        <button type="button" class="btn small secondary" id="nvUndoBtn" onclick="nvUndo()" disabled title="تراجع عن آخر إضافة/حذف تحليل (Ctrl+Z)">↶ تراجع</button>
+        <button type="button" class="btn small secondary" id="nvClearBtn" onclick="nvClearTests()" title="إلغاء تحديد كل التحاليل (يمكن التراجع عنه)">🗑 مسح الكل</button>
+      </div>
+      <div id="nvWarn" class="nv-warn" style="display:none;"></div>
+      <div id="nvSelWrap" style="display:none;"><table class="nv-sel-summary"><tbody id="nvSelBody"></tbody></table></div>
+    </div>
     <details class="nv-custom"><summary>➕ تحليل غير موجود بالقائمة؟</summary>
     <div id="customTestRow">
       <div class="form-field" style="flex:2; min-width:180px;">
@@ -477,8 +520,7 @@
     <small class="muted" id="customTestError" style="display:none; color:#DC2626; display:none;"></small>
     </details>
 
-    <div class="checkbox-grid nv-checkbox-grid">
-      {% for test in tests %}
+    {% macro nv_test_item(test) %}
       <span class="checkbox-item-wrap" id="test_item_{{ test['id'] }}">
       <label class="checkbox-item">
         <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}"
@@ -500,7 +542,20 @@
       <input type="hidden" id="selected_params_{{ test['id'] }}" name="selected_params_{{ test['id'] }}" value="">
       <div class="nv-param-panel" id="paramPanel_{{ test['id'] }}" style="display:none;"></div>
       </span>
-      {% endfor %}
+    {% endmacro %}
+    {% macro nv_section(node, depth) %}
+    <details class="nv-sec" data-sec="{{ node['id'] }}">
+      <summary><span class="nv-sec-name">{{ node['name'] }}</span><span class="muted nv-sec-count">({{ node['count'] }})</span><span class="nv-sec-sel"></span>{% if node['id'] %}<span class="nv-sec-actions"><button type="button" title="تعديل اسم القسم" onclick="event.preventDefault();event.stopPropagation();nvSecRename(this)">✏️</button><button type="button" title="إضافة تحليل جديد لهذا القسم" onclick="event.preventDefault();event.stopPropagation();nvSecAddTest(this)">➕</button><button type="button" title="إخفاء القسم وكل تحاليله من قائمة الطلبات" onclick="event.preventDefault();event.stopPropagation();nvSecHideAll(this)">🚫</button></span>{% endif %}</summary>
+      {% if node['tests'] %}<div class="nv-sec-grid">{% for test in node['tests'] %}{{ nv_test_item(test) }}{% endfor %}</div>{% endif %}
+      {% for ch in node['children'] %}{{ nv_section(ch, depth + 1) }}{% endfor %}
+    </details>
+    {% endmacro %}
+    <div class="nv-sec-tools">
+      <button type="button" class="btn small secondary" onclick="nvSecToggleAll(true)">فتح كل الأقسام</button>
+      <button type="button" class="btn small secondary" onclick="nvSecToggleAll(false)">طي الكل</button>
+    </div>
+    <div class="checkbox-grid nv-checkbox-grid">
+      {% for node in section_tree %}{{ nv_section(node, 0) }}{% endfor %}
     </div>
     <div class="nv-pay">
       <div class="form-grid">
@@ -538,6 +593,9 @@
         <input type="checkbox" name="sample_collected" id="sample_collected" value="1">
         ✅ تم سحب العينة
       </label>
+      <button type="button" class="btn small secondary" id="nvCancelFormBtn" onclick="nvCancelForm()"
+              style="padding:4px 10px; font-size:12.5px; white-space:nowrap; color:#B91C1C;"
+              title="مسح كل معلومات المراجع وتحاليله والمبالغ والبدء من جديد (للمراجع المنسحب قبل حفظ الزيارة)">🗑 مسح الاستمارة</button>
       <a class="btn small secondary" id="printBarcodeBtn" href="#" target="_blank"
          style="padding:4px 10px; font-size:12.5px; white-space:nowrap; pointer-events:none; opacity:.5;"
          title="يفعّل بعد حفظ الزيارة">🖨️ طباعة الباركود</a>
@@ -615,6 +673,7 @@
     <button type="button" class="btn" id="createdPrintQrBtn" onclick="printCreatedQr()">📱 QR المريض</button>
     <a class="btn secondary" id="goToVisitsBtn" href="#">📋 قائمة الزيارات</a>
     <button type="button" class="btn secondary" onclick="startAnotherVisit()">➕ زيارة جديدة أخرى</button>
+    <button type="button" class="btn danger" onclick="nvCancelSavedVisit()" title="المراجع انسحب: حذف هذه الزيارة وتحاليلها وأي مبالغ مستلمة">🗑 إلغاء هذه الزيارة</button>
   </div>
 </div>
 <iframe id="barcodePrintFrame" style="display:none;" title="barcode-print"></iframe>
@@ -676,17 +735,178 @@
   const DOCTOR_PRICES = {{ doctor_prices|tojson }};
   const DOCTOR_NAME_TO_ID = {{ doctor_name_to_id|tojson }};
   const EXAM_RATES = {{ examining_rates|tojson }};
+  // الأسعار تُضبط من صفحة أسعار التحاليل فقط. غيّرها إلى true لو احتجت خانة السعر السريعة داخل لوحة البارامترات.
+  const NV_ALLOW_PARAM_PRICE_EDIT = false;
 
   function currentDoctorId() {
     const typed = (document.getElementById('doctor_name').value || '').trim().toLowerCase();
     return typed && DOCTOR_NAME_TO_ID.hasOwnProperty(typed) ? String(DOCTOR_NAME_TO_ID[typed]) : null;
   }
 
+  const TEST_META = {{ test_meta|tojson }};
+  const LAB_PRICES = {{ lab_prices|tojson }};          // {labId: {testId: price}} — فقط للمختبرات التي لها قائمة أسعار
+  const LAB_NAME_TO_ID = {{ lab_name_to_id|tojson }};
+  const NV_AUTO = {};       // تحاليل أُضيفت تلقائيًا بسبب شرط الارتباط (BF -> CBC)
+  let nvTypedIds = {};
+  let nvUnknown = [];
+  let nvNotes = [];
+
+  function currentLabId() {
+    const el = document.getElementById('referral_lab_name');
+    const v = ((el && el.value) || '').trim().toLowerCase();
+    return v && LAB_NAME_TO_ID.hasOwnProperty(v) ? String(LAB_NAME_TO_ID[v]) : null;
+  }
+
+  // يرجّع null = بدون سعر (مختبر مُرسِل عنده قائمة أسعار والتحليل ليس فيها)
   function priceFor(testId, doctorId) {
+    const labId = currentLabId();
+    if (labId && LAB_PRICES[labId]) {
+      return LAB_PRICES[labId].hasOwnProperty(testId) ? LAB_PRICES[labId][testId] : null;
+    }
     if (doctorId && DOCTOR_PRICES[doctorId] && DOCTOR_PRICES[doctorId].hasOwnProperty(testId)) {
       return DOCTOR_PRICES[doctorId][testId];
     }
     return DEFAULT_PRICES[testId] || 0;
+  }
+
+  function nvNorm(s) { return (s || '').toUpperCase().replace(/[\s.\-_\/]+/g, ''); }
+  const NV_TOKENS = {};
+  (function () {
+    const ids = Object.keys(TEST_META);
+    ids.forEach(function (id) { const k = nvNorm(TEST_META[id].code); if (k && !NV_TOKENS[k]) NV_TOKENS[k] = id; });
+    ids.forEach(function (id) { TEST_META[id].aliases.forEach(function (a) { const k = nvNorm(a); if (k && !NV_TOKENS[k]) NV_TOKENS[k] = id; }); });
+    ids.forEach(function (id) {
+      [TEST_META[id].name, TEST_META[id].name_ar].forEach(function (n) { const k = nvNorm(n); if (k && !NV_TOKENS[k]) NV_TOKENS[k] = id; });
+    });
+  })();
+
+  // "ESRPT" بدون فاصلة => ESR + PT (تقسيم لرموز معروفة فقط، وإلا يبقى غير معروف)
+  function nvSegment(str) {
+    const keys = Object.keys(NV_TOKENS).filter(function (k) { return k.length >= 2; });
+    const memo = {};
+    function go(i) {
+      if (i === str.length) return [];
+      if (memo[i] !== undefined) return memo[i];
+      let best = null;
+      for (let n = 0; n < keys.length; n++) {
+        const k = keys[n];
+        if (str.startsWith(k, i)) {
+          const rest = go(i + k.length);
+          if (rest) { const cand = [k].concat(rest); if (!best || cand.length < best.length) best = cand; }
+        }
+      }
+      memo[i] = best;
+      return best;
+    }
+    return go(0);
+  }
+
+  function nvApplyTyped() {
+    const inp = document.getElementById('typedTests');
+    if (!inp) return;
+    const toks = inp.value.split(/[,\n\u060C;]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+    const found = {}; const unknown = []; nvNotes = [];
+    toks.forEach(function (tk) {
+      const id = NV_TOKENS[nvNorm(tk)];
+      if (id) { found[id] = true; return; }
+      const parts = tk.split(/\s+/);
+      if (parts.length > 1) {
+        const ids = parts.map(function (p) { return NV_TOKENS[nvNorm(p)]; });
+        if (ids.every(Boolean)) { ids.forEach(function (x) { found[x] = true; }); return; }
+      }
+      const seg = nvSegment(nvNorm(tk));
+      if (seg && seg.length > 1) {
+        seg.forEach(function (k) { found[NV_TOKENS[k]] = true; });
+        nvNotes.push('«' + tk + '» فُهمت كـ ' + seg.map(function (k) { return (TEST_META[NV_TOKENS[k]] || {}).code || k; }).join(' + '));
+        return;
+      }
+      unknown.push(tk);
+    });
+    Object.keys(nvTypedIds).forEach(function (id) {
+      if (!found[id]) { const cb = document.getElementById('test_' + id); if (cb) { cb.checked = false; nvClearPartial(id); } }
+    });
+    Object.keys(found).forEach(function (id) {
+      const cb = document.getElementById('test_' + id);
+      if (cb) { cb.checked = true; delete NV_AUTO[id]; } else { unknown.push((TEST_META[id] || {}).code || id); }
+    });
+    nvTypedIds = found; nvUnknown = unknown;
+    refreshPrices();
+  }
+
+  // شرط الارتباط: BF يحتاج CBC. CBC المضاف تلقائيًا يُزال إذا أُلغي BF (إلا إذا اختاره المستخدم بنفسه). CBC لا يجلب BF.
+  function nvEnforceRequires() {
+    const need = {};
+    document.querySelectorAll('.test-check:checked').forEach(function (cb) {
+      const m = TEST_META[cb.value];
+      if (!m) return;
+      m.requires.forEach(function (rid) { (need[rid] = need[rid] || []).push(cb.value); });
+    });
+    Object.keys(need).forEach(function (rid) {
+      const rc = document.getElementById('test_' + rid);
+      if (rc && !rc.checked) { rc.checked = true; NV_AUTO[rid] = true; }
+    });
+    Object.keys(NV_AUTO).forEach(function (rid) {
+      if (!need[rid]) {
+        const rc = document.getElementById('test_' + rid);
+        if (rc && rc.checked) rc.checked = false;
+        delete NV_AUTO[rid];
+      }
+    });
+    return need;
+  }
+
+  function nvMissingPrices() {
+    const doctorId = currentDoctorId(); const out = [];
+    document.querySelectorAll('.test-check:checked').forEach(function (cb) {
+      if (nvSelectedParamIds(cb.value).length) return;
+      if (priceFor(cb.value, doctorId) === null) out.push(cb.value);
+    });
+    return out;
+  }
+
+  function nvRenderSummary() {
+    const doctorId = currentDoctorId();
+    const body = document.getElementById('nvSelBody');
+    const wrap = document.getElementById('nvSelWrap');
+    const warn = document.getElementById('nvWarn');
+    if (!body || !wrap || !warn) return;
+    body.innerHTML = '';
+    const missing = [];
+    document.querySelectorAll('.test-check:checked').forEach(function (cb) {
+      const id = cb.value; const m = TEST_META[id] || { code: '', name: (document.getElementById('test_label_' + id) || {}).textContent || id, section: '' };
+      const partial = nvSelectedParamIds(id);
+      const price = partial.length ? nvPartialPriceSum(id, partial) : priceFor(id, doctorId);
+      const tr = document.createElement('tr');
+      const c1 = document.createElement('td'); c1.dir = 'ltr'; c1.style.textAlign = 'right'; c1.style.fontWeight = '600'; c1.textContent = m.code;
+      const c2 = document.createElement('td'); c2.textContent = m.name;
+      if (NV_AUTO[id]) { const b = document.createElement('span'); b.className = 'nv-auto'; b.textContent = 'أُضيف تلقائيًا'; c2.appendChild(b); }
+      const c3 = document.createElement('td'); c3.className = 'muted'; c3.textContent = m.section;
+      const c4 = document.createElement('td'); c4.className = 'nv-p';
+      if (price === null) { missing.push(m.code || m.name); const b = document.createElement('span'); b.className = 'nv-nop'; b.textContent = 'بدون سعر'; c4.appendChild(b); }
+      else { c4.textContent = Math.round(price).toLocaleString('en-US'); }
+      [c1, c2, c3, c4].forEach(function (c) { tr.appendChild(c); });
+      body.appendChild(tr);
+    });
+    wrap.style.display = body.children.length ? '' : 'none';
+    const msgs = [];
+    const labId = currentLabId();
+    const labEl = document.getElementById('referral_lab_name');
+    if (labEl && labEl.value.trim() && !(labId && LAB_PRICES[labId])) msgs.push('هذا المختبر ليس له قائمة أسعار: يُستخدم السعر الافتراضي.');
+    if (missing.length) msgs.push('⚠ تحاليل بدون سعر لهذا المختبر: ' + missing.join('، ') + ' — لا تدخل بالمبلغ الكلي. أضف أسعارها من «أسعار المختبرات».');
+    if (nvUnknown.length) msgs.push('رموز غير معروفة: ' + nvUnknown.join('، '));
+    Object.keys(NV_AUTO).forEach(function (rid) { const m = TEST_META[rid]; if (m) msgs.push(m.code + ' أُضيف تلقائيًا لأن BF يحتاجه.'); });
+    nvNotes.forEach(function (n) { msgs.push(n); });
+    warn.style.display = msgs.length ? '' : 'none';
+    warn.textContent = msgs.join('  ');
+    document.querySelectorAll('.nv-sec').forEach(function (d) {
+      const n = d.querySelectorAll('.test-check:checked').length;
+      const el = d.querySelector(':scope > summary .nv-sec-sel');
+      if (el) el.textContent = n ? ('✓ ' + n) : '';
+    });
+  }
+
+  function nvSecToggleAll(open) {
+    document.querySelectorAll('.nv-sec').forEach(function (d) { d.open = !!open; });
   }
 
   // ------------------------------------------------------------------
@@ -786,7 +1006,7 @@
     if (!panel) return;
     if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
     // إغلاق أي لوحة ثانية مفتوحة حتى ما تتراكم فوق بعضها.
-    document.querySelectorAll('.nv-param-panel').forEach(function (p) { p.style.display = 'none'; });
+    document.querySelectorAll('.nv-param-panel').forEach(function (p) { if (!p.closest('.nv-flat')) p.style.display = 'none'; });
     if (nvParamCache[testId]) {
       panel.style.display = 'block';
       return;
@@ -821,8 +1041,10 @@
         'onclick="nvRenameParam(\'' + testId + '\', ' + p.id + ', this)">✏️</button>' +
         (hasPrice
           ? '<span class="muted">' + Math.round(p.price) + '</span>'
-          : '<input type="number" min="0" step="any" placeholder="سعر" data-param-price-input="' + p.id + '" ' +
-            'onchange="nvSaveParamPrice(\'' + testId + '\', ' + p.id + ', this)">') +
+          : (NV_ALLOW_PARAM_PRICE_EDIT
+              ? '<input type="number" min="0" step="any" placeholder="سعر" data-param-price-input="' + p.id + '" ' +
+                'onchange="nvSaveParamPrice(\'' + testId + '\', ' + p.id + ', this)">'
+              : '<span class="nv-nop" title="يُضبط السعر من صفحة أسعار التحاليل">بدون سعر</span>')) +
         '</div>';
     });
     // إضافة باراميتر جديد لهذا التحليل مباشرة من نفس اللوحة — بدون فتح
@@ -962,11 +1184,12 @@
 
   document.addEventListener('click', function (e) {
     if (!e.target.closest('.checkbox-item-wrap')) {
-      document.querySelectorAll('.nv-param-panel').forEach(function (p) { p.style.display = 'none'; });
+      document.querySelectorAll('.nv-param-panel').forEach(function (p) { if (!p.closest('.nv-flat')) p.style.display = 'none'; });
     }
   });
 
   function refreshPrices() {
+    nvEnforceRequires();
     const doctorId = currentDoctorId();
     let total = 0;
     let anyExamCheckedTestChecked = false;
@@ -979,8 +1202,12 @@
       const label = document.getElementById('price_' + testId);
       const wrap = document.getElementById('pricewrap_' + testId);
       if (cb.checked) {
-        total += price;
-        if (label) label.textContent = Math.round(price);
+        if (price === null) {
+          if (label) { label.textContent = 'بدون سعر'; label.style.color = '#B91C1C'; }
+        } else {
+          total += price;
+          if (label) { label.textContent = Math.round(price); label.style.color = ''; }
+        }
         if (wrap) wrap.style.display = '';
       } else {
         if (wrap) wrap.style.display = 'none';
@@ -989,6 +1216,7 @@
     });
     document.getElementById('grandTotal').textContent = Math.round(total);
     updateBilling();
+    nvRenderSummary();
 
     // دكتور المختبر الفاحص يظهر فقط إذا كان أحد الفحوصات المؤهلة مختارًا
     const examField = document.getElementById('examiningDoctorField');
@@ -1000,7 +1228,300 @@
     }
 
     refreshExamFeePreview();
+    nvSyncTyped(false, false);
+    nvPushHistory();
   }
+
+  // ------------------------------------------------------------------
+  // مزامنة صندوق الرموز مع الخانات المؤشّرة + تراجع خطوة خطوة + مسح الكل
+  // ------------------------------------------------------------------
+  function nvClearPartial(testId) {
+    const hidden = document.getElementById('selected_params_' + testId);
+    if (hidden) hidden.value = '';
+    const panel = document.getElementById('paramPanel_' + testId);
+    if (panel) panel.querySelectorAll('input[type=checkbox]').forEach(function (c) { c.checked = false; });
+    nvUpdatePartialBadge(testId);
+  }
+
+  // يكتب رموز التحاليل المؤشّرة داخل الصندوق (التي لها رمز معروف فقط، حتى ما يُلغى تحليل بالغلط عند الكتابة)
+  function nvSyncTyped(force, trail) {
+    const inp = document.getElementById('typedTests');
+    if (!inp) return;
+    if (!force && document.activeElement === inp) return;   // لا نكتب فوق ما يكتبه المستخدم الآن
+    const codes = []; const ids = {};
+    document.querySelectorAll('.test-check:checked').forEach(function (cb) {
+      const id = cb.value;
+      if (NV_AUTO[id]) return;                                // المضاف تلقائيًا (BF -> CBC) لا يدخل الصندوق
+      const m = TEST_META[id];
+      if (!m || !m.code || NV_TOKENS[nvNorm(m.code)] !== id) return;
+      ids[id] = true; codes.push(m.code);
+    });
+    const extra = (nvUnknown || []).filter(function (u) { return codes.indexOf(u) === -1; });
+    let val = codes.concat(extra).join(', ');
+    if (trail && val) val += ', ';
+    if (inp.value !== val) inp.value = val;
+    nvTypedIds = ids;
+  }
+
+  const NV_HIST = []; let nvHistLast = ''; let nvRestoring = false;
+  function nvSnapshot() {
+    const ids = []; const params = {};
+    document.querySelectorAll('.test-check:checked').forEach(function (cb) { ids.push(cb.value); });
+    document.querySelectorAll('input[id^="selected_params_"]').forEach(function (h) {
+      if (h.value) params[h.id.replace('selected_params_', '')] = h.value;
+    });
+    return { ids: ids, params: params };
+  }
+  function nvUpdateUndoBtn() {
+    const b = document.getElementById('nvUndoBtn');
+    if (b) b.disabled = NV_HIST.length === 0;
+  }
+  function nvPushHistory() {
+    if (nvRestoring) return;
+    const key = JSON.stringify(nvSnapshot());
+    if (key === nvHistLast) return;
+    if (nvHistLast) { NV_HIST.push(JSON.parse(nvHistLast)); if (NV_HIST.length > 100) NV_HIST.shift(); }
+    nvHistLast = key;
+    nvUpdateUndoBtn();
+  }
+  function nvApplySnapshot(snap) {
+    nvRestoring = true;
+    try {
+      Object.keys(NV_AUTO).forEach(function (k) { delete NV_AUTO[k]; });
+      document.querySelectorAll('.test-check').forEach(function (cb) { cb.checked = snap.ids.indexOf(cb.value) !== -1; });
+      document.querySelectorAll('input[id^="selected_params_"]').forEach(function (h) {
+        const id = h.id.replace('selected_params_', '');
+        h.value = snap.params[id] || '';
+        const panel = document.getElementById('paramPanel_' + id);
+        if (panel) {
+          const sel = h.value ? h.value.split(',') : [];
+          panel.querySelectorAll('input[type=checkbox][data-param-id]').forEach(function (c) { c.checked = sel.indexOf(c.getAttribute('data-param-id')) !== -1; });
+        }
+        nvUpdatePartialBadge(id);
+      });
+      nvUnknown = [];
+      refreshPrices();
+      nvSyncTyped(true, false);
+    } finally { nvRestoring = false; }
+  }
+  window.nvUndo = function () {
+    if (!NV_HIST.length) return;
+    const snap = NV_HIST.pop();
+    nvApplySnapshot(snap);
+    nvHistLast = JSON.stringify(nvSnapshot());
+    nvUpdateUndoBtn();
+  };
+  window.nvClearTests = function () {
+    if (!document.querySelectorAll('.test-check:checked').length) return;
+    const prev = nvSnapshot();
+    nvApplySnapshot({ ids: [], params: {} });
+    // المسح نفسه يُحسب كخطوة قابلة للتراجع
+    NV_HIST.push(prev); if (NV_HIST.length > 100) NV_HIST.shift();
+    nvHistLast = JSON.stringify(nvSnapshot());
+    nvUpdateUndoBtn();
+  };
+  document.addEventListener('keydown', function (e) {
+    if (!((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !e.shiftKey)) return;
+    const t = e.target || {};
+    if (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|number|email|tel|password)$/.test(t.type || 'text'))) return;
+    e.preventDefault();
+    nvUndo();
+  });
+
+  // ------------------------------------------------------------------
+  // قسم فيه تحليل واحد باسم القسم (مثل Coagulation > Coagulation Tests):
+  // نخفي السطر المكرر ونعرض البارامترات والأسعار مباشرة عند فتح القسم.
+  // ------------------------------------------------------------------
+  // ------------------------------------------------------------------
+  // أزرار القسم: ➕ إضافة تحليل للقسم (نفس مسار "+ Add Test" /api/tests/quick-add
+  // مع اسم القسم كـ department) — 🚫 إخفاء القسم = إخفاء كل تحاليله (quick-hide)
+  // ------------------------------------------------------------------
+  function nvSecName(btn) {
+    const sec = btn.closest('.nv-sec');
+    return { sec: sec, id: sec.getAttribute('data-sec'), name: ((sec.querySelector(':scope > summary .nv-sec-name') || {}).textContent || '').trim() };
+  }
+  function nvApi(url, payload) {
+    const opt = { method: 'POST' };
+    if (payload instanceof URLSearchParams) opt.body = payload;
+    else if (payload) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(payload); }
+    return fetch(url, opt).then(function (r) {
+      if (r.redirected) throw new Error('perm');            // صلاحية/جلسة: السيرفر حوّل لصفحة ثانية
+      return r.text().then(function (t) {
+        let d; try { d = JSON.parse(t); } catch (e) { throw new Error('perm'); }
+        return d;
+      });
+    });
+  }
+  function nvApiErr(e) {
+    alert(e && e.message === 'perm' ? 'ليست لديك صلاحية لهذا الإجراء، أو انتهت الجلسة. أعد تسجيل الدخول وحاول مرة ثانية.' : 'تعذّر الاتصال بالخادم');
+  }
+  function nvTodayStr() {
+    const d = new Date(); const p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+
+  window.nvSecRename = function (btn) {
+    const o = nvSecName(btn);
+    const nn = prompt('اسم القسم الجديد:', o.name);
+    if (nn === null) return;
+    const t = nn.trim();
+    if (!t || t === o.name) return;
+    nvApi('/api/sections/' + o.id + '/rename', { name: t }).then(function (d) {
+      if (!d.ok) { alert(d.error || 'تعذّر تعديل اسم القسم'); return; }
+      o.sec.querySelector(':scope > summary .nv-sec-name').textContent = d.name;
+      o.sec.querySelectorAll('.checkbox-item-wrap').forEach(function (w) {
+        const id = w.id.replace('test_item_', '');
+        if (TEST_META[id] && w.closest('.nv-sec') === o.sec) TEST_META[id].section = d.name;
+      });
+      refreshPrices();
+    }).catch(nvApiErr);
+  };
+
+  window.nvSecAddTest = function (btn) {
+    const o = nvSecName(btn);
+    const name = prompt('اسم التحليل الجديد داخل قسم «' + o.name + '»:');
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    nvApi('/api/sections/' + o.id + '/add-test', { name: trimmed }).then(function (data) {
+      if (!data.ok) { alert(data.error || 'تعذّر إضافة التحليل'); return; }
+      const idStr = String(data.id);
+      DEFAULT_PRICES[idStr] = 0;
+      TEST_META[idStr] = { code: data.code, name: data.name, name_ar: '', section: o.name, aliases: [], requires: [] };
+      const k = nvNorm(data.code); if (k && !NV_TOKENS[k]) NV_TOKENS[k] = idStr;
+      if (document.getElementById('test_' + idStr)) return;
+      let grid = o.sec.querySelector(':scope > .nv-sec-grid');
+      if (!grid) {
+        grid = document.createElement('div');
+        grid.className = 'nv-sec-grid';
+        const firstChild = o.sec.querySelector(':scope > .nv-sec');
+        if (firstChild) o.sec.insertBefore(grid, firstChild); else o.sec.appendChild(grid);
+      }
+      // صار بالقسم أكثر من تحليل: نلغي العرض المباشر للبارامترات
+      if (o.sec.classList.contains('nv-flat')) {
+        o.sec.classList.remove('nv-flat');
+        o.sec.querySelectorAll('.nv-param-panel').forEach(function (pn) { pn.style.display = 'none'; });
+      }
+      const wrap = document.createElement('span');
+      wrap.className = 'checkbox-item-wrap';
+      wrap.id = 'test_item_' + idStr;
+      wrap.innerHTML = '<label class="checkbox-item">' +
+        '<input type="checkbox" class="test-check" id="test_' + idStr + '" name="tests" value="' + idStr + '" data-exam="0">' +
+        '<span id="test_label_' + idStr + '"></span> ' +
+        '<span class="muted" id="pricewrap_' + idStr + '" style="display:none;">(<span id="price_' + idStr + '">0</span>)</span>' +
+        '</label>' +
+        '<input type="hidden" id="selected_params_' + idStr + '" name="selected_params_' + idStr + '" value="">';
+      wrap.querySelector('#test_label_' + idStr).textContent = data.name;
+      grid.appendChild(wrap);
+      wrap.querySelector('.test-check').addEventListener('change', nvMainCheckboxChanged);
+      o.sec.open = true;
+      const cnt = o.sec.querySelector(':scope > summary .nv-sec-count');
+      if (cnt) cnt.textContent = '(' + o.sec.querySelectorAll('.checkbox-item-wrap').length + ')';
+    }).catch(nvApiErr);
+  };
+
+  window.nvSecHideAll = function (btn) {
+    const o = nvSecName(btn);
+    const n = o.sec.querySelectorAll('.checkbox-item-wrap').length;
+    if (!n) { alert('لا توجد تحاليل داخل هذا القسم.'); return; }
+    if (!confirm('مسح القسم «' + o.name + '» وكل تحاليله (' + n + ') من قائمة الطلبات؟\nلا تُحذف نتائج أو زيارات سابقة، ويمكن إظهار التحاليل لاحقًا من كتالوج التحاليل.')) return;
+    nvApi('/api/sections/' + o.id + '/hide').then(function (d) {
+      if (!d.ok) { alert(d.error || 'تعذّر مسح القسم'); return; }
+      (d.hidden || []).forEach(function (id) {
+        const cb = document.getElementById('test_' + id);
+        if (cb && cb.checked) { cb.checked = false; nvClearPartial(String(id)); }
+        const item = document.getElementById('test_item_' + id);
+        if (item) item.remove();
+      });
+      refreshPrices();
+      if (!o.sec.querySelector('.checkbox-item-wrap')) o.sec.remove();
+    }).catch(nvApiErr);
+  };
+
+  // مراجع انسحب: قبل الحفظ = مسح الاستمارة؛ بعد الحفظ = إلغاء الزيارة نفسها
+  window.nvCancelForm = function () {
+    if (typeof visitAlreadySaved !== 'undefined' && visitAlreadySaved && lastCreatedVisitId) { nvCancelSavedVisit(); return; }
+    if (!confirm('مسح كل معلومات المراجع وتحاليله والمبالغ والبدء من جديد؟')) return;
+    try { newVisitForm.reset(); } catch (e) {}
+    window.location.reload();
+  };
+  window.nvCancelSavedVisit = function () {
+    if (typeof lastCreatedVisitId === 'undefined' || !lastCreatedVisitId) { alert('لا توجد زيارة محفوظة لإلغائها.'); return; }
+    const reg = (document.getElementById('createdRegNumber') || {}).textContent || '';
+    if (!confirm('إلغاء الزيارة رقم ' + reg + ' بالكامل؟\nسيُحذف نهائيًا: معلومات المراجع وتحاليله وفاتورته وأي مبالغ مستلمة منه.')) return;
+    nvApi('/api/visits/' + lastCreatedVisitId + '/cancel', new URLSearchParams()).then(function (d) {
+      if (!d.ok) { alert(d.error || 'تعذّر إلغاء الزيارة'); return; }
+      alert('تم إلغاء الزيارة وحذف كل ما يتبعها.');
+      window.location.reload();
+    }).catch(nvApiErr);
+  };
+
+  // إضافة التحاليل المحددة حاليًا إلى زيارة سابقة لنفس المريض بنفس اليوم
+  window.nvAddToVisit = function (visitId, btn) {
+    const checked = document.querySelectorAll('.test-check:checked');
+    if (!checked.length) { alert('حدّد التحاليل المطلوب إضافتها من قائمة التحاليل أولاً.'); return; }
+    const sc = document.getElementById('sample_collected');
+    const paid = parseFloat(paidAmountInput.value) || 0;
+    if (!confirm('إضافة ' + checked.length + ' تحليل (المبلغ حسب تسعير الصفحة: ' + document.getElementById('grandTotal').textContent + ') إلى هذه الزيارة؟' +
+        (paid ? '\nالواصل الآن: ' + paid : '') + (sc && sc.checked ? '' : '\nملاحظة: «تم سحب العينة» غير مؤشّرة، فتُضاف بانتظار سحب العينة.'))) return;
+    const body = new URLSearchParams();
+    checked.forEach(function (cb) {
+      body.append('tests', cb.value);
+      const h = document.getElementById('selected_params_' + cb.value);
+      if (h && h.value) body.append('selected_params_' + cb.value, h.value);
+    });
+    body.append('paid_amount', String(paid));
+    body.append('sample_collected', sc && sc.checked ? '1' : '0');
+    btn.disabled = true;
+    nvApi('/api/visits/' + visitId + '/add-tests', body).then(function (d) {
+      btn.disabled = false;
+      if (!d.ok) { alert(d.error || 'تعذّرت إضافة التحاليل'); return; }
+      const names = d.added.map(function (a) { return a.name; }).join('، ');
+      const row = btn.closest('.prev-visit-row');
+      const chip = row && row.querySelector('.tests-chip');
+      if (chip) chip.textContent = (chip.textContent && chip.textContent !== 'بدون تحاليل' ? chip.textContent + '، ' : '') + names;
+      const miss = d.added.filter(function (a) { return a.price_missing; }).length;
+      alert('تمت إضافة: ' + names + '\nالمجموع الجديد للزيارة: ' + Math.round(d.total) + '  |  الواصل: ' + Math.round(d.paid) + '  |  الباقي: ' + Math.round(d.remaining) +
+            (miss ? '\n⚠ ' + miss + ' تحليل بدون سعر لهذا المختبر (لم يدخل بالمجموع).' : ''));
+      nvClearTests();
+      paidAmountInput.value = 0; if (paidFullCheck) paidFullCheck.checked = false;
+      delete totalAmountInput.dataset.userEdited; updateBilling();
+    }).catch(function (e) { btn.disabled = false; nvApiErr(e); });
+  };
+
+  function nvFlatNorm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, ''); }
+  function nvFlattenSections() {
+    document.querySelectorAll('.nv-sec').forEach(function (sec) {
+      if (sec.querySelector(':scope > .nv-sec')) return;
+      const wraps = sec.querySelectorAll(':scope > .nv-sec-grid > .checkbox-item-wrap');
+      if (wraps.length !== 1) return;
+      const sName = nvFlatNorm((sec.querySelector(':scope > summary .nv-sec-name') || {}).textContent);
+      const tName = nvFlatNorm((wraps[0].querySelector('span[id^="test_label_"]') || {}).textContent);
+      if (!sName || !tName || (tName.indexOf(sName) === -1 && sName.indexOf(tName) === -1)) return;
+      if (wraps[0].querySelector('.nv-param-arrow[onclick^="nvToggleParamPanel"]') === null) return;  // GUE/GSE/SFA: بدون بارامترات
+      sec.classList.add('nv-flat');
+    });
+  }
+  function nvLoadFlat(sec) {
+    const wrap = sec.querySelector(':scope > .nv-sec-grid > .checkbox-item-wrap');
+    if (!wrap) return;
+    const testId = wrap.id.replace('test_item_', '');
+    const panel = document.getElementById('paramPanel_' + testId);
+    if (!panel) return;
+    panel.style.display = 'block';
+    if (panel.dataset.flatLoaded) return;
+    if (nvParamCache[testId]) { nvRenderParamPanel(testId, nvParamCache[testId]); panel.dataset.flatLoaded = '1'; return; }
+    panel.innerHTML = '<div class="nv-param-hint">جارِ التحميل...</div>';
+    fetch('/api/test-definitions/' + testId + '/parameters')
+      .then(function (r) { return r.json(); })
+      .then(function (list) { nvParamCache[testId] = list; nvRenderParamPanel(testId, list); panel.dataset.flatLoaded = '1'; })
+      .catch(function () { panel.innerHTML = '<div class="nv-param-hint">تعذّر تحميل البارامترات.</div>'; });
+  }
+  document.addEventListener('toggle', function (e) {
+    const d = e.target;
+    if (d && d.classList && d.classList.contains('nv-flat') && d.open) nvLoadFlat(d);
+  }, true);
+  nvFlattenSections();
 
   function refreshExamFeePreview() {
     const doctorName = document.getElementById('examining_doctor').value;
@@ -1164,6 +1685,8 @@
       alert('الرجاء تأكيد خانة "✅ تم سحب العينة" قبل حفظ الزيارة.');
       return;
     }
+    const nvMiss = nvMissingPrices();
+    if (nvMiss.length && !confirm('يوجد ' + nvMiss.length + ' تحليل بدون سعر لهذا المختبر (لن يدخل بالمبلغ الكلي). هل تريد حفظ الزيارة؟')) return;
     createVisitBtn.disabled = true;
     fetch(window.location.href, {
       method: 'POST',
@@ -1274,6 +1797,22 @@
   }
 
   document.getElementById('doctor_name').addEventListener('input', refreshPrices);
+  (function () {
+    const lab = document.getElementById('referral_lab_name');
+    if (lab) { lab.addEventListener('input', refreshPrices); lab.addEventListener('change', refreshPrices); }
+    const typed = document.getElementById('typedTests');
+    if (typed) {
+      let tmr = null;
+      typed.addEventListener('input', function () { clearTimeout(tmr); tmr = setTimeout(nvApplyTyped, 300); });
+      typed.addEventListener('blur', nvApplyTyped);
+      typed.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); clearTimeout(tmr); nvApplyTyped(); nvSyncTyped(true, true); }
+      });
+    }
+    document.querySelectorAll('.test-check').forEach(function (cb) {
+      cb.addEventListener('click', function () { if (cb.checked === false && NV_AUTO[cb.value]) { /* يُعاد تأشيره تلقائيًا إن بقي BF */ } else { delete NV_AUTO[cb.value]; } });
+    });
+  })();
   document.getElementById('examining_doctor').addEventListener('change', refreshExamFeePreview);
   document.querySelectorAll('.test-check').forEach(function (cb) {
     cb.addEventListener('change', nvMainCheckboxChanged);
@@ -1360,6 +1899,9 @@
             '<span class="actions">' +
             '<button type="button" class="btn small secondary" onclick="viewPreviousVisit(' + data.patient.id + ')">مشاهدة</button>' +
             '<button type="button" class="btn small secondary" onclick="printPreviousVisit(' + v.id + ')">طباعة</button>' +
+            (String(v.created_at || '').slice(0, 10) === nvTodayStr()
+              ? '<button type="button" class="btn small" onclick="nvAddToVisit(' + v.id + ', this)" title="إضافة التحاليل المحددة حاليًا لهذه الزيارة بدل إنشاء زيارة جديدة">➕ إضافة التحاليل المحددة لهذه الزيارة</button>'
+              : '') +
             '<label style="font-size:12px; display:flex; align-items:center; gap:4px;">' +
             '<input type="checkbox" onchange="toggleIncludeVisit(' + v.id + ', this.checked)"> تضمين مع الحالية بجدول موحّد</label>' +
             '</span></div>';
@@ -1793,8 +2335,16 @@ document.addEventListener('DOMContentLoaded', function () {
     var q = norm(inp.value);
     document.querySelectorAll('.nv-checkbox-grid .checkbox-item-wrap').forEach(function (w) {
       var cb = w.querySelector('input.test-check');
-      var show = !q || (cb && cb.checked) || norm(w.textContent).indexOf(q) !== -1;
+      var m = TEST_META[cb ? cb.value : ''] || {};
+      var hay = norm(w.textContent + ' ' + (m.code || '') + ' ' + (m.aliases || []).join(' '));
+      var show = !q || (cb && cb.checked) || hay.indexOf(q) !== -1;
       w.style.display = show ? '' : 'none';
+    });
+    var secs = Array.prototype.slice.call(document.querySelectorAll('.nv-checkbox-grid .nv-sec')).reverse();
+    secs.forEach(function (d) {
+      var vis = Array.prototype.some.call(d.querySelectorAll('.checkbox-item-wrap'), function (w) { return w.style.display !== 'none'; });
+      d.style.display = (!q || vis) ? '' : 'none';
+      if (q && vis) d.open = true;
     });
   }
   inp.addEventListener('input', run);

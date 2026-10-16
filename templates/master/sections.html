@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block page_title %}🗂️ الأقسام{% endblock %}
+{% block content %}
+<div dir="rtl">
+<div class="card">
+  <h3>🗂️ أقسام التحاليل</h3>
+  <p class="muted">القسم الرئيسي (مثل «كيمياء») يضم أقسامًا فرعية (كيمياء حيوية، هرمونات، فيتامينات، دلائل ورمية). تظهر بصفحة الزيارة الجديدة كقوائم يفتحها السهم.
+  «اسم القسم بالتقارير» هو نفس حقل القسم (department) القديم: ما تكتبه هنا يظهر بمصمم التقارير وبعناوين اللوحة المجمّعة. اتركه فارغًا للقسم الرئيسي الذي يعمل كمجموعة فقط.</p>
+
+  <form method="post" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:12px 0">
+    <input type="hidden" name="action" value="add">
+    <div><label>اسم القسم</label><br><input name="name" required placeholder="مثال: Tumor markers"></div>
+    <div><label>يتبع قسم رئيسي</label><br>
+      <select name="parent_id"><option value="">— قسم رئيسي —</option>
+      {% for s in secs %}<option value="{{ s['id'] }}">{{ s['name'] }}</option>{% endfor %}</select></div>
+    <div><label>اسم القسم بالتقارير</label><br><input name="dept_name" placeholder="افتراضيًا نفس الاسم"></div>
+    <button class="btn" type="submit">+ إضافة قسم</button>
+  </form>
+
+  <table style="width:100%">
+    <thead><tr><th>الاسم</th><th>يتبع</th><th>اسم القسم بالتقارير</th><th>الترتيب</th><th>عدد التحاليل</th><th></th></tr></thead>
+    <tbody>
+    {% for s in secs %}
+    <tr>
+      <td><input form="upd{{ s['id'] }}" name="name" value="{{ s['name'] }}" style="width:150px"></td>
+      <td><select form="upd{{ s['id'] }}" name="parent_id"><option value="">—</option>
+        {% for p in secs if p['id'] != s['id'] %}<option value="{{ p['id'] }}" {{ 'selected' if p['id'] == s['parent_id'] else '' }}>{{ p['name'] }}</option>{% endfor %}</select></td>
+      <td><input form="upd{{ s['id'] }}" name="dept_name" value="{{ s['dept_name'] or '' }}" style="width:150px"></td>
+      <td><input form="upd{{ s['id'] }}" name="sort_order" type="number" value="{{ s['sort_order'] or 0 }}" style="width:70px"></td>
+      <td>{{ counts.get(s['id'], 0) }}</td>
+      <td style="white-space:nowrap">
+        <form id="upd{{ s['id'] }}" method="post" style="display:inline"><input type="hidden" name="action" value="update"><input type="hidden" name="id" value="{{ s['id'] }}">
+          <button class="btn small" type="submit">حفظ</button></form>
+        <form method="post" style="display:inline" onsubmit="return confirm('حذف القسم؟')">
+          <input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ s['id'] }}">
+          <button class="btn small secondary" type="submit">حذف</button></form></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>↔️ نقل تحاليل إلى قسم</h3>
+  <form method="post">
+    <input type="hidden" name="action" value="move_tests">
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">
+      <div><label>القسم الهدف</label><br><select name="section_id" required>
+        {% for s in secs %}<option value="{{ s['id'] }}">{{ s['name'] }}</option>{% endfor %}</select></div>
+      <div><label>بحث</label><br><input id="mvFilter" placeholder="رمز أو اسم…" autocomplete="off"></div>
+      <button class="btn" type="submit">نقل المحدد</button>
+    </div>
+    <div id="mvList" style="columns:3 220px;max-height:340px;overflow:auto;border:1px solid var(--border,#ddd);padding:8px;border-radius:8px">
+      {% for t in tests %}
+      <label class="mv-item" style="display:block;font-size:13px"><input type="checkbox" name="test_ids" value="{{ t['id'] }}">
+        <b dir="ltr">{{ t['code'] }}</b> {{ t['name'] }} <span class="muted">({{ t['section_name'] or t['department'] or '—' }})</span></label>
+      {% endfor %}
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3>⌨️ رموز بديلة وشرط الارتباط</h3>
+  <p class="muted">«رموز بديلة»: أسماء تُفهم عند كتابة التحاليل بصفحة الزيارة (مفصولة بفاصلة). «يحتاج»: تحليل يُضاف تلقائيًا معه (مثال: BF يحتاج CBC؛ والعكس غير مطلوب).</p>
+  <form method="post">
+    <input type="hidden" name="action" value="save_tests_meta">
+    <input id="metaFilter" placeholder="بحث…" autocomplete="off" style="margin-bottom:8px">
+    <table style="width:100%">
+      <thead><tr><th>الرمز</th><th>التحليل</th><th>رموز بديلة</th><th>يحتاج (أكواد)</th></tr></thead>
+      <tbody>
+      {% for t in tests %}
+      <tr class="meta-row"><td dir="ltr"><b>{{ t['code'] }}</b></td><td>{{ t['name'] }}</td>
+        <td><input name="aliases_{{ t['id'] }}" value="{{ t['aliases'] or '' }}" dir="ltr" style="width:220px"></td>
+        <td><input name="requires_{{ t['id'] }}" value="{{ t['requires_codes'] or '' }}" dir="ltr" style="width:120px" placeholder="CBC"></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <button class="btn" type="submit" style="margin-top:10px">حفظ الكل</button>
+  </form>
+</div>
+</div>
+<script>
+(function(){
+  function f(inp, sel){ inp.addEventListener('input', function(){ var q=inp.value.toLowerCase().trim();
+    document.querySelectorAll(sel).forEach(function(el){ el.style.display = (!q || el.textContent.toLowerCase().indexOf(q)!==-1) ? '' : 'none'; }); }); }
+  f(document.getElementById('mvFilter'), '.mv-item');
+  var m=document.getElementById('metaFilter'); m.addEventListener('input', function(){ var q=m.value.toLowerCase().trim();
+    document.querySelectorAll('.meta-row').forEach(function(r){ r.style.display=(!q||r.textContent.toLowerCase().indexOf(q)!==-1)?'':'none'; }); });
+})();
+</script>
+{% endblock %}

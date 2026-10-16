@@ -124,10 +124,19 @@ def read_catalog(db_path):
     try:
         code_of = {}
         tests = []
+        sec_name = {}
+        sections = []
+        if "sections" in names:
+            for r in con.execute("SELECT * FROM sections"):
+                sec_name[r["id"]] = r["name"]
+            for r in con.execute("SELECT * FROM sections ORDER BY sort_order, id"):
+                sections.append({"name": r["name"], "parent_name": sec_name.get(r["parent_id"]),
+                                 "dept_name": r["dept_name"], "sort_order": r["sort_order"]})
         for r in con.execute("SELECT * FROM test_definitions"):
             d = dict(r)
             code_of[d["id"]] = d["code"]
             d.pop("id", None)
+            d["section_name"] = sec_name.get(d.pop("section_id", None))
             tests.append(d)
         params = []
         pid_map = {}
@@ -167,7 +176,7 @@ def read_catalog(db_path):
         if "examining_doctor_rates" in names:
             rates = [{"doctor_name": r["doctor_name"], "code": code_of.get(r["test_definition_id"]), "rate": r["rate"]}
                      for r in con.execute("SELECT * FROM examining_doctor_rates") if code_of.get(r["test_definition_id"])]
-        return {"tests": tests, "parameters": params, "packages": pkgs, "quick_add": quick, "examining_rates": rates}
+        return {"sections": sections, "tests": tests, "parameters": params, "packages": pkgs, "quick_add": quick, "examining_rates": rates}
     finally:
         con.close()
 

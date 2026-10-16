@@ -195,6 +195,8 @@
         <a class="nav-link {{ 'active' if request.path == url_for('test_catalog') else '' }}" href="{{ url_for('test_catalog') }}">🧾 {{ t('test_catalog') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('parameter_order') else '' }}" href="{{ url_for('parameter_order') }}">🔢 ترتيب الباراميترات</a>
         <a class="nav-link {{ 'active' if request.path == url_for('unit_converter') else '' }}" href="{{ url_for('unit_converter') }}">📏 تعديل الوحدات</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('sections_manage') else '' }}" href="{{ url_for('sections_manage') }}">🗂️ الأقسام</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('lab_prices') else '' }}" href="{{ url_for('lab_prices') }}">💲 أسعار المختبرات</a>
         </div>
       </div>
       {% endif %}

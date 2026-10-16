@@ -22,6 +22,7 @@ from database import text_style_css, sanitize_text_style, TEXT_STYLE_FONTS
 from database import write_pending_preset_logo
 from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_test_price, find_or_create_doctor, find_or_create_referral_center,
+                       center_has_price_list, expand_required_tests, sync_test_sections,
                        get_report_template, save_report_template,
                        get_examining_doctors, set_examining_doctors, add_examining_doctor,
                        get_examining_doctors_full, add_examining_doctor_full,
@@ -1649,6 +1650,48 @@ def next_registration_number(db):
     return (row["m"] or 18999) + 1
 
 
+def build_test_picker_context(db, tests, referral_labs):
+    """شجرة الأقسام + معلومات كل تحليل (رمز/أسماء بديلة/شرط ارتباط) + أسعار المختبرات المُرسِلة (لواجهة الزيارة الجديدة)."""
+    secs = db.execute("SELECT * FROM sections ORDER BY sort_order, id").fetchall()
+    nodes = {s_["id"]: {"id": s_["id"], "name": s_["name"], "parent_id": s_["parent_id"], "tests": [], "children": []} for s_ in secs}
+    orphan = {"id": 0, "name": "بدون قسم", "parent_id": None, "tests": [], "children": []}
+    code_to_id = {str(t["code"]).upper(): t["id"] for t in tests}
+    test_meta = {}
+    for t in tests:
+        sid = t["section_id"] if "section_id" in t.keys() else None
+        node = nodes.get(sid) or orphan
+        node["tests"].append(t)
+        req = []
+        for c in [x.strip().upper() for x in (t["requires_codes"] or "").split(",") if x.strip()] if "requires_codes" in t.keys() else []:
+            if c in code_to_id:
+                req.append(code_to_id[c])
+        test_meta[str(t["id"])] = {
+            "code": t["code"], "name": t["name"], "name_ar": (t["name_ar"] or ""),
+            "section": (node["name"] if node is not orphan else ""),
+            "aliases": [x.strip() for x in ((t["aliases"] or "") if "aliases" in t.keys() else "").split(",") if x.strip()],
+            "requires": [str(x) for x in req],
+        }
+    roots = []
+    for n in nodes.values():
+        par = nodes.get(n["parent_id"])
+        (par["children"] if par else roots).append(n)
+
+    def _count(n):
+        n["count"] = len(n["tests"]) + sum(_count(c) for c in n["children"])
+        return n["count"]
+    for r in roots:
+        _count(r)
+    roots = [r for r in roots if r["count"] > 0]
+    if orphan["tests"]:
+        orphan["count"] = len(orphan["tests"])
+        roots.append(orphan)
+    lab_prices = {}
+    for r in db.execute("SELECT center_id, test_definition_id, price FROM center_test_prices").fetchall():
+        lab_prices.setdefault(str(r["center_id"]), {})[str(r["test_definition_id"])] = r["price"]
+    lab_name_to_id = {(l["name"] or "").strip().lower(): l["id"] for l in referral_labs}
+    return {"section_tree": roots, "test_meta": test_meta, "lab_prices": lab_prices, "lab_name_to_id": lab_name_to_id}
+
+
 def doctor_pricing_context(db):
     """Everything the new-visit / edit-visit pages need to auto-fill the
     referring doctor field and switch prices live in the browser:
@@ -2604,6 +2647,7 @@ def new_visit():
         attending_doctor = examining_doctor
         contact_method = request.form.get("contact_method", "None")
         test_ids = request.form.getlist("tests")
+        test_ids = expand_required_tests(db, test_ids)   # BF يحتاج CBC (CBC لا يحتاج BF)
         now = datetime.now().isoformat(timespec="seconds")
 
         # الطبيب المُحيل (خارجي) — إذا هذا أول مرة يذكر اسمه، ينحفظ تلقائيًا
@@ -2694,19 +2738,20 @@ def new_visit():
                         price = sum((r["price"] or 0) for r in prows)
                         selected_param_ids = ",".join(str(r["id"]) for r in prows)
                     else:
-                        price = get_test_price(db, tid, referring_doctor_id)
+                        price = get_test_price(db, tid, referring_doctor_id, referral_center_id)
                 else:
-                    price = get_test_price(db, tid, referring_doctor_id)
+                    price = get_test_price(db, tid, referring_doctor_id, referral_center_id)
             else:
-                price = get_test_price(db, tid, referring_doctor_id)
+                price = get_test_price(db, tid, referring_doctor_id, referral_center_id)
             barcode = f"{reg_number}{tid.zfill(3)}"
             # الحالة تبدأ 'Collected' مباشرة (مو 'Accepted') لأن زر "تم سحب
             # العينة" الإلزامي فوق تأكد إنها انسحبت فعليًا هذي اللحظة —
             # فتتخطى طابور "سحب العينة" وتظهر مباشرة بطابور "استلام العينة".
             db.execute(
                 "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, "
-                "collected_at, created_at, selected_param_ids) VALUES (?, ?, 'Collected', ?, ?, ?, ?, ?, ?)",
-                (order_id, tid, barcode, price, referring_doctor_id, now, now, selected_param_ids),
+                "collected_at, created_at, selected_param_ids, price_missing) VALUES (?, ?, 'Collected', ?, ?, ?, ?, ?, ?, ?)",
+                (order_id, tid, barcode, (price if price is not None else 0), referring_doctor_id, now, now, selected_param_ids,
+                 1 if price is None else 0),
             )
             total += price or 0
 
@@ -2824,6 +2869,7 @@ def new_visit():
 
         return redirect(redirect_url)
 
+    sync_test_sections(db)
     tests = db.execute("SELECT * FROM test_definitions WHERE is_active=1 ORDER BY department, name").fetchall()
     quick_items = db.execute(
         "SELECT td.id, td.name FROM quick_add_items q JOIN test_definitions td ON td.id = q.test_definition_id "
@@ -2835,13 +2881,371 @@ def new_visit():
     referral_labs = db.execute(
         "SELECT * FROM referral_centers WHERE name != 'Walk-in' ORDER BY name"
     ).fetchall()
+    picker = build_test_picker_context(db, tests, referral_labs)
     return render_template("front_desk/new_visit.html", tests=tests, quick_items=quick_items,
+                            section_tree=picker["section_tree"], test_meta=picker["test_meta"],
+                            lab_prices=picker["lab_prices"], lab_name_to_id=picker["lab_name_to_id"],
                             examining_doctors=get_examining_doctors(db), doctors=doctors,
                             doctor_prices=doctor_prices, doctor_name_to_id=doctor_name_to_id,
                             test_default_prices=test_default_prices,
                             examining_test_ids=examining_test_ids,
                             examining_rates=get_examining_rates_map(db),
                             referral_labs=referral_labs)
+
+
+# ============================================================ v54: الأقسام + أسعار المختبرات ==
+@app.route("/master/sections", methods=["GET", "POST"])
+@roles_required("supervisor")
+def sections_manage():
+    """شجرة الأقسام (قسم رئيسي ← أقسام فرعية)، نقل التحاليل بينها، والرموز البديلة/شرط الارتباط لكل تحليل."""
+    db = get_db()
+    sync_test_sections(db)
+    if request.method == "POST":
+        act = request.form.get("action", "")
+        if act == "add":
+            name = (request.form.get("name") or "").strip()
+            if not name:
+                flash("اسم القسم إلزامي.")
+                return redirect(url_for("sections_manage"))
+            if db.execute("SELECT 1 FROM sections WHERE LOWER(name)=LOWER(?)", (name,)).fetchone():
+                flash("هذا القسم موجود أصلاً.")
+                return redirect(url_for("sections_manage"))
+            parent_id = request.form.get("parent_id", type=int) or None
+            dept = (request.form.get("dept_name") or "").strip() or name
+            nxt = db.execute("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM sections").fetchone()["n"]
+            db.execute("INSERT INTO sections (name, parent_id, dept_name, sort_order) VALUES (?, ?, ?, ?)",
+                       (name, parent_id, dept, nxt))
+            db.commit()
+            log_action("Create", "section", None, name)
+            flash("تمت إضافة القسم. انقل إليه تحاليل من الأسفل ليظهر بتنسيق عناوين الأقسام بمصمم التقارير.")
+        elif act == "update":
+            sid = request.form.get("id", type=int)
+            name = (request.form.get("name") or "").strip()
+            parent_id = request.form.get("parent_id", type=int) or None
+            # منع الحلقات: القسم لا يصير تحت نفسه أو تحت أحد فروعه
+            cur = parent_id
+            while cur:
+                if cur == sid:
+                    parent_id = None
+                    flash("لا يمكن جعل القسم تحت نفسه أو تحت أحد فروعه.")
+                    break
+                r = db.execute("SELECT parent_id FROM sections WHERE id=?", (cur,)).fetchone()
+                cur = r["parent_id"] if r else None
+            if sid and name:
+                db.execute("UPDATE sections SET name=?, parent_id=?, dept_name=?, sort_order=? WHERE id=?",
+                           (name, parent_id, (request.form.get("dept_name") or "").strip() or None,
+                            request.form.get("sort_order", type=int) or 0, sid))
+                db.commit()
+                flash("تم حفظ القسم.")
+        elif act == "delete":
+            sid = request.form.get("id", type=int)
+            used = db.execute("SELECT COUNT(*) AS c FROM test_definitions WHERE section_id=?", (sid,)).fetchone()["c"]
+            kids = db.execute("SELECT COUNT(*) AS c FROM sections WHERE parent_id=?", (sid,)).fetchone()["c"]
+            if used or kids:
+                flash("لا يمكن حذف قسم فيه تحاليل أو أقسام فرعية. انقلها أولاً.")
+            else:
+                db.execute("DELETE FROM sections WHERE id=?", (sid,))
+                db.commit()
+                flash("تم حذف القسم.")
+        elif act == "move_tests":
+            sid = request.form.get("section_id", type=int)
+            ids = [int(x) for x in request.form.getlist("test_ids") if x.isdigit()]
+            sec = db.execute("SELECT * FROM sections WHERE id=?", (sid,)).fetchone()
+            if not sec or not ids:
+                flash("اختر القسم الهدف وتحليلاً واحدًا على الأقل.")
+            else:
+                for tid in ids:
+                    db.execute("UPDATE test_definitions SET section_id=? WHERE id=?", (sid, tid))
+                    if (sec["dept_name"] or "").strip():   # department يتبع القسم → يظهر بمصمم التقارير واللوحة المجمّعة
+                        db.execute("UPDATE test_definitions SET department=? WHERE id=?", (sec["dept_name"].strip(), tid))
+                db.commit()
+                log_action("MoveTests", "section", sid, f"{len(ids)} tests")
+                flash(f"تم نقل {len(ids)} تحليل إلى «{sec['name']}».")
+        elif act == "save_tests_meta":
+            n = 0
+            for key, val in request.form.items():
+                if key.startswith("aliases_"):
+                    tid = key[8:]
+                    if tid.isdigit():
+                        req = (request.form.get("requires_" + tid) or "").strip()
+                        db.execute("UPDATE test_definitions SET aliases=?, requires_codes=? WHERE id=?",
+                                   (val.strip(), req, int(tid)))
+                        n += 1
+            db.commit()
+            flash("تم حفظ الرموز البديلة وشروط الارتباط.")
+        return redirect(url_for("sections_manage"))
+
+    secs = db.execute("SELECT * FROM sections ORDER BY sort_order, id").fetchall()
+    counts = {r["section_id"]: r["c"] for r in db.execute(
+        "SELECT section_id, COUNT(*) AS c FROM test_definitions GROUP BY section_id").fetchall()}
+    tests = db.execute(
+        "SELECT td.*, s.name AS section_name FROM test_definitions td LEFT JOIN sections s ON s.id=td.section_id "
+        "WHERE td.is_active=1 ORDER BY COALESCE(s.name,''), td.name").fetchall()
+    return render_template("master/sections.html", secs=secs, counts=counts, tests=tests)
+
+
+# ============================================================ v55: أقسام + زيارات من صفحة "زيارة جديدة" ==
+def _req_text(name):
+    data = request.get_json(silent=True) or {}
+    return str(data.get(name) or request.form.get(name) or "").strip()
+
+
+@app.route("/api/sections/<int:sid>/rename", methods=["POST"])
+@login_required
+def api_section_rename(sid):
+    """تعديل اسم قسم من صفحة زيارة جديدة. يبقى ربط التحاليل بالقسم كما هو: إذا القسم بلا dept_name
+    نثبّت dept_name على اسمه القديم حتى تستمر التحاليل المضافة بنفس الـdepartment بالانربط به
+    (sync_test_sections يطابق dept_name أولاً ثم الاسم)."""
+    db = get_db()
+    sec = db.execute("SELECT * FROM sections WHERE id=?", (sid,)).fetchone()
+    if not sec:
+        return jsonify({"ok": False, "error": "القسم غير موجود"}), 404
+    name = _req_text("name")
+    if not name:
+        return jsonify({"ok": False, "error": "اسم القسم إلزامي"}), 400
+    if db.execute("SELECT 1 FROM sections WHERE LOWER(name)=LOWER(?) AND id<>?", (name, sid)).fetchone():
+        return jsonify({"ok": False, "error": "يوجد قسم بهذا الاسم"}), 409
+    dept = (sec["dept_name"] or "").strip() or sec["name"]
+    db.execute("UPDATE sections SET name=?, dept_name=? WHERE id=?", (name, dept, sid))
+    db.commit()
+    log_action("RenameSection", "section", sid, f"{sec['name']} -> {name}")
+    return jsonify({"ok": True, "id": sid, "name": name})
+
+
+@app.route("/api/sections/<int:sid>/add-test", methods=["POST"])
+@login_required
+def api_section_add_test(sid):
+    """إضافة تحليل جديد داخل قسم مباشرة (يُربط بالقسم فورًا، بسعر 0 مؤقتًا — السعر من صفحة الأسعار)."""
+    db = get_db()
+    sec = db.execute("SELECT * FROM sections WHERE id=?", (sid,)).fetchone()
+    if not sec:
+        return jsonify({"ok": False, "error": "القسم غير موجود"}), 404
+    name = _req_text("name")
+    if not name:
+        return jsonify({"ok": False, "error": "اسم التحليل مطلوب"}), 400
+    if db.execute("SELECT 1 FROM test_definitions WHERE LOWER(TRIM(name))=LOWER(TRIM(?)) AND is_active=1", (name,)).fetchone():
+        return jsonify({"ok": False, "error": "يوجد تحليل بنفس الاسم"}), 409
+    dept = (sec["dept_name"] or "").strip() or sec["name"]
+    code = unique_test_code(db, name)
+    cur = db.execute(
+        "INSERT INTO test_definitions (code, name, department, sample_type, price, is_active, is_examining_test, section_id) "
+        "VALUES (?, ?, ?, '', 0, 1, 0, ?)",
+        (code, name, dept, sid),
+    )
+    db.commit()
+    log_action("QuickAddTest", "test_definition", cur.lastrowid, f"{name} (section {sid})")
+    return jsonify({"ok": True, "id": cur.lastrowid, "name": name, "code": code, "section_id": sid})
+
+
+@app.route("/api/sections/<int:sid>/hide", methods=["POST"])
+@login_required
+def api_section_hide(sid):
+    """\"مسح\" قسم من قائمة الطلبات: إخفاء كل تحاليله (والأقسام الفرعية) دفعة واحدة. لا يُحذف أي تحليل ولا نتيجة
+    ولا زيارة سابقة (تقارير الزيارات القديمة تحتاج بيانات التحليل)؛ ويمكن إظهارها لاحقًا من كتالوج التحاليل."""
+    db = get_db()
+    if not db.execute("SELECT 1 FROM sections WHERE id=?", (sid,)).fetchone():
+        return jsonify({"ok": False, "error": "القسم غير موجود"}), 404
+    ids, frontier = {sid}, [sid]
+    while frontier:
+        ph = ",".join("?" * len(frontier))
+        kids = [r["id"] for r in db.execute(f"SELECT id FROM sections WHERE parent_id IN ({ph})", frontier).fetchall()]
+        frontier = [k for k in kids if k not in ids]
+        ids.update(frontier)
+    ph = ",".join("?" * len(ids))
+    tids = [r["id"] for r in db.execute(
+        f"SELECT id FROM test_definitions WHERE is_active=1 AND section_id IN ({ph})", list(ids)).fetchall()]
+    if tids:
+        ph2 = ",".join("?" * len(tids))
+        db.execute(f"UPDATE test_definitions SET is_active=0 WHERE id IN ({ph2})", tids)
+        db.commit()
+        log_action("HideSection", "section", sid, f"{len(tids)} tests hidden")
+    return jsonify({"ok": True, "hidden": tids})
+
+
+def _is_privileged_interface():
+    return bool(session.get("designer_id")) or session.get("interface") in ("lab", "both")
+
+
+@app.route("/api/visits/<int:visit_id>/cancel", methods=["POST"])
+@login_required
+def api_visit_cancel(visit_id):
+    """إلغاء زيارة (مراجع انسحب): يحذف الزيارة وتحاليلها وفاتورتها وأي مبالغ مستلمة منها.
+    واجهة المختبر/الاثنين: أي زيارة. الاستقبال: فقط زيارة اليوم قبل بدء أي نتيجة وإذا الفاتورة غير مقفلة."""
+    db = get_db()
+    visit = db.execute("SELECT * FROM visits WHERE id=?", (visit_id,)).fetchone()
+    if not visit:
+        return jsonify({"ok": False, "error": "الزيارة غير موجودة"}), 404
+    if not _is_privileged_interface():
+        if (visit["created_at"] or "")[:10] != datetime.now().date().isoformat():
+            return jsonify({"ok": False, "error": "الاستقبال يقدر يلغي زيارات اليوم فقط. استخدم واجهة المختبر لحذف زيارة قديمة."}), 403
+        inv = db.execute("SELECT is_locked FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+        if inv and inv["is_locked"]:
+            return jsonify({"ok": False, "error": "الفاتورة مقفلة — لا يمكن إلغاء الزيارة من الاستقبال."}), 403
+        started = db.execute(
+            "SELECT COUNT(*) AS c FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+            "WHERE o.visit_id=? AND (ot.status IN ('Completed','Verified') "
+            "OR EXISTS (SELECT 1 FROM results r WHERE r.order_test_id=ot.id))", (visit_id,)
+        ).fetchone()["c"]
+        if started:
+            return jsonify({"ok": False, "error": "بدأ إدخال نتائج هذه الزيارة — لا يمكن إلغاؤها من الاستقبال."}), 403
+    _delete_visit_cascade(db, visit)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/visits/<int:visit_id>/add-tests", methods=["POST"])
+@login_required
+def api_visit_add_tests(visit_id):
+    """إضافة تحاليل لزيارة سابقة لنفس المريض بنفس اليوم (بدل إنشاء زيارة جديدة): تُسعَّر حسب دكتور/مختبر الزيارة،
+    يرتفع إجمالي الفاتورة، ويُسجَّل أي مبلغ \"الواصل\" الجديد كدفعة."""
+    db = get_db()
+    visit = db.execute("SELECT * FROM visits WHERE id=?", (visit_id,)).fetchone()
+    if not visit:
+        return jsonify({"ok": False, "error": "الزيارة غير موجودة"}), 404
+    if (visit["created_at"] or "")[:10] != datetime.now().date().isoformat():
+        return jsonify({"ok": False, "error": "إضافة التحاليل من هنا لزيارات اليوم فقط. للزيارات القديمة استخدم «تعديل الزيارة»."}), 400
+    order = db.execute("SELECT * FROM orders WHERE visit_id=?", (visit_id,)).fetchone()
+    if not order:
+        return jsonify({"ok": False, "error": "لا يوجد طلب لهذي الزيارة"}), 404
+    invoice = db.execute("SELECT * FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+    if invoice and invoice["is_locked"]:
+        return jsonify({"ok": False, "error": "الفاتورة مقفلة — افتحها أولًا من صفحة الفواتير."}), 403
+    req_ids = [x for x in request.form.getlist("tests") if str(x).isdigit()]
+    if not req_ids:
+        return jsonify({"ok": False, "error": "حدّد تحليلًا واحدًا على الأقل."}), 400
+
+    have = {str(r["test_definition_id"]) for r in db.execute(
+        "SELECT test_definition_id FROM order_tests WHERE order_id=?", (order["id"],)).fetchall()}
+    new_ids = []
+    for tid in expand_required_tests(db, req_ids):      # BF يحتاج CBC
+        if tid not in have and tid not in new_ids:
+            new_ids.append(tid)
+    if not new_ids:
+        return jsonify({"ok": False, "error": "كل التحاليل المحددة موجودة أصلاً بهذه الزيارة."}), 400
+
+    doctor_id, center_id = visit["doctor_id"], visit["referral_center_id"]
+    reg = visit["registration_number"]
+    collected = request.form.get("sample_collected") == "1"
+    now = datetime.now().isoformat(timespec="seconds")
+    added, added_total = [], 0.0
+    for tid in new_ids:
+        test = db.execute("SELECT id, name FROM test_definitions WHERE id=? AND is_active=1", (tid,)).fetchone()
+        if not test:
+            continue
+        price, selected_param_ids = None, None
+        raw = (request.form.get(f"selected_params_{tid}") or "").strip()
+        if raw:
+            try:
+                pid_list = [int(x) for x in raw.split(",") if x.strip()]
+            except ValueError:
+                pid_list = []
+            if pid_list:
+                ph = ",".join("?" * len(pid_list))
+                prows = db.execute(
+                    f"SELECT id, price FROM test_parameters WHERE id IN ({ph}) AND test_definition_id=?",
+                    (*pid_list, tid)).fetchall()
+                if prows:
+                    price = sum((r["price"] or 0) for r in prows)
+                    selected_param_ids = ",".join(str(r["id"]) for r in prows)
+        if price is None and selected_param_ids is None:
+            price = get_test_price(db, tid, doctor_id, center_id)
+        db.execute(
+            "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, "
+            "collected_at, created_at, selected_param_ids, price_missing) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (order["id"], tid, "Collected" if collected else "Accepted", f"{reg}{str(tid).zfill(3)}",
+             (price if price is not None else 0), doctor_id, now if collected else None, now, selected_param_ids,
+             1 if price is None else 0))
+        added.append({"id": int(tid), "name": test["name"], "price": price if price is not None else 0,
+                      "price_missing": price is None})
+        added_total += price or 0
+    if not added:
+        return jsonify({"ok": False, "error": "تعذّر إضافة التحاليل المحددة."}), 400
+
+    recompute_examining_doctor_fee(db, visit_id)
+
+    try:
+        paid_now = max(0.0, float((request.form.get("paid_amount") or "0").replace(",", "").strip() or 0))
+    except ValueError:
+        paid_now = 0.0
+    payment_note = None
+    if invoice:
+        new_total = float(invoice["total_amount"] or 0) + added_total
+        old_paid = float(invoice["paid_amount"] or 0)
+        paid_now = min(paid_now, max(0.0, new_total - old_paid))
+        new_paid = old_paid + paid_now
+        status = "Paid" if new_paid >= new_total else ("Partial" if new_paid > 0 else "Unpaid")
+        db.execute("UPDATE invoices SET total_amount=?, paid_amount=?, status=? WHERE id=?",
+                   (new_total, new_paid, status, invoice["id"]))
+        inv_id = invoice["id"]
+    else:
+        new_total = added_total + float(visit["home_visit_fee"] or 0)
+        paid_now = min(paid_now, new_total)
+        new_paid = paid_now
+        status = "Paid" if new_paid >= new_total else ("Partial" if new_paid > 0 else "Unpaid")
+        inv_id = db.execute(
+            "INSERT INTO invoices (visit_id, total_amount, discount_amount, extra_charges, paid_amount, status, "
+            "created_by, created_at) VALUES (?, ?, 0, 0, ?, ?, ?, ?)",
+            (visit_id, new_total, new_paid, status, session.get("user_id"), now)).lastrowid
+    if paid_now > 0:
+        db.execute("INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) VALUES (?, ?, 'Cash', ?, ?)",
+                   (inv_id, paid_now, session.get("user_id"), now))
+        payment_note = f"amount={paid_now} (added tests to visit)"
+    db.commit()
+    if payment_note:
+        log_action("Payment", "invoice", inv_id, payment_note)
+    log_action("AddTestsToVisit", "visit", visit_id, ", ".join(a["name"] for a in added))
+    return jsonify({"ok": True, "registration_number": reg, "added": added, "added_total": added_total,
+                    "total": new_total, "paid": new_paid, "remaining": max(0.0, new_total - new_paid)})
+
+
+@app.route("/master/lab-prices", methods=["GET", "POST"])
+@roles_required("supervisor")
+def lab_prices():
+    """قائمة أسعار لكل مختبر مُرسِل. خانة فارغة = بدون سعر (تنبيه بالزيارة). مختبر بدون أي سعر = يبقى بالسعر الافتراضي القديم."""
+    db = get_db()
+    sync_test_sections(db)
+    labs = db.execute("SELECT * FROM referral_centers WHERE name != 'Walk-in' ORDER BY name").fetchall()
+    center_id = request.values.get("center_id", type=int)
+    if request.method == "POST" and center_id:
+        act = request.form.get("action", "save")
+        if act == "save":
+            db.execute("DELETE FROM center_test_prices WHERE center_id=?", (center_id,))
+            n = 0
+            for key, val in request.form.items():
+                if key.startswith("price_") and key[6:].isdigit() and val.strip() != "":
+                    try:
+                        pr = float(val.replace(",", ""))
+                    except ValueError:
+                        continue
+                    if pr < 0:
+                        continue
+                    db.execute("INSERT INTO center_test_prices (center_id, test_definition_id, price) VALUES (?, ?, ?)",
+                               (center_id, int(key[6:]), pr))
+                    n += 1
+            db.commit()
+            log_action("LabPrices", "referral_center", center_id, f"{n} prices")
+            flash(f"تم حفظ أسعار المختبر ({n} تحليل).")
+        elif act == "copy_default":
+            db.execute("INSERT OR IGNORE INTO center_test_prices (center_id, test_definition_id, price) "
+                       "SELECT ?, id, price FROM test_definitions WHERE is_active=1 AND COALESCE(price,0)>0", (center_id,))
+            db.commit()
+            flash("نُسخت الأسعار الافتراضية للتحاليل الناقصة. عدّلها ثم احفظ.")
+        elif act == "copy_from":
+            src = request.form.get("src_center_id", type=int)
+            if src and src != center_id:
+                db.execute("INSERT OR IGNORE INTO center_test_prices (center_id, test_definition_id, price) "
+                           "SELECT ?, test_definition_id, price FROM center_test_prices WHERE center_id=?", (center_id, src))
+                db.commit()
+                flash("نُسخت أسعار المختبر المختار للتحاليل الناقصة.")
+        return redirect(url_for("lab_prices", center_id=center_id))
+    prices, tests = {}, []
+    if center_id:
+        prices = {r["test_definition_id"]: r["price"] for r in db.execute(
+            "SELECT test_definition_id, price FROM center_test_prices WHERE center_id=?", (center_id,)).fetchall()}
+        tests = db.execute(
+            "SELECT td.*, COALESCE(s.name, td.department, '') AS sec FROM test_definitions td "
+            "LEFT JOIN sections s ON s.id=td.section_id WHERE td.is_active=1 ORDER BY sec, td.name").fetchall()
+    return render_template("master/lab_prices.html", labs=labs, center_id=center_id, prices=prices, tests=tests)
+
 
 
 @app.route("/front-desk/patients")
@@ -3860,7 +4264,7 @@ def _referral_lab_statement_data(db, center_id, month):
         return None, [], [], [], 0.0
 
     rows = db.execute(
-        "SELECT ot.id, td.name as test_name, COALESCE(ot.price, td.price) as price, "
+        "SELECT ot.id, td.name as test_name, COALESCE(ot.price, td.price) as price, COALESCE(ot.price_missing, 0) as price_missing, "
         "p.full_name as patient_name, v.registration_number, v.created_at "
         "FROM order_tests ot "
         "JOIN test_definitions td ON td.id = ot.test_definition_id "
@@ -3875,6 +4279,7 @@ def _referral_lab_statement_data(db, center_id, month):
     day_map = {}
     test_map = {}
     total = 0.0
+    rows = [dict(r) for r in rows]   # price_missing = تحليل بدون سعر عند هذا المختبر (يُحسب 0 ويُنبَّه عليه)
     for r in rows:
         price = r["price"] or 0
         total += price
@@ -3883,7 +4288,8 @@ def _referral_lab_statement_data(db, center_id, month):
         d["count"] += 1
         d["subtotal"] += price
         tname = r["test_name"]
-        tm = test_map.setdefault(tname, {"test_name": tname, "count": 0, "subtotal": 0.0})
+        tm = test_map.setdefault(tname, {"test_name": tname, "count": 0, "subtotal": 0.0, "missing": 0})
+        tm["missing"] += 1 if r["price_missing"] else 0
         tm["count"] += 1
         tm["subtotal"] += price
 
@@ -4034,18 +4440,12 @@ def visits_list():
     return render_template("front_desk/visits.html", visits=visits, q=q, show_all=show_all,
                             filter_label=filter_label, visit_tests=visit_tests)
 
-@app.route("/front-desk/visits/<int:visit_id>/delete", methods=["POST"])
-@roles_required("admin")
-def delete_visit(visit_id):
-    """حذف زيارة بالكامل مع كل ما يتبعها (طلبات، نتائج، فواتير، مدفوعات،
-    متابعات، إرسالات واتساب)، ثم — إذا صار المريض بلا أي زيارة أخرى — يُحذف
-    المريض نفسه فينحذف من صفحة/أيقونة المرضى، وكذلك إذا صار الدكتور المرسل
-    (doctor_id) غير مرتبط بأي زيارة أو طلب تحليل آخر يُحذف هو الآخر تلقائيًا."""
-    db = get_db()
-    visit = db.execute("SELECT * FROM visits WHERE id=?", (visit_id,)).fetchone()
-    if not visit:
-        return "Not found", 404
-
+def _delete_visit_cascade(db, visit):
+    """يحذف الزيارة بالكامل مع كل ما يتبعها (طلبات، نتائج، فواتير، مدفوعات، متابعات،
+    واتساب)، ثم المريض والدكتور المُحيل إذا صاروا بلا أي زيارة/طلب آخر.
+    مشتركة بين حذف الزيارة من قائمة الزيارات (delete_visit) وإلغاء الزيارة من صفحة
+    \"زيارة جديدة\" (api_visit_cancel)."""
+    visit_id = visit["id"]
     patient_id = visit["patient_id"]
     doctor_id = visit["doctor_id"]
 
@@ -4102,6 +4502,20 @@ def delete_visit(visit_id):
                 db.commit()
                 log_action("Delete", "doctor", doctor_id, doctor["full_name"])
 
+
+@app.route("/front-desk/visits/<int:visit_id>/delete", methods=["POST"])
+@roles_required("admin")
+def delete_visit(visit_id):
+    """حذف زيارة بالكامل مع كل ما يتبعها (طلبات، نتائج، فواتير، مدفوعات،
+    متابعات، إرسالات واتساب)، ثم — إذا صار المريض بلا أي زيارة أخرى — يُحذف
+    المريض نفسه فينحذف من صفحة/أيقونة المرضى، وكذلك إذا صار الدكتور المرسل
+    (doctor_id) غير مرتبط بأي زيارة أو طلب تحليل آخر يُحذف هو الآخر تلقائيًا."""
+    db = get_db()
+    visit = db.execute("SELECT * FROM visits WHERE id=?", (visit_id,)).fetchone()
+    if not visit:
+        return "Not found", 404
+
+    _delete_visit_cascade(db, visit)
     flash("تم حذف الزيارة، والمريض والدكتور المرسل أيضًا إذا صاروا بلا أي زيارات أخرى مرتبطة.")
     return redirect(url_for("visits_list"))
 
@@ -4139,12 +4553,14 @@ def visit_edit(visit_id):
         )
         referring_doctor_id = find_or_create_doctor(db, request.form.get("doctor_name", ""))
         doctor_changed = referring_doctor_id != visit["doctor_id"]
+        center_changed = False   # يُحدَّد بعد معرفة المختبر المُرسِل أدناه
 
         examining_doctor = request.form.get("examining_doctor", "")
         # نفس منطق شاشة "زيارة جديدة" — attending_doctor يتبع examining_doctor
         # تلقائيًا الآن بعد ما صار حقلاً واحدًا بالشاشة.
         attending_doctor = examining_doctor
         referral_center_id = find_or_create_referral_center(db, request.form.get("referral_lab_name", ""))
+        center_changed = (referral_center_id or None) != (visit["referral_center_id"] or None)
         # المعلومات الصحية + الزيارة المنزلية — نفس حقول شاشة "زيارة جديدة".
         weight = request.form.get("weight") or None
         height = request.form.get("height") or None
@@ -4172,13 +4588,25 @@ def visit_edit(visit_id):
             if test:
                 reg = visit["registration_number"]
                 barcode = f"{reg}{new_test_id.zfill(3)}"
-                price = get_test_price(db, new_test_id, referring_doctor_id)
+                price = get_test_price(db, new_test_id, referring_doctor_id, referral_center_id)
                 db.execute(
-                    "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, created_at) "
-                    "VALUES (?, ?, 'Accepted', ?, ?, ?, ?)",
-                    (order["id"], new_test_id, barcode, price, referring_doctor_id,
-                     datetime.now().isoformat(timespec="seconds")),
+                    "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, created_at, price_missing) "
+                    "VALUES (?, ?, 'Accepted', ?, ?, ?, ?, ?)",
+                    (order["id"], new_test_id, barcode, (price if price is not None else 0), referring_doctor_id,
+                     datetime.now().isoformat(timespec="seconds"), 1 if price is None else 0),
                 )
+                # شرط الارتباط (BF -> CBC): أضف التحليل المطلوب إن لم يكن موجودًا بالزيارة
+                _have = {str(r["test_definition_id"]) for r in db.execute(
+                    "SELECT test_definition_id FROM order_tests WHERE order_id=?", (order["id"],)).fetchall()}
+                for _rid in expand_required_tests(db, [new_test_id])[1:]:
+                    if _rid not in _have:
+                        _rp = get_test_price(db, _rid, referring_doctor_id, referral_center_id)
+                        db.execute(
+                            "INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, created_at, price_missing) "
+                            "VALUES (?, ?, 'Accepted', ?, ?, ?, ?, ?)",
+                            (order["id"], _rid, f"{reg}{_rid.zfill(3)}", (_rp if _rp is not None else 0), referring_doctor_id,
+                             datetime.now().isoformat(timespec="seconds"), 1 if _rp is None else 0),
+                        )
 
         # نعيد حساب أجر دكتور المختبر الفاحص حسب كل الفحوصات الحالية بالزيارة
         # (بعد أي حذف/إضافة) واسم الدكتور الفاحص المختار حاليًا.
@@ -4189,7 +4617,7 @@ def visit_edit(visit_id):
         # إذا انتغيّر الطبيب المُحيل، نعيد تسعير كل التحاليل الموجودة أصلاً
         # بالزيارة حسب جدول أسعار الطبيب الجديد (أو السعر الافتراضي إذا ماكو
         # طبيب / ماكو سعر خاص إله).
-        if doctor_changed:
+        if doctor_changed or center_changed:
             existing = db.execute(
                 "SELECT id, test_definition_id, selected_param_ids FROM order_tests WHERE order_id=?", (order["id"],)
             ).fetchall()
@@ -4212,9 +4640,10 @@ def visit_edit(visit_id):
                         if _pr:
                             new_price = sum((x["price"] or 0) for x in _pr)
                 if new_price is None:
-                    new_price = get_test_price(db, row["test_definition_id"], referring_doctor_id)
-                db.execute("UPDATE order_tests SET price=?, doctor_id=? WHERE id=?",
-                           (new_price, referring_doctor_id, row["id"]))
+                    new_price = get_test_price(db, row["test_definition_id"], referring_doctor_id, referral_center_id)
+                db.execute("UPDATE order_tests SET price=?, doctor_id=?, price_missing=? WHERE id=?",
+                           ((new_price if new_price is not None else 0), referring_doctor_id,
+                            1 if new_price is None else 0, row["id"]))
 
         extra_charges = float(request.form.get("extra_charges") or 0)
         discount_amount = float(request.form.get("discount_amount") or 0)
