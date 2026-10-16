@@ -33,7 +33,7 @@
   </form>
   <p class="muted" style="margin:0 0 10px; font-size:13px;">اضغط <b>اسم المريض</b> لفتح كل تحاليله المكتملة بملف PDF واحد (جاهز للطباعة أو الإرسال)، أو اضغط <b>اسم التحليل</b> لفتح PDF لهذا التحليل فقط. 🖨 = طباعة مباشرة، 📱 = إرسال واتساب.</p>
   <table style="width:100%;">
-    <thead><tr><th>المريض</th><th>رقم التسجيل</th><th>تاريخ السحب</th><th>التحاليل المكتملة</th><th>إجراءات</th></tr></thead>
+    <thead class="lis-skyhead"><tr><th>المريض</th><th>رقم التسجيل</th><th>تاريخ السحب</th><th>التحاليل المكتملة</th><th>إجراءات</th></tr></thead>
     <tbody>
     {% for v in visits %}
       <tr>
@@ -88,4 +88,10 @@
   full.addEventListener('change', function () { try { localStorage.setItem('lisCeFull', full.checked ? '1' : '0'); } catch (e) {} ceNames(); });
   ceNames();
 </script>
+
+<style>
+  thead.lis-skyhead th { background: linear-gradient(180deg, #C8F0FF 0%, #6FD0FF 55%, #4CC2FA 100%) !important;
+    color: #000 !important; font-weight: 800 !important; text-shadow: 0 1px 0 rgba(255,255,255,.75);
+    border-bottom: 2px solid #1FA9EC !important; }
+</style>
 {% endblock %}

@@ -796,7 +796,7 @@
     {% for box in boxes %}
     {% set ot = box.ot %}
     {% set _txt_cnt = box.parameters|selectattr('result_type', 'equalto', 'Text')|list|length %}
-    <div class="card rb-box{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') %} rb-exam{% endif %}{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') or (box.parameters|length >= 8 and _txt_cnt == 0) %} rb-wide{% endif %}" id="rbox_{{ ot['id'] }}" data-tdid="{{ ot['test_definition_id'] }}" data-dept="{{ dept_group(ot['test_department']) }}">
+    <div class="card rb-box{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') %} rb-exam{% endif %}{% if ot['test_code'] in ('GUE', 'GSE', 'SFA') or (box.parameters|length >= 8 and _txt_cnt == 0) %} rb-wide{% endif %}" id="rbox_{{ ot['id'] }}" data-status="{{ ot['status'] }}" data-tdid="{{ ot['test_definition_id'] }}" data-dept="{{ dept_group(ot['test_department']) }}">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
         <h4 style="margin:0;">{{ ot['test_name'] }}</h4>
         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
@@ -850,9 +850,9 @@
           {% set sugg = box.suggestions_map.get(p['id'], []) %}
           {% set fid = 'p_' ~ ot['id'] ~ '_' ~ p['id'] %}
           <tr data-pid="{{ p['id'] }}">
-            <td>{{ p['name'] }}</td>
-            <td class="muted">{{ p['unit'] }}</td>
-            <td class="muted">
+            <td class="lis-pname">{{ p['name'] }}</td>
+            <td class="muted lis-ed lis-unit" data-kind="unit">{{ p['unit'] or '' }}</td>
+            <td class="muted lis-ed lis-range" data-kind="range">
               {% if rng %}
                 {% if rng['range_text'] %}{{ rng['range_text'] }}
                 {% elif rng['low'] is not none and rng['high'] is not none %}{{ rng['low'] }} - {{ rng['high'] }}{% endif %}
@@ -1635,6 +1635,132 @@
       try { cb.checked = localStorage.getItem('lisReqWithTube') !== '0'; } catch (e) {}
       cb.addEventListener('change', sync); sync();
     });
+  })();
+</script>
+
+<style>
+  /* ===== v55: توزيع بدون فراغات + وحدات غير متراكبة + عناوين جداول سمائية ===== */
+  /* الصناديق تتدفق بأعمدة متوازنة (CBC جنب Blood film، Retic تحته، GUE/كيمياء تعبّي الفراغ) — بدون column-span */
+  .rb-grid, .rb-grid:not(.rb-normal), .rb-grid.rb-normal { columns: auto 440px !important; column-gap: 12px !important; }
+  .rb-grid .rb-box, .rb-grid .rb-box.rb-wide { column-span: none !important; display: block !important;
+      width: 100% !important; margin: 0 0 12px !important; break-inside: avoid; }
+  /* إلغاء أسلوب "الجدول المقسوم لعمودين" القديم للصناديق الطويلة — نرجع جدول عادي */
+  .rb-grid .rb-wide table { display: table !important; width: 100% !important; table-layout: fixed !important; }
+  .rb-grid .rb-wide thead { display: table-header-group !important; }
+  .rb-grid .rb-wide tbody { display: table-row-group !important; column-count: auto !important; column-width: auto !important; }
+  .rb-grid .rb-wide tbody tr { display: table-row !important; border-bottom: 0 !important; }
+  .rb-grid .rb-wide tbody tr td { border-bottom: 1px solid #EEF2F6 !important; padding: 3px 6px !important; }
+  /* عرض أعمدة الجدول: الوحدة ما تتكسر حرف حرف */
+  .rb-grid .rb-box table { table-layout: fixed !important; width: 100% !important; border-collapse: collapse; }
+  .rb-grid .rb-box table th:nth-child(1), .rb-grid .rb-box table td:nth-child(1) { width: 25% !important; }
+  .rb-grid .rb-box table th:nth-child(2), .rb-grid .rb-box table td:nth-child(2) { width: 17% !important; }
+  .rb-grid .rb-box table th:nth-child(3), .rb-grid .rb-box table td:nth-child(3) { width: 19% !important; }
+  .rb-grid .rb-box table th:nth-child(4), .rb-grid .rb-box table td:nth-child(4) { width: 29% !important; }
+  .rb-grid .rb-box table th:nth-child(5), .rb-grid .rb-box table td:nth-child(5) { width: 10% !important; }
+  .rb-grid .rb-box table td { overflow-wrap: normal !important; word-break: normal !important; line-height: 1.3; vertical-align: middle; }
+  .rb-grid .rb-box table td.lis-unit { white-space: nowrap; font-size: 12px; overflow: visible; }
+  .rb-grid .rb-box table td.lis-range { font-size: 12.5px; white-space: normal; }
+  .rb-grid .rb-box table td.lis-pname { overflow-wrap: break-word !important; }
+  .rb-grid .rb-box table th { white-space: nowrap; overflow: hidden; text-overflow: clip; font-size: 11.5px !important; }
+  .rb-grid .rb-box table td input[type=text], .rb-grid .rb-box table td textarea { width: 100% !important; box-sizing: border-box; }
+  /* عناوين الجداول: سمائي فاتح زاهي + نص أسود لامع */
+  .rb-grid .rb-box table thead th, .lis-skyhead th, table.lis-skyhead thead th {
+    background: linear-gradient(180deg, #C8F0FF 0%, #6FD0FF 55%, #4CC2FA 100%) !important;
+    color: #000 !important; font-weight: 800 !important; letter-spacing: .2px;
+    text-shadow: 0 1px 0 rgba(255,255,255,.75), 0 0 1px rgba(0,0,0,.25);
+    border-bottom: 2px solid #1FA9EC !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.85); }
+  /* خلايا قابلة للتعديل (وحدة / نسبة طبيعية) */
+  .lis-ed { cursor: pointer; position: relative; }
+  .lis-ed:hover { background: #E6F7FF; outline: 1px dashed #4CC2FA; }
+  .lis-ed.lis-empty::after { content: '✎'; color: #94A3B8; font-size: 11px; }
+  #lisEdOverlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:10002; align-items:center; justify-content:center; padding:16px; }
+  #lisEdOverlay .lis-ed-card { background:#fff; border-radius:12px; width:min(460px,96vw); padding:16px; }
+  #lisEdOverlay input[type=text] { width:100%; box-sizing:border-box; }
+  #lisEdOverlay .row { margin-bottom:10px; }
+  #lisEdOverlay label.l { display:block; font-size:12.5px; font-weight:700; margin-bottom:3px; }
+</style>
+
+<!-- تعديل الوحدة / النسبة الطبيعية من شاشة الإدخال -->
+<div id="lisEdOverlay">
+  <div class="lis-ed-card" dir="rtl">
+    <h4 style="margin:0 0 4px;">✎ تعديل — <span id="lisEdParam"></span></h4>
+    <div class="muted" style="font-size:12px; margin-bottom:10px;" id="lisEdTest"></div>
+    <div id="lisEdStep1">
+      <div class="row"><label class="l">الوحدة</label><input type="text" id="lisEdUnit" dir="ltr"></div>
+      <div class="row"><label class="l">النسبة الطبيعية</label><input type="text" id="lisEdRange" dir="ltr" placeholder="مثال: 4.0 - 10.0  أو  &lt; 5  أو  Negative"></div>
+      <div id="lisEdMsg" style="color:#B91C1C; font-size:12.5px; min-height:16px;"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn secondary" onclick="lisEdClose()">إلغاء</button>
+        <button type="button" class="btn" onclick="lisEdNext()">متابعة</button>
+      </div>
+    </div>
+    <div id="lisEdStep2" style="display:none;">
+      <p id="lisEdAsk" style="font-size:14px; line-height:1.7; margin:4px 0 14px;"></p>
+      <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+        <button type="button" class="btn secondary" onclick="lisEdBack()">رجوع</button>
+        <button type="button" class="btn secondary" onclick="lisEdSave('patient')">لا — لهذا المريض فقط</button>
+        <button type="button" class="btn" onclick="lisEdSave('all')">نعم — على جميع المرضى</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  (function () {
+    var cur = null;
+    function $(id) { return document.getElementById(id); }
+    function txt(td) { return (td.textContent || '').replace(/\s+/g, ' ').trim(); }
+    document.addEventListener('DOMContentLoaded', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.rb-box'), function (box) {
+        if (box.getAttribute('data-status') === 'Verified') return;
+        var otId = (box.id || '').replace('rbox_', '');
+        Array.prototype.forEach.call(box.querySelectorAll('tr[data-pid]'), function (tr) {
+          Array.prototype.forEach.call(tr.querySelectorAll('td.lis-ed'), function (td) {
+            td.title = 'اضغط لتعديل الوحدة / النسبة الطبيعية';
+            if (!txt(td)) td.classList.add('lis-empty');
+            td.addEventListener('click', function () { open(otId, tr, box); });
+          });
+        });
+      });
+    });
+    function open(otId, tr, box) {
+      cur = { ot: otId, pid: tr.getAttribute('data-pid'), tr: tr,
+              name: txt(tr.querySelector('.lis-pname') || tr.children[0]),
+              unit0: txt(tr.querySelector('.lis-unit')), range0: txt(tr.querySelector('.lis-range')) };
+      $('lisEdParam').textContent = cur.name;
+      $('lisEdTest').textContent = (box.querySelector('h4') || {}).textContent || '';
+      $('lisEdUnit').value = cur.unit0; $('lisEdRange').value = cur.range0;
+      $('lisEdMsg').textContent = '';
+      $('lisEdStep1').style.display = 'block'; $('lisEdStep2').style.display = 'none';
+      $('lisEdOverlay').style.display = 'flex';
+      setTimeout(function () { $('lisEdRange').focus(); }, 50);
+    }
+    window.lisEdClose = function () { $('lisEdOverlay').style.display = 'none'; };
+    window.lisEdBack = function () { $('lisEdStep1').style.display = 'block'; $('lisEdStep2').style.display = 'none'; };
+    window.lisEdNext = function () {
+      var u = $('lisEdUnit').value.trim(), r = $('lisEdRange').value.trim();
+      var uc = u !== cur.unit0, rc = r !== cur.range0;
+      if (!uc && !rc) { $('lisEdMsg').textContent = 'ما تغيّر شي.'; return; }
+      var what = (rc && uc) ? 'الوحدة والنسبة الطبيعية' : (rc ? 'النسبة الطبيعية' : 'الوحدة');
+      $('lisEdAsk').innerHTML = 'تم تعديل ' + what + ' للباراميتر <b>' + cur.name.replace(/</g, '&lt;') +
+        '</b>.<br>هل تريد أن يكون التعديل على <b>جميع المرضى</b>؟<br><span class="muted" style="font-size:12px;">«نعم» = يتغيّر بتعريف التحليل لكل المرضى. «لا» = يخص هذا المريض فقط.</span>';
+      cur.u = u; cur.r = r; cur.uc = uc; cur.rc = rc;
+      $('lisEdStep1').style.display = 'none'; $('lisEdStep2').style.display = 'block';
+    };
+    window.lisEdSave = function (scope) {
+      var body = { param_id: +cur.pid, scope: scope };
+      if (cur.uc) body.unit = cur.u;
+      if (cur.rc) body.range = cur.r;
+      fetch('/api/order-tests/' + cur.ot + '/param-edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.ok) { lisEdBack(); $('lisEdMsg').textContent = d.error || 'تعذّر الحفظ'; return; }
+          // تحديث الخلايا مباشرة بدون إعادة تحميل (حتى ما تضيع القيم غير المحفوظة)
+          if (cur.uc) { var ut = cur.tr.querySelector('.lis-unit'); ut.textContent = cur.u; ut.classList.toggle('lis-empty', !cur.u); }
+          if (cur.rc) { var rt = cur.tr.querySelector('.lis-range'); rt.textContent = cur.r; rt.classList.toggle('lis-empty', !cur.r); }
+          lisEdClose();
+        })
+        .catch(function () { lisEdBack(); $('lisEdMsg').textContent = 'تعذّر الاتصال بالسيرفر.'; });
+    };
   })();
 </script>
 

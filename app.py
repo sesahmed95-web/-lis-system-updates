@@ -7117,6 +7117,161 @@ def api_order_test_hide_params(order_test_id):
     return jsonify({"ok": True, "hidden": sorted(hidden)})
 
 
+
+# ======================================================================
+# v55 — تعديل الوحدة / النسبة الطبيعية من شاشة إدخال النتائج
+#   scope=all     -> يتغير بتعريف التحليل لكل المرضى (test_parameters.unit / reference_ranges)
+#   scope=patient -> يُحفظ بجدول lis_patient_param_overrides لهذا المريض فقط
+# ======================================================================
+_OVR_OK = False
+
+
+def _ensure_overrides_table(db):
+    global _OVR_OK
+    if _OVR_OK:
+        return
+    try:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS lis_patient_param_overrides ("
+            "patient_id INTEGER NOT NULL, test_parameter_id INTEGER NOT NULL, "
+            "unit TEXT, low REAL, high REAL, range_text TEXT, updated_at TEXT, "
+            "PRIMARY KEY (patient_id, test_parameter_id))")
+        db.commit()
+        _OVR_OK = True
+    except Exception:
+        pass
+
+
+def _get_patient_override(db, patient_id, param_id):
+    if not patient_id:
+        return None
+    _ensure_overrides_table(db)
+    try:
+        return db.execute(
+            "SELECT * FROM lis_patient_param_overrides WHERE patient_id=? AND test_parameter_id=?",
+            (patient_id, param_id)).fetchone()
+    except Exception:
+        return None
+
+
+_orig_find_reference_range = find_reference_range
+
+
+def find_reference_range(db, param_id, gender, age, age_unit, *args, **kwargs):
+    """غلاف حول find_reference_range الأصلية: لو للمريض نسبة طبيعية معدّلة (لهذا المريض فقط) تُفضَّل."""
+    base = _orig_find_reference_range(db, param_id, gender, age, age_unit, *args, **kwargs)
+    pid = kwargs.get("patient_id")
+    ov = _get_patient_override(db, pid, param_id) if pid else None
+    if ov is not None and (ov["range_text"] or ov["low"] is not None or ov["high"] is not None):
+        d = {}
+        if base is not None:
+            try:
+                d = {k: base[k] for k in base.keys()}
+            except Exception:
+                d = {}
+        d.update({"low": ov["low"], "high": ov["high"], "range_text": ov["range_text"]})
+        return d
+    return base
+
+
+def _parse_range_text(txt):
+    """'4.0 - 10.0' -> (4.0, 10.0) ; '> 5' -> (5, None) ; '< 5' -> (None, 5) ; غير ذلك -> (None, None)"""
+    t = (txt or "").strip().replace("–", "-").replace("—", "-")
+    m = re.match(r"^(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)$", t)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    m = re.match(r"^(?:>=?|≥)\s*(-?\d+(?:\.\d+)?)$", t)
+    if m:
+        return float(m.group(1)), None
+    m = re.match(r"^(?:<=?|≤)\s*(-?\d+(?:\.\d+)?)$", t)
+    if m:
+        return None, float(m.group(1))
+    return None, None
+
+
+@app.route("/api/order-tests/<int:order_test_id>/param-edit", methods=["POST"])
+@login_required
+def api_order_test_param_edit(order_test_id):
+    """body: {param_id, unit?, range?, scope: 'all'|'patient', reset?: true}
+    unit/range غير موجودين بالـbody = لا تغيير. reset=true مع patient يلغي تخصيص المريض."""
+    db = get_db()
+    _ensure_overrides_table(db)
+    ot = db.execute(
+        "SELECT ot.id, ot.status, ot.analyzer, ot.test_definition_id, p.id AS patient_id, "
+        "p.gender, p.age, p.age_unit FROM order_tests ot "
+        "JOIN orders o ON o.id=ot.order_id JOIN visits v ON v.id=o.visit_id "
+        "JOIN patients p ON p.id=v.patient_id WHERE ot.id=?", (order_test_id,)).fetchone()
+    if not ot:
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    if ot["status"] == "Verified":
+        return jsonify({"ok": False, "error": "النتيجة معتمدة — افتحها للتعديل أولاً."}), 400
+    body = request.get_json(silent=True) or {}
+    try:
+        param_id = int(body.get("param_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "باراميتر غير صالح"}), 400
+    prm = db.execute("SELECT * FROM test_parameters WHERE id=? AND test_definition_id=?",
+                     (param_id, ot["test_definition_id"])).fetchone()
+    if not prm:
+        return jsonify({"ok": False, "error": "الباراميتر ليس من هذا التحليل"}), 404
+    scope = body.get("scope")
+    if scope not in ("all", "patient"):
+        return jsonify({"ok": False, "error": "حدّد النطاق (كل المرضى / هذا المريض)"}), 400
+    has_unit = "unit" in body
+    has_range = "range" in body
+    unit = (body.get("unit") or "").strip() if has_unit else None
+    rtxt = (body.get("range") or "").strip() if has_range else None
+    low, high = _parse_range_text(rtxt) if has_range else (None, None)
+
+    if scope == "patient":
+        if body.get("reset"):
+            db.execute("DELETE FROM lis_patient_param_overrides WHERE patient_id=? AND test_parameter_id=?",
+                       (ot["patient_id"], param_id))
+        else:
+            cur = _get_patient_override(db, ot["patient_id"], param_id)
+            n_unit = unit if has_unit else (cur["unit"] if cur else None)
+            if has_range:
+                n_low, n_high, n_txt = low, high, (rtxt or None)
+            else:
+                n_low, n_high, n_txt = ((cur["low"], cur["high"], cur["range_text"]) if cur else (None, None, None))
+            db.execute(
+                "INSERT INTO lis_patient_param_overrides (patient_id, test_parameter_id, unit, low, high, range_text, updated_at) "
+                "VALUES (?,?,?,?,?,?,?) ON CONFLICT(patient_id, test_parameter_id) DO UPDATE SET "
+                "unit=excluded.unit, low=excluded.low, high=excluded.high, range_text=excluded.range_text, "
+                "updated_at=excluded.updated_at",
+                (ot["patient_id"], param_id, n_unit, n_low, n_high, n_txt,
+                 datetime.now().isoformat(timespec="seconds")))
+    else:
+        if has_unit:
+            db.execute("UPDATE test_parameters SET unit=? WHERE id=?", (unit, param_id))
+            # التعديل العام يلغي أي وحدة مخصصة سابقًا حتى لا تتعارض
+            db.execute("UPDATE lis_patient_param_overrides SET unit=NULL WHERE test_parameter_id=?", (param_id,))
+        if has_range:
+            base = _orig_find_reference_range(db, param_id, ot["gender"], ot["age"], ot["age_unit"],
+                                              patient_id=None, analyzer=ot["analyzer"])
+            rid = None
+            if base is not None:
+                try:
+                    rid = base["id"]
+                except (KeyError, IndexError, TypeError):
+                    rid = None
+            if rid:
+                db.execute("UPDATE reference_ranges SET low=?, high=?, range_text=? WHERE id=?",
+                           (low, high, rtxt or None, rid))
+            else:
+                db.execute(
+                    "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, "
+                    "age_to_unit, low, high, range_text) VALUES (?, 'Both', 0, 'Years', 120, 'Years', ?, ?, ?)",
+                    (param_id, low, high, rtxt or None))
+            # التعديل العام يلغي تخصيص المرضى للنسبة (حتى يطبّق على الجميع فعلاً)
+            db.execute("UPDATE lis_patient_param_overrides SET low=NULL, high=NULL, range_text=NULL "
+                       "WHERE test_parameter_id=?", (param_id,))
+    db.commit()
+    log_action("EditParamUnitRange", "order_tests", order_test_id,
+               f"param={param_id} scope={scope} unit={unit!r} range={rtxt!r} reset={bool(body.get('reset'))}")
+    return jsonify({"ok": True})
+
+
 def get_ordered_parameters(db, ot):
     _all = _get_ordered_parameters_raw(db, ot)
     try:
@@ -7125,7 +7280,31 @@ def get_ordered_parameters(db, ot):
         _hid = set()
     if _hid:
         _kept = [p for p in _all if p["id"] not in _hid]
-        return _kept or _all
+        _all = _kept or _all
+    # v55: وحدة مخصصة لهذا المريض فقط
+    try:
+        _pid = ot["patient_id"] if "patient_id" in ot.keys() else None
+        if _pid is None:
+            _r = db.execute("SELECT v.patient_id AS pid FROM order_tests x JOIN orders o ON o.id=x.order_id "
+                            "JOIN visits v ON v.id=o.visit_id WHERE x.id=?", (ot["id"],)).fetchone()
+            _pid = _r["pid"] if _r else None
+        if _pid:
+            _ensure_overrides_table(db)
+            _ov = {r["test_parameter_id"]: r["unit"] for r in db.execute(
+                "SELECT test_parameter_id, unit FROM lis_patient_param_overrides WHERE patient_id=? AND unit IS NOT NULL",
+                (_pid,)).fetchall()}
+            if _ov:
+                _out = []
+                for p in _all:
+                    if p["id"] in _ov:
+                        d = {k: p[k] for k in p.keys()}
+                        d["unit"] = _ov[p["id"]]
+                        _out.append(d)
+                    else:
+                        _out.append(p)
+                return _out
+    except Exception:
+        pass
     return _all
 
 
