@@ -15,8 +15,17 @@
   </p>
 </div>
 
+<div class="card" id="lisPubLinks" style="border:2px solid #205072;">
+  <h3>📦 التحديث الداخلي الموقّع (الطريقة الجديدة — بدون توكن عند العميل)</h3>
+  <p class="muted">يبني تحديثًا موقّعًا (كود + قوالب فقط) ويرفعه لمستودع GitHub <b>عام</b> للتحديثات. العميل يشوف «يتوفر تحديث» بنفسه. كل الإعداد (المفتاح، الرابط) وزر النشر بصفحة واحدة.</p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <a class="btn" href="/designer/publish-update">📦 نشر تحديث للعملاء + الإعداد</a>
+    <a class="btn secondary" href="/designer/client-builder">🏗 تجهيز ملف تنصيب عميل (Setup)</a>
+  </div>
+</div>
+
 <div class="card">
-  <h3>🌐 التحديث التلقائي عبر الإنترنت</h3>
+  <h3>🌐 التحديث التلقائي عبر الإنترنت <span class="muted" style="font-size:12px;">(الطريقة القديمة — مستودع خاص + توكن قراءة عند كل عميل)</span></h3>
   <p>الإصدار المثبَّت حالياً على هذا الجهاز: <strong class="mono">{{ update_info.local_version }}</strong></p>
 
   {% if not update_info.configured %}
