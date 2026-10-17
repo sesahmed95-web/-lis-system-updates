@@ -12,3 +12,5 @@
 [2026-10-16T12:42:36] SLOW 3.0s GET /management/report-designer/preview/6?design=table (preview_report_design)
 [2026-10-16T12:42:37] SLOW 3.1s GET /management/report-designer/preview/6?design=1 (preview_report_design)
 [2026-10-16T12:42:37] SLOW 3.3s GET /management/report-designer/preview/22?design=3 (preview_report_design)
+[2026-10-16T21:46:48] SLOW 3.3s POST /designer/update/check-now? (designer_update_check_now)
+[2026-10-17T11:26:41] SLOW 2.1s POST /designer/update/push? (designer_push_update)

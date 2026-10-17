@@ -14,6 +14,7 @@ seal_client_package.py — "ختم" نسخة العميل: يطلع منها م�
     --admin-password كلمة_سر_جديدة     (ينصح به: يبدّل admin123 الافتراضية)
     --deactivate-demo-users            (يعطّل rec/tech/super/acc الافتراضيين؛ العميل ينشئ موظفيه)
     --keep-license                     (لا تمسح بيانات الترخيص — فقط إذا تعرف شنو تسوي)
+    --keep-designer                    (لا تستبدل حساب المصمم — الافتراضي: يُستبدل بحساب عشوائي مجهول)
     --keep-setting مفتاح               (استثناء من مسح الإعدادات الحساسة؛ يتكرر)
     --out مجلد_الخرج                   (الافتراضي: مجلد sealed بجانب المجلد المجهّز)
 """
@@ -22,6 +23,7 @@ import getpass
 import hashlib
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import sys
@@ -66,6 +68,23 @@ def _sha(p):
     return hashlib.sha256(p.encode("utf-8")).hexdigest()
 
 
+# سطر إنشاء حساب المصمم الافتراضي داخل database.py (يوزر وباسورد مكتوبين بالنص): نستبدلهما بقيم عشوائية
+# بنسخة العميل حتى ما يقدر يعرفهما من الكود. (نسختك أنت ما تتغير: التعديل على نسخة الزيب فقط.)
+DESIGNER_SEED_RE = re.compile(
+    r'(INSERT INTO designer_account \(id, username, password_hash\) VALUES \(1, \?, \?\)",\s*\()\s*(["\'])(.*?)\2\s*,\s*hash_password\(\s*(["\'])(.*?)\4\s*\)\s*(\))',
+    re.S)
+
+
+def scrub_designer_seed(text):
+    """يرجّع (النص الجديد، [القيم القديمة اللي انشالت]). إذا ما لقى السطر يرجّع نفس النص و[]."""
+    found = []
+
+    def _r(m):
+        found.extend([m.group(3), m.group(5)])
+        return f'{m.group(1)}"c_{secrets.token_hex(6)}", hash_password("{secrets.token_urlsafe(24)}"){m.group(6)}'
+    return DESIGNER_SEED_RE.sub(_r, text), found
+
+
 # ================================================================== القاعدة
 def sanitize_db(src_db, dst_db, args):
     """نسخة متسقة (backup API يشتغل حتى لو البرنامج شغّال) ثم تنظيف. يرجّع تقرير نصي."""
@@ -103,6 +122,21 @@ def sanitize_db(src_db, dst_db, args):
     rep.append("إعدادات حساسة/مسارات جهازك تم تفريغها: " + (", ".join(cleared) or "لا شي"))
     if kept:
         rep.append("إعدادات حساسة بقيت (تخص العميل أو استثنيتها): " + ", ".join(kept))
+
+    # حساب المصمم: نسخة العميل ما لازم تحتوي يوزر/باسورد لوحة المصمم عندك → نبدّلهما بقيم عشوائية مجهولة
+    designer_msg = None
+    if "designer_account" in tables and not args.keep_designer:
+        n_des = d.execute("SELECT COUNT(*) FROM designer_account").fetchone()[0]
+        if n_des:
+            d.execute("UPDATE designer_account SET username=?, password_hash=?",
+                      ("c_" + secrets.token_hex(6), _sha(secrets.token_urlsafe(24))))
+            designer_msg = "حساب المصمم استُبدل بحساب عشوائي مجهول (العميل ما يقدر يدخل لوحة المصمم بيوزرك/باسوردك)"
+        else:
+            designer_msg = "لا يوجد حساب مصمم بالقاعدة"
+    elif "designer_account" in tables:
+        designer_msg = "⚠ حساب المصمم بقي كما هو (--keep-designer): يوزرك وباسوردك موجودين بنسخة العميل!"
+    if designer_msg:
+        rep.append(designer_msg)
 
     # المستخدمون
     users_msgs = []
@@ -300,6 +334,7 @@ def main():
     ap.add_argument("--admin-password", default=None)
     ap.add_argument("--deactivate-demo-users", action="store_true")
     ap.add_argument("--keep-license", action="store_true")
+    ap.add_argument("--keep-designer", action="store_true")
     ap.add_argument("--keep-setting", action="append", default=[])
     ap.add_argument("--python-version", default=f"{sys.version_info.major}.{sys.version_info.minor}",
                     help="إصدار بايثون اللي يثبّته INSTALL.bat إذا ما لقى بايثون (الافتراضي: نفس إصدار جهازك)")
@@ -335,7 +370,22 @@ def main():
         n = 0
         uploads = 0
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            leak_terms, scrub_notes = [], []
             for full, arc in collect_files(ws):
+                if arc.endswith(".py") and not args.keep_designer:
+                    try:
+                        txt = open(full, encoding="utf-8").read()
+                    except (UnicodeDecodeError, OSError):
+                        txt = None
+                    if txt is not None and "INSERT INTO designer_account" in txt:
+                        new_txt, found = scrub_designer_seed(txt)
+                        if found:
+                            leak_terms += [x for x in found if len(x) >= 4]
+                            zf.writestr(arc, new_txt)
+                            scrub_notes.append(f"{arc}: تم استبدال يوزر/باسورد المصمم الافتراضيين بقيم عشوائية")
+                            n += 1
+                            continue
+                        scrub_notes.append(f"⚠ {arc}: فيه INSERT لحساب المصمم لكن ما قدرت أعدّله تلقائيًا — عدّله يدويًا بنسخة العميل!")
                 zf.write(full, arc)
                 n += 1
                 uploads += arc.startswith("static/uploads/")
@@ -348,12 +398,30 @@ def main():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+    # فحص نهائي: هل بقي يوزر/باسورد المصمم القديم نصًّا بأي ملف نصي داخل الزيب؟
+    leaks = []
+    if leak_terms:
+        with zipfile.ZipFile(zip_path) as zf:
+            for info in zf.infolist():
+                if info.filename.lower().endswith((".py", ".html", ".txt", ".md", ".json", ".bat", ".js", ".css")):
+                    try:
+                        body = zf.read(info.filename).decode("utf-8", "ignore")
+                    except Exception:
+                        continue
+                    for term in leak_terms:
+                        if term in body:
+                            leaks.append(f"{info.filename} (يحتوي نص يوزر/باسورد المصمم)")
+                            break
     size = os.path.getsize(zip_path) / 1024 / 1024
     print(f"\n✅ تم ختم نسخة العميل: {lab_ar}")
     print(f"   الملف: {zip_path}  ({size:.1f} MB، {n} ملف، منها {uploads} من static/uploads = شعار/أختام/صور)")
     print("\n— تقرير القاعدة —")
     for r in report:
         print("  •", r)
+    for sn in scrub_notes:
+        print("  •", sn)
+    for lk in leaks:
+        print("  ⚠ تسريب محتمل:", lk)
     print("\n— requirements.txt —")
     print("  " + reqs.replace("\n", "\n  ").rstrip())
     for nn in req_notes:
