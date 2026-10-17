@@ -1850,4 +1850,36 @@
   })();
 </script>
 
+<script>
+/* إصلاح: أزرار الطباعة العلوية (النتائج المكتملة / اللوحة المجمّعة / التقرير الشامل) ما كانت تستجيب لأن
+   الدالتين lisPreOpen و lisClosePending مستدعاتان بالصفحة بس غير معرّفتين بأي ملف → الضغط يرمي خطأ بصمت. */
+(function () {
+  if (typeof window.lisPreOpen !== 'function') {
+    window.lisPreOpen = function () {                 // نافذة فاضية تنفتح فورًا مع ضغطة المستخدم (قبل الحفظ غير المتزامن)
+      try {
+        if (window.lisPendingWin && !window.lisPendingWin.closed) return;
+        var w = window.open('about:blank', '_blank');
+        if (w) { try { w.document.write('<!doctype html><meta charset="utf-8"><body style="font-family:Tahoma,sans-serif;direction:rtl;padding:24px;color:#334155">جارِ تجهيز التقرير…</body>'); } catch (e) {} }
+        window.lisPendingWin = w || null;
+      } catch (e) { window.lisPendingWin = null; }
+    };
+  }
+  if (typeof window.lisClosePending !== 'function') {
+    window.lisClosePending = function () {
+      try { if (window.lisPendingWin && !window.lisPendingWin.closed) window.lisPendingWin.close(); } catch (e) {}
+      window.lisPendingWin = null;
+    };
+  }
+  // لو صار أي خطأ ثاني بالطباعة يظهر برسالة بدل ما يسكت
+  ['lisTopPrintBtn', 'lisPrintOne'].forEach(function (n) {
+    var orig = window[n]; if (typeof orig !== 'function' || orig.__wrapped) return;
+    var f = function () {
+      try { return orig.apply(this, arguments); }
+      catch (e) { alert('تعذّر تنفيذ الطباعة: ' + (e && e.message ? e.message : e)); try { window.lisClosePending(); } catch (x) {} }
+    };
+    f.__wrapped = true; window[n] = f;
+  });
+})();
+</script>
+
 {% endblock %}
