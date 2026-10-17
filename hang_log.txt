@@ -14,3 +14,75 @@
 [2026-10-16T12:42:37] SLOW 3.3s GET /management/report-designer/preview/22?design=3 (preview_report_design)
 [2026-10-16T21:46:48] SLOW 3.3s POST /designer/update/check-now? (designer_update_check_now)
 [2026-10-17T11:26:41] SLOW 2.1s POST /designer/update/push? (designer_push_update)
+[2026-10-17T20:51:24] HANG 9s+ /designer? (designer_panel)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1517, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2076, in designer_panel
+    revoked_licenses = auto_updater.fetch_revocation_list()
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 354, in fetch_revocation_list
+    with _api_request(_contents_url(REVOCATION_FILE_PATH)) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-10-17T20:51:26] SLOW 11.1s GET /designer? (designer_panel)
+[2026-10-17T20:51:26] SLOW 8.4s GET /designer? (designer_panel)

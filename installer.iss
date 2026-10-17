@@ -1,4 +1,4 @@
-; Inno Setup script - Lab System
+﻿; Inno Setup script - Lab System
 ; 1) run build.bat first   2) open this file in Inno Setup   3) Ctrl+F9
 
 #define MyAppName "Lab System"
@@ -25,6 +25,8 @@ CloseApplications=force
 [Dirs]
 ; the program writes lis.db, uploads and logs inside its own folder
 Name: "{app}"; Permissions: users-modify
+; daily safety copies of lis.db live OUTSIDE the program folder (the program writes them; uninstall keeps them)
+Name: "{commonappdata}\LabSystemBackup"; Permissions: users-modify; Flags: uninsneveruninstall
 
 [Files]
 Source: "dist\LabSystem\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -47,3 +49,33 @@ Filename: "{sys}\wscript.exe"; Parameters: """{app}\start_lab.vbs"""; Descriptio
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Lab System 9090"""; Flags: runhidden
+
+[Code]
+{ Re-install on a computer where the data folder is gone: offer to restore the last daily safety copy. }
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  BackupDb, BackupInfo, Info: String;
+  Raw: AnsiString;
+begin
+  if CurStep = ssInstall then
+  begin
+    BackupDb := ExpandConstant('{commonappdata}\LabSystemBackup\lis_latest.db');
+    if (not FileExists(ExpandConstant('{app}\lis.db'))) and FileExists(BackupDb) then
+    begin
+      BackupInfo := ExpandConstant('{commonappdata}\LabSystemBackup\lis_latest.json');
+      Info := '';
+      if LoadStringFromFile(BackupInfo, Raw) then
+        Info := #13#10#13#10 + String(Raw);
+      if MsgBox('A previous Lab System database backup was found on this computer.' + #13#10 +
+                'Restore all patients and results from it?' + Info + #13#10#13#10 +
+                'تم العثور على نسخة احتياطية سابقة لبيانات المرضى والنتائج على هذا الجهاز.' + #13#10 +
+                'هل تريد استعادتها؟',
+                mbConfirmation, MB_YESNO) = IDYES then
+      begin
+        ForceDirectories(ExpandConstant('{app}'));
+        if not FileCopy(BackupDb, ExpandConstant('{app}\lis.db'), False) then
+          MsgBox('Could not copy the backup. You can restore it later from: ' + ExpandConstant('{commonappdata}\LabSystemBackup'), mbError, MB_OK);
+      end;
+    end;
+  end;
+end;

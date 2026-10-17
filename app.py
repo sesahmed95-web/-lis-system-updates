@@ -1,3 +1,11 @@
+# --- v59: تشغيل نسخة "التحديث الداخلي" (updates\\current) بدل الكود المضمَّن بالـexe إذا وُجدت وكانت أحدث (lab_overlay.py) ---
+try:
+    import lab_overlay
+    lab_overlay.boot(__file__, globals())
+except SystemExit:
+    raise
+except ImportError:
+    pass
 from flask import Flask, render_template, request, redirect, url_for, session, g, flash, send_file, jsonify, get_flashed_messages
 from datetime import datetime, date, timedelta
 from functools import wraps
@@ -230,6 +238,11 @@ _error_file_handler.setLevel(_logging.ERROR)
 _error_file_handler.setFormatter(_logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
 
 app = Flask(__name__)
+# قوالب التحديث الداخلي تتقدّم على المضمّنة بالـexe (والقالب غير الموجود بالتحديث يؤخذ من المضمّن)
+_ov_dir = os.environ.get("LIS_OVERLAY_DIR")
+if _ov_dir and os.path.isdir(os.path.join(_ov_dir, "templates")):
+    from jinja2 import ChoiceLoader, FileSystemLoader
+    app.jinja_loader = ChoiceLoader([FileSystemLoader(os.path.join(_ov_dir, "templates")), app.jinja_loader])
 app.logger.addHandler(_error_file_handler)
 app.logger.setLevel(_logging.ERROR)
 # مفتاح جلسة عشوائي مختلف بكل مرة يُشغَّل فيها السيرفر فعليًا (وليس نفس
@@ -2583,7 +2596,7 @@ def recent_visits_page():
     صارت صفحة خاصة بيها ضمن قائمة Front Desk المنسدلة (بطلب المستخدم)."""
     db = get_db()
     recent_visits = db.execute(
-        "SELECT v.registration_number, p.id as patient_id, p.full_name, v.status, v.created_at "
+        "SELECT v.id, v.registration_number, p.id as patient_id, p.full_name, v.status, v.created_at "
         "FROM visits v JOIN patients p ON p.id=v.patient_id "
         "ORDER BY v.id DESC LIMIT 100"
     ).fetchall()
@@ -3369,6 +3382,53 @@ def patient_edit(patient_id):
         flash("Patient updated.")
         return redirect(url_for("patients_list"))
     return render_template("front_desk/patient_form.html", patient=patient, requires_gate=requires_gate)
+
+
+def _check_delete_password(db, password):
+    """كلمة مرور الحذف (من الإعدادات): أي موظف (استقبال/مختبر/مسؤول) يحذف مريض/زيارة بشرط إدخالها."""
+    stored = get_setting(db, "delete_password_hash", "")
+    if not stored:
+        return False, "لم تُضبط كلمة مرور الحذف بعد — اضبطها من الإعدادات (بطاقة «كلمة مرور الحذف»)."
+    if hash_password(password or "") != stored:
+        return False, "كلمة مرور الحذف غير صحيحة."
+    return True, None
+
+
+@app.route("/api/delete/visit/<int:visit_id>", methods=["POST"])
+@login_required
+def api_delete_visit(visit_id):
+    db = get_db()
+    d = request.get_json(silent=True) or {}
+    ok, err = _check_delete_password(db, d.get("password"))
+    if not ok:
+        return jsonify(ok=False, error=err), 403
+    visit = db.execute("SELECT * FROM visits WHERE id=?", (visit_id,)).fetchone()
+    if not visit:
+        return jsonify(ok=False, error="الزيارة غير موجودة"), 404
+    _delete_visit_cascade(db, visit)
+    return jsonify(ok=True)
+
+
+@app.route("/api/delete/patient/<int:patient_id>", methods=["POST"])
+@login_required
+def api_delete_patient(patient_id):
+    """حذف المريض مع كل زياراته ونتائجه وفواتيره (بعد كلمة مرور الحذف)."""
+    db = get_db()
+    d = request.get_json(silent=True) or {}
+    ok, err = _check_delete_password(db, d.get("password"))
+    if not ok:
+        return jsonify(ok=False, error=err), 403
+    patient = db.execute("SELECT * FROM patients WHERE id=?", (patient_id,)).fetchone()
+    if not patient:
+        return jsonify(ok=False, error="المريض غير موجود"), 404
+    for v in db.execute("SELECT * FROM visits WHERE patient_id=?", (patient_id,)).fetchall():
+        _delete_visit_cascade(db, v)
+    if db.execute("SELECT 1 FROM patients WHERE id=?", (patient_id,)).fetchone():
+        db.execute("DELETE FROM patient_followups WHERE patient_id=?", (patient_id,))
+        db.execute("DELETE FROM patients WHERE id=?", (patient_id,))
+        db.commit()
+        log_action("Delete", "patient", patient_id, patient["full_name"])
+    return jsonify(ok=True)
 
 
 @app.route("/front-desk/patients/<int:patient_id>/delete", methods=["POST"])
@@ -4540,13 +4600,17 @@ def _delete_visit_cascade(db, visit):
 
 
 @app.route("/front-desk/visits/<int:visit_id>/delete", methods=["POST"])
-@roles_required("admin")
+@login_required
 def delete_visit(visit_id):
     """حذف زيارة بالكامل مع كل ما يتبعها (طلبات، نتائج، فواتير، مدفوعات،
     متابعات، إرسالات واتساب)، ثم — إذا صار المريض بلا أي زيارة أخرى — يُحذف
     المريض نفسه فينحذف من صفحة/أيقونة المرضى، وكذلك إذا صار الدكتور المرسل
     (doctor_id) غير مرتبط بأي زيارة أو طلب تحليل آخر يُحذف هو الآخر تلقائيًا."""
     db = get_db()
+    _ok, _err = _check_delete_password(db, request.form.get("delete_password"))
+    if not _ok:
+        flash(_err)
+        return redirect(url_for("visits_list"))
     visit = db.execute("SELECT * FROM visits WHERE id=?", (visit_id,)).fetchone()
     if not visit:
         return "Not found", 404
@@ -11751,6 +11815,21 @@ def app_settings():
         # ترك الحقل فاضي = ما يغيّر كلمة المرور الحالية (يبقى نفس الشي
         # -- خله فاضي كل مرة إذا ما تريد تغييرها).
         # ------------------------------------------------------------
+        if request.form.get("delete_password_form") is not None:
+            cur_hash = get_setting(db, "delete_password_hash", "")
+            if cur_hash and hash_password(request.form.get("current_delete_password", "")) != cur_hash:
+                flash("كلمة مرور الحذف الحالية غير صحيحة — لم تتغيّر.")
+            else:
+                newp = request.form.get("new_delete_password", "")
+                if not newp:
+                    flash("اكتب كلمة المرور الجديدة.")
+                else:
+                    set_setting(db, "delete_password_hash", hash_password(newp))
+                    db.commit()
+                    log_action("UpdateDeletePassword", "settings", 0)
+                    flash("تم حفظ كلمة مرور الحذف.")
+            return redirect(url_for("app_settings"))
+
         if request.form.get("interface_passwords_form") is not None:
             recep_pass = request.form.get("interface_reception_password", "")
             if recep_pass:
@@ -13530,6 +13609,43 @@ def api_portal_revoke(visit_id):
 def api_portal_test():
     ok, msg = cloud_sync.test_connection(cloud_sync.get_cfg(get_db()))
     return {"ok": ok, "message": msg}
+# --- v58: صفحة المصمم "تجهيز ملف تنصيب العميل" (client_builder.py): حقول + زر واحد يبني LabSystem_Setup.exe ---
+try:
+    import client_builder
+    client_builder.register(app, designer_required, get_db, get_setting, set_setting)
+except Exception as _cb_err:   # أي مشكلة بهالميزة ما توقف البرنامج
+    print("client_builder not loaded:", _cb_err)
+# --- v59: التحديث الداخلي (شريط "يتوفر تحديث") + نسخ احتياطي يومي لقاعدة البيانات خارج مجلد البرنامج ---
+try:
+    import lab_updater
+    lab_updater.register(app, get_db, get_setting, set_setting, login_required)
+except Exception as _lu_err:
+    print("lab_updater not loaded:", _lu_err)
+# --- v60: صفحة المصمم "نشر تحديث للعملاء" (update_publisher.py): إعداد المفتاح/الرابط + زر بناء وتوقيع ونشر ---
+try:
+    import update_publisher
+    update_publisher.register(app, designer_required, get_db, get_setting, set_setting)
+
+    @app.after_request
+    def _designer_panel_publish_links(resp):
+        """يضيف شريط أزرار صغير بلوحة المصمم يوصل لصفحتي «نشر تحديث» و«تجهيز Setup» (بدون تعديل قالب اللوحة)."""
+        try:
+            if request.path.rstrip("/") == "/designer" and resp.mimetype == "text/html" and resp.status_code == 200 \
+                    and not getattr(sys, "frozen", False):
+                body = resp.get_data(as_text=True)
+                if "lisPubLinks" not in body and "</body>" in body:
+                    bar = ('<div id="lisPubLinks" style="position:fixed;bottom:14px;left:14px;z-index:9999;display:flex;gap:8px;'
+                           'direction:rtl;font:700 13px Tahoma,Arial,sans-serif;">'
+                           '<a href="/designer/publish-update" style="background:#205072;color:#fff;padding:9px 14px;border-radius:9px;'
+                           'text-decoration:none;box-shadow:0 3px 12px rgba(0,0,0,.3);">📦 نشر تحديث للعملاء</a>'
+                           '<a href="/designer/client-builder" style="background:#fff;color:#205072;padding:9px 14px;border-radius:9px;'
+                           'text-decoration:none;border:1px solid #205072;box-shadow:0 3px 12px rgba(0,0,0,.2);">🏗 تجهيز Setup العميل</a></div>')
+                    resp.set_data(body.replace("</body>", bar + "</body>", 1))
+        except Exception:
+            pass
+        return resp
+except Exception as _up_err:
+    print("update_publisher not loaded:", _up_err)
 if __name__ == "__main__":
     init_db()
     write_pending_preset_logo(UPLOAD_DIR)   # شعار العميل القادم من portal_preset.json (إن وُجد)

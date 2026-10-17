@@ -66,10 +66,8 @@
             <a class="btn small secondary" href="{{ url_for('print_visit_barcode', visit_id=v['id']) }}" title="طباعة ملصق باركود الزيارة">🏷️</a>
             <a class="btn small secondary" href="{{ url_for('print_sample_barcodes', visit_id=v['id']) }}" title="طباعة ملصقات باركود العينات">🧪🏷️</a>
             <a class="btn small secondary" href="{{ url_for('print_invoice', visit_id=v['id']) }}" title="طباعة الفاتورة">🧾</a>
-            <form method="POST" action="{{ url_for('delete_visit', visit_id=v['id']) }}" style="display:inline"
-                  onsubmit="return confirm('متأكد من حذف زيارة {{ v['full_name'] }} رقم {{ v['registration_number'] }}؟ هذا الإجراء لا يمكن التراجع عنه، وراح يحذف المريض والدكتور المرسل أيضًا إذا صاروا بلا أي زيارات أخرى مرتبطة.');">
-              <button class="btn small danger" type="submit" title="حذف الزيارة">🗑 حذف</button>
-            </form>
+            <button class="btn small danger" type="button" title="حذف الزيارة" data-n="{{ v['full_name']|e }} #{{ v['registration_number'] }}"
+                    onclick="lisDelete('visit', {{ v['id'] }}, this.dataset.n)">🗑 حذف</button>
           </div>
           {% if remaining > 0.01 %}
           <form method="POST" action="{{ url_for('pay_invoice', visit_id=v['id']) }}" style="display:flex; gap:6px; margin-top:6px;">
@@ -83,4 +81,5 @@
     </tbody>
   </table>
 </div>
+{% include "_delete_js.html" %}
 {% endblock %}

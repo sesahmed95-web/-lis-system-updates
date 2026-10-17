@@ -5,6 +5,8 @@
   <h3>{{ visit['patient_name'] }} <span class="muted mono">#{{ visit['registration_number'] }}</span></h3>
   <p class="muted rb-sub">{{ visit['gender'] }} · {{ visit['age'] }} {{ visit['age_unit'] }} · {{ visit['created_at'] }}</p>
   <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
+  <button type="button" class="btn small danger" data-n="{{ visit['patient_name']|e }} #{{ visit['registration_number'] }}"
+     onclick="lisDelete('visit', {{ visit['id'] }}, this.dataset.n, function(){ location.href='{{ url_for('results_list') }}'; })">🗑 حذف المريض/الزيارة</button>
   <button type="button" class="btn small secondary print-link" id="printAllLink"
      onclick="lisTopPrintBtn('{{ url_for('print_visit_full_report', visit_id=visit['id']) }}?autoprint=1', 'طباعة النتائج المكتملة')"
      title="كل التحاليل المكتملة بصفحة وحدة وبنافذة طباعة وحدة (نفس تصميم كل تقرير)">🖨 طباعة النتائج المكتملة</button>
@@ -1882,4 +1884,5 @@
 })();
 </script>
 
+{% include "_delete_js.html" %}
 {% endblock %}

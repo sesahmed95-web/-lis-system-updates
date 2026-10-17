@@ -491,6 +491,19 @@
 </div>
 
 <div class="card">
+  <h3>🗑 كلمة مرور الحذف (مريض / زيارة)</h3>
+  <p class="muted">أي موظف (استقبال، مختبر، مسؤول) يقدر يحذف مريض أو زيارة من صفحات البرنامج، لكن لازم يكتب هذي الكلمة. حذف المريض يحذف معه كل زياراته ونتائجه وفواتيره. إذا كانت محفوظة مسبقًا اكتب الحالية أولاً.</p>
+  <form method="POST">
+    <input type="hidden" name="delete_password_form" value="1">
+    <div class="form-field"><label>كلمة مرور الحذف الحالية (إن وُجدت)</label>
+      <input type="password" name="current_delete_password" dir="ltr" autocomplete="off"></div>
+    <div class="form-field"><label>كلمة مرور الحذف الجديدة</label>
+      <input type="password" name="new_delete_password" dir="ltr" autocomplete="off"></div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card">
   <h3>🔀 كلمات مرور واجهتي الدخول (استقبال / مختبر)</h3>
   <p class="muted">
     تُسأل هذي الكلمة فقط وقت الدخول أو التبديل لتلك الواجهة تحديدًا (من زر

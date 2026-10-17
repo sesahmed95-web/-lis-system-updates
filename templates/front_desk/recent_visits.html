@@ -10,6 +10,7 @@
         <th>{{ 'المريض' if lang=='ar' else 'Patient' }}</th>
         <th>{{ 'الحالة' if lang=='ar' else 'Status' }}</th>
         <th>{{ 'التاريخ' if lang=='ar' else 'Date' }}</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -19,11 +20,14 @@
         <td><a href="{{ url_for('patient_history', patient_id=v.patient_id) }}" style="color:inherit; text-decoration:underline; text-decoration-style:dotted;">{{ v.full_name }}</a></td>
         <td>{{ v.status }}</td>
         <td>{{ v.created_at }}</td>
+        <td><button class="btn small danger" type="button" data-n="{{ v.full_name|e }} #{{ v.registration_number }}"
+                    onclick="lisDelete('visit', {{ v.id }}, this.dataset.n)">🗑 حذف</button></td>
       </tr>
       {% else %}
-      <tr><td colspan="4" style="text-align:center; opacity:.6;">{{ 'لا توجد زيارات' if lang=='ar' else 'No visits yet' }}</td></tr>
+      <tr><td colspan="5" style="text-align:center; opacity:.6;">{{ 'لا توجد زيارات' if lang=='ar' else 'No visits yet' }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+{% include "_delete_js.html" %}
 {% endblock %}

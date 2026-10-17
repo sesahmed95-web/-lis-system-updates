@@ -1,0 +1,12 @@
+<script>
+function lisDelete(kind, id, label, after){
+  var msg = kind==='patient'
+    ? 'حذف المريض «'+label+'» مع كل زياراته ونتائجه وفواتيره نهائيًا. اكتب كلمة مرور الحذف:'
+    : 'حذف زيارة «'+label+'» نهائيًا. اكتب كلمة مرور الحذف:';
+  var pw = prompt(msg); if(pw===null || pw==='') return;
+  fetch('/api/delete/'+kind+'/'+id, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:pw})})
+  .then(function(r){return r.json();})
+  .then(function(j){ if(!j.ok){ alert(j.error||'فشل الحذف'); return; } if(after) after(); else location.reload(); })
+  .catch(function(){ alert('تعذر الاتصال بالسيرفر'); });
+}
+</script>

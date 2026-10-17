@@ -4,6 +4,7 @@ cd /d "%~dp0"
 
 echo ==== 1/4  Preparing tools ====
 python -m pip install --upgrade pyinstaller
+python -m pip install cryptography
 if exist requirements.txt python -m pip install -r requirements.txt
 
 echo ==== 2/4  Cleaning old build ====
