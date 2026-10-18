@@ -388,6 +388,9 @@
     <table class="page-repeat-table">
       {% if repeat_header_on_print %}<thead>{% else %}<tbody>{% endif %}
         <tr><td>
+          {% set _hs = report_header_style|default('default') %}
+          {% set _lhname = lab_name_ar|default(brand_name|default('')) %}
+          {% if _hs == 'default' or _hs not in ('h1','h2','h3','h4') %}
           <div class="lab-title-box">مختبر امراض الدم التخصصي للتحليلات المرضية</div>
 
           {% if logo_url and logo_position == 'center' %}
@@ -423,6 +426,61 @@
             <div class="doc-col logo-col{% if logo_position == 'left' %} logo-pos-left{% endif %}"><img src="{{ logo_url }}" alt="logo"></div>
             {% endif %}
           </div>
+
+          {% else %}
+          {# ===== v61: ترويسات إضافية (تُختار من "تصميم التقارير" — الافتراضية أعلاه لم تتغيّر) ===== #}
+          <style>
+            .lh { --lh-accent: {{ report_header_accent|default('#4FB6E8') }}; direction: rtl; margin-bottom: 10px; color: #14213D; }
+            .lh .lh-name { font-weight: 800; font-size: 1.5em; line-height: 1.25; }
+            .lh .lh-sub { color: #334155; font-size: .95em; }
+            .lh .lh-logo { width: {{ logo_width|default(100) }}px; height: auto; max-width: 100%; }
+            .lh .lh-doc { text-align: center; line-height: 1.4; font-size: {{ letterhead_font_size|default(14) }}px; font-family: {{ letterhead_font_family|default("'Segoe UI', Tahoma, Arial, sans-serif")|safe }}; }
+            .lh .lh-doc .doc-title { color: #14213D; font-weight: 600; }
+            .lh .lh-doc .doc-name { color: #14213D; font-weight: 700; }
+            .lh .lh-doc .doc-degree, .lh .lh-doc .doc-eng { color: #1F3B7A; }
+            .lh .lh-bar { height: 8px; background: var(--lh-accent); border-radius: 4px; margin-bottom: 8px; }
+            .lh-h1 .lh-top { display: flex; direction: ltr; align-items: center; gap: 10px; }
+            .lh-h1 .lh-top .lh-mid { flex: 1; text-align: center; direction: rtl; }
+            .lh-h1 .lh-docs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 14px; margin-top: 8px; }
+            .lh-h1 .lh-doc { border-bottom: 2px solid var(--lh-accent); padding-bottom: 5px; }
+            .lh-h2 .lh-row { display: flex; direction: ltr; align-items: flex-start; gap: 14px; }
+            .lh-h2 .lh-docs { flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 14px; }
+            .lh-h2 .lh-doc { border-bottom: 2px solid var(--lh-accent); padding-bottom: 5px; }
+            .lh-h2 .lh-brand { flex: 0 0 34%; text-align: center; direction: rtl; }
+            .lh-h3 { text-align: center; }
+            .lh-h3 .lh-docs { display: flex; justify-content: space-around; border-top: 2px solid var(--lh-accent); margin-top: 8px; padding-top: 6px; }
+            .lh-h3 .lh-doc { flex: 1; padding: 0 6px; border-inline-start: 1px solid #CBD5E1; }
+            .lh-h3 .lh-doc:first-child { border-inline-start: none; }
+            .lh-h4 .lh-top { display: flex; direction: ltr; align-items: center; gap: 12px; border-bottom: 2px solid var(--lh-accent); padding-bottom: 6px; }
+            .lh-h4 .lh-top .lh-mid { flex: 1; text-align: right; direction: rtl; }
+            .lh-h4 .lh-name { font-size: 1.35em; }
+            .lh-h4 .lh-line { margin-top: 5px; font-size: .88em; color: #1F3B7A; text-align: center; }
+            .lh-h4 .lh-line span + span::before { content: "  |  "; color: #94A3B8; }
+          </style>
+          {% macro lh_doc(doc) %}<div class="lh-doc"{% if doc['font_size'] %} style="font-size:{{ doc['font_size'] }}px;"{% endif %}>
+            <div class="doc-title">{{ doc['title'] or 'الدكتور' }}</div><div class="doc-name">{{ doc['name'] }}</div>
+            {% if doc['degree_ar'] %}<div class="doc-degree">{{ doc['degree_ar']|replace('\n', '<br>')|safe }}</div>{% endif %}
+            {% if doc['degree_en'] %}<div class="doc-eng">{{ doc['degree_en']|replace('\n', '<br>')|safe }}</div>{% endif %}</div>{% endmacro %}
+          {% if _hs == 'h1' %}
+          <div class="lh lh-h1"><div class="lh-bar"></div>
+            <div class="lh-top">{% if logo_url %}<img class="lh-logo" src="{{ logo_url }}" alt="logo">{% endif %}
+              <div class="lh-mid"><div class="lh-name">{{ _lhname }}</div>{% if report_header_subtitle %}<div class="lh-sub">{{ report_header_subtitle }}</div>{% endif %}</div></div>
+            <div class="lh-docs">{% for doc in letterhead_doctors %}{{ lh_doc(doc) }}{% endfor %}</div></div>
+          {% elif _hs == 'h2' %}
+          <div class="lh lh-h2"><div class="lh-row">
+            <div class="lh-docs">{% for doc in letterhead_doctors %}{{ lh_doc(doc) }}{% endfor %}</div>
+            <div class="lh-brand">{% if logo_url %}<img class="lh-logo" src="{{ logo_url }}" alt="logo">{% endif %}<div class="lh-name">{{ _lhname }}</div>{% if report_header_subtitle %}<div class="lh-sub">{{ report_header_subtitle }}</div>{% endif %}</div>
+          </div></div>
+          {% elif _hs == 'h3' %}
+          <div class="lh lh-h3">{% if logo_url %}<div><img class="lh-logo" src="{{ logo_url }}" alt="logo"></div>{% endif %}
+            <div class="lh-name">{{ _lhname }}</div>{% if report_header_subtitle %}<div class="lh-sub">{{ report_header_subtitle }}</div>{% endif %}
+            <div class="lh-docs">{% for doc in letterhead_doctors %}{{ lh_doc(doc) }}{% endfor %}</div></div>
+          {% else %}
+          <div class="lh lh-h4"><div class="lh-top">{% if logo_url %}<img class="lh-logo" src="{{ logo_url }}" alt="logo" style="width:{{ ((logo_width|default(100))|int * 0.7)|int }}px;">{% endif %}
+            <div class="lh-mid"><div class="lh-name">{{ _lhname }}</div><div class="lh-sub">{{ report_header_subtitle or ((lab_address or '') ~ (' - ' if lab_address and lab_phone else '') ~ (lab_phone or '')) }}</div></div></div>
+            <div class="lh-line">{% for doc in letterhead_doctors %}<span>{{ doc['title'] or 'الدكتور' }} {{ doc['name'] }}{% if doc['degree_en'] %} ({{ doc['degree_en']|replace('\n', ' ') }}){% endif %}</span>{% endfor %}</div></div>
+          {% endif %}
+          {% endif %}
 
           {% if session.get('role') == 'admin' %}
           {{ shared.doctors_manager_button_and_modal() }}

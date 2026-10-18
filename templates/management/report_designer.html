@@ -77,7 +77,10 @@
         ('a1', 'Style A — Labels Set 1', 'جدول بشريط قسم غامق: Test / Result / Unit / Normal Range، والنتائج السابقة سطر تحت كل تحليل'),
         ('a2', 'Style A — Labels Set 2', 'نفس جدول A بتسميات: Test Name / Result / Unit / Reference Range'),
         ('b_grid', 'Style B — Matching Image 1', 'Test Name | Conventional Units | SI Units — المدى الطبيعي تحت الاسم والنتائج السابقة بنفس الأعمدة'),
-        ('b_compact', 'Style B — Compact', 'الاسم يسار والقيم يمين بنفس السطر، المدى الطبيعي ثم النتائج السابقة تحته')] %}
+        ('b_compact', 'Style B — Compact', 'الاسم يسار والقيم يمين بنفس السطر، المدى الطبيعي ثم النتائج السابقة تحته'),
+        ('r1', 'Style R1 — شريط ملوّن (جديد)', 'شريط عناوين ملوّن: الاسم والمدى تحته بأسطر صغيرة، والنتيجة مع الوحدة تحت عمود Conventional units وSI units. كلمة المدى (مثل Non diabetic) تحت الاسم ورقمها تحت النتيجة'),
+        ('r2', 'Style R2 — أعمدة كلاسيكية (جديد)', 'Test | Result | Unit | Reference range | Flag — كل قيمة تحت عنوان عمودها، وعلامة H/L بالأحمر'),
+        ('r3', 'Style R3 — مدمج بشرائط أقسام (جديد)', 'Test (والمدى بخط صغير تحته) | Result مع الوحدة | Flag، وشريط باسم القسم (Biochemistry / Tumor markers...)')] %}
       <label style="display:block; border:2px solid {{ '#26529C' if rl.style == sid else '#E2E8F0' }}; border-radius:10px; padding:10px; cursor:pointer; font-weight:normal;" class="rs-style-opt">
         <input type="radio" name="style" value="{{ sid }}" {{ 'checked' if rl.style == sid }} onchange="rsStyleChanged(this)">
         <b>{{ title }}</b><br><span class="muted" style="font-size:0.8em;">{{ desc }}</span>
@@ -87,14 +90,14 @@
 
     <p class="muted" style="font-size:0.82em;">الصور الأربع: <b>A افتراضي</b> = Style A + الألوان الافتراضية · <b>A Custom colors</b> = Style A + Custom colors · <b>B افتراضي</b> = Style B Compact + الافتراضية · <b>B Custom colors</b> = Style B Compact + Custom colors · وStyle B Matching Image 1 = شبكة Conventional/SI.</p>
     <h4>🏷️ أسماء الأعمدة (غيّرها كما تريد — لكل أسلوب تسمياته)</h4>
-    {% for sid, stitle in [('a1','Style A — Set 1'), ('a2','Style A — Set 2'), ('b_grid','Style B — Matching Image 1'), ('b_compact','Style B — Compact')] %}
+    {% for sid, stitle in [('a1','Style A — Set 1'), ('a2','Style A — Set 2'), ('b_grid','Style B — Matching Image 1'), ('b_compact','Style B — Compact'), ('r1','Style R1 — شريط ملوّن'), ('r2','Style R2 — أعمدة كلاسيكية'), ('r3','Style R3 — مدمج بشرائط أقسام')] %}
     <details style="margin-bottom:6px;" {{ 'open' if rl.style == sid }}>
       <summary style="cursor:pointer;">{{ stitle }}</summary>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:8px; padding:8px 0;">
         {% set eff = result_label_defaults[sid].copy() %}
         {% for k, dv in result_label_defaults[sid].items() %}
         {% set cur = (rl.labels.get(sid, {}).get(k)) or dv %}
-        <label style="font-weight:normal; font-size:12px;">{{ {'test':'عمود الاسم','result':'عمود النتيجة','unit':'عمود الوحدة','range':'عمود المدى','conv':'عمود Conventional','si':'عمود SI','normal_range':'تسمية "المدى الطبيعي"','previous':'تسمية "النتيجة السابقة"','control':'تسمية "Control" (التخثر)'}.get(k, k) }}
+        <label style="font-weight:normal; font-size:12px;">{{ {'test':'عمود الاسم','result':'عمود النتيجة','unit':'عمود الوحدة','range':'عمود المدى','conv':'عمود Conventional','si':'عمود SI','flag':'عمود العلامة (H/L)','normal_range':'تسمية "المدى الطبيعي"','previous':'تسمية "النتيجة السابقة"','control':'تسمية "Control" (التخثر)'}.get(k, k) }}
           <input type="text" name="label_{{ sid }}_{{ k }}" value="{{ cur }}" placeholder="{{ dv }}" dir="ltr" style="width:100%;">
         </label>
         {% endfor %}
@@ -154,7 +157,17 @@
     <label style="font-weight:normal; font-size:13px; display:flex; gap:6px; align-items:center; margin-top:10px;">
       المسافة بين النتيجة ووحدتها (بكسل):
       <input type="number" name="unit_gap" min="0" max="40" value="{{ rl.unit_gap }}" style="width:70px;">
-      <span class="muted" style="font-size:0.8em;">ينطبق على الأساليب الأربعة سوا، بمعزل عن اختيار الألوان/الثيم.</span>
+      <span class="muted" style="font-size:0.8em;">ينطبق على كل الأساليب، بمعزل عن اختيار الألوان/الثيم.</span>
+    </label>
+    <label style="font-weight:normal; font-size:13px; display:flex; gap:6px; align-items:center; margin-top:8px;">
+      المسافة بين التحاليل/الصفوف (بكسل):
+      <input type="number" name="row_gap" min="0" max="40" value="{{ rl.row_gap }}" style="width:70px;">
+      <span class="muted" style="font-size:0.8em;">الافتراضي 8 — صغّرها لتضغط الجدول بصفحة أقل، وكبّرها لتباعد أكثر.</span>
+    </label>
+    <label style="font-weight:normal; font-size:13px; display:flex; gap:6px; align-items:center; margin-top:8px;">
+      المسافة بين أسطر المدى الطبيعي (بكسل):
+      <input type="number" name="line_gap" min="0" max="20" value="{{ rl.line_gap }}" style="width:70px;">
+      <span class="muted" style="font-size:0.8em;">للتحليل اللي له أكثر من سطر مدى (Optimal / Non diabetic ...). الافتراضي 2.</span>
     </label>
 
     <h4 style="margin-top:14px;">⏮️ النتائج السابقة</h4>

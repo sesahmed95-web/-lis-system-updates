@@ -90,6 +90,11 @@ var LD = (function () {
         '<div class="ld-hint" id="ldDinfo"></div>';
     }
     if (kind === 'tube') h += '<div class="ld-hint">العرض/الارتفاع فارغ = القياس التلقائي الحالي.</div>';
+    var PRE = ({{ LABEL_PRESETS_JSON|safe }})[kind] || {};
+    if (Object.keys(PRE).length) {
+      h += '<div class="ld-inline"><label>🎨 قالب جاهز: <select id="ldPreset"><option value="">— اختر لتطبيقه (يستبدل الأسطر الحالية) —</option>' +
+        Object.keys(PRE).map(function (k) { return '<option value="' + k + '">' + esc(PRE[k].title) + '</option>'; }).join('') + '</select></label></div>';
+    }
     h += '<h4>الأسطر (من الأعلى للأسفل)</h4><div id="ldLines">' + layout.lines.map(lineRow).join('') + '</div>' +
       '<div style="margin-top:8px;"><button type="button" class="ld-mini" id="ldAdd">＋ إضافة سطر</button> ' +
       '<button type="button" class="ld-mini" id="ldReset">↺ رجوع للتصميم الافتراضي</button></div>';
@@ -137,6 +142,16 @@ var LD = (function () {
         if (parseFloat(this.value) > mx) { this.value = mx; layout.w = mx; changed(); alert('أقصى عرض لأنبوب قطره ' + d + ' مم هو ' + mx + ' مم حتى ما تتقابل حافتا الملصق.'); }
       });
     }
+    var presetSel = document.getElementById('ldPreset');
+    if (presetSel) presetSel.addEventListener('change', function () {
+      var p = PRE[this.value]; if (!p) return;
+      if (!confirm('تطبيق القالب ' + this.value + '؟ يستبدل الأسطر والقياس الحاليين (تقدر تعدّل بعدها).')) { this.value = ''; return; }
+      layout.lines = JSON.parse(JSON.stringify(p.lines));
+      ['w', 'h', 'roll', 'tmode', 'copies'].forEach(function (k) { if (p[k] !== undefined) layout[k] = p[k]; });
+      if (p.bc) layout.bc = JSON.parse(JSON.stringify(p.bc));
+      layout.d = 0;
+      build(); changed();
+    });
     document.getElementById('ldRoll').addEventListener('change', function () { layout.roll = this.checked; changed(); });
     document.getElementById('ldTmode').addEventListener('change', function () { layout.tmode = this.value; changed(); });
     document.getElementById('ldAdd').addEventListener('click', function () {
@@ -187,15 +202,27 @@ var LD = (function () {
   // يبني أسطر الملصق: getValue(line) يرجّع النص أو فاضي لو ما فيه قيمة (يُتخطى السطر)
   api.buildLines = function (container, lay, getValue) {
     container.innerHTML = '';
+    var after = (container.parentNode && container.parentNode.querySelector) ? container.parentNode.querySelector('.lines-after') : null;
+    if (after) after.innerHTML = '';
     (lay || layout).lines.forEach(function (ln, i) {
-      var v = getValue(ln); if (v === null || v === undefined || v === '') return;
+      var v = getValue(ln);
+      var v2 = ln.f2 ? getValue({ f: ln.f2, t: ln.t2 }) : '';
+      var e1 = (v === null || v === undefined || v === ''), e2 = (v2 === null || v2 === undefined || v2 === '');
+      if (e1 && e2) return;
       var d = document.createElement('div');
-      d.className = 'ld-line ' + (CLS[ln.f] || 'test'); d.textContent = v; d.setAttribute('data-ln', i);
+      d.className = 'ld-line ' + (CLS[ln.f] || 'test'); d.setAttribute('data-ln', i);
+      if (ln.f2) {   // سطر بحقلين: الأول يسار والثاني يمين بنفس السطر
+        d.style.display = 'flex'; d.style.justifyContent = 'space-between'; d.style.gap = '2mm';
+        var a1 = document.createElement('span'); a1.textContent = e1 ? '' : v;
+        var a2 = document.createElement('span'); a2.textContent = e2 ? '' : v2; a2.style.textAlign = 'right';
+        d.appendChild(a1); d.appendChild(a2);
+      } else { d.textContent = v; }
+      if (ln.r) { d.style.borderBottom = '0.25mm solid #000'; d.style.paddingBottom = '0.4mm'; d.style.marginBottom = '0.4mm'; }
       if (ln.s) d.style.fontSize = ln.s + 'pt';
       if (ln.b === 1) d.style.fontWeight = '800';
       if (ln.a) d.style.textAlign = ln.a;
       d.style.whiteSpace = ln.w ? 'normal' : 'nowrap'; d.style.overflow = 'hidden';
-      container.appendChild(d);
+      (ln.p === 'after' && after ? after : container).appendChild(d);
     });
   };
   // تنبيهات التجاوز: سطر أعرض من الملصق، أو محتوى أطول من ارتفاع الملصق

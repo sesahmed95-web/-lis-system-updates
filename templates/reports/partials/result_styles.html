@@ -38,6 +38,12 @@
        الرقم بـStyle B compact)، بدل ما يكون كل ستايل إله قيمة ثابتة
        منفصلة بالكود. القيمة بالبكسل، تُقرأ من view.colors.unit_gap. */
     --rs-unit-gap: {{ view.unit_gap or '6' }}px;
+    /* v61: تحكم بالمسافات — بين الصفوف/التحاليل (row_gap) وبين أسطر المدى الطبيعي (line_gap) */
+    --rs-row-gap: {{ view.row_gap if view.row_gap is not none else 8 }}px;
+    --rs-line-gap: {{ view.line_gap if view.line_gap is not none else 2 }}px;
+    /* شريط عناوين الأساليب الجديدة R1/R2/R3: أزرق فاتح افتراضيًا، ويتبع ألوان "ألواني اليدوية" إذا فعّلتها */
+    --rs-band-bg: {{ c.head_bg or '#CDEBFA' }};
+    --rs-band-text: {{ c.head_text or '#0B3B5C' }};
   }
   .rs-scope { direction: ltr; text-align: left; }
   .rs-num { font-family: Arial, Helvetica, sans-serif; font-weight: 700; }
@@ -52,7 +58,7 @@
   .rs-a-table th { color: var(--rs-th); text-align: center; font-weight: bold; padding: 4px 6px;
     border-bottom: 1.5px solid #111827; font-size: .96em; }
   .rs-a-table th.rs-a-first { text-align: left; }
-  .rs-a-table td { padding: 2px 6px; text-align: center; vertical-align: top; }
+  .rs-a-table td { padding: calc(var(--rs-row-gap) / 4) 6px; text-align: center; vertical-align: top; }
   .rs-a-table td.rs-a-first { text-align: left; font-weight: bold; color: var(--rs-name); }
   .rs-a-table tr.rs-a-main td { border-top: 1px solid #E5E7EB; }
   .rs-a-table tr.rs-a-main:first-of-type td { border-top: none; }
@@ -69,23 +75,25 @@
   .rs-bg-head { display: grid; gap: 10px; margin-bottom: 6px; font-weight: 700; }
   .rs-bg-head > div { border-bottom: 1.5px solid #111827; padding-bottom: 4px; text-align: center; }
   .rs-bg-head > div.rs-bg-first { text-align: left; }
-  .rs-bg-block { border-bottom: 1px dashed var(--rs-line); padding: 8px 0; }
+  .rs-bg-block { border-bottom: 1px dashed var(--rs-line); padding: var(--rs-row-gap) 0; }
   .rs-bg-block:last-child { border-bottom: none; }
   .rs-bg-row { display: grid; gap: 10px; align-items: baseline; }
   .rs-bg-name { font-weight: 700; color: var(--rs-name); }
   .rs-bg-lab { font-weight: 700; color: var(--rs-label); }
-  .rs-bg-val { display: grid; grid-template-columns: 1.15fr 1fr; gap: var(--rs-unit-gap); align-items: baseline; }
+  .rs-bg-val { display: flex; justify-content: center; align-items: baseline; gap: var(--rs-unit-gap); text-align: center; }
+  .rs-bg-val .rs-unit { padding-inline-start: 0; }
   .rs-bg-val .rs-num { color: #111827; }
   .rs-bg-val.rs-cur .rs-num { color: var(--rs-result); }
   .rs-bg-extra { text-align: center; font-size: .92em; color: #334155; }
-  .rs-bg-rng { color: #334155; }
+  .rs-bg-rng { color: #334155; text-align: center; }
+  .rs-bg-row + .rs-bg-row { margin-top: var(--rs-line-gap); }
   .rs-bg-tier { padding-inline-start: 14px; color: #475569; }
   .rs-bg-prevrow .rs-prevlab, .rs-bg-prevrow .rs-prevdate { color: var(--rs-prev); font-family: Arial, Helvetica, sans-serif; }
   .rs-bg-prevrow .rs-prevlab { font-weight: 700; margin-inline-end: 14px; }
   .rs-bg-prevrow { margin-top: 3px; font-size: .9em; }
 
   /* ---------- Style B compact ---------- */
-  .rs-bc-block { padding: 9px 0; border-bottom: 1px solid #E5E7EB; }
+  .rs-bc-block { padding: calc(var(--rs-row-gap) * 1.125) 0; border-bottom: 1px solid #E5E7EB; }
   .rs-bc-top { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; flex-wrap: wrap; }
   .rs-bc-name { font-weight: 700; font-size: 1.05em; color: var(--rs-name); }
   .rs-bc-vals { display: flex; gap: 16px; align-items: baseline; }
@@ -97,6 +105,42 @@
   .rs-bc-prevhead { color: var(--rs-prev); font-weight: 700; margin-top: 3px; }
   .rs-bc-prevrow { display: grid; grid-template-columns: 110px 110px 110px; padding-inline-start: 14px; font-size: .94em; }
   .rs-bc-prevrow .rs-prevdate { color: var(--rs-prev); }
+
+  /* ---------- v61: Style R1 (شريط ملوّن + المدى تحت الاسم) — يعيد استخدام شبكة B؛ الاختلاف بالشكل فقط ---------- */
+  .rs-r1 .rs-bg-head { background: var(--rs-band-bg); color: var(--rs-band-text); padding: 7px 10px; border-radius: 3px; gap: 10px; }
+  .rs-r1 .rs-bg-head > div { border-bottom: none; padding-bottom: 0; }
+  .rs-r1 .rs-bg-block { border-bottom: 1px solid #E5E7EB; padding: var(--rs-row-gap) 10px; }
+  .rs-r1 .rs-bg-name { font-weight: 600; }
+  .rs-r1 .rs-bg-lab, .rs-r1 .rs-bg-tier { font-weight: 400; color: #64748B; font-size: .88em; padding-inline-start: 0; }
+  .rs-r1 .rs-bg-rng { color: #64748B; font-size: .88em; }
+  .rs-r1 .rs-bg-val .rs-num { font-weight: 600; }
+  .rs-r1 .rs-bg-val .rs-unit { font-size: .86em; }
+
+  /* ---------- v61: Style R2 (أعمدة كلاسيكية: كل قيمة تحت عنوانها) ---------- */
+  .rs-r2-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: auto; }
+  .rs-r2-table th { background: var(--rs-band-bg); color: var(--rs-band-text); padding: 7px 8px; text-align: center; font-weight: 600; }
+  .rs-r2-table th.rs-r2-first { text-align: left; }
+  .rs-r2-table td { padding: calc(var(--rs-row-gap) * .6) 8px; text-align: center; vertical-align: top; border-bottom: 1px solid #E5E7EB; }
+  .rs-r2-table td.rs-r2-first { text-align: left; font-weight: 600; color: var(--rs-name); }
+  .rs-r2-table .rs-r2-res .rs-num { color: var(--rs-result); }
+  .rs-r2-table .rs-r2-unit { color: #475569; }
+  .rs-r2-table .rs-r2-rng div + div { margin-top: var(--rs-line-gap); }
+  .rs-r2-table .rs-r2-rng b { color: #64748B; font-weight: 400; margin-inline-end: 6px; }
+  .rs-r2-table .rs-r2-flag { font-weight: 700; color: #B91C1C; }
+  .rs-r2-table tr.rs-r2-prev td { background: #F8FAFC; font-size: .85em; text-align: left; padding-top: 1px; padding-bottom: 1px; border-bottom: none; }
+
+  /* ---------- v61: Style R3 (مدمج بشرائط أقسام، المدى بخط صغير تحت الاسم) ---------- */
+  .rs-r3-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: auto; }
+  .rs-r3-table th { background: var(--rs-band-bg); color: var(--rs-band-text); padding: 7px 8px; text-align: center; font-weight: 600; }
+  .rs-r3-table th.rs-r3-first { text-align: left; }
+  .rs-r3-table td { padding: calc(var(--rs-row-gap) * .6) 8px; vertical-align: top; border-bottom: 1px solid #E5E7EB; text-align: center; }
+  .rs-r3-table td.rs-r3-first { text-align: left; }
+  .rs-r3-table .rs-r3-name { font-weight: 600; color: var(--rs-name); }
+  .rs-r3-table .rs-r3-sub { color: #64748B; font-size: .86em; margin-top: var(--rs-line-gap); }
+  .rs-r3-table .rs-r3-band td { background: #EAF6FD; color: var(--rs-band-text); font-weight: 600; text-align: left; padding: 5px 8px; }
+  .rs-r3-table .rs-r3-res .rs-num { color: var(--rs-result); }
+  .rs-r3-table .rs-r3-flag { font-weight: 700; color: #B91C1C; }
+  .rs-r3-table tr.rs-r3-prev td { background: #F8FAFC; font-size: .85em; text-align: left; padding-top: 1px; padding-bottom: 1px; border-bottom: none; }
 
   /* ---------- الملاحظات (تظهر فقط بعد كتابتها + تفعيل "إظهار") ---------- */
   .rs-note { margin: 4px 0 2px 0; padding: 4px 8px; border-inline-start: 3px solid var(--rs-prev);
@@ -214,7 +258,7 @@
 {% set L = view.labels %}
 {% set ex = view.ex %}
 {% set style = view.style %}
-<div class="rs-scope">
+<div class="rs-scope{% if style == 'r1' %} rs-r1{% endif %}">
 
 {# ---------------------------- Style A (a1 / a2) ---------------------------- #}
 {% if style in ('a1', 'a2') %}
@@ -264,7 +308,7 @@
   </table>
 
 {# ---------------------------- Style B grid (image 1) ---------------------------- #}
-{% elif style == 'b_grid' %}
+{% elif style in ('b_grid', 'r1') %}
   {% set tpl = ['minmax(0,1fr)'] %}
   {% for e in ex.test %}{% if tpl.append('minmax(0,.6fr)') %}{% endif %}{% endfor %}
   {% if tpl.append('minmax(0,1fr)') %}{% endif %}
@@ -341,6 +385,90 @@
     {{ note_block(row) }}
   </div>
   {% endfor %}
+
+{# ---------------------------- Style R2 (أعمدة كلاسيكية) ---------------------------- #}
+{% elif style == 'r2' %}
+  {% set flagmap = {'High': 'H', 'Low': 'L', 'Critical': 'C', 'Critical High': 'HH', 'Critical Low': 'LL'} %}
+  {% if group_title %}<div class="report-heading" style="text-align:center; margin:14px 0 6px 0;{{ title_style }}">{{ group_title }}</div>{% endif %}
+  {% set ncols = 5 + (ex.test|length) + (ex.result|length) + (ex.unit|length) + (ex.range|length) %}
+  <table class="rs-r2-table">
+    <tr>
+      <th class="rs-r2-first">{{ name_header or L.test }}</th>
+      {% for e in ex.test %}<th>{{ e.title }}</th>{% endfor %}
+      <th>{{ L.result }}</th>
+      {% for e in ex.result %}<th>{{ e.title }}</th>{% endfor %}
+      <th>{{ L.unit }}</th>
+      {% for e in ex.unit %}<th>{{ e.title }}</th>{% endfor %}
+      <th>{{ L.range }}</th>
+      {% for e in ex.range %}<th>{{ e.title }}</th>{% endfor %}
+      <th>{{ L.flag }}</th>
+    </tr>
+    {% for row in rows %}
+    {% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and not row.color and row.flag) else none %}
+    {% if row.result not in (none, '') or row.show_blank %}
+    <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
+      <td class="rs-r2-first" style="{% if row.color %}color:{{ row.color }};{% endif %}">{{ row.name }}</td>
+      {% for e in ex.test %}<td>{{ (row.extras or {}).get(e.id, '') }}</td>{% endfor %}
+      <td class="rs-r2-res"><span class="rs-num" style="{% if row.color %}color:{{ row.color }};{% elif auto_color %}color:{{ auto_color }};{% endif %}">{{ row.result }}</span>{% if row.value2 not in (none, '') %}<span class="rs-a-sec">{{ row.value2 }}</span>{% endif %}{% if row.control %}<span class="rs-a-sec">{{ L.control }}: {{ row.control }}</span>{% endif %}</td>
+      {% for e in ex.result %}<td>{{ (row.extras or {}).get(e.id, '') }}</td>{% endfor %}
+      <td class="rs-r2-unit">{{ row.unit or '' }}{% if row.unit2 %}<span class="rs-a-sec">{{ row.unit2 }}</span>{% endif %}</td>
+      {% for e in ex.unit %}<td>{{ (row.extras or {}).get(e.id, '') }}</td>{% endfor %}
+      <td class="rs-r2-rng">
+        {% for t in row.range_tiers or [] %}<div>{% if t.label %}<b>{{ t.label }}</b>{% endif %}{{ t.value }}</div>{% endfor %}
+        {% if row.range2 %}<div class="rs-a-sec">{{ row.range2 }}</div>{% endif %}
+      </td>
+      {% for e in ex.range %}<td>{{ (row.extras or {}).get(e.id, '') }}</td>{% endfor %}
+      <td class="rs-r2-flag">{% if show_result_flag and row.flag and row.flag != 'Normal' %}{{ flagmap.get(row.flag, row.flag) }}{% endif %}</td>
+    </tr>
+    {% elif row.history %}
+    <tr><td class="rs-r2-first" colspan="{{ ncols }}">{{ row.name }}</td></tr>
+    {% endif %}
+    {% for h in row.history %}
+    <tr class="rs-r2-prev"><td colspan="{{ ncols }}">
+      <span class="rs-prevlab">{{ L.previous }} (Date: {{ h.date }})</span>
+      <span class="rs-prevval">{{ row.name }}: <b>{{ h.value }}</b> {{ row.unit or '' }}{% if h.value2 not in (none, '') %} / <b>{{ h.value2 }}</b> {{ row.unit2 or '' }}{% endif %}</span>
+    </td></tr>
+    {% endfor %}
+    {{ note_block(row, colspan=ncols, tag='tr') }}
+    {% endfor %}
+  </table>
+
+{# ---------------------------- Style R3 (مدمج بشرائط أقسام) ---------------------------- #}
+{% elif style == 'r3' %}
+  {% set flagmap = {'High': 'H', 'Low': 'L', 'Critical': 'C', 'Critical High': 'HH', 'Critical Low': 'LL'} %}
+  {% set ncols = 3 + (ex.name|length) %}
+  <table class="rs-r3-table">
+    <tr>
+      <th class="rs-r3-first">{{ name_header or L.test }}</th>
+      <th>{{ L.result }}</th>
+      <th>{{ L.flag }}</th>
+    </tr>
+    {% if group_title %}<tr class="rs-r3-band"><td colspan="3" style="{{ title_style }}">{{ group_title }}</td></tr>{% endif %}
+    {% for row in rows %}
+    {% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and not row.color and row.flag) else none %}
+    {% if row.result not in (none, '') or row.show_blank %}
+    <tr{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
+      <td class="rs-r3-first">
+        <div class="rs-r3-name" style="{% if row.color %}color:{{ row.color }};{% endif %}">{{ row.name }}</div>
+        {% for t in row.range_tiers or [] %}<div class="rs-r3-sub">{{ (t.label ~ ' ') if t.label else '' }}{{ t.value }}{% if row.unit %} {{ row.unit }}{% endif %}</div>{% endfor %}
+        {% if row.range2 %}<div class="rs-r3-sub">{{ row.range2 }}{% if row.unit2 %} {{ row.unit2 }}{% endif %}</div>{% endif %}
+        {% for e in ex.name %}{% set tv = (row.extras or {}).get(e.id, '') %}{% if tv %}<div class="rs-r3-sub"><b>{{ e.title }}:</b> {{ tv }}</div>{% endif %}{% endfor %}
+        {% if row.control %}<div class="rs-r3-sub">{{ L.control }}: {{ row.control }} {{ row.unit or '' }}</div>{% endif %}
+      </td>
+      <td class="rs-r3-res"><span class="rs-num" style="{% if row.color %}color:{{ row.color }};{% elif auto_color %}color:{{ auto_color }};{% endif %}">{{ row.result }}</span> <span class="rs-unit">{{ row.unit or '' }}</span>
+        {% if row.value2 not in (none, '') %}<div class="rs-r3-sub"><span class="rs-num" style="font-weight:600;">{{ row.value2 }}</span> <span class="rs-unit">{{ row.unit2 or '' }}</span></div>{% endif %}</td>
+      <td class="rs-r3-flag">{% if show_result_flag and row.flag and row.flag != 'Normal' %}{{ flagmap.get(row.flag, row.flag) }}{% endif %}</td>
+    </tr>
+    {% endif %}
+    {% for h in row.history %}
+    <tr class="rs-r3-prev"><td colspan="3">
+      <span class="rs-prevlab">{{ L.previous }} (Date: {{ h.date }})</span>
+      <span class="rs-prevval">{{ row.name }}: <b>{{ h.value }}</b> {{ row.unit or '' }}{% if h.value2 not in (none, '') %} / <b>{{ h.value2 }}</b> {{ row.unit2 or '' }}{% endif %}</span>
+    </td></tr>
+    {% endfor %}
+    {{ note_block(row, colspan=3, tag='tr') }}
+    {% endfor %}
+  </table>
 
 {# ---------------------------- Style B compact ---------------------------- #}
 {% else %}

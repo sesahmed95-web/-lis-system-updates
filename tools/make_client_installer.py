@@ -28,7 +28,7 @@ for _f in ("scrub_designer_seed", "sanitize_db", "EXCLUDE_FILES"):
 
 SKIP_DIRS = {".git", "__pycache__", "build", "dist", "installer_output", "portal_pdf_cache", "whatsapp_profile", "tools",
              "sealed", "client_packages", "client_build", "venv", ".venv", ".idea", ".vscode", "node_modules"}
-SKIP_FILES = set(seal.EXCLUDE_FILES) | {".gitignore", ".gitattributes", "build_client.bat", "installer_client.iss"}
+SKIP_FILES = set(seal.EXCLUDE_FILES) | {"local_config.py", ".gitignore", ".gitattributes", "build_client.bat", "installer_client.iss"}
 SKIP_PATTERNS = ["*.bak*", "*.pyc", "*.log", "*.zip", "lis.db*", "*.db-wal", "*.db-shm", "- Copy.gitignore", "designer_login_PRIVATE.txt"]
 STATIC_SKIP_DIRS = {"whatsapp_pdfs", "pdf_archive", "reports_pdf"}
 UPLOAD_KEEP = ("logo*", "dashboard-bg*")          # files directly inside static/uploads
@@ -80,6 +80,18 @@ def main():
                     if not found: sys.exit("ERROR: designer insert in %s not recognised - stopped, nothing built." % fn)
                     open(dst, "w", encoding="utf-8", newline="").write(new); n += 1; continue
             shutil.copy2(full, dst); n += 1
+    # the build + installer expect icon\lab-icon.ico at the root; many projects keep it in static\icon
+    ico = os.path.join(bld, "icon", "lab-icon.ico"); has_icon = os.path.exists(ico)
+    if not has_icon:
+        cands = [os.path.join(bld, "static", "icon", "lab-icon.ico")]
+        for dp, dns, fns in os.walk(os.path.join(bld, "static")):
+            cands += [os.path.join(dp, f) for f in fns if f.lower().endswith(".ico")]
+        src_ico = next((c for c in cands if os.path.exists(c)), None)
+        if src_ico:
+            os.makedirs(os.path.dirname(ico), exist_ok=True); shutil.copy2(src_ico, ico); has_icon = True
+            print("icon: copied %s -> icon\\lab-icon.ico" % os.path.relpath(src_ico, bld))
+        else:
+            print("WARNING: no .ico file found - the program is built without a custom icon.")
     for must in ("start_lab.vbs", "stop_lab.bat", "installer.iss", "build.bat"):
         if not os.path.exists(os.path.join(bld, must)): print("WARNING: %s is missing from the folder - the installer needs it." % must)
 
@@ -89,6 +101,7 @@ def main():
     line = 'Source: "lis.db"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall'
     if "[Files]" not in iss: sys.exit("ERROR: installer.iss has no [Files] section.")
     if 'Source: "lis.db"' not in iss: iss = iss.replace("[Files]", "[Files]\r\n; client's prepared (empty of patients) database - never overwrites an existing one\r\n" + line, 1)
+    if not has_icon: iss = re.sub(r"(?im)^SetupIconFile=.*\r?\n", "", iss)
     open(os.path.join(bld, "installer_client.iss"), "w", encoding="utf-8-sig", newline="").write(iss)
 
     print("\n".join(report)); print("\nOK: %d files in %s" % (n, bld))
@@ -101,6 +114,7 @@ setlocal
 cd /d "%~dp0"
 echo ==== 1/3 Tools ====
 python -m pip install --upgrade pyinstaller
+python -m pip install cryptography
 if exist requirements.txt python -m pip install -r requirements.txt
 echo ==== 2/3 Building LabSystem.exe ====
 if exist build rmdir /s /q build
@@ -108,15 +122,17 @@ if exist dist rmdir /s /q dist
 set ADD=--add-data "templates;templates" --add-data "static;static"
 if exist icon set ADD=%ADD% --add-data "icon;icon"
 if exist fonts set ADD=%ADD% --add-data "fonts;fonts"
-python -m PyInstaller --noconfirm --clean --onedir --noconsole --name LabSystem --icon "icon\lab-icon.ico" %ADD% app.py
-if errorlevel 1 ( echo BUILD FAILED & pause & exit /b 1 )
+set ICONARG=
+if exist "icon\lab-icon.ico" set ICONARG=--icon "icon\lab-icon.ico"
+python -m PyInstaller --noconfirm --clean --onedir --noconsole --name LabSystem %ICONARG% %ADD% app.py
+if errorlevel 1 ( echo BUILD FAILED & if not defined LAB_NOPAUSE pause & exit /b 1 )
 if exist VERSION copy /y VERSION dist\LabSystem\VERSION >nul
 echo ==== 3/3 Installer ====
 set ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe
 if not exist "%ISCC%" set ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe
 if exist "%ISCC%" ( "%ISCC%" installer_client.iss ) else ( echo Inno Setup not found: open installer_client.iss in Inno Setup and press Ctrl+F9 )
 echo Done. Setup file: installer_output\LabSystem_Setup.exe
-pause
+if not defined LAB_NOPAUSE pause
 """
 if __name__ == "__main__":
     main()

@@ -22,6 +22,13 @@
     <a class="btn" href="/designer/publish-update">📦 نشر تحديث للعملاء + الإعداد</a>
     <a class="btn secondary" href="/designer/client-builder">🏗 تجهيز ملف تنصيب عميل (Setup)</a>
   </div>
+  <div id="lisPubWarn" style="display:none; margin-top:10px; padding:8px 12px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:8px; color:#991B1B; font-size:13px;">
+    ⚠ الصفحات الجديدة غير محمّلة: البرنامج الشغّال ما زال بالنسخة القديمة من الكود (القوالب تحدّثت لكن العملية القديمة لسا شغّالة).
+    افتح مدير المهام (Ctrl+Shift+Esc) ← أنهِ كل عمليات <b>python</b> / <b>pythonw</b> / <b>LabSystem</b>، أو أعد تشغيل الكمبيوتر، ثم شغّل البرنامج من جديد.
+  </div>
+  <script>
+    fetch('/designer/publish-update/status').then(function (r) { if (r.status === 404) document.getElementById('lisPubWarn').style.display = 'block'; }).catch(function () {});
+  </script>
 </div>
 
 <div class="card">

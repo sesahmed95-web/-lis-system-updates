@@ -29,7 +29,7 @@ SRC_DEFAULT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXCLUDE_DIRS = {"__pycache__", ".git", "client_packages", "tools", "portal_pdf_cache", ".idea", ".vscode"}
 EXCLUDE_FILES = {
     "lis.db", "lis.db-journal", "lis.db-wal", "lis.db-shm", "portal_public.db",
-    "crash_log.txt", "error_log.txt", "portal_preset.json", "portal_preset.applied.json",
+    "crash_log.txt", "error_log.txt", "portal_preset.json", "portal_preset.applied.json", "local_config.py",
 }
 EXCLUDE_SUFFIX = (".pyc", ".db-journal", ".log")
 # محتويات هذي المجلدات بيانات مختبرك أنت (شعار، أختام، PDFات مرضى): نترك المجلد فاضي

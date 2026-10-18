@@ -2802,7 +2802,7 @@ def reset_report_layout(db, scope, scope_id):
 
 
 # ============== أسلوب جدول النتائج (Style A / Style B) + الأعمدة الإضافية ==============
-RESULT_STYLES = ("a1", "a2", "b_grid", "b_compact")
+RESULT_STYLES = ("a1", "a2", "b_grid", "b_compact", "r1", "r2", "r3")
 
 RESULT_LABEL_DEFAULTS = {
     "a1": {"test": "Test", "result": "Result", "unit": "Unit", "range": "Normal Range",
@@ -2812,6 +2812,13 @@ RESULT_LABEL_DEFAULTS = {
     "b_grid": {"test": "Test Name", "conv": "Conventional Units", "si": "SI Units",
                "normal_range": "Normal Range", "previous": "Previous Result", "control": "Control"},
     "b_compact": {"normal_range": "Normal Range", "previous": "Previous Result", "control": "Control"},
+    # v61: ثلاثة أساليب جديدة (تُضاف للموجودة): النتيجة + الوحدة دائمًا تحت عنوان عمودها
+    "r1": {"test": "Laboratory test results", "conv": "Conventional units", "si": "SI units",
+           "normal_range": "Normal range", "previous": "Previous Result", "control": "Control"},
+    "r2": {"test": "Test", "result": "Result", "unit": "Unit", "range": "Reference range", "flag": "Flag",
+           "normal_range": "Reference range", "previous": "Previous Result", "control": "Control"},
+    "r3": {"test": "Test", "result": "Result", "flag": "Flag",
+           "normal_range": "Reference range", "previous": "Previous Result", "control": "Control"},
 }
 
 # ---- تنسيق عناوين اللوحة المجمّعة (عنوان اللوحة + عناوين الأقسام مثل BIOCHEMISTRY / VITAMINS) ----
@@ -2888,6 +2895,8 @@ RESULT_LAYOUT_DEFAULTS = {
     "head_style": {},           # تنسيق كل عناوين الأقسام (BIOCHEMISTRY ...)
     "dept_styles": {},          # {اسم القسم: style} تخصيص قسم معيّن فوق head_style
     "unit_gap": 6,
+    "row_gap": 8,               # v61: المسافة العمودية بين صفوف/تحاليل الجدول (بكسل)
+    "line_gap": 2,              # v61: المسافة بين أسطر المدى الطبيعي تحت الاسم/النتيجة (بكسل)
     "show_prev_visit_line": 0,  # سطر "زيارة سابقة بتاريخ: ..." القديم أسفل التقرير (اختياري، مخفي افتراضيًا)
 }
 
@@ -2903,7 +2912,7 @@ def get_result_layout(db):
             saved = {}
         if isinstance(saved, dict):
             for k in ("style", "prev_count", "prev_default_show", "show_prev_visit_line", "theme", "prev_order",
-                      "dept_headings", "merged_title", "merged_exclude", "unit_gap"):
+                      "dept_headings", "merged_title", "merged_exclude", "unit_gap", "row_gap", "line_gap"):
                 if k in saved:
                     cfg[k] = saved[k]
             cfg["title_style"] = sanitize_text_style(saved.get("title_style"))
@@ -2928,6 +2937,11 @@ def get_result_layout(db):
         cfg["unit_gap"] = max(0, min(40, int(cfg.get("unit_gap", 6))))
     except (TypeError, ValueError):
         cfg["unit_gap"] = 6
+    for _gk, _gd, _gmax in (("row_gap", 8, 40), ("line_gap", 2, 20)):
+        try:
+            cfg[_gk] = max(0, min(_gmax, int(cfg.get(_gk, _gd))))
+        except (TypeError, ValueError):
+            cfg[_gk] = _gd
     if cfg["theme"] not in ("default", "green", "custom"):
         cfg["theme"] = "default"
     if cfg["prev_order"] not in ("asc", "desc"):

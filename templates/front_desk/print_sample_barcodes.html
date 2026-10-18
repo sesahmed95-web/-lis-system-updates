@@ -279,6 +279,7 @@
     <div class="label" data-f='{{ s["fields"] | tojson }}'>
       <div class="lines"></div>
       <img src="{{ url_for('barcode_image', code=s['barcode']) }}" alt="barcode">
+      <div class="lines lines-after"></div>
     </div>
     {% endfor %}
   </div>
@@ -323,6 +324,7 @@
     <div class="label individual-card" data-barcode="{{ s['barcode'] }}" data-f='{{ s["fields"] | tojson }}'>
       <div class="lines"></div>
       <img src="{{ url_for('barcode_image', code=s['barcode']) }}" alt="barcode">
+      <div class="lines lines-after"></div>
     </div>
     {% endfor %}
   </div>

@@ -46,6 +46,21 @@
       </select>
     </div>
     <div class="form-field">
+      <label>🎨 ستايل ترويسة التقرير (الشعار + اسم المختبر + الأطباء وشهاداتهم)</label>
+      <select name="report_header_style">
+        <option value="default" {{ 'selected' if current.report_header_style == 'default' }}>الحالي (الافتراضي — لم يتغيّر)</option>
+        <option value="h1" {{ 'selected' if current.report_header_style == 'h1' }}>H1 — الشعار والاسم فوق، والأطباء بشبكة 3 أعمدة</option>
+        <option value="h2" {{ 'selected' if current.report_header_style == 'h2' }}>H2 — الأطباء بعمودين، والشعار والاسم بالجهة الثانية</option>
+        <option value="h3" {{ 'selected' if current.report_header_style == 'h3' }}>H3 — الشعار والاسم بالمنتصف، والأطباء بصف واحد</option>
+        <option value="h4" {{ 'selected' if current.report_header_style == 'h4' }}>H4 — شريط مبسّط وسطر صغير للأطباء</option>
+      </select>
+      <span class="muted" style="display:block; margin-top:4px;">يختار لكل عميل ستايله، وينحفظ بقاعدته. «الحالي» هو التصميم المعتمد حاليًا (بدون أي تغيير).</span>
+      <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:6px; align-items:center;">
+        <label style="font-weight:normal;">لون الخطوط/الشريط: <input type="color" name="report_header_accent" value="{{ current.report_header_accent }}"></label>
+        <label style="font-weight:normal;">سطر تحت اسم المختبر (اختياري): <input type="text" name="report_header_subtitle" value="{{ current.report_header_subtitle }}" maxlength="120" style="width:320px;"></label>
+      </div>
+    </div>
+    <div class="form-field">
       <label>حجم الشعار (عرضه بالبكسل) — القيمة الافتراضية 100</label>
       <input type="number" name="logo_width" min="30" max="300" value="{{ current.logo_width }}" style="width:120px;">
     </div>

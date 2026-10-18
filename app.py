@@ -879,6 +879,8 @@ app.jinja_env.globals["report_design"] = report_design
 app.jinja_env.globals["RESULT_STYLE_CHOICES"] = [
     ("a1", "Style A — Labels Set 1"), ("a2", "Style A — Labels Set 2"),
     ("b_grid", "Style B — Matching Image 1"), ("b_compact", "Style B — Compact"),
+    ("r1", "Style R1 — شريط ملوّن + المدى تحت الاسم"), ("r2", "Style R2 — أعمدة كلاسيكية"),
+    ("r3", "Style R3 — مدمج بشرائط أقسام"),
 ]
 app.jinja_env.globals["RESULT_THEME_CHOICES"] = [
     ("default", "الألوان الافتراضية"), ("green", "Custom colors (أخضر/بنفسجي/برتقالي)"), ("custom", "ألواني اليدوية"),
@@ -1358,6 +1360,10 @@ def inject_globals():
     # موضع/حجم الشعار بترويسة كل تقرير مطبوع — إعدادان عامان محقونان هنا
     # مرة وحدة، بنفس أسلوب باقي إعدادات التقرير.
     logo_position = get_setting(db, "logo_position", "right")
+    report_header_style = get_setting(db, "report_header_style", "default")
+    report_header_accent = get_setting(db, "report_header_accent", "") or "#4FB6E8"
+    report_header_subtitle = get_setting(db, "report_header_subtitle", "")
+    lab_name_ar = get_setting(db, "app_name_ar", "") or get_setting(db, "app_name", "")
     logo_width = get_setting(db, "logo_width", "100")
     # حالة "التحديث التلقائي" الحالية — تُحقن هنا حتى يظهر زر التبديل بشريط
     # الأعلى (base.html، بجانب اسم المستخدم) بأي صفحة بدون تمريرها يدويًا.
@@ -1457,6 +1463,8 @@ def inject_globals():
                 test_name_font_size=test_name_font_size,
                 result_value_font_size=result_value_font_size,
                 logo_position=logo_position,
+                report_header_style=report_header_style, report_header_accent=report_header_accent,
+                report_header_subtitle=report_header_subtitle, lab_name_ar=lab_name_ar,
                 logo_width=logo_width,
                 auto_update_enabled=auto_update_enabled,
                 theme_primary_color=theme_primary_color,
@@ -5039,6 +5047,8 @@ LABEL_FIELD_TITLES = {
     "reg_no": "رقم التسجيل", "sample_no": "رقم العينة (Sample No.)", "visit_id": "رقم الزيارة الداخلي",
     "sample_type": "نوع العينة / القسم", "tests": "أسماء التحاليل",
     "tests_codes": "أكواد التحاليل", "custom": "نص ثابت (تكتبه أنت)",
+    "order_no": "رقم الطلب (التسجيل بدون #)", "dept_age_gender": "القسم/الجهاز + الجنس-العمر (Abbot - Female-18Y)",
+    "ready_by": "وقت الجاهزية (Ready by)", "paid": "الواصل (Paid)", "balance": "الباقي (Balance)",
 }
 LABEL_SCAN_TITLES = {
     "reg_no": "رقم التسجيل", "sample_no": "رقم العينة", "patient_name": "اسم المريض",
@@ -5047,9 +5057,9 @@ LABEL_SCAN_TITLES = {
 }
 LABEL_FIELDS_BY_KIND = {
     "tube": ("lab_name", "patient_name", "age_gender", "datetime", "date", "time", "reg_no",
-             "sample_no", "sample_type", "tests", "tests_codes", "custom"),
+             "sample_no", "sample_type", "tests", "tests_codes", "custom", "order_no", "dept_age_gender"),
     "request": ("lab_name", "patient_name", "age_gender", "datetime", "date", "time", "reg_no",
-                "sample_no", "visit_id", "tests", "tests_codes", "custom"),
+                "sample_no", "visit_id", "tests", "tests_codes", "custom", "order_no", "ready_by", "paid", "balance"),
 }
 _DEFAULT_LABEL_LAYOUTS = {
     "tube": {
@@ -5067,6 +5077,29 @@ _DEFAULT_LABEL_LAYOUTS = {
     },
 }
 
+
+
+# قوالب جاهزة لملصق الأنبوب (T1) وملصق الطلب (R1) — تُختار من مصمم الملصق (⚙) وتبقى قابلة للتعديل بالكامل.
+LABEL_PRESETS = {
+    "tube": {
+        "T1": {"title": "T1 — اسم + جهاز/جنس/عمر + وقت (سطر فاصل) + التحاليل + باركود + رقم/نوع العينة",
+               "w": 50, "h": 25, "roll": True, "tmode": "short",
+               "lines": [{"f": "patient_name", "s": 9, "b": 1, "a": "center"},
+                         {"f": "dept_age_gender", "f2": "datetime", "s": 6.5, "r": 1},
+                         {"f": "tests", "s": 6.5, "a": "center", "w": 1},
+                         {"f": "order_no", "f2": "sample_type", "s": 7, "p": "after"}]},
+    },
+    "request": {
+        "R1": {"title": "R1 — اسم + Ready by/التاريخ + Paid/Balance + رقم الطلب + باركود",
+               "w": 60, "h": 30, "roll": True, "tmode": "full", "copies": 1,
+               "lines": [{"f": "patient_name", "s": 10, "b": 1, "a": "center"},
+                         {"f": "ready_by", "f2": "datetime", "s": 8},
+                         {"f": "paid", "f2": "balance", "s": 8},
+                         {"f": "order_no", "s": 9, "a": "center"}],
+               "bc": {"type": "code128", "pos": "bottom", "h": 10}},
+    },
+}
+app.jinja_env.globals["LABEL_PRESETS_JSON"] = json.dumps(LABEL_PRESETS, ensure_ascii=False).replace("</", "<\\/")
 
 def _lnum(v, lo, hi, default=None):
     try:
@@ -5114,6 +5147,15 @@ def _sanitize_label_layout(kind, raw):
             item["w"] = 1
         if ln["f"] == "custom":
             item["t"] = str(ln.get("t") or "")[:80]
+        # v61: سطر بحقلين (يسار + يمين بنفس السطر)، خط فاصل تحت السطر، وسطر يُطبع بعد الباركود (ملصق الأنبوب)
+        if ln.get("f2") in allowed:
+            item["f2"] = ln["f2"]
+            if ln["f2"] == "custom":
+                item["t2"] = str(ln.get("t2") or "")[:80]
+        if ln.get("r") in (1, True):
+            item["r"] = 1
+        if kind == "tube" and ln.get("p") == "after":
+            item["p"] = "after"
         lines.append(item)
     if lines:
         d["lines"] = lines
@@ -5188,7 +5230,25 @@ def _fmt_dt(v):
     return v[:16]
 
 
-def _label_visit_fields(visit, lab_name, tests=None, draw_time=None):
+def _label_money(db, visit):
+    """حقول الجاهزية/الواصل/الباقي لملصق الطلب (نص جاهز بعنوانه): Ready by / Paid / Balance."""
+    out = {"ready_by": "Ready by :", "paid": "Paid : 0.000", "balance": "Balance : 0.000"}
+    try:
+        vid = visit["id"]
+        bal = _visit_balance(db, vid)
+        out["paid"] = "Paid : %.3f" % bal["paid"]
+        out["balance"] = "Balance : %.3f" % bal["remaining"]
+        row = db.execute("SELECT expected_ready_at, expected_ready_text FROM visits WHERE id=?", (vid,)).fetchone()
+        if row:
+            txt = (row["expected_ready_text"] or "").strip() or _fmt_dt(row["expected_ready_at"] or "")
+            if txt:
+                out["ready_by"] = "Ready by : " + txt
+    except Exception:
+        pass
+    return out
+
+
+def _label_visit_fields(visit, lab_name, tests=None, draw_time=None, money=None):
     """الحقول المشتركة لأي ملصق (قيم نصية جاهزة)."""
     keys = visit.keys()
     age = visit["age"] if "age" in keys and visit["age"] else ""
@@ -5206,7 +5266,12 @@ def _label_visit_fields(visit, lab_name, tests=None, draw_time=None):
         "reg_no": f"#{visit['registration_number']}",
         "sample_no": (str(visit["sample_no"]) if "sample_no" in keys and visit["sample_no"] else ""),
         "visit_id": str(visit["id"]),
+        "order_no": str(visit["registration_number"]) if "registration_number" in keys else "",
     }
+    _ab = {"years": "Y", "year": "Y", "months": "M", "month": "M", "days": "D", "day": "D", "weeks": "W"}.get(unit.strip().lower(), unit[:1].upper())
+    out["ga_short"] = "-".join(x for x in [gender, f"{age}{_ab}" if age else ""] if x)
+    out["dept_age_gender"] = out["ga_short"]
+    out.update(money or {})
     if tests is not None:
         out["tests_full"] = [t["name"] for t in tests]
         out["tests_short"] = [(t["short_name"] or t["name"]) for t in tests]
@@ -5261,6 +5326,10 @@ def visit_request_qr(visit_id):
 # أنماط جاهزة لملصق باركود ورقة الطلب (اسم المريض بالمنتصف ← التاريخ والوقت بالمنتصف تحته ← الباركود). تُختار من "مركز الباركودات"
 # أو ?style=key بطباعة الملصق (للطباعة الحالية فقط)، وتُحفظ كافتراضي من نفس الصفحة. كل نمط يبقى قابلًا للتعديل بمصمم الملصق.
 _REQUEST_LABEL_STYLES = {
+    "R1": {"title": "R1 — مع Ready by / Paid / Balance", "w": 60, "h": 30,
+           "lines": [{"f": "patient_name", "s": 10, "b": 1, "a": "center"}, {"f": "ready_by", "f2": "datetime", "s": 8},
+                     {"f": "paid", "f2": "balance", "s": 8}, {"f": "order_no", "s": 9, "a": "center"}],
+           "bc": {"type": "code128", "pos": "bottom", "h": 10}},
     "centered": {"title": "مركزي (الأساسي): الاسم + التاريخ والوقت + باركود", "w": 60, "h": 40,
                  "lines": [{"f": "patient_name", "s": 11, "b": 1, "a": "center"}, {"f": "datetime", "s": 8, "a": "center"}],
                  "bc": {"type": "code128", "pos": "bottom", "h": 16}},
@@ -5306,7 +5375,7 @@ def print_request_label(visit_id):
     return render_template(
         "front_desk/print_request_label.html", visit=visit,
         autoprint=request.args.get("autoprint") == "1",
-        label_data=_label_visit_fields(visit, lab_name, tests, draw_time),
+        label_data=_label_visit_fields(visit, lab_name, tests, draw_time, money=_label_money(db, visit)),
         label_layout=label_layout,
         field_titles=[(k, LABEL_FIELD_TITLES[k]) for k in LABEL_FIELDS_BY_KIND["request"]],
         scan_titles=list(LABEL_SCAN_TITLES.items()),
@@ -5716,6 +5785,7 @@ def print_sample_barcodes(visit_id):
             # اسم القسم ما يُطبع على الملصق (فقط أسماء التحاليل/الأنواع المختارة)؛
             # عند التجميع حسب نوع العينة فقط (?group=sample_type) يبقى العنوان القديم
             "sample_type": stype if group_mode == "sample_type" else "",
+            "department": (group_rows[0]["department"] or "") if group_rows else "",
             "barcode": tube_barcode,
             "test_names": [n for r in group_rows for n in _label_names(r)],
             # short_names: نفس الترتيب أعلاه، لكل تحليل اختصاره اليدوي
@@ -5773,7 +5843,8 @@ def print_sample_barcodes(visit_id):
     _base = _label_visit_fields(visit, lab_name_ar)
     for _s in tube_samples:
         _s["fields"] = {**_base, "sample_type": _s["sample_type"] or "", "tests_full": _s["test_names"],
-                        "tests_short": _s["short_names"], "tests_codes": ""}
+                        "tests_short": _s["short_names"], "tests_codes": "",
+                        "dept_age_gender": (f"{_s.get('department')} - " if _s.get("department") else "") + _base.get("ga_short", "")}
     for _s in individual_samples:
         _s["fields"] = {**_base, "sample_type": _s["sample_type"] or "", "tests_full": [_s["test_name"]],
                         "tests_short": [_s["test_short_name"]], "tests_codes": ""}
@@ -7782,10 +7853,10 @@ def build_layout_view(db, style_override=None, cfg=None, theme_override=None):
         if str(c.get("show", "1")) in ("0", "False", "false"):
             continue
         after = c.get("after") or "test"
-        if style in ("a1", "a2"):
+        if style in ("a1", "a2", "r2"):
             key = {"conv": "result", "si": "unit"}.get(after, after)
             key = key if key in ("test", "result", "unit", "range") else "test"
-        elif style == "b_grid":
+        elif style in ("b_grid", "r1"):
             key = {"test": "test", "result": "conv", "unit": "conv", "range": "si",
                    "conv": "conv", "si": "si"}.get(after, "test")
         else:
@@ -7796,7 +7867,8 @@ def build_layout_view(db, style_override=None, cfg=None, theme_override=None):
             "prev_order": cfg["prev_order"], "dept_headings": cfg["dept_headings"],
             "prev_count": cfg["prev_count"], "prev_default_show": cfg["prev_default_show"],
             "show_prev_visit_line": cfg["show_prev_visit_line"],
-            "extra_cols": cfg["extra_cols"], "unit_gap": cfg.get("unit_gap", 6)}
+            "extra_cols": cfg["extra_cols"], "unit_gap": cfg.get("unit_gap", 6),
+            "row_gap": cfg.get("row_gap", 8), "line_gap": cfg.get("line_gap", 2)}
 
 
 def _history_with_unit2(hist_list, factor):
@@ -8216,7 +8288,7 @@ def _print_combined_panel_core(visit_id):
     elif layout_cfg["dept_headings"] in ("show", "hide"):
         show_dept_headings = layout_cfg["dept_headings"] == "show"
     else:
-        show_dept_headings = _view["style"] in ("a1", "a2")
+        show_dept_headings = _view["style"] in ("a1", "a2", "r3")
     all_rows = [r for g in panel_groups for r in g["rows"]]
     return render_template(
         "reports/combined_panel.html",
@@ -11667,6 +11739,15 @@ def app_settings():
         logo_pos_raw = request.form.get("logo_position", "").strip()
         if logo_pos_raw in ("right", "center", "left"):
             set_setting(db, "logo_position", logo_pos_raw)
+        # v61: ستايل الترويسة (default = الحالية | h1..h4)، لونها، والسطر الإنجليزي تحت اسم المختبر
+        _hs_raw = request.form.get("report_header_style", "").strip()
+        if _hs_raw in ("default", "h1", "h2", "h3", "h4"):
+            set_setting(db, "report_header_style", _hs_raw)
+        _ha_raw = request.form.get("report_header_accent", "").strip()
+        if re.fullmatch(r"#[0-9A-Fa-f]{6}", _ha_raw):
+            set_setting(db, "report_header_accent", _ha_raw)
+        if "report_header_subtitle" in request.form:
+            set_setting(db, "report_header_subtitle", request.form.get("report_header_subtitle", "").strip()[:120])
         logo_width_raw = request.form.get("logo_width", "").strip()
         if logo_width_raw:
             try:
@@ -12013,6 +12094,9 @@ def app_settings():
         "test_name_font_size": get_setting(db, "test_name_font_size", "16"),
         "result_value_font_size": get_setting(db, "result_value_font_size", "16"),
         "logo_position": get_setting(db, "logo_position", "right"),
+        "report_header_style": get_setting(db, "report_header_style", "default"),
+        "report_header_accent": get_setting(db, "report_header_accent", "") or "#4FB6E8",
+        "report_header_subtitle": get_setting(db, "report_header_subtitle", ""),
         "logo_width": get_setting(db, "logo_width", "100"),
         "combined_panel_group_order": get_setting(db, "combined_panel_group_order", ""),
         "name_translit_overrides": get_setting(db, "name_translit_overrides", ""),
@@ -13261,6 +13345,11 @@ def save_result_style_settings():
         cfg["unit_gap"] = max(0, min(40, int(request.form.get("unit_gap", cfg.get("unit_gap", 6)))))
     except (TypeError, ValueError):
         pass
+    for _gk, _gd, _gmax in (("row_gap", 8, 40), ("line_gap", 2, 20)):
+        try:
+            cfg[_gk] = max(0, min(_gmax, int(request.form.get(_gk, cfg.get(_gk, _gd)))))
+        except (TypeError, ValueError):
+            pass
     _th = request.form.get("theme", cfg["theme"])
     cfg["theme"] = _th if _th in ("default", "green", "custom") else "default"
     _po = request.form.get("prev_order", cfg["prev_order"])
@@ -13332,7 +13421,7 @@ def _sample_panel_groups(style, prev_count, show_prev, prev_order="desc"):
     def grp(title, rows):
         return {"department": title, "rows": rows, "name_header": "Test Name", "range_header": "Normal Range"}
 
-    if style in ("a1", "a2"):
+    if style in ("a1", "a2", "r2", "r3"):
         return [
             grp("Biochemistry Tests", [
                 row("FBS", "1122.0", "mg/dL", "70.0 - 100.0", h=[("10/05/2026", "105.0", None)], flag="High", key="s|fbs"),
@@ -13346,7 +13435,7 @@ def _sample_panel_groups(style, prev_count, show_prev, prev_order="desc"):
                 row("PT", "13.2", "sec", "11.0 - 14.0", h=[("01/03/2026", "12.8", None)], key="s|pt"),
                 row("INR", "1.02", "", "0.9 - 1.1", key="s|inr")]),
         ]
-    if style == "b_grid":
+    if style in ("b_grid", "r1"):
         rows = [
             row("Bilirubin Total, Serum", "0.45", "mg/dL", "<1.00", "7.65", "umol/L", "<17.00",
                 [("14/02/2026", "0.31", "5.27"), ("09/08/2025", "0.30", "5.10")], key="s|bt"),
@@ -13391,7 +13480,7 @@ def result_style_preview():
                     r["extras"][c["id"]] = "—" if c.get("show") else ""
         # في المعاينة نفعّل تلوين الـHigh/Low حتى يظهر مثل الصور المرجعية
         flag_red = "#DC2626" if view["theme"] == "green" else "#B91C1C"
-        show_headings = cfg["dept_headings"] == "show" or (cfg["dept_headings"] == "auto" and view["style"] in ("a1", "a2"))
+        show_headings = cfg["dept_headings"] == "show" or (cfg["dept_headings"] == "auto" and view["style"] in ("a1", "a2", "r3"))
         _, show_result_flag, _ = get_report_flag_settings(db)
         logo_path = get_setting(db, "logo_path", "")
         logo_url = url_for("static", filename=logo_path) if logo_path else None

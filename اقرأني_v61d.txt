@@ -1,0 +1,3 @@
+v61d - ملفات ناقصة: tools\make_update_package.py (وباقي مجلد tools + installer.iss + build.bat)
+الخطأ كان: can't open file ...\tools\make_update_package.py  -> المجلد tools ما انلصق عندك من v60.
+انسخ الزيب فوق مجلد البرنامج (ينشئ/يكمّل مجلد tools)، ثم أعد الضغط على "إنشاء المفتاح".

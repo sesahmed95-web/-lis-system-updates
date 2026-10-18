@@ -40,7 +40,7 @@ WIPE_TABLES = [
 ]
 LICENSE_TABLES = ["license_info"]          # مربوطة بجهازك (hardware_id) — تُمسح افتراضيًا
 # إعدادات تبقى لأنها تخص العميل نفسه
-KEEP_SETTINGS = {"portal_api_key", "portal_url", "portal_mode", "portal_enabled", "github_read_token"}
+KEEP_SETTINGS = {"portal_api_key", "portal_url", "portal_mode", "portal_enabled"}   # github_read_token was removed: clients must NOT carry your GitHub token
 SENSITIVE_RE = re.compile(r"(token|secret|api_?key|password|passwd|whatsapp|smtp)", re.I)
 DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 DEFAULT_USERS = {"admin": "admin123", "rec": "rec123", "tech": "tech123", "super": "super123", "acc": "acc123"}
@@ -53,7 +53,7 @@ EXCLUDE_DIRS = {"__pycache__", ".git", "sealed", "client_packages", "tools", "po
 EXCLUDE_FILES = {"lis.db", "lis.db-journal", "lis.db-wal", "lis.db-shm", "portal_public.db", "portal_public.db-wal",
                  "portal_public.db-shm", "crash_log.txt", "error_log.txt", "server_log.txt", "server_log.old.txt",
                  "run_log.txt", "portal_preset.json", "portal_preset.applied.json", "INSTALL.bat",
-                 "requirements.txt", "README_CLIENT.txt"}
+                 "requirements.txt", "README_CLIENT.txt", "local_config.py"}
 EXCLUDE_SUFFIX = (".pyc", ".db-journal", ".log", ".zip")
 EMPTY_DIRS = ("static/whatsapp_pdfs", "static/pdf_archive", "static/reports_pdf")   # ملفات PDF مرضى — تُترك فاضية
 
