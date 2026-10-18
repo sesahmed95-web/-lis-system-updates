@@ -259,4 +259,5 @@ var LD = (function () {
   api.touch = changed;
   return api;
 })();
+try { if (/[?&]design=1/.test(location.search)) window.addEventListener('load', function () { LD.toggle(); }); } catch (e) {}
 </script>

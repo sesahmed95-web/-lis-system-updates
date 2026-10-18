@@ -5353,6 +5353,31 @@ _REQUEST_LABEL_STYLES = {
 }
 
 
+@app.route("/management/label-designer")
+@roles_required("admin")
+def label_designer_page():
+    """صفحة تصميم الباركودات: تفتح ملصق الأنبوب/الطلب لآخر زيارة مع لوحة التصميم مفتوحة (قالب جاهز T1/R1 + القياس)."""
+    db = get_db()
+    row = db.execute("SELECT id FROM visits ORDER BY id DESC LIMIT 1").fetchone()
+    vid = row["id"] if row else None
+    from flask import render_template_string
+    return render_template_string(
+        """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تصميم الباركودات</title>
+<style>body{font-family:Tahoma,Arial,sans-serif;background:#F1F5F9;margin:0;padding:24px;color:#0F172A}
+.w{max-width:760px;margin:0 auto}.c{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:18px;margin-bottom:14px}
+a.b{display:inline-block;background:#26529C;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:700;margin-top:8px}
+.m{color:#64748B;font-size:13px;line-height:1.8}</style></head><body><div class="w">
+<h2>🏷️ تصميم الباركودات</h2>
+{% if vid %}
+<div class="c"><h3>ملصق الأنبوب</h3><div class="m">اسم + جهاز/جنس/عمر + وقت + التحاليل + باركود. بلوحة التصميم اختر «قالب جاهز: T1» وعدّل القياس بالمليمتر.</div>
+<a class="b" href="{{ url_for('print_sample_barcodes', visit_id=vid) }}?design=1">تصميم ملصق الأنبوب</a></div>
+<div class="c"><h3>ملصق الطلب</h3><div class="m">اسم + Ready by + Paid/Balance + رقم الطلب + باركود. اختر «قالب جاهز: R1».</div>
+<a class="b" href="{{ url_for('print_request_label', visit_id=vid) }}?design=1">تصميم ملصق الطلب</a></div>
+<p class="m">يُفتح بآخر زيارة مسجلة للمعاينة. كل تعديل يُحفظ تلقائيًا ويطبَّق على كل الزيارات.</p>
+{% else %}<div class="c m">سجّل زيارة واحدة على الأقل أولًا حتى تظهر معاينة الملصق.</div>{% endif %}
+</div></body></html>""", vid=vid)
+
+
 @app.route("/front-desk/visits/<int:visit_id>/print/request-label")
 @login_required
 def print_request_label(visit_id):
