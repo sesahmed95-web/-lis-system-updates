@@ -90,12 +90,6 @@
   table.meta-table td.meta-label { width: 62%; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   table.meta-table td.meta-side { width: 38%; text-align: left; direction: ltr; }
   .patient-name-hl { font-weight: bold; font-size: 1.12em; color: #14213D; white-space: nowrap; }
-  /* v63: الاسم العربي والإنكليزي ما يتراكبون — خلية الاسم تسمح بسطرين، وكل لغة معزولة باتجاهها */
-  table.meta-table td.meta-label { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; line-height: 1.55; word-break: break-word; }
-  table.meta-table td.meta-label *, table.meta-table td.meta-side * { unicode-bidi: isolate; max-width: 100%; }
-  table.meta-table td.meta-label [lang="en"], table.meta-table td.meta-label .name-en { display: block; direction: ltr; text-align: left; white-space: normal; }
-  table.meta-table td.meta-label [lang="ar"], table.meta-table td.meta-label .name-ar { display: block; direction: rtl; text-align: right; white-space: normal; }
-  .patient-name-hl { white-space: normal !important; }
 
   .report-heading {
     text-align: center;
@@ -397,7 +391,7 @@
           {% set _hs = report_header_style|default('default') %}
           {% set _lhname = lab_name_ar|default(brand_name|default('')) %}
           {% if _hs == 'default' or _hs not in ('h1','h2','h3','h4') %}
-          <div class="lab-title-box">مختبر امراض الدم التخصصي للتحليلات المرضية</div>
+          <div class="lab-title-box">{{ lab_name_ar|default('مختبر امراض الدم التخصصي للتحليلات المرضية', true) }}</div>
 
           {% if logo_url and logo_position == 'center' %}
           <div class="logo-center-row"><img src="{{ logo_url }}" alt="logo"></div>
@@ -498,22 +492,6 @@
       <tbody>
         <tr><td>
           {% block report_body %}{% endblock %}
-
-          {# v63: عنوان اسم التحليل (مثل A1c / T3) فوق جدول النتائج ما له داعي — الاسم موجود بالجدول. نخفيه لو نصه يطابق اسم/رمز التحليل، بكل الستايلات. #}
-          <script>
-          (function () {
-            try {
-              var names = {{ [ot['test_name'], ot['short_name'], ot['code']]|select|list|tojson if ot else '[]' }};
-              var norm = function (x) { return String(x || '').replace(/\s+/g, ' ').trim().toLowerCase(); };
-              names = names.map(norm);
-              var sc = document.currentScript;
-              var root = (sc && (sc.closest('table') || sc.parentElement)) || document;
-              root.querySelectorAll('.report-heading, .report-title').forEach(function (h) {
-                if (names.indexOf(norm(h.textContent)) >= 0) h.style.display = 'none';
-              });
-            } catch (e) {}
-          })();
-          </script>
 
           {#
             شريط "✏️ تعديل التصميم" + حفظ/تراجع — كان سابقًا يظهر فقط جوّا
