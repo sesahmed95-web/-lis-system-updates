@@ -66,6 +66,7 @@
   {% endfor %}
   {% if from_other_lab %}
   <div style="margin-top:14px; font-style:italic; font-weight:bold; color:#334155; text-align:left; direction:ltr;">The sample received from another Lab.</div>
+  {% set _olx = other_lab_extra(visit["id"]) %}{% if _olx %}<div style="font-weight:bold; color:#334155; text-align:left; direction:ltr;">{{ _olx }}</div>{% endif %}
   {% endif %}
 </div>
 {% endblock %}

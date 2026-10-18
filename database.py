@@ -733,7 +733,7 @@ def migrate(conn):
             ("printed_at", "TEXT"),
         ],
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
-        "visits": [("tests_display", "TEXT"), ("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
+        "visits": [("tests_display", "TEXT"), ("other_lab_note", "TEXT"), ("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
                     ("examining_doctor_fee", "REAL DEFAULT 0"), ("attending_doctor", "TEXT"),
                     # حقول "المعلومات الصحية" الجديدة بشاشة "زيارة جديدة" — خاصة
                     # بكل زيارة تحديداً (تختلف من زيارة لأخرى لنفس المريض)، لذلك

@@ -17,7 +17,7 @@ What it does (your folders are never modified):
      client has none yet - re-installing/updating never overwrites his data)
 Then:  double-click  <out>\client_build\build_client.bat   ->  <out>\client_build\installer_output\LabSystem_Setup.exe
 """
-import argparse, fnmatch, importlib.util, os, re, shutil, sys, tempfile
+import argparse, base64, fnmatch, importlib.util, json, os, re, shutil, sqlite3, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("seal", os.path.join(HERE, "seal_client_package.py"))
@@ -31,6 +31,7 @@ SKIP_DIRS = {".git", "__pycache__", "build", "dist", "installer_output", "portal
 SKIP_FILES = set(seal.EXCLUDE_FILES) | {"local_config.py", ".gitignore", ".gitattributes", "build_client.bat", "installer_client.iss"}
 SKIP_PATTERNS = ["*.bak*", "*.pyc", "*.log", "*.zip", "lis.db*", "*.db-wal", "*.db-shm", "- Copy.gitignore", "designer_login_PRIVATE.txt"]
 STATIC_SKIP_DIRS = {"whatsapp_pdfs", "pdf_archive", "reports_pdf"}
+SENSITIVE = re.compile(r"(token|secret|api_?key|password|passwd|whatsapp|smtp)", re.I)
 UPLOAD_KEEP = ("logo*", "dashboard-bg*")          # files directly inside static/uploads
 UPLOAD_KEEP_DIRS = {"stamps"}                      # folders inside static/uploads
 
@@ -57,6 +58,17 @@ def main():
     # 1) database
     report = seal.sanitize_db(os.path.join(ws, "lis.db"), os.path.join(bld, "lis.db"), a)
 
+    # ملفات static/uploads المشار إليها بأي إعداد (شعار، خلفية الرئيسية، صور الشاشة الأولى...) تُنسخ كلها
+    keep_names = set()
+    try:
+        _c = sqlite3.connect(os.path.join(bld, "lis.db"))
+        for (_k, _v) in _c.execute("SELECT key, value FROM settings"):
+            _v = (_v or "").strip().replace("\\", "/")
+            if _v.startswith("uploads/") and "/" not in _v[len("uploads/"):] and not SENSITIVE.search(_k or ""):
+                keep_names.add(_v[len("uploads/"):])
+        _c.close()
+    except Exception as _e:
+        print("WARNING: could not read upload names from settings:", _e)
     # 2+3) code and static
     n = 0; skipped_up = []
     for dp, dns, fns in os.walk(ws):
@@ -68,7 +80,7 @@ def main():
         for fn in fns:
             if rel == "." and fn == "lis.db": continue
             if skip_file(fn): continue
-            if parts == ["static", "uploads"] and not any(fnmatch.fnmatch(fn, p) for p in UPLOAD_KEEP):
+            if parts == ["static", "uploads"] and fn not in keep_names and not any(fnmatch.fnmatch(fn, p) for p in UPLOAD_KEEP):
                 skipped_up.append(fn); continue
             dst = os.path.join(bld, rel if rel != "." else "", fn); os.makedirs(os.path.dirname(dst), exist_ok=True)
             full = os.path.join(dp, fn)
@@ -95,18 +107,93 @@ def main():
     for must in ("start_lab.vbs", "stop_lab.bat", "installer.iss", "build.bat"):
         if not os.path.exists(os.path.join(bld, must)): print("WARNING: %s is missing from the folder - the installer needs it." % must)
 
+    # 3b) branding preset (شعار + أطباء الترويسة بشهاداتهم + تصاميم + صور الشاشة الرئيسية) داخل الـSetup نفسه.
+    #     يُطبَّق عند أول تشغيل مرة وحدة بكل جهاز حتى لو كان عند العميل lis.db قديم (الـSetup ما يبدّل قاعدة موجودة).
+    try:
+        pre_msg = build_branding_preset(bld)
+    except Exception as e:
+        pre_msg = "WARNING: branding preset not created: %r" % (e,)
+    print(pre_msg)
+
     # 4) build + installer scripts
     open(os.path.join(bld, "build_client.bat"), "w", encoding="ascii", newline="").write(BUILD_BAT)
     iss = open(os.path.join(bld, "installer.iss"), encoding="utf-8-sig").read() if os.path.exists(os.path.join(bld, "installer.iss")) else ""
     line = 'Source: "lis.db"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall'
     if "[Files]" not in iss: sys.exit("ERROR: installer.iss has no [Files] section.")
     if 'Source: "lis.db"' not in iss: iss = iss.replace("[Files]", "[Files]\r\n; client's prepared (empty of patients) database - never overwrites an existing one\r\n" + line, 1)
+    if os.path.exists(os.path.join(bld, "portal_preset.json")) and "LisPresetNotApplied" not in iss:
+        pl = 'Source: "portal_preset.json"; DestDir: "{app}"; Flags: ignoreversion; Check: LisPresetNotApplied'
+        iss = iss.replace("[Files]", "[Files]\r\n; branding (logo, doctors' degrees, report design): applied once per computer\r\n" + pl, 1)
+        fn = ("\r\nfunction LisPresetNotApplied: Boolean;\r\nbegin\r\n"
+              "  Result := not FileExists(ExpandConstant('{app}\\portal_preset.applied.json'));\r\nend;\r\n")
+        iss = (iss.replace("[Code]", "[Code]" + fn, 1) if "[Code]" in iss else iss + "\r\n[Code]" + fn)
     if not has_icon: iss = re.sub(r"(?im)^SetupIconFile=.*\r?\n", "", iss)
     open(os.path.join(bld, "installer_client.iss"), "w", encoding="utf-8-sig", newline="").write(iss)
 
     print("\n".join(report)); print("\nOK: %d files in %s" % (n, bld))
     if skipped_up: print("NOT copied from static\\uploads (not logo/background/stamps): " + ", ".join(sorted(set(skipped_up))[:20]))
     print("Next: double-click build_client.bat inside client_build")
+
+
+DESIGN_KEYS = (
+    "result_layout_json", "combined_panel_group_order", "results_entry_test_order",
+    "logo_width", "logo_position", "letterhead_font_size", "letterhead_font_family",
+    "report_underline_style", "report_row_pad", "report_col_pad", "test_name_font_size", "result_value_font_size",
+    "show_result_flag", "flag_color_low", "flag_color_high", "conclusion_marker_colors",
+    "patient_info_top_gap", "patient_info_row_gap", "patient_info_label_width", "patient_info_col_gap",
+    "barcode_test_names_mode", "barcode_show_lab_name", "vb_names_mode", "theme_primary_color", "theme_page_bg_color",
+    "report_header_style", "report_header_accent", "report_header_subtitle",
+    "dashboard_bg_path", "dashboard_bg_overlay_opacity", "dashboard_bg_blur", "dashboard_bg_position",
+    "dashboard_bg_size_mode", "dashboard_bg_size_percent", "dashboard_overlay_color",
+    "dashboard_bg_brightness", "dashboard_hero_text_color",
+    "exam_abnormal_red", "report_design_exam", "report_design_coag", "auto_flag_color_enabled", "label_layout_tube",
+    "label_layout_request", "barcode_copies", "barcode_group_mode", "known_analyzers", "whatsapp_country_code",
+    "landing_title", "landing_title_en", "landing_bg_banner_size", "landing_bg_logo_size", "landing_bg_overlay_opacity",
+    "landing_bg_position", "landing_bg_shape", "landing_image_opacity", "landing_image_position", "landing_image_shape",
+    "landing_gradient_color", "landing_bg_image_path", "landing_bglogo_image_path", "landing_lab_image_path",
+    "landing_reception_image_path", "landing_together_image_path",
+)
+
+
+def build_branding_preset(bld):
+    """يقرأ النسخة المنظَّفة bld/lis.db + bld/static/uploads ويكتب bld/portal_preset.json (بدون أي توكن/باسورد/مفتاح بوابة)."""
+    con = sqlite3.connect(os.path.join(bld, "lis.db")); con.row_factory = sqlite3.Row
+    try:
+        keys = ("app_name", "app_name_ar", "lab_phone", "lab_address", "logo_path") + DESIGN_KEYS
+        st = {r["key"]: r["value"] for r in con.execute(
+            "SELECT key, value FROM settings WHERE key IN (%s)" % ",".join("?" * len(keys)), keys)}
+        cols = [r[1] for r in con.execute("PRAGMA table_info(examining_doctors_list)")]
+        want = [c for c in ("name", "title", "degree_ar", "degree_en", "sort_order", "font_size") if c in cols]
+        docs = [dict(r) for r in con.execute("SELECT " + ", ".join(want) +
+                " FROM examining_doctors_list WHERE show_on_letterhead=1 ORDER BY sort_order, id")] if "name" in want else []
+        tcols = [r[1] for r in con.execute("PRAGMA table_info(test_definitions)")]
+        tw = [c for c in ("code", "report_group", "panel_color", "panel_page_break", "row_spacing", "done_by_note") if c in tcols]
+        tds = [dict(r) for r in con.execute("SELECT " + ", ".join(tw) + " FROM test_definitions")] if len(tw) > 1 else []
+    finally:
+        con.close()
+    up = os.path.join(bld, "static")
+    def _b64(rel):
+        fp = os.path.join(up, rel.replace("/", os.sep))
+        if os.path.isfile(fp) and os.path.getsize(fp) <= 3 * 1024 * 1024:
+            with open(fp, "rb") as fh:
+                return {"filename": os.path.basename(fp), "b64": base64.b64encode(fh.read()).decode("ascii")}
+        return None
+    settings = {k: v for k, v in st.items() if k != "logo_path" and (v or "").strip()}
+    pre = {"settings": settings, "letterhead_doctors": docs, "test_designs": tds}
+    logo = _b64(st.get("logo_path") or "") if (st.get("logo_path") or "").strip() else None
+    if logo: pre["logo"] = logo
+    files, seen = [], set()
+    for k in DESIGN_KEYS:
+        if k.endswith("_path") and (st.get(k) or "").strip() not in ("", "-"):
+            f = _b64(st[k])
+            if f and f["filename"] not in seen:
+                files.append(f); seen.add(f["filename"])
+    if files: pre["files"] = files
+    with open(os.path.join(bld, "portal_preset.json"), "w", encoding="utf-8") as fh:
+        json.dump(pre, fh, ensure_ascii=False)
+    withdeg = sum(1 for d in docs if d.get("degree_ar") or d.get("degree_en"))
+    return ("branding preset: logo=%s, doctors=%d (with degrees: %d), extra images=%d, design settings=%d"
+            % ("YES" if logo else "NO (logo file not found!)", len(docs), withdeg, len(files), len(settings)))
 
 
 BUILD_BAT = r"""@echo off

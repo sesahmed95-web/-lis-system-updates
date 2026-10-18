@@ -98,6 +98,14 @@
 
 <script>
   function openReportModal(url, title) {
+    // الطباعة التلقائية (auto=1) من داخل iframe تجمّد نافذة Edge بوضع التطبيق → نفتح التقرير بنافذة حقيقية
+    // (مثل print_results_bundle.html). لو انمنعت النافذة المنبثقة نرجع للمعاينة داخل الصفحة.
+    if (url.indexOf('auto=1') !== -1) {
+      var w = null;
+      try { w = window.open(url + (url.indexOf('?') === -1 ? '?' : '&') + '_ts=' + Date.now(), '_blank'); } catch (e) { w = null; }
+      if (w) return;
+      url = url.replace(/([?&])auto=1(&|$)/, function (m, a, b) { return b ? a : ''; });
+    }
     // cache-buster: حتى بحالة "hasProtected" (تحت) اللي ما تسوي حفظ صامت
     // قبل الفتح، نضمن الطلب يوصل طازج للسيرفر دائماً بدل ما يرجّع
     // المتصفح نسخة iframe مخزّنة قديمة لنفس الرابط.

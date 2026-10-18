@@ -2072,51 +2072,6 @@ def designer_logout():
     return redirect(url_for("designer_login"))
 
 
-
-# ---- قائمة الإلغاء: كاش + تحديث بالخلفية (كانت تُجلب من GitHub بكل فتحة للوحة المصمم بمهلة 20 ثانية
-# فتصفن الصفحة لما الإنترنت/الـDNS بطيء). الحين الصفحة ما تنتظر الشبكة أكثر من ثانية ونصف. ----
-_REVOKE_CACHE = {"data": {}, "error": None, "ts": 0.0, "busy": False}
-_REVOKE_LOCK = threading.Lock()
-
-
-def _revocation_refresh_worker():
-    try:
-        data = auto_updater.fetch_revocation_list()
-        err = None
-    except Exception as e:
-        data, err = None, str(e)
-    with _REVOKE_LOCK:
-        if data is not None:
-            _REVOKE_CACHE["data"] = data
-        _REVOKE_CACHE["error"] = err
-        _REVOKE_CACHE["ts"] = time.time()
-        _REVOKE_CACHE["busy"] = False
-
-
-def _revocation_invalidate():
-    with _REVOKE_LOCK:
-        _REVOKE_CACHE["ts"] = 0.0
-
-
-def _revocation_cached(ttl=120, wait=1.5):
-    now = time.time()
-    with _REVOKE_LOCK:
-        fresh = (now - _REVOKE_CACHE["ts"]) < ttl
-        start = (not fresh) and (not _REVOKE_CACHE["busy"])
-        if start:
-            _REVOKE_CACHE["busy"] = True
-    if start:
-        t = threading.Thread(target=_revocation_refresh_worker, daemon=True)
-        t.start()
-        if _REVOKE_CACHE["ts"] == 0.0:
-            t.join(wait)          # أول مرة فقط ننتظر شوي
-    with _REVOKE_LOCK:
-        err = _REVOKE_CACHE["error"]
-        if _REVOKE_CACHE["ts"] == 0.0 and not err:
-            err = "جارِ جلب قائمة الإلغاء من GitHub بالخلفية… حدّث الصفحة بعد لحظات."
-        return dict(_REVOKE_CACHE["data"]), err
-
-
 @app.route("/designer")
 @designer_required
 def designer_panel():
@@ -2138,7 +2093,10 @@ def designer_panel():
     revoked_licenses = {}
     revocation_error = None
     if github_write_token and auto_updater.is_configured():
-        revoked_licenses, revocation_error = _revocation_cached()
+        try:
+            revoked_licenses = auto_updater.fetch_revocation_list()
+        except Exception as e:
+            revocation_error = str(e)
     branding = {
         "app_name": get_setting(db, "app_name", ""),
         "app_name_ar": get_setting(db, "app_name_ar", ""),
@@ -2347,7 +2305,6 @@ def designer_revoke_license():
     else:
         try:
             auto_updater.push_revocation(write_token, hardware_id, reason, revoke=True)
-            _revocation_invalidate()
             flash(f"تم إرسال إلغاء الترخيص لجهاز {hardware_id} — راح يوصله أول ما يتصل بالنت (لازم يكون \"مربوط بالإنترنت\" مفعّل عنده).")
         except Exception as e:
             flash(f"⚠️ تعذر إلغاء الترخيص عن بُعد: {e}")
@@ -2362,7 +2319,6 @@ def designer_restore_license(hardware_id):
     write_token = get_setting(db, "github_write_token", "")
     try:
         auto_updater.push_revocation(write_token, hardware_id, None, revoke=False)
-        _revocation_invalidate()
         flash(f"تم رفع الإلغاء عن جهاز {hardware_id} — يقدر يفعّل ببرنامجه بكود جديد أول ما يتصل بالنت.")
     except Exception as e:
         flash(f"⚠️ تعذر رفع الإلغاء: {e}")
@@ -2675,7 +2631,7 @@ def print_visit_full_report(visit_id):
     # (طلبات طباعة متعددة متزامنة = نافذة طباعة تتجمّد).
     if request.args.get("autoprint") == "1":
         _ap = ("<script>window.addEventListener('load',function(){setTimeout(function(){"
-               "window.print();},700);});</script>")
+               "if(window.__lisPrinted)return;window.__lisPrinted=true;window.print();},700);});</script>")
         if "</body>" in html_content:
             html_content = html_content.replace("</body>", _ap + "</body>", 1)
         else:
@@ -3681,7 +3637,6 @@ def api_results_quick_search():
     if len(q) < 2:
         return jsonify({"items": []})
     db = get_db()
-    _seq_q = _visit_seq_clause(q)
     rows = db.execute(
         "SELECT ot.id as order_test_id, ot.status, ot.barcode, td.name as test_name, "
         "p.full_name as patient_name, v.id as visit_id, v.registration_number "
@@ -3691,9 +3646,8 @@ def api_results_quick_search():
         "JOIN visits v ON v.id = o.visit_id "
         "JOIN patients p ON p.id = v.patient_id "
         "WHERE p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR ot.barcode LIKE ? "
-        + (" OR " + _seq_q[0] if _seq_q else "") +
-        " ORDER BY ot.id DESC LIMIT 20",
-        (f"%{q}%", _scan_like(q), f"%{q}%") + tuple(_seq_q[1] if _seq_q else ()),
+        "ORDER BY ot.id DESC LIMIT 20",
+        (f"%{q}%", _scan_like(q), f"%{q}%"),
     ).fetchall()
     use_front_desk = session.get("interface") in (None, "reception", "both")
     items = []
@@ -4076,7 +4030,7 @@ def completed_results():
     rows = db.execute(
         "SELECT v.id as visit_id, v.registration_number, v.created_at, p.full_name as patient_name, p.phone as phone, "
         "MIN(COALESCE(ot.collected_at, v.created_at)) as drawn_at, "
-        "GROUP_CONCAT(ot.id || '\u0001' || COALESCE(NULLIF(td.short_name, ''), td.name) || '\u0001' || td.name, '\u0002') as tests_list, "
+        "GROUP_CONCAT(ot.id || '\u0001' || COALESCE(NULLIF(td.code, ''), td.name) || '\u0001' || td.name, '\u0002') as tests_list, "
         "(SELECT COUNT(*) FROM order_tests ot3 JOIN orders o3 ON o3.id = ot3.order_id WHERE o3.visit_id = v.id) as total_tests "
         "FROM order_tests ot JOIN orders o ON o.id = ot.order_id JOIN visits v ON v.id = o.visit_id "
         "JOIN patients p ON p.id = v.patient_id JOIN test_definitions td ON td.id = ot.test_definition_id "
@@ -5095,7 +5049,6 @@ LABEL_FIELD_TITLES = {
     "tests_codes": "أكواد التحاليل", "custom": "نص ثابت (تكتبه أنت)",
     "order_no": "رقم الطلب (التسجيل بدون #)", "dept_age_gender": "القسم/الجهاز + الجنس-العمر (Abbot - Female-18Y)",
     "ready_by": "وقت الجاهزية (Ready by)", "paid": "الواصل (Paid)", "balance": "الباقي (Balance)",
-    "month_no": "التسلسل الشهري للعينة", "day_month_no": "رقم عينة اليوم + التسلسل الشهري (002 / M17)",
 }
 LABEL_SCAN_TITLES = {
     "reg_no": "رقم التسجيل", "sample_no": "رقم العينة", "patient_name": "اسم المريض",
@@ -5104,11 +5057,9 @@ LABEL_SCAN_TITLES = {
 }
 LABEL_FIELDS_BY_KIND = {
     "tube": ("lab_name", "patient_name", "age_gender", "datetime", "date", "time", "reg_no",
-             "sample_no", "sample_type", "tests", "tests_codes", "custom", "order_no", "dept_age_gender",
-             "month_no", "day_month_no"),
+             "sample_no", "sample_type", "tests", "tests_codes", "custom", "order_no", "dept_age_gender"),
     "request": ("lab_name", "patient_name", "age_gender", "datetime", "date", "time", "reg_no",
-                "sample_no", "visit_id", "tests", "tests_codes", "custom", "order_no", "ready_by", "paid", "balance",
-                "month_no", "day_month_no"),
+                "sample_no", "visit_id", "tests", "tests_codes", "custom", "order_no", "ready_by", "paid", "balance"),
 }
 _DEFAULT_LABEL_LAYOUTS = {
     "tube": {
@@ -5136,13 +5087,7 @@ LABEL_PRESETS = {
                "lines": [{"f": "patient_name", "s": 9, "b": 1, "a": "center"},
                          {"f": "dept_age_gender", "f2": "datetime", "s": 6.5, "r": 1},
                          {"f": "tests", "s": 6.5, "a": "center", "w": 1},
-                         {"f": "day_month_no", "f2": "sample_type", "s": 7, "p": "after"}]},
-        "T2": {"title": "T2 — أنبوب 16 مم: اسم + وقت + التحاليل + باركود + رقم اليوم/الشهري ونوع العينة",
-               "w": 44, "h": 30, "d": 16, "roll": True, "tmode": "short",
-               "lines": [{"f": "patient_name", "s": 9, "b": 1, "a": "center"},
-                         {"f": "datetime", "s": 6.5, "a": "center"},
-                         {"f": "tests", "s": 6.5, "a": "center", "w": 1},
-                         {"f": "day_month_no", "f2": "sample_type", "s": 7.5, "b": 1, "p": "after"}]},
+                         {"f": "order_no", "f2": "sample_type", "s": 7, "p": "after"}]},
     },
     "request": {
         "R1": {"title": "R1 — اسم + Ready by/التاريخ + Paid/Balance + رقم الطلب + باركود",
@@ -5303,36 +5248,6 @@ def _label_money(db, visit):
     return out
 
 
-def _visit_month_no(visit_id, created_at):
-    """التسلسل الشهري للزيارة = ترتيبها بين زيارات نفس الشهر (حسب تاريخ الإنشاء). يُحسب ولا يُخزَّن."""
-    try:
-        ym = (created_at or "")[:7]
-        if not ym:
-            return ""
-        row = get_db().execute(
-            "SELECT COUNT(*) AS c FROM visits WHERE substr(created_at,1,7)=? AND id<=?", (ym, visit_id)).fetchone()
-        return str(row["c"]) if row and row["c"] else ""
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-# بحث بالتسلسل: m17 / M17 / ش17 = التسلسل الشهري 17 لهذا الشهر؛ رقم قصير (1-3 خانات) أو d2 / ي2 = رقم عينة اليوم.
-# يُستخدم كشرط إضافي (OR) بجانب البحث بالاسم/رقم التسجيل/الباركود، لا يغيّر شي منها.
-def _visit_seq_clause(q, vcol="v"):
-    q = (q or "").strip()
-    m = re.fullmatch(r"(?:m|M|ش|شهري)\s*[-:]?\s*(\d{1,5})", q)
-    if m:
-        return (f"((SELECT COUNT(*) FROM visits vq WHERE substr(vq.created_at,1,7)=substr({vcol}.created_at,1,7) "
-                f"AND vq.id<={vcol}.id)=? AND substr({vcol}.created_at,1,7)=?)",
-                [int(m.group(1)), datetime.now().strftime("%Y-%m")])
-    m = re.fullmatch(r"(?:d|D|ي|يومي)\s*[-:]?\s*(\d{1,3})|(\d{1,3})", q)
-    if m:
-        n = int(m.group(1) or m.group(2))
-        return (f"(CAST({vcol}.sample_no AS INTEGER)=? AND substr({vcol}.created_at,1,10)=?)",
-                [n, datetime.now().strftime("%Y-%m-%d")])
-    return None
-
-
 def _label_visit_fields(visit, lab_name, tests=None, draw_time=None, money=None):
     """الحقول المشتركة لأي ملصق (قيم نصية جاهزة)."""
     keys = visit.keys()
@@ -5353,8 +5268,6 @@ def _label_visit_fields(visit, lab_name, tests=None, draw_time=None, money=None)
         "visit_id": str(visit["id"]),
         "order_no": str(visit["registration_number"]) if "registration_number" in keys else "",
     }
-    out["month_no"] = _visit_month_no(visit["id"], visit["created_at"] if "created_at" in keys else "")
-    out["day_month_no"] = " / ".join(x for x in [out["sample_no"], f"M{out['month_no']}" if out["month_no"] else ""] if x)
     _ab = {"years": "Y", "year": "Y", "months": "M", "month": "M", "days": "D", "day": "D", "weeks": "W"}.get(unit.strip().lower(), unit[:1].upper())
     out["ga_short"] = "-".join(x for x in [gender, f"{age}{_ab}" if age else ""] if x)
     out["dept_age_gender"] = out["ga_short"]
@@ -5438,6 +5351,35 @@ _REQUEST_LABEL_STYLES = {
                            {"f": "datetime", "s": 8, "a": "center"}],
                  "bc": {"type": "code128", "pos": "bottom", "h": 14}},
 }
+
+
+def other_lab_extra(visit_id):
+    """سطر إضافي (اختياري) يُطبع تحت عبارة "The sample received from another Lab." لزيارة معيّنة فقط."""
+    try:
+        if not visit_id:
+            return ""
+        r = get_db().execute("SELECT other_lab_note FROM visits WHERE id=?", (int(visit_id),)).fetchone()
+        return (r["other_lab_note"] or "").strip() if r else ""
+    except Exception:
+        return ""
+
+
+app.jinja_env.globals["other_lab_extra"] = other_lab_extra
+
+
+@app.route("/api/visit/<int:visit_id>/other-lab-note", methods=["POST"])
+@login_required
+def api_visit_other_lab_note(visit_id):
+    """يحفظ/يمسح الإضافة على عبارة المختبر المحيل لمريض (زيارة) واحد فقط. الفاضي = بدون إضافة (العبارة الأصلية تبقى للكل)."""
+    db = get_db()
+    if not db.execute("SELECT 1 FROM visits WHERE id=?", (visit_id,)).fetchone():
+        return {"ok": False, "error": "الزيارة غير موجودة"}, 404
+    body = request.get_json(silent=True) or {}
+    text = str(body.get("text") or "").strip()[:300]
+    db.execute("UPDATE visits SET other_lab_note=? WHERE id=?", (text or None, visit_id))
+    db.commit()
+    log_action("SetOtherLabNote", "visit", visit_id, text[:80])
+    return {"ok": True, "text": text}
 
 
 @app.route("/management/label-designer")
@@ -5835,9 +5777,7 @@ def print_sample_barcodes(visit_id):
     # تشترك بباركود واحد؛ تحليل بدون قسم يُجمَّع حسب نوع العينة، وبدونهما
     # يبقى ملصقه الفردي. لإرجاع التجميع القديم (حسب نوع العينة فقط):
     # الرابط ?group=sample_type أو إعداد barcode_group_mode = sample_type.
-    group_mode = (request.args.get("group") or get_setting(db, "barcode_group_mode", "") or "tube").strip()
-    if group_mode == "department" and not request.args.get("group"):
-        group_mode = "tube"   # v65: الافتراضي صار التجميع حسب نوع الأنبوب (?group=department يرجّع القديم)
+    group_mode = (request.args.get("group") or get_setting(db, "barcode_group_mode", "department") or "department").strip()
     # أسماء التحاليل المطبوعة على الملصق: لو التحليل مطلوب جزئيًا (مثلاً PT و PTT
     # من Coagulation) تُطبع أسماء البارامترات المختارة نفسها بدل اسم التحليل
     # الكامل، بدون بارامترات الـControl ولا INR (تُضاف تلقائيًا مع PT).
@@ -5865,10 +5805,7 @@ def print_sample_barcodes(visit_id):
     for r in rows:
         stype = (r["sample_type"] or "").strip()
         dept = (r["department"] or "").strip()
-        if group_mode == "tube":
-            key = _tube_type_of(r["sample_type"], r["department"], r["test_name"])
-        else:
-            key = (dept or stype) if group_mode != "sample_type" else stype
+        key = (dept or stype) if group_mode != "sample_type" else stype
         if not key:
             ungrouped.append(r)
             continue
@@ -5901,7 +5838,7 @@ def print_sample_barcodes(visit_id):
         tube_samples.append({
             # اسم القسم ما يُطبع على الملصق (فقط أسماء التحاليل/الأنواع المختارة)؛
             # عند التجميع حسب نوع العينة فقط (?group=sample_type) يبقى العنوان القديم
-            "sample_type": stype if group_mode in ("sample_type", "tube") else "",
+            "sample_type": stype if group_mode == "sample_type" else "",
             "department": (group_rows[0]["department"] or "") if group_rows else "",
             "barcode": tube_barcode,
             "test_names": [n for r in group_rows for n in _label_names(r)],
@@ -7388,7 +7325,9 @@ def result_entry(order_test_id):
         if ot["status"] != "Verified":
             db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (order_test_id,))
         db.commit()
-        _post_save_background(ot["visit_id"], [order_test_id])
+        _archive_single_test_pdf(db, order_test_id)
+        _maybe_auto_whatsapp_send(db, ot["visit_id"])
+        _maybe_archive_visit_pdf(db, ot["visit_id"])
         log_action("EnterResult", "order_test", order_test_id, f"gate_person={gate_person}" if gate_person else None)
         flash("Results saved.")
         return redirect(url_for("orders_list"))
@@ -7719,13 +7658,11 @@ def api_quick_entry_search():
     all_days = request.args.get("all") == "1"
     where = ["ot.status NOT IN ('Completed', 'Verified')", "COALESCE(ot.sent_to_reception, 0) = 0"]
     params = []
-    _seq = _visit_seq_clause(q) if q else None
     if q:
-        _extra = (" OR " + _seq[0]) if _seq else ""
         where.append("(p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR ot.barcode LIKE ? "
                      "OR v.id IN (SELECT o2.visit_id FROM order_tests ot2 JOIN orders o2 ON o2.id = ot2.order_id "
-                     "WHERE ot2.barcode LIKE ?)" + _extra + ")")
-        params += [f"%{q}%", _scan_like(q), f"%{q}%", f"%{q}%"] + (_seq[1] if _seq else [])
+                     "WHERE ot2.barcode LIKE ?))")
+        params += [f"%{q}%", _scan_like(q), f"%{q}%", f"%{q}%"]
     if not all_days and not (q and q.isdigit() and len(q) >= 4):
         where.append("substr(v.created_at,1,10) = ?")
         params.append(datetime.now().strftime("%Y-%m-%d"))
@@ -7855,7 +7792,10 @@ def visit_results_entry(visit_id):
                     db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (ot["id"],))
         db.commit()
         if any_saved:
-            _post_save_background(visit_id, touched_ot_ids)
+            for _tid in touched_ot_ids:
+                _archive_single_test_pdf(db, _tid)
+            _maybe_auto_whatsapp_send(db, visit_id)
+            _maybe_archive_visit_pdf(db, visit_id)
             log_action("EnterResultsBulk", "visit", visit_id, f"gate_person={gate_person}" if gate_person else None)
             if not wants_json:
                 flash("تم حفظ النتائج.")
@@ -8403,25 +8343,15 @@ def _print_combined_panel_core(visit_id):
         show_dept_headings = layout_cfg["dept_headings"] == "show"
     else:
         show_dept_headings = _view["style"] in ("a1", "a2", "r3")
+    # فاصل الصفحة (page_break_before) على أول صف بأول لوحة يطلّع صفحة أولى فاضية (ترويسة فقط) والنتائج تنزل
+    # للصفحة 2 — ما له معنى قبل أول صف أصلاً، فنتجاهله هنا (الفواصل بين باقي الصفوف تبقى كما هي).
+    for _g in panel_groups[:1]:
+        for _r in _g["rows"][:1]:
+            _r["page_break_before"] = False
     all_rows = [r for g in panel_groups for r in g["rows"]]
-    # نفس بيانات رأس التقرير المفرد (اسم إنكليزي، وقت العينة، Number Of) — كانت ناقصة بالتقرير الشامل/اللوحة المجمّعة
-    _pt_en_row = db.execute("SELECT full_name_en FROM patients WHERE id=?", (visit["patient_id"],)).fetchone()
-    _panel_name_en = (_pt_en_row["full_name_en"] or "") if _pt_en_row else ""
-    _panel_time, _panel_number_of = "", ""
-    if order_tests:
-        _t0 = order_tests[0]
-        _k0 = _t0.keys()
-        _panel_time = _fmt_hhmm((_t0["collected_at"] if "collected_at" in _k0 and _t0["collected_at"] else "")
-                                or (_t0["accessioned_at"] if "accessioned_at" in _k0 and _t0["accessioned_at"] else "")
-                                or "")
-        try:
-            _panel_number_of = get_patient_number_of_day(db, _t0["id"])
-        except Exception:  # noqa: BLE001 — ما نوقف الطباعة لو تعذّر حساب العدد
-            _panel_number_of = ""
     return render_template(
         "reports/combined_panel.html",
-        patient_name_en=_panel_name_en, sample_time=_panel_time, number_of=_panel_number_of,
-        panel_groups=panel_groups, logo_url=logo_url, from_other_lab=from_other_lab,
+        panel_groups=panel_groups, logo_url=logo_url, from_other_lab=from_other_lab, other_lab_visit_id=visit["id"],
         show_dept_headings=show_dept_headings, all_rows=all_rows, merged_title=layout_cfg["merged_title"],
         **_heading_css_ctx(layout_cfg, [g["department"] for g in panel_groups]),
         sample_no=(visit["sample_no"] if "sample_no" in visit.keys() else "") or "",
@@ -8501,7 +8431,7 @@ def print_combined_panel(visit_id):
                           if s_.startswith("<div>") else s_ for i, s_ in enumerate(sections)) + "</body></html>")
     if want_auto:
         html_out = html_out.replace("</body>", "<script>window.addEventListener('load',function(){setTimeout(function(){"
-                                    "window.print();},700);});</script></body>", 1)
+                                    "if(window.__lisPrinted)return;window.__lisPrinted=true;window.print();},700);});</script></body>", 1)
     return html_out
 
 
@@ -9020,7 +8950,7 @@ def _print_report_impl(order_test_id):
         note_visit_id=(ot["visit_id"] if template_name == "reports/custom_v2.html" else None),
         prev_toggle_available=(prev_toggle_available if template_name == "reports/custom_v2.html" else False),
         prev_toggle_checked=result_show_prev,
-        logo_url=logo_url, from_other_lab=from_other_lab, font_size=font_size,
+        logo_url=logo_url, from_other_lab=from_other_lab, other_lab_visit_id=ot["visit_id"], font_size=font_size,
         show_exam_signature=show_exam_signature,
         hide_signature_box=bool(ot["hide_signature_box"]),
         signature_position=(ot["signature_position"] if ot["signature_position"] in ("left", "center", "right") else ""),
@@ -9648,49 +9578,6 @@ def _get_pdf_archive_dir(db):
     return d
 
 
-
-# ---- أرشفة PDF + واتساب التلقائي بعد حفظ النتائج: صارت بالخلفية. قبل كانت تتنفذ داخل نفس الطلب
-# (ملف PDF لكل تحليل + ملف للزيارة بمحرك المتصفح) فتصفن الصفحة عند زر الطباعة/الحفظ. ----
-_POSTSAVE_LOCKS = {}
-_POSTSAVE_LOCKS_GUARD = threading.Lock()
-
-
-def _post_save_background(visit_id, order_test_ids=()):
-    url_root = request.url_root
-    ids = list(order_test_ids or [])
-
-    def _worker():
-        with _POSTSAVE_LOCKS_GUARD:
-            lk = _POSTSAVE_LOCKS.setdefault(visit_id, threading.Lock())
-        with lk:
-            try:
-                with app.test_request_context("/", base_url=url_root):
-                    wdb = get_db()
-                    try:
-                        for _tid in ids:
-                            try:
-                                _archive_single_test_pdf(wdb, _tid)
-                            except Exception:
-                                pass
-                        try:
-                            _maybe_auto_whatsapp_send(wdb, visit_id)
-                        except Exception:
-                            pass
-                        try:
-                            _maybe_archive_visit_pdf(wdb, visit_id)
-                        except Exception:
-                            pass
-                    finally:
-                        try:
-                            wdb.close()
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-
-    threading.Thread(target=_worker, daemon=True).start()
-
-
 def _maybe_archive_visit_pdf(db, visit_id):
     """يحفظ نسخة PDF دائمة (موحّدة لكل نتائج الزيارة) بمجلد الأرشيف الثابت،
     بس إذا: (1) المدير ظبط مجلد أرشفة من الإعدادات، و(2) كل تحليل مطلوب
@@ -9861,7 +9748,12 @@ def print_and_save_result(order_test_id):
         return jsonify({"ok": False, "error": "لا توجد نتيجة مُدخلة لهذا التحليل — أدخل قيمة واحدة على الأقل قبل الطباعة."}), 400
 
     archived = False
-    _post_save_background(ot["visit_id"], [t["id"] for t, _p, _pre, _c in plan] if saved_any else [])
+    for t, _p, _pre, _c in plan:
+        if _archive_single_test_pdf(db, t["id"]):
+            archived = archived or t["id"] == order_test_id
+    if saved_any:
+        _maybe_auto_whatsapp_send(db, ot["visit_id"])
+        _maybe_archive_visit_pdf(db, ot["visit_id"])
     log_action("PrintAndSaveResult", "order_test", order_test_id,
                f"saved={int(saved_any)} archived={int(archived)}")
     return jsonify({"ok": True, "saved": saved_any, "archived": archived,
@@ -10592,37 +10484,6 @@ def delete_mapcode(mapcode_id):
     db.commit()
     flash(t(session.get("lang", "en"), "mapcode_deleted"))
     return redirect(url_for("mapcodes_list"))
-
-
-
-@app.route("/master/analyzer-ip-map", methods=["GET", "POST"])
-@designer_required
-def analyzer_ip_map():
-    """ربط عنوان IP كل جهاز باسمه (لازم يطابق machine_name بصفحة Mapcodes) حتى يرجّع له الاستعلام تحاليله فقط."""
-    db = get_db()
-    if request.method == "POST":
-        lines = []
-        for ln in (request.form.get("map") or "").splitlines():
-            if "=" in ln:
-                k, v = ln.split("=", 1)
-                if k.strip() and v.strip():
-                    lines.append(k.strip() + "=" + v.strip())
-        set_setting(db, "analyzer_ip_map", ";".join(lines))
-        db.commit()
-        flash("تم حفظ ربط الأجهزة")
-        return redirect(url_for("analyzer_ip_map"))
-    cur = (get_setting(db, "analyzer_ip_map", "") or "").replace(";", "\n")
-    names = [r["machine_name"] for r in db.execute(
-        "SELECT DISTINCT machine_name FROM mapcodes WHERE machine_name IS NOT NULL AND machine_name<>'' ORDER BY 1")]
-    return render_template_string(
-        "<!doctype html><meta charset='utf-8'><body dir='rtl' style='font-family:Tahoma;padding:20px;max-width:720px'>"
-        "<h3>ربط الأجهزة بعناوين IP</h3>"
-        "<p>سطر لكل جهاز بالشكل: <code>IP=اسم الجهاز</code> مثال:<br><code>192.168.1.21=cobas e 411</code><br>"
-        "<code>192.168.1.22=cobas pure</code><br><code>192.168.1.23=DxH 520</code></p>"
-        "<p>الأسماء الموجودة حاليًا بـMapcodes: <b>{{ names|join(' ، ') or 'لا يوجد' }}</b></p>"
-        "<form method='post'><textarea name='map' rows='6' style='width:100%;direction:ltr'>{{ cur }}</textarea><br>"
-        "<button>حفظ</button> <a href='{{ url_for(\"host_interface\") }}'>رجوع</a></form></body>",
-        cur=cur, names=names)
 
 
 @app.route("/master/host-interface", methods=["GET", "POST"])
@@ -13933,106 +13794,6 @@ try:
         return resp
 except Exception as _up_err:
     print("update_publisher not loaded:", _up_err)
-# --- v65: باركود الأنابيب حسب نوع الأنبوب + صفحة ترتيب أنواع الأنابيب للتحاليل ---
-import re as _re_v65
-TUBE_TYPES = ["Blood-EDTA", "Serum", "Citrate", "Urine", "Stool", "Semen", "Bone Marrow", "Fluid", "Swab", "Other"]
-_TUBE_TYPE_TITLES = {"Blood-EDTA": "EDTA (غطاء بنفسجي)", "Serum": "Serum / Gel (غطاء أصفر/أحمر)", "Citrate": "Citrate (غطاء أزرق — تخثر)",
-                     "Urine": "بول", "Stool": "براز", "Semen": "سائل منوي", "Bone Marrow": "نقي عظم", "Fluid": "سائل (Fluid/CSF)",
-                     "Swab": "مسحة / زرع", "Other": "غير ذلك (ملصق مستقل)"}
-
-
-def _tube_type_of(sample_type, department, name):
-    """يرجّع نوع الأنبوب القانوني للتحليل (أحد TUBE_TYPES) أو "" إذا ما نعرف (يبقى بملصقه الفردي).
-    الأولوية: sample_type المكتوب بالتحليل (يتحمّل اختلاف الكتابة) ثم تخمين من القسم والاسم."""
-    st = (sample_type or "").strip().lower()
-    dept = (department or "").strip().lower()
-    nm = (name or "").strip().lower()
-    if st:
-        if any(k in st for k in ("edta", "lavender", "purple", "whole blood")):
-            return "Blood-EDTA"
-        if any(k in st for k in ("citrate", "blue top")):
-            return "Citrate"
-        if any(k in st for k in ("serum", "gel", "sst", "plain", "clot activator")):
-            return "Serum"
-        if "urine" in st:
-            return "Urine"
-        if any(k in st for k in ("stool", "feces", "faeces")):
-            return "Stool"
-        if "semen" in st:
-            return "Semen"
-        if "marrow" in st:
-            return "Bone Marrow"
-        if any(k in st for k in ("fluid", "csf", "pleural", "ascit", "synovial")):
-            return "Fluid"
-        if "swab" in st or "culture" in st:
-            return "Swab"
-        if st in ("other", "others"):
-            return ""
-    # تخمين (sample_type فاضي أو عام مثل "Blood")
-    if "coag" in dept or _re_v65.search(r"\b(pt|ptt|aptt|inr)\b|d[\s.\-]?dimer|fibrinogen", nm):
-        return "Citrate"
-    if _re_v65.search(r"bma|bone marrow|biopsy|\bbmp\b", nm):
-        return "Bone Marrow"
-    if "fluid" in nm:
-        return "Fluid"
-    if _re_v65.search(r"\bcbc\b|blood film|\bbf\b|retic|\besr\b|hb[\s.\-]*(electro|h\b|f\b|prep)|sickl|coombs|a1c|hba1c|blood group|\babo\b|g6pd|osmotic|\bham", nm):
-        return "Blood-EDTA"
-    if "hemat" in dept:
-        return "Blood-EDTA"
-    if any(k in dept for k in ("chem", "hormone", "vitamin", "tumor", "viral", "serolog", "immun", "lipid", "diabet", "marker")):
-        return "Serum"
-    if "urine" in nm or re.search(r"\bgue\b", nm):
-        return "Urine"
-    if "stool" in nm or re.search(r"\bgse\b", nm):
-        return "Stool"
-    if "semen" in nm or re.search(r"\bsfa\b", nm):
-        return "Semen"
-    return ""
-
-
-@app.route("/management/tube-types", methods=["GET", "POST"])
-@roles_required("admin")
-def tube_types_page():
-    """ترتيب نوع الأنبوب لكل تحليل: يقترح تلقائيًا (حسب الاسم/القسم/النوع الحالي) وتعدّل وتحفظ. الباركود يتجمّع بعدها حسب هذا النوع."""
-    db = get_db()
-    tests = db.execute("SELECT id, code, name, department, COALESCE(sample_type, '') AS sample_type FROM test_definitions "
-                       "ORDER BY department, name").fetchall()
-    msg = ""
-    if request.method == "POST":
-        n = 0
-        for t in tests:
-            v = (request.form.get("tt_%d" % t["id"]) or "").strip()
-            if v in TUBE_TYPES and v != (t["sample_type"] or ""):
-                db.execute("UPDATE test_definitions SET sample_type=? WHERE id=?", ("" if v == "Other" else v, t["id"]))
-                n += 1
-        db.commit()
-        log_action("TubeTypes", "test_definitions", 0, "updated %d" % n)
-        msg = "تم الحفظ — تحديث %d تحليل." % n
-        tests = db.execute("SELECT id, code, name, department, COALESCE(sample_type, '') AS sample_type FROM test_definitions "
-                           "ORDER BY department, name").fetchall()
-    rows = []
-    for t in tests:
-        cur = _tube_type_of(t["sample_type"], t["department"], t["name"])
-        rows.append({"id": t["id"], "code": t["code"], "name": t["name"], "dept": t["department"] or "", "current": t["sample_type"],
-                     "val": cur or "Other"})
-    page = """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>أنواع الأنابيب</title>
-<style>body{font-family:Tahoma,Arial,sans-serif;background:#F1F5F9;margin:0;padding:18px;color:#0F172A}.w{max-width:980px;margin:0 auto}
-.c{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:14px 18px;margin-bottom:12px}table{width:100%;border-collapse:collapse}
-th{background:#205072;color:#fff;padding:7px 8px;text-align:right;font-size:13px}td{padding:5px 8px;border-bottom:1px solid #E5E7EB;font-size:14px}
-select{padding:4px 6px;border-radius:6px;border:1px solid #CBD5E1}button{background:#205072;color:#fff;border:0;border-radius:8px;padding:9px 20px;font:700 14px Tahoma;cursor:pointer}
-.m{color:#64748B;font-size:13px}.ok{color:#15803D;font-weight:700}tr.ch td{background:#FFFBEB}</style></head><body><div class="w">
-<h2 style="margin:0 0 4px">🧪 أنواع الأنابيب للتحاليل</h2>
-<div class="c"><div class="m">اختر نوع الأنبوب لكل تحليل. باركود الأنابيب يتجمّع حسب هذا النوع <b>بغض النظر عن القسم</b>: كل التحاليل اللي تحتاج Serum = باركود واحد، كل EDTA = باركود واحد،
-كل Citrate (تخثر) = باركود واحد. القيمة المعروضة هي <b>اقتراح تلقائي</b> (أو القيمة الحالية)؛ عدّل ما يلزم ثم احفظ. "غير ذلك" = ملصق مستقل للتحليل.</div>
-{% if msg %}<div class="ok" style="margin-top:8px">{{ msg }}</div>{% endif %}</div>
-<form method="post"><div class="c"><table><tr><th>التحليل</th><th>الكود</th><th>القسم</th><th>النوع الحالي</th><th>نوع الأنبوب</th></tr>
-{% for r in rows %}<tr class="{{ 'ch' if r.current != (r.val if r.val != 'Other' else '') else '' }}"><td>{{ r.name }}</td><td dir="ltr">{{ r.code }}</td><td>{{ r.dept }}</td><td dir="ltr" class="m">{{ r.current or '—' }}</td>
-<td><select name="tt_{{ r.id }}">{% for k in tube_types %}<option value="{{ k }}" {{ 'selected' if k == r.val }}>{{ titles[k] }}</option>{% endfor %}</select></td></tr>{% endfor %}
-</table><div style="margin-top:12px"><button type="submit">💾 حفظ كل الأنواع</button> <a href="/designer" style="margin-inline-start:12px" class="m">رجوع</a></div></div></form></div></body></html>"""
-    from flask import render_template_string as _rts_v65
-    return _rts_v65(page, rows=rows, tube_types=TUBE_TYPES, titles=_TUBE_TYPE_TITLES, msg=msg)
-
-
 if __name__ == "__main__":
     init_db()
     write_pending_preset_logo(UPLOAD_DIR)   # شعار العميل القادم من portal_preset.json (إن وُجد)

@@ -391,7 +391,7 @@
           {% set _hs = report_header_style|default('default') %}
           {% set _lhname = lab_name_ar|default(brand_name|default('')) %}
           {% if _hs == 'default' or _hs not in ('h1','h2','h3','h4') %}
-          <div class="lab-title-box">{{ lab_name_ar|default('مختبر امراض الدم التخصصي للتحليلات المرضية', true) }}</div>
+          <div class="lab-title-box">مختبر امراض الدم التخصصي للتحليلات المرضية</div>
 
           {% if logo_url and logo_position == 'center' %}
           <div class="logo-center-row"><img src="{{ logo_url }}" alt="logo"></div>
@@ -559,6 +559,28 @@
             {% endif %}
             {% if from_other_lab %}
             <div class="other-lab-note">The sample received from another Lab.</div>
+            {% if other_lab_visit_id is defined and other_lab_visit_id %}
+            {% set _olx = other_lab_extra(other_lab_visit_id) %}
+            <div class="other-lab-note" id="olExtra" style="font-style:normal;{% if not _olx %}display:none;{% endif %}">{{ _olx }}</div>
+            {% if not is_design_preview %}
+            <div class="no-print" style="text-align:left;direction:ltr;">
+              <button type="button" onclick="olEdit()" style="font-size:11px;padding:1px 8px;border:1px dashed #94A3B8;background:#fff;border-radius:10px;cursor:pointer;">✏ إضافة/تعديل سطر لهذا المريض فقط</button>
+            </div>
+            <script>
+            function olEdit() {
+              var el = document.getElementById('olExtra');
+              var cur = el ? el.textContent.trim() : '';
+              var t = prompt('سطر إضافي تحت العبارة لهذا المريض فقط (اتركه فاضي لحذفه):', cur);
+              if (t === null) return;
+              fetch("{{ url_for('api_visit_other_lab_note', visit_id=other_lab_visit_id) }}", {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: t})})
+                .then(function (r) { return r.json(); }).then(function (d) {
+                  if (!d.ok) { alert(d.error || 'تعذر الحفظ'); return; }
+                  el.textContent = d.text; el.style.display = d.text ? '' : 'none';
+                }).catch(function () { alert('تعذر الحفظ'); });
+            }
+            </script>
+            {% endif %}
+            {% endif %}
             {% endif %}
             {% set _dbn_list = done_by_notes if (done_by_notes is defined and done_by_notes) else ([done_by_note] if (done_by_note is defined and done_by_note) else []) %}
             {% if _dbn_list %}
@@ -668,7 +690,7 @@
   // أثناء معاينة مصمم التقارير (طباعة تجريبية بدون قصد).
   (function () {
     if (new URLSearchParams(window.location.search).get('auto') === '1') {
-      window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 150); });
+      window.addEventListener('load', function () { setTimeout(function () { if (window.__lisPrinted) return; window.__lisPrinted = true; window.print(); }, 150); });
     }
   })();
 </script>
