@@ -87,3 +87,4 @@
 [2026-10-17T20:51:26] SLOW 11.1s GET /designer? (designer_panel)
 [2026-10-17T20:51:26] SLOW 8.4s GET /designer? (designer_panel)
 [2026-10-18T11:37:59] SLOW 2.9s POST /designer/update/check-now? (designer_update_check_now)
+[2026-10-18T12:40:01] SLOW 2.3s GET /management/report-designer/preview/22?design=1 (preview_report_design)

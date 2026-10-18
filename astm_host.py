@@ -215,7 +215,7 @@ def _ascii_clean(text):
     return " ".join(out.split())
 
 
-def build_query_response(db, specimen_id):
+def build_query_response(db, specimen_id, analyzer_name=None):
     """رد الـLIS على استعلام الجهاز (Q record) بعد قراءة الباركود: معلومات
     المريض + التحاليل المطلوبة. لو العينة غير موجودة يُرد بـ"لا معلومات" (X)."""
     ts = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -236,11 +236,24 @@ def build_query_response(db, specimen_id):
     codes = []
     if def_ids:
         marks = ",".join("?" * len(def_ids))
-        for m in db.execute(
-            "SELECT DISTINCT m.machine_code FROM mapcodes m "
+        # كل جهاز يرجع له فقط التحاليل المربوطة باسمه بصفحة Mapcodes (machine_name).
+        # اسم الجهاز يُعرف من حقل المرسل بسجل H أو من عنوان IP (إعداد analyzer_ip_map).
+        # لو ما تعرّفنا على الجهاز، أو ما فيه ربط باسمه، نرجع لسلوك قبل (كل الرموز المفعّلة).
+        mrows = db.execute(
+            "SELECT m.machine_code, m.machine_name FROM mapcodes m "
             "JOIN test_parameters tp ON tp.id = m.test_parameter_id "
             f"WHERE m.send_enabled=1 AND tp.test_definition_id IN ({marks}) "
-            "AND m.machine_code IS NOT NULL AND m.machine_code<>'' ORDER BY m.id", def_ids):
+            "AND m.machine_code IS NOT NULL AND m.machine_code<>'' ORDER BY m.id", def_ids).fetchall()
+        import re as _re
+        _norm = lambda x: _re.sub(r"[^a-z0-9]", "", (x or "").lower())
+        an = _norm(analyzer_name)
+        picked = []
+        if an:
+            for m in mrows:
+                mn = _norm(m["machine_name"])
+                if mn and (mn == an or mn in an or an in mn):
+                    picked.append(m)
+        for m in (picked if picked else mrows):
             if m["machine_code"] not in codes:
                 codes.append(m["machine_code"])
     tests = "\\".join(f"^^^{c}" for c in codes)
@@ -434,6 +447,27 @@ def process_astm_message(records):
     return summary, status
 
 
+def _analyzer_name_for(records, addr, db):
+    """اسم الجهاز الذي سأل: 1) من إعداد analyzer_ip_map بصيغة 192.168.1.10=E411;192.168.1.11=Pure
+    2) من حقل المرسل بسجل H (H.5). يرجّع "" لو ما انعرف."""
+    try:
+        ip = addr[0] if addr else ""
+        raw = get_setting(db, "analyzer_ip_map", "") or ""
+        for part in raw.replace("\n", ";").split(";"):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                if k.strip() and k.strip() == ip:
+                    return v.strip()
+    except Exception:
+        pass
+    for rec in records:
+        if rec[:1].upper() == "H":
+            f = rec.split("|")
+            if len(f) > 4 and f[4].strip():
+                return f[4].split("^")[0].strip()
+    return ""
+
+
 def _handle_connection(conn, addr):
     conn.settimeout(30)
     buffer = b""
@@ -491,8 +525,9 @@ def _handle_connection(conn, addr):
                             log_message("IN", raw_log, "Query", "Host query: " + ", ".join(query_ids))
                             try:
                                 qdb = get_db()
+                                _an = _analyzer_name_for(records, addr, qdb)
                                 for qid in query_ids:
-                                    reply = build_query_response(qdb, qid)
+                                    reply = build_query_response(qdb, qid, _an)
                                     sent = _send_astm_message(conn, reply)
                                     log_message("OUT", " | ".join(reply), "Sent" if sent else "Error",
                                                 f"Reply to query {qid}" + ("" if sent else " (no ACK from analyzer)"))

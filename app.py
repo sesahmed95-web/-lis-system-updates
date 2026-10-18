@@ -2072,6 +2072,51 @@ def designer_logout():
     return redirect(url_for("designer_login"))
 
 
+
+# ---- قائمة الإلغاء: كاش + تحديث بالخلفية (كانت تُجلب من GitHub بكل فتحة للوحة المصمم بمهلة 20 ثانية
+# فتصفن الصفحة لما الإنترنت/الـDNS بطيء). الحين الصفحة ما تنتظر الشبكة أكثر من ثانية ونصف. ----
+_REVOKE_CACHE = {"data": {}, "error": None, "ts": 0.0, "busy": False}
+_REVOKE_LOCK = threading.Lock()
+
+
+def _revocation_refresh_worker():
+    try:
+        data = auto_updater.fetch_revocation_list()
+        err = None
+    except Exception as e:
+        data, err = None, str(e)
+    with _REVOKE_LOCK:
+        if data is not None:
+            _REVOKE_CACHE["data"] = data
+        _REVOKE_CACHE["error"] = err
+        _REVOKE_CACHE["ts"] = time.time()
+        _REVOKE_CACHE["busy"] = False
+
+
+def _revocation_invalidate():
+    with _REVOKE_LOCK:
+        _REVOKE_CACHE["ts"] = 0.0
+
+
+def _revocation_cached(ttl=120, wait=1.5):
+    now = time.time()
+    with _REVOKE_LOCK:
+        fresh = (now - _REVOKE_CACHE["ts"]) < ttl
+        start = (not fresh) and (not _REVOKE_CACHE["busy"])
+        if start:
+            _REVOKE_CACHE["busy"] = True
+    if start:
+        t = threading.Thread(target=_revocation_refresh_worker, daemon=True)
+        t.start()
+        if _REVOKE_CACHE["ts"] == 0.0:
+            t.join(wait)          # أول مرة فقط ننتظر شوي
+    with _REVOKE_LOCK:
+        err = _REVOKE_CACHE["error"]
+        if _REVOKE_CACHE["ts"] == 0.0 and not err:
+            err = "جارِ جلب قائمة الإلغاء من GitHub بالخلفية… حدّث الصفحة بعد لحظات."
+        return dict(_REVOKE_CACHE["data"]), err
+
+
 @app.route("/designer")
 @designer_required
 def designer_panel():
@@ -2093,10 +2138,7 @@ def designer_panel():
     revoked_licenses = {}
     revocation_error = None
     if github_write_token and auto_updater.is_configured():
-        try:
-            revoked_licenses = auto_updater.fetch_revocation_list()
-        except Exception as e:
-            revocation_error = str(e)
+        revoked_licenses, revocation_error = _revocation_cached()
     branding = {
         "app_name": get_setting(db, "app_name", ""),
         "app_name_ar": get_setting(db, "app_name_ar", ""),
@@ -2305,6 +2347,7 @@ def designer_revoke_license():
     else:
         try:
             auto_updater.push_revocation(write_token, hardware_id, reason, revoke=True)
+            _revocation_invalidate()
             flash(f"تم إرسال إلغاء الترخيص لجهاز {hardware_id} — راح يوصله أول ما يتصل بالنت (لازم يكون \"مربوط بالإنترنت\" مفعّل عنده).")
         except Exception as e:
             flash(f"⚠️ تعذر إلغاء الترخيص عن بُعد: {e}")
@@ -2319,6 +2362,7 @@ def designer_restore_license(hardware_id):
     write_token = get_setting(db, "github_write_token", "")
     try:
         auto_updater.push_revocation(write_token, hardware_id, None, revoke=False)
+        _revocation_invalidate()
         flash(f"تم رفع الإلغاء عن جهاز {hardware_id} — يقدر يفعّل ببرنامجه بكود جديد أول ما يتصل بالنت.")
     except Exception as e:
         flash(f"⚠️ تعذر رفع الإلغاء: {e}")
@@ -3637,6 +3681,7 @@ def api_results_quick_search():
     if len(q) < 2:
         return jsonify({"items": []})
     db = get_db()
+    _seq_q = _visit_seq_clause(q)
     rows = db.execute(
         "SELECT ot.id as order_test_id, ot.status, ot.barcode, td.name as test_name, "
         "p.full_name as patient_name, v.id as visit_id, v.registration_number "
@@ -3646,8 +3691,9 @@ def api_results_quick_search():
         "JOIN visits v ON v.id = o.visit_id "
         "JOIN patients p ON p.id = v.patient_id "
         "WHERE p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR ot.barcode LIKE ? "
-        "ORDER BY ot.id DESC LIMIT 20",
-        (f"%{q}%", _scan_like(q), f"%{q}%"),
+        + (" OR " + _seq_q[0] if _seq_q else "") +
+        " ORDER BY ot.id DESC LIMIT 20",
+        (f"%{q}%", _scan_like(q), f"%{q}%") + tuple(_seq_q[1] if _seq_q else ()),
     ).fetchall()
     use_front_desk = session.get("interface") in (None, "reception", "both")
     items = []
@@ -4030,7 +4076,7 @@ def completed_results():
     rows = db.execute(
         "SELECT v.id as visit_id, v.registration_number, v.created_at, p.full_name as patient_name, p.phone as phone, "
         "MIN(COALESCE(ot.collected_at, v.created_at)) as drawn_at, "
-        "GROUP_CONCAT(ot.id || '\u0001' || COALESCE(NULLIF(td.code, ''), td.name) || '\u0001' || td.name, '\u0002') as tests_list, "
+        "GROUP_CONCAT(ot.id || '\u0001' || COALESCE(NULLIF(td.short_name, ''), td.name) || '\u0001' || td.name, '\u0002') as tests_list, "
         "(SELECT COUNT(*) FROM order_tests ot3 JOIN orders o3 ON o3.id = ot3.order_id WHERE o3.visit_id = v.id) as total_tests "
         "FROM order_tests ot JOIN orders o ON o.id = ot.order_id JOIN visits v ON v.id = o.visit_id "
         "JOIN patients p ON p.id = v.patient_id JOIN test_definitions td ON td.id = ot.test_definition_id "
@@ -5049,6 +5095,7 @@ LABEL_FIELD_TITLES = {
     "tests_codes": "أكواد التحاليل", "custom": "نص ثابت (تكتبه أنت)",
     "order_no": "رقم الطلب (التسجيل بدون #)", "dept_age_gender": "القسم/الجهاز + الجنس-العمر (Abbot - Female-18Y)",
     "ready_by": "وقت الجاهزية (Ready by)", "paid": "الواصل (Paid)", "balance": "الباقي (Balance)",
+    "month_no": "التسلسل الشهري للعينة", "day_month_no": "رقم عينة اليوم + التسلسل الشهري (002 / M17)",
 }
 LABEL_SCAN_TITLES = {
     "reg_no": "رقم التسجيل", "sample_no": "رقم العينة", "patient_name": "اسم المريض",
@@ -5057,9 +5104,11 @@ LABEL_SCAN_TITLES = {
 }
 LABEL_FIELDS_BY_KIND = {
     "tube": ("lab_name", "patient_name", "age_gender", "datetime", "date", "time", "reg_no",
-             "sample_no", "sample_type", "tests", "tests_codes", "custom", "order_no", "dept_age_gender"),
+             "sample_no", "sample_type", "tests", "tests_codes", "custom", "order_no", "dept_age_gender",
+             "month_no", "day_month_no"),
     "request": ("lab_name", "patient_name", "age_gender", "datetime", "date", "time", "reg_no",
-                "sample_no", "visit_id", "tests", "tests_codes", "custom", "order_no", "ready_by", "paid", "balance"),
+                "sample_no", "visit_id", "tests", "tests_codes", "custom", "order_no", "ready_by", "paid", "balance",
+                "month_no", "day_month_no"),
 }
 _DEFAULT_LABEL_LAYOUTS = {
     "tube": {
@@ -5087,7 +5136,13 @@ LABEL_PRESETS = {
                "lines": [{"f": "patient_name", "s": 9, "b": 1, "a": "center"},
                          {"f": "dept_age_gender", "f2": "datetime", "s": 6.5, "r": 1},
                          {"f": "tests", "s": 6.5, "a": "center", "w": 1},
-                         {"f": "order_no", "f2": "sample_type", "s": 7, "p": "after"}]},
+                         {"f": "day_month_no", "f2": "sample_type", "s": 7, "p": "after"}]},
+        "T2": {"title": "T2 — أنبوب 16 مم: اسم + وقت + التحاليل + باركود + رقم اليوم/الشهري ونوع العينة",
+               "w": 44, "h": 30, "d": 16, "roll": True, "tmode": "short",
+               "lines": [{"f": "patient_name", "s": 9, "b": 1, "a": "center"},
+                         {"f": "datetime", "s": 6.5, "a": "center"},
+                         {"f": "tests", "s": 6.5, "a": "center", "w": 1},
+                         {"f": "day_month_no", "f2": "sample_type", "s": 7.5, "b": 1, "p": "after"}]},
     },
     "request": {
         "R1": {"title": "R1 — اسم + Ready by/التاريخ + Paid/Balance + رقم الطلب + باركود",
@@ -5248,6 +5303,36 @@ def _label_money(db, visit):
     return out
 
 
+def _visit_month_no(visit_id, created_at):
+    """التسلسل الشهري للزيارة = ترتيبها بين زيارات نفس الشهر (حسب تاريخ الإنشاء). يُحسب ولا يُخزَّن."""
+    try:
+        ym = (created_at or "")[:7]
+        if not ym:
+            return ""
+        row = get_db().execute(
+            "SELECT COUNT(*) AS c FROM visits WHERE substr(created_at,1,7)=? AND id<=?", (ym, visit_id)).fetchone()
+        return str(row["c"]) if row and row["c"] else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+# بحث بالتسلسل: m17 / M17 / ش17 = التسلسل الشهري 17 لهذا الشهر؛ رقم قصير (1-3 خانات) أو d2 / ي2 = رقم عينة اليوم.
+# يُستخدم كشرط إضافي (OR) بجانب البحث بالاسم/رقم التسجيل/الباركود، لا يغيّر شي منها.
+def _visit_seq_clause(q, vcol="v"):
+    q = (q or "").strip()
+    m = re.fullmatch(r"(?:m|M|ش|شهري)\s*[-:]?\s*(\d{1,5})", q)
+    if m:
+        return (f"((SELECT COUNT(*) FROM visits vq WHERE substr(vq.created_at,1,7)=substr({vcol}.created_at,1,7) "
+                f"AND vq.id<={vcol}.id)=? AND substr({vcol}.created_at,1,7)=?)",
+                [int(m.group(1)), datetime.now().strftime("%Y-%m")])
+    m = re.fullmatch(r"(?:d|D|ي|يومي)\s*[-:]?\s*(\d{1,3})|(\d{1,3})", q)
+    if m:
+        n = int(m.group(1) or m.group(2))
+        return (f"(CAST({vcol}.sample_no AS INTEGER)=? AND substr({vcol}.created_at,1,10)=?)",
+                [n, datetime.now().strftime("%Y-%m-%d")])
+    return None
+
+
 def _label_visit_fields(visit, lab_name, tests=None, draw_time=None, money=None):
     """الحقول المشتركة لأي ملصق (قيم نصية جاهزة)."""
     keys = visit.keys()
@@ -5268,6 +5353,8 @@ def _label_visit_fields(visit, lab_name, tests=None, draw_time=None, money=None)
         "visit_id": str(visit["id"]),
         "order_no": str(visit["registration_number"]) if "registration_number" in keys else "",
     }
+    out["month_no"] = _visit_month_no(visit["id"], visit["created_at"] if "created_at" in keys else "")
+    out["day_month_no"] = " / ".join(x for x in [out["sample_no"], f"M{out['month_no']}" if out["month_no"] else ""] if x)
     _ab = {"years": "Y", "year": "Y", "months": "M", "month": "M", "days": "D", "day": "D", "weeks": "W"}.get(unit.strip().lower(), unit[:1].upper())
     out["ga_short"] = "-".join(x for x in [gender, f"{age}{_ab}" if age else ""] if x)
     out["dept_age_gender"] = out["ga_short"]
@@ -7629,11 +7716,13 @@ def api_quick_entry_search():
     all_days = request.args.get("all") == "1"
     where = ["ot.status NOT IN ('Completed', 'Verified')", "COALESCE(ot.sent_to_reception, 0) = 0"]
     params = []
+    _seq = _visit_seq_clause(q) if q else None
     if q:
+        _extra = (" OR " + _seq[0]) if _seq else ""
         where.append("(p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR ot.barcode LIKE ? "
                      "OR v.id IN (SELECT o2.visit_id FROM order_tests ot2 JOIN orders o2 ON o2.id = ot2.order_id "
-                     "WHERE ot2.barcode LIKE ?))")
-        params += [f"%{q}%", _scan_like(q), f"%{q}%", f"%{q}%"]
+                     "WHERE ot2.barcode LIKE ?)" + _extra + ")")
+        params += [f"%{q}%", _scan_like(q), f"%{q}%", f"%{q}%"] + (_seq[1] if _seq else [])
     if not all_days and not (q and q.isdigit() and len(q) >= 4):
         where.append("substr(v.created_at,1,10) = ?")
         params.append(datetime.now().strftime("%Y-%m-%d"))
@@ -8315,8 +8404,23 @@ def _print_combined_panel_core(visit_id):
     else:
         show_dept_headings = _view["style"] in ("a1", "a2", "r3")
     all_rows = [r for g in panel_groups for r in g["rows"]]
+    # نفس بيانات رأس التقرير المفرد (اسم إنكليزي، وقت العينة، Number Of) — كانت ناقصة بالتقرير الشامل/اللوحة المجمّعة
+    _pt_en_row = db.execute("SELECT full_name_en FROM patients WHERE id=?", (visit["patient_id"],)).fetchone()
+    _panel_name_en = (_pt_en_row["full_name_en"] or "") if _pt_en_row else ""
+    _panel_time, _panel_number_of = "", ""
+    if order_tests:
+        _t0 = order_tests[0]
+        _k0 = _t0.keys()
+        _panel_time = _fmt_hhmm((_t0["collected_at"] if "collected_at" in _k0 and _t0["collected_at"] else "")
+                                or (_t0["accessioned_at"] if "accessioned_at" in _k0 and _t0["accessioned_at"] else "")
+                                or "")
+        try:
+            _panel_number_of = get_patient_number_of_day(db, _t0["id"])
+        except Exception:  # noqa: BLE001 — ما نوقف الطباعة لو تعذّر حساب العدد
+            _panel_number_of = ""
     return render_template(
         "reports/combined_panel.html",
+        patient_name_en=_panel_name_en, sample_time=_panel_time, number_of=_panel_number_of,
         panel_groups=panel_groups, logo_url=logo_url, from_other_lab=from_other_lab,
         show_dept_headings=show_dept_headings, all_rows=all_rows, merged_title=layout_cfg["merged_title"],
         **_heading_css_ctx(layout_cfg, [g["department"] for g in panel_groups]),
@@ -10450,6 +10554,37 @@ def delete_mapcode(mapcode_id):
     db.commit()
     flash(t(session.get("lang", "en"), "mapcode_deleted"))
     return redirect(url_for("mapcodes_list"))
+
+
+
+@app.route("/master/analyzer-ip-map", methods=["GET", "POST"])
+@designer_required
+def analyzer_ip_map():
+    """ربط عنوان IP كل جهاز باسمه (لازم يطابق machine_name بصفحة Mapcodes) حتى يرجّع له الاستعلام تحاليله فقط."""
+    db = get_db()
+    if request.method == "POST":
+        lines = []
+        for ln in (request.form.get("map") or "").splitlines():
+            if "=" in ln:
+                k, v = ln.split("=", 1)
+                if k.strip() and v.strip():
+                    lines.append(k.strip() + "=" + v.strip())
+        set_setting(db, "analyzer_ip_map", ";".join(lines))
+        db.commit()
+        flash("تم حفظ ربط الأجهزة")
+        return redirect(url_for("analyzer_ip_map"))
+    cur = (get_setting(db, "analyzer_ip_map", "") or "").replace(";", "\n")
+    names = [r["machine_name"] for r in db.execute(
+        "SELECT DISTINCT machine_name FROM mapcodes WHERE machine_name IS NOT NULL AND machine_name<>'' ORDER BY 1")]
+    return render_template_string(
+        "<!doctype html><meta charset='utf-8'><body dir='rtl' style='font-family:Tahoma;padding:20px;max-width:720px'>"
+        "<h3>ربط الأجهزة بعناوين IP</h3>"
+        "<p>سطر لكل جهاز بالشكل: <code>IP=اسم الجهاز</code> مثال:<br><code>192.168.1.21=cobas e 411</code><br>"
+        "<code>192.168.1.22=cobas pure</code><br><code>192.168.1.23=DxH 520</code></p>"
+        "<p>الأسماء الموجودة حاليًا بـMapcodes: <b>{{ names|join(' ، ') or 'لا يوجد' }}</b></p>"
+        "<form method='post'><textarea name='map' rows='6' style='width:100%;direction:ltr'>{{ cur }}</textarea><br>"
+        "<button>حفظ</button> <a href='{{ url_for(\"host_interface\") }}'>رجوع</a></form></body>",
+        cur=cur, names=names)
 
 
 @app.route("/master/host-interface", methods=["GET", "POST"])

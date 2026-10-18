@@ -90,6 +90,12 @@
   table.meta-table td.meta-label { width: 62%; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   table.meta-table td.meta-side { width: 38%; text-align: left; direction: ltr; }
   .patient-name-hl { font-weight: bold; font-size: 1.12em; color: #14213D; white-space: nowrap; }
+  /* v63: الاسم العربي والإنكليزي ما يتراكبون — خلية الاسم تسمح بسطرين، وكل لغة معزولة باتجاهها */
+  table.meta-table td.meta-label { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; line-height: 1.55; word-break: break-word; }
+  table.meta-table td.meta-label *, table.meta-table td.meta-side * { unicode-bidi: isolate; max-width: 100%; }
+  table.meta-table td.meta-label [lang="en"], table.meta-table td.meta-label .name-en { display: block; direction: ltr; text-align: left; white-space: normal; }
+  table.meta-table td.meta-label [lang="ar"], table.meta-table td.meta-label .name-ar { display: block; direction: rtl; text-align: right; white-space: normal; }
+  .patient-name-hl { white-space: normal !important; }
 
   .report-heading {
     text-align: center;
