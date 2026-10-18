@@ -184,40 +184,54 @@ def _esc(v):
     return _html.escape("" if v is None else str(v))
 
 
+def _row_html(r):
+    flag = r.get("flag")
+    flag_html = ""
+    if flag and flag != "Normal":
+        flag_html = f' <b style="color:#B91C1C;">{_esc(flag)}</b>'
+    tiers = r.get("range_tiers") or []
+    if len(tiers) > 1 or (tiers and tiers[0].get("label")):
+        # نسب متعددة (مثل HbA1c / Vit D): كل حالة بسطر مستقل بتسميتها
+        rng_html = "".join(
+            "<div dir='ltr' style='text-align:start;'>"
+            + (f"<b>{_esc(x.get('label'))}:</b> " if x.get("label") else "") + _esc(x.get("value", "")) + "</div>"
+            for x in tiers)
+    else:
+        rng = r.get("range_display") or (tiers[0].get("value") if tiers else "") or ""
+        rng_html = f"<span dir='ltr'>{_esc(rng)}</span>"
+    unit = _esc(r.get("unit") or "")
+    if r.get("value2") not in (None, "") and r.get("unit2"):
+        unit += f' <span style="color:#64748B;">/ {_esc(r["value2"])} {_esc(r["unit2"])}</span>'
+    return (f"<tr><td style='text-align:start;font-weight:600;'>{_esc(r.get('name'))}</td>"
+            f"<td><b dir='ltr'>{_esc(r.get('result'))}</b>{flag_html}</td><td dir='ltr'>{unit}</td><td>{rng_html}</td></tr>")
+
+
 def _results_html(cfg, data):
-    parts = []
+    """v65: النتائج مجمّعة بنفس شكل "اللوحة المجمّعة": عنوان لكل قسم/مجموعة تقرير وتحته جدول واحد
+    بكل صفوف تحاليل ذلك القسم (بدل عنوان وجدول منفصل لكل تحليل)."""
+    groups, order = {}, []
+    for g in (data.get("group_order") or []):
+        order.append(g)
     for t in data["tests"]:
         if not _is_ready(cfg, t["status"]) or not t["rows"]:
             continue
-        body = []
+        g = t.get("group") or t["name"]
+        if g not in order:
+            order.append(g)
         for r in t["rows"]:
             if r.get("result") in (None, ""):
                 continue
-            flag = r.get("flag")
-            flag_html = ""
-            if flag and flag != "Normal":
-                flag_html = f' <b style="color:#B91C1C;">{_esc(flag)}</b>'
-            tiers = r.get("range_tiers") or []
-            if len(tiers) > 1 or (tiers and tiers[0].get("label")):
-                # نسب متعددة (مثل HbA1c / Vit D): كل حالة بسطر مستقل بتسميتها
-                rng_html = "".join(
-                    "<div dir='ltr' style='text-align:start;'>"
-                    + (f"<b>{_esc(x.get('label'))}:</b> " if x.get("label") else "") + _esc(x.get("value", "")) + "</div>"
-                    for x in tiers)
-            else:
-                rng = r.get("range_display") or (tiers[0].get("value") if tiers else "") or ""
-                rng_html = f"<span dir='ltr'>{_esc(rng)}</span>"
-            unit = _esc(r.get("unit") or "")
-            if r.get("value2") not in (None, "") and r.get("unit2"):
-                unit += f' <span style="color:#64748B;">/ {_esc(r["value2"])} {_esc(r["unit2"])}</span>'
-            body.append(
-                f"<tr><td style='text-align:start;font-weight:600;'>{_esc(r.get('name'))}</td>"
-                f"<td><b dir='ltr'>{_esc(r.get('result'))}</b>{flag_html}</td><td dir='ltr'>{unit}</td><td>{rng_html}</td></tr>")
-        if body:
-            parts.append(
-                f"<h3 style='margin:18px 0 6px;font-size:15px;color:#205072;'>{_esc(t['name'])}</h3>"
-                "<table><tr><th>التحليل</th><th>النتيجة</th><th>الوحدة</th><th>المدى الطبيعي</th></tr>"
-                + "".join(body) + "</table>")
+            groups.setdefault(g, []).append(_row_html(r))
+    parts = []
+    for g in order:
+        body = groups.get(g)
+        if not body:
+            continue
+        parts.append(
+            f"<h3 style='margin:18px 0 6px;font-size:15px;color:#205072;text-align:center;"
+            f"border-bottom:2px solid #205072;padding-bottom:4px;'>{_esc(g)}</h3>"
+            "<table><tr><th>التحليل</th><th>النتيجة</th><th>الوحدة</th><th>المدى الطبيعي</th></tr>"
+            + "".join(body) + "</table>")
     waiting = [t["name"] for t in data["tests"] if not _is_ready(cfg, t["status"])]
     if waiting:
         parts.append("<p style='margin-top:16px;color:#92400E;background:#FEF9E7;border-radius:8px;padding:8px 10px;'>"

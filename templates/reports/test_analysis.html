@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block page_title %}تحليل التحاليل{% endblock %}
+{% block content %}
+<style>
+  .ta-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-bottom:12px; }
+  .ta-bar label { display:flex; flex-direction:column; font-size:12px; color:#475569; gap:3px; }
+  .ta-bar input, .ta-bar select { padding:6px 8px; min-width:130px; }
+  .ta-quick a { text-decoration:none; background:#F3F6F8; color:#205072; padding:5px 10px; border-radius:6px; font-size:12px; border:1px solid #E2E8F0; }
+  .ta-table { width:100%; border-collapse:collapse; }
+  .ta-table th, .ta-table td { border:1px solid #E2E8F0; padding:6px 9px; font-size:13px; text-align:right; }
+  .ta-table th { background:#205072; color:#fff; }
+  .ta-sum { display:flex; gap:12px; flex-wrap:wrap; margin:12px 0; }
+  .ta-sum div { background:#F3F6F8; border:1px solid #E2E8F0; border-radius:8px; padding:8px 14px; font-size:13px; }
+  .ta-sum b { font-size:17px; color:#205072; }
+  .ta-grp { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; margin-bottom:14px; }
+  .rem { color:#B91C1C; font-weight:700; }
+  @media print { .ta-bar, .ta-quick, .no-print { display:none; } }
+</style>
+<div class="card">
+  <h3 style="margin:0 0 8px;">🔎 تحليل التحاليل — بحث بنوع التحليل / الطبيب / المختبر</h3>
+  <form method="get" class="ta-bar">
+    <label>من <input type="date" name="from" value="{{ d_from }}"></label>
+    <label>إلى <input type="date" name="to" value="{{ d_to }}"></label>
+    <label>نوع التحليل (مثل CBC) <input type="text" name="test" value="{{ q_test }}" placeholder="اسم أو رمز"></label>
+    <label>الطبيب المرسل <input type="text" name="doctor" value="{{ q_doc }}" list="taDocs" placeholder="اسم الطبيب"></label>
+    <datalist id="taDocs">{% for d in doctors %}<option value="{{ d }}">{% endfor %}</datalist>
+    <label>المختبر (المرسل إليه) <input type="text" name="lab" value="{{ q_lab }}" placeholder="اسم المختبر"></label>
+    <label>الحالة
+      <select name="status">
+        <option value="all" {{ 'selected' if status=='all' }}>الكل</option>
+        <option value="remaining" {{ 'selected' if status=='remaining' }}>باقي عليه مبلغ</option>
+        <option value="paid" {{ 'selected' if status=='paid' }}>مسدّد بالكامل</option>
+      </select></label>
+    <button class="btn" type="submit">بحث</button>
+    <button class="btn secondary" type="button" onclick="window.print()">🖨 طباعة</button>
+  </form>
+  <div class="ta-quick no-print" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+    <a href="#" onclick="taRange(0);return false;">اليوم</a>
+    <a href="#" onclick="taRange(1);return false;">هذا الشهر</a>
+    <a href="#" onclick="taRange(3);return false;">آخر 3 أشهر</a>
+    <a href="#" onclick="taRange(6);return false;">آخر 6 أشهر</a>
+    <a href="#" onclick="taRange(12);return false;">آخر سنة</a>
+    <a href="{{ url_for('daily_report') }}">🗓️ اليومي</a>
+    <a href="{{ url_for('monthly_report') }}">📅 الشهري</a>
+    <a href="{{ url_for('half_year_report') }}">📆 نصف سنوي</a>
+    <a href="{{ url_for('annual_report') }}">📊 سنوي</a>
+  </div>
+  <div class="ta-sum">
+    <div>عدد التحاليل: <b>{{ rows|length }}</b></div>
+    <div>إجمالي المبالغ: <b>{{ "%.0f"|format(total_amount) }}</b></div>
+    <div>كلفة المرسَل لمختبرات أخرى: <b>{{ "%.0f"|format(total_fwd) }}</b></div>
+  </div>
+  {% if truncated %}<p class="muted">⚠ أول 5000 نتيجة فقط — ضيّق الفترة أو أضف فلتر.</p>{% endif %}
+  {% if by_doc or by_lab %}
+  <div class="ta-grp">
+    <div><h4 style="margin:0 0 4px;">حسب الطبيب المرسل</h4>
+      <table class="ta-table"><thead><tr><th>الطبيب</th><th>العدد</th><th>المبلغ</th></tr></thead><tbody>
+      {% for k, v in by_doc %}<tr><td>{{ k }}</td><td>{{ v.n }}</td><td>{{ "%.0f"|format(v.sum) }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    <div><h4 style="margin:0 0 4px;">حسب المختبر المرسل إليه</h4>
+      <table class="ta-table"><thead><tr><th>المختبر</th><th>العدد</th><th>الكلفة</th></tr></thead><tbody>
+      {% for k, v in by_lab %}<tr><td>{{ k }}</td><td>{{ v.n }}</td><td>{{ "%.0f"|format(v.cost) }}</td></tr>
+      {% else %}<tr><td colspan="3" class="muted">لا يوجد</td></tr>{% endfor %}
+      </tbody></table></div>
+  </div>
+  {% endif %}
+  <table class="ta-table">
+    <thead><tr><th>التاريخ</th><th>رقم التسجيل</th><th>المريض</th><th>التحليل</th><th>الطبيب المرسل</th><th>الفاحص</th><th>المختبر</th><th>السعر</th><th>الباقي</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.day }}</td><td>{{ r.reg }}</td>
+        <td><a href="/front-desk/visits/{{ r.visit_id }}/results">{{ r.patient }}</a></td>
+        <td>{{ r.test }}</td><td>{{ r.ref_doctor }}</td><td>{{ r.exam_doctor }}</td>
+        <td>{{ r.fwd_lab }}{% if r.fwd_cost %} ({{ "%.0f"|format(r.fwd_cost) }}){% endif %}</td>
+        <td>{{ 'مجاني' if r.waived else "%.0f"|format(r.price) }}</td>
+        <td>{% if r.remaining > 0 %}<span class="rem">{{ "%.0f"|format(r.remaining) }}</span>{% else %}واصل{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="muted" style="text-align:center; padding:24px;">لا توجد نتائج مطابقة.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:12px;">"الباقي" هو المتبقي على فاتورة الزيارة كاملة (مو على التحليل لحاله).</p>
+</div>
+<script>
+  function taRange(months) {
+    var t = new Date(), f = new Date();
+    if (months === 1) f = new Date(t.getFullYear(), t.getMonth(), 1);
+    else if (months > 1) f = new Date(t.getFullYear(), t.getMonth() - months, t.getDate());
+    var iso = function (d) { var m = d.getMonth() + 1, dd = d.getDate(); return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (dd < 10 ? '0' : '') + dd; };
+    document.querySelector('[name=from]').value = iso(f); document.querySelector('[name=to]').value = iso(t);
+    document.querySelector('.ta-bar').submit();
+  }
+</script>
+{% endblock %}

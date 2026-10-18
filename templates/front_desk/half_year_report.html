@@ -29,6 +29,8 @@
   <button class="btn" onclick="window.print()">🖨 طباعة / حفظ PDF</button>
   <a class="pill" href="{{ url_for('monthly_report') }}">📅 الحسابات الشهرية</a>
   <a class="pill" href="{{ url_for('annual_report') }}">📊 الحسابات السنوية</a>
+  <a class="pill" href="{{ url_for('accounts_search', kind='basic') }}">🔍 بحث وتصدير</a>
+  <a class="pill" href="{{ url_for('test_analysis_report') }}">🔎 تحليل التحاليل</a>
   <a class="pill" href="{{ url_for('dashboard') }}" style="margin-inline-start:auto;">🔙 الرجوع للرئيسية</a>
 </div>
 
