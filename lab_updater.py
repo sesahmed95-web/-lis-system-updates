@@ -29,7 +29,7 @@ import urllib.error
 from datetime import datetime
 
 # ---- set these two once (see tools\make_update_package.py --init-keys) ---------------------------------------------
-PUBLIC_KEY_B64 = ""            # Ed25519 public key (base64) printed by --init-keys
+PUBLIC_KEY_B64 = "BIvWzHkoQLs26itNenrUpBTruHmz5aOWIitoWyXvu1U="            # Ed25519 public key (base64) printed by --init-keys
 DEFAULT_UPDATE_URL = ""        # folder URL that contains update.json, e.g. https://your-name.github.io/lab-updates
 # ---------------------------------------------------------------------------------------------------------------------
 
