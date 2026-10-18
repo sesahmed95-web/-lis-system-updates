@@ -499,6 +499,22 @@
         <tr><td>
           {% block report_body %}{% endblock %}
 
+          {# v63: عنوان اسم التحليل (مثل A1c / T3) فوق جدول النتائج ما له داعي — الاسم موجود بالجدول. نخفيه لو نصه يطابق اسم/رمز التحليل، بكل الستايلات. #}
+          <script>
+          (function () {
+            try {
+              var names = {{ [ot['test_name'], ot['short_name'], ot['code']]|select|list|tojson if ot else '[]' }};
+              var norm = function (x) { return String(x || '').replace(/\s+/g, ' ').trim().toLowerCase(); };
+              names = names.map(norm);
+              var sc = document.currentScript;
+              var root = (sc && (sc.closest('table') || sc.parentElement)) || document;
+              root.querySelectorAll('.report-heading, .report-title').forEach(function (h) {
+                if (names.indexOf(norm(h.textContent)) >= 0) h.style.display = 'none';
+              });
+            } catch (e) {}
+          })();
+          </script>
+
           {#
             شريط "✏️ تعديل التصميم" + حفظ/تراجع — كان سابقًا يظهر فقط جوّا
             القوالب اللي تستخدم render_report_body() (GUE/GSE/SFA وما شابه)،

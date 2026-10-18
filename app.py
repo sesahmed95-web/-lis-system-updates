@@ -7383,9 +7383,7 @@ def result_entry(order_test_id):
         if ot["status"] != "Verified":
             db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (order_test_id,))
         db.commit()
-        _archive_single_test_pdf(db, order_test_id)
-        _maybe_auto_whatsapp_send(db, ot["visit_id"])
-        _maybe_archive_visit_pdf(db, ot["visit_id"])
+        _post_save_background(ot["visit_id"], [order_test_id])
         log_action("EnterResult", "order_test", order_test_id, f"gate_person={gate_person}" if gate_person else None)
         flash("Results saved.")
         return redirect(url_for("orders_list"))
@@ -7852,10 +7850,7 @@ def visit_results_entry(visit_id):
                     db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (ot["id"],))
         db.commit()
         if any_saved:
-            for _tid in touched_ot_ids:
-                _archive_single_test_pdf(db, _tid)
-            _maybe_auto_whatsapp_send(db, visit_id)
-            _maybe_archive_visit_pdf(db, visit_id)
+            _post_save_background(visit_id, touched_ot_ids)
             log_action("EnterResultsBulk", "visit", visit_id, f"gate_person={gate_person}" if gate_person else None)
             if not wants_json:
                 flash("تم حفظ النتائج.")
@@ -9648,6 +9643,49 @@ def _get_pdf_archive_dir(db):
     return d
 
 
+
+# ---- أرشفة PDF + واتساب التلقائي بعد حفظ النتائج: صارت بالخلفية. قبل كانت تتنفذ داخل نفس الطلب
+# (ملف PDF لكل تحليل + ملف للزيارة بمحرك المتصفح) فتصفن الصفحة عند زر الطباعة/الحفظ. ----
+_POSTSAVE_LOCKS = {}
+_POSTSAVE_LOCKS_GUARD = threading.Lock()
+
+
+def _post_save_background(visit_id, order_test_ids=()):
+    url_root = request.url_root
+    ids = list(order_test_ids or [])
+
+    def _worker():
+        with _POSTSAVE_LOCKS_GUARD:
+            lk = _POSTSAVE_LOCKS.setdefault(visit_id, threading.Lock())
+        with lk:
+            try:
+                with app.test_request_context("/", base_url=url_root):
+                    wdb = get_db()
+                    try:
+                        for _tid in ids:
+                            try:
+                                _archive_single_test_pdf(wdb, _tid)
+                            except Exception:
+                                pass
+                        try:
+                            _maybe_auto_whatsapp_send(wdb, visit_id)
+                        except Exception:
+                            pass
+                        try:
+                            _maybe_archive_visit_pdf(wdb, visit_id)
+                        except Exception:
+                            pass
+                    finally:
+                        try:
+                            wdb.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
 def _maybe_archive_visit_pdf(db, visit_id):
     """يحفظ نسخة PDF دائمة (موحّدة لكل نتائج الزيارة) بمجلد الأرشيف الثابت،
     بس إذا: (1) المدير ظبط مجلد أرشفة من الإعدادات، و(2) كل تحليل مطلوب
@@ -9818,12 +9856,7 @@ def print_and_save_result(order_test_id):
         return jsonify({"ok": False, "error": "لا توجد نتيجة مُدخلة لهذا التحليل — أدخل قيمة واحدة على الأقل قبل الطباعة."}), 400
 
     archived = False
-    for t, _p, _pre, _c in plan:
-        if _archive_single_test_pdf(db, t["id"]):
-            archived = archived or t["id"] == order_test_id
-    if saved_any:
-        _maybe_auto_whatsapp_send(db, ot["visit_id"])
-        _maybe_archive_visit_pdf(db, ot["visit_id"])
+    _post_save_background(ot["visit_id"], [t["id"] for t, _p, _pre, _c in plan] if saved_any else [])
     log_action("PrintAndSaveResult", "order_test", order_test_id,
                f"saved={int(saved_any)} archived={int(archived)}")
     return jsonify({"ok": True, "saved": saved_any, "archived": archived,
