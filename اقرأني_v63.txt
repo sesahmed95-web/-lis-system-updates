@@ -4,3 +4,4 @@ v63 (فوق v62) — الملفات: app.py + astm_host.py + base_report.html (�
 3) ASTM: رد الاستعلام يرجّع لكل جهاز تحاليله فقط حسب machine_name بصفحة Mapcodes. الجهاز يُعرف من سجل H، أو من إعداد analyzer_ip_map (مثال: 192.168.1.10=E411;192.168.1.11=Pure). لو ما انعرف الجهاز يرجع للسلوك القديم (كل الرموز).
    صفحة ضبط الـIP: /master/analyzer-ip-map (سطر لكل جهاز IP=اسم). مطابقة الاسم تتجاهل المسافات والرموز (cobas e 411 = E411).
 4) base_report.html: CSS احتياطي لمنع تراكب الاسم العربي/الإنكليزي. القالب الأصلي للميتا (patient_meta_v2) موجود بـexam_report_shared.html وما وصلني.
+5) templates/front_desk/visit_results_entry.html: سبب الأزرار المعطلة والنص الظاهر — النص '</body>' داخل سكربت lisPreOpen كان يتقطع بحقن السيرفر قبل </body> فينكسر السكربت. أزيل.

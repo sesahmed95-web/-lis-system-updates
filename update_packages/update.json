@@ -1,7 +1,7 @@
 {
- "version": "206",
- "file": "update_206.zip",
- "sha256": "8853bcfde64e20dd719a1632ba035f8b7f24b829c6a3fd4356dc7bd538aac2c4",
- "sig": "6JfmzrdMr1bGbjksvDLF3vnribJHzSmvCUOCgmrhEBZjrGy+zLNS7yUSMuR+JfvQv3D8798IfsIneQUI7tNxAg==",
- "notes": "update"
+ "version": "208",
+ "file": "update_208.zip",
+ "sha256": "3b53394983ff91965c4525d8aaacc2f3b9cbb88ef75f5cb4463a6b022907c25d",
+ "sig": "0xenBvi05Sc6BfQKgFg1Jze0jKN4WQ5jlXHuqqsZ2FyEl7XayXCsY8e1nCKxoXmYBbBQ0/pf19HJOJWulOgOBA==",
+ "notes": "upd"
 }

@@ -1861,7 +1861,7 @@
       try {
         if (window.lisPendingWin && !window.lisPendingWin.closed) return;
         var w = window.open('about:blank', '_blank');
-        if (w) { try { w.document.write('<!doctype html><meta charset="utf-8"><body style="font-family:Tahoma,sans-serif;direction:rtl;padding:24px;color:#334155">جارِ تجهيز التقرير…</body>'); } catch (e) {} }
+        if (w) { try { w.document.write('<!doctype html><meta charset="utf-8"><div style="font-family:Tahoma,sans-serif;direction:rtl;padding:24px;color:#334155">جارِ تجهيز التقرير…<\/div>'); } catch (e) {} }
         window.lisPendingWin = w || null;
       } catch (e) { window.lisPendingWin = null; }
     };
