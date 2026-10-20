@@ -1,6 +1,26 @@
 {% extends "base.html" %}
 {% block page_title %}{{ t('orders') }}{% endblock %}
 {% block content %}
+<style>
+  .og-table { width:100%; border-collapse:collapse; }
+  .og-table th { text-align:start; padding:8px 10px; }
+  .og-head td { background:#E8ECF1; padding:7px 10px; border-top:10px solid #fff; vertical-align:middle; }
+  .og-head .og-name { font-weight:800; font-size:15px; margin-inline:10px; }
+  .og-head .og-meta { color:#475569; font-size:12.5px; margin-inline:8px; }
+  .og-head .og-actions { display:inline-flex; gap:6px; margin-inline-end:6px; vertical-align:middle; }
+  .og-row td { padding:6px 10px; border-bottom:1px solid #EEF1F5; vertical-align:middle; }
+  .og-row td:first-child { border-inline-start:5px solid #F59E0B; }
+  .og-row.done td:first-child { border-inline-start-color:#16A34A; }
+  .og-row.sent td { opacity:.75; }
+  .og-row .acts { white-space:nowrap; display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
+  .og-row .acts form { display:inline; }
+  .og-bulk { position:sticky; bottom:0; z-index:20; background:#1E3A5F; color:#fff; padding:10px 16px; border-radius:10px 10px 0 0;
+             display:none; align-items:center; gap:12px; box-shadow:0 -4px 14px rgba(0,0,0,.2); }
+  .og-bulk.on { display:flex; }
+  .og-empty { text-align:center; color:#64748B; padding:30px; }
+  .og-pill { font-size:11px; padding:1px 8px; border-radius:10px; background:#E3F0F7; color:#1F6FA6; }
+</style>
+
 <div class="card">
   <form class="filters" method="GET">
     <div class="form-field">
@@ -23,16 +43,48 @@
     {% endif %}
   </form>
 
-  <table>
+  {# فورم الإرسال الجماعي: الخانات تتصل فيه بالخاصية form="bulkForm" (بدون تداخل فورمات) #}
+  <form id="bulkForm" method="POST" action="{{ url_for('send_selected_to_reception') }}"></form>
+
+  <table class="og-table">
     <thead><tr>
-      <th>{{ t('no_col') }}</th><th>{{ t('name') }}</th><th>{{ t('test') }}</th><th>{{ t('department') }}</th>
+      <th style="width:34px;"><input type="checkbox" id="ogAll" title="تحديد الكل"></th>
+      <th>{{ t('test') }}</th><th>{{ t('department') }}</th>
       <th>{{ t('sample_type') }}</th><th>{{ t('barcode') }}</th><th>{{ t('status') }}</th><th></th>
     </tr></thead>
     <tbody>
-      {% for ot in order_tests %}
-      <tr class="dept-bar dept-{{ ot['department']|replace(' ', '-') }}">
-        <td class="mono">{{ ot['registration_number'] }}</td>
-        <td>{{ ot['patient_name'] }}</td>
+      {% for g in groups %}
+      <tr class="og-head" data-visit="{{ g.visit_id }}">
+        <td colspan="7">
+          <input type="checkbox" class="og-grp" data-visit="{{ g.visit_id }}" title="تحديد كل تحاليل هذا المريض">
+          <span class="og-actions">
+            <a class="btn small" href="{{ url_for('visit_results_entry', visit_id=g.visit_id) }}">{{ t('enter_results') }}</a>
+            {% if g.completed %}
+            <a class="btn small" style="background:#3B82F6;border-color:#3B82F6;" target="_blank"
+               href="{{ url_for('print_visit_full_report', visit_id=g.visit_id) }}?autoprint=1" title="طباعة النتائج المكتملة لهذا المريض">Print</a>
+            {% endif %}
+            {% if g.sendable %}
+            <form method="POST" action="{{ url_for('send_visit_to_reception', visit_id=g.visit_id) }}" style="display:inline"
+                  onsubmit="return confirm('إرسال كل النتائج المكتملة ({{ g.sendable|length }}) لهذا المريض لشاشة الاستقبال؟');">
+              <button class="btn small secondary" type="submit" title="يرسل كل نتائجه المكتملة دفعة واحدة">📤 أرسل الكل ({{ g.sendable|length }})</button>
+            </form>
+            {% endif %}
+          </span>
+          <span class="og-name">{{ g.patient_name }}</span>
+          <span class="og-meta mono">{{ g.reg_no }}</span>
+          {% if g.center %}<span class="og-meta">{{ g.center }}</span>{% endif %}
+          {% if g.ref_doctor %}<span class="og-meta">د. {{ g.ref_doctor }}</span>{% endif %}
+          <span class="og-meta">{{ g.created }}</span>
+          {% if g.all_done %}<span class="og-pill">كل التحاليل مكتملة</span>{% endif %}
+        </td>
+      </tr>
+      {% for ot in g.tests %}
+      {% set done = ot['status'] in ('Completed', 'Verified') %}
+      <tr class="og-row {{ 'done' if done }} {{ 'sent' if ot['sent_to_reception'] }}">
+        <td>
+          <input type="checkbox" class="og-ot" name="ot_id" value="{{ ot['id'] }}" form="bulkForm"
+                 data-visit="{{ g.visit_id }}" data-sendable="{{ 1 if (done and not ot['sent_to_reception']) else 0 }}">
+        </td>
         <td>
           {{ ot['test_name'] }}
           {% if ot['fee_waived'] %}<span class="badge" style="background:#eee;color:#555;" title="لا يُحتسب أجر للفاحص عن هذا التحليل">🆓 مجاني للفاحص</span>{% endif %}
@@ -42,37 +94,85 @@
         <td>{{ ot['sample_type'] }}</td>
         <td class="mono">{{ ot['barcode'] }}</td>
         <td><span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span></td>
-        <td style="white-space:nowrap;">
-          <a class="btn small" href="{{ url_for('result_entry', order_test_id=ot['id']) }}">{{ t('enter_results') }}</a>
-          {% if ot['test_code'] in ('CBC', 'BF', 'WBCDIFF', 'FLUIDEXAM') and ot['status'] in ('Completed', 'Verified') %}
-          <a class="btn small" href="{{ url_for('print_report', order_test_id=ot['id']) }}?auto=1">Print Report</a>
-          {% endif %}
-          {% if ot['status'] in ('Completed', 'Verified') and not ot['sent_to_reception'] %}
-          <form method="POST" action="{{ url_for('send_order_test_to_reception', order_test_id=ot['id']) }}" style="display:inline">
-            <button class="btn small secondary" type="submit" title="ترسل النتيجة لشاشة الاستقبال لتُطبع وتُسلَّم للمريض، وتختفي من هذي القائمة (تبقى تظهر لو دوّرت عليها بمربع البحث)">
-              📤 أرسل للاستقبال
+        <td>
+          <div class="acts">
+            <a class="btn small secondary" href="{{ url_for('result_entry', order_test_id=ot['id']) }}">{{ t('enter_results') }}</a>
+            {% if ot['test_code'] in ('CBC', 'BF', 'WBCDIFF', 'FLUIDEXAM') and done %}
+            <a class="btn small" href="{{ url_for('print_report', order_test_id=ot['id']) }}?auto=1">Print Report</a>
+            {% endif %}
+            {% if done and not ot['sent_to_reception'] %}
+            <form method="POST" action="{{ url_for('send_order_test_to_reception', order_test_id=ot['id']) }}">
+              <button class="btn small secondary" type="submit" title="ترسل النتيجة لشاشة الاستقبال لتُطبع وتُسلَّم للمريض، وتختفي من هذي القائمة (تبقى تظهر لو دوّرت عليها بمربع البحث)">📤 أرسل للاستقبال</button>
+            </form>
+            {% elif ot['sent_to_reception'] %}
+            <span class="badge" style="background:#e3f0f7;color:#1f6fa6;" title="أُرسلت للاستقبال بالفعل">📤 أُرسلت للاستقبال</span>
+            {% endif %}
+            {% if ot['is_examining_test'] %}
+            <button type="button" class="btn small secondary" onclick="toggleFeeWaiver({{ ot['id'] }}, {{ (not ot['fee_waived'])|tojson }})">
+              {{ '↩️ إلغاء المجانية' if ot['fee_waived'] else '🆓 جعله مجاني (بدون أجر فاحص)' }}
             </button>
-          </form>
-          {% elif ot['sent_to_reception'] %}
-          <span class="badge" style="background:#e3f0f7;color:#1f6fa6;" title="أُرسلت للاستقبال بالفعل">📤 أُرسلت للاستقبال</span>
-          {% endif %}
-          {% if ot['is_examining_test'] %}
-          <button type="button" class="btn small secondary" onclick="toggleFeeWaiver({{ ot['id'] }}, {{ (not ot['fee_waived'])|tojson }})">
-            {{ '↩️ إلغاء المجانية' if ot['fee_waived'] else '🆓 جعله مجاني (بدون أجر فاحص)' }}
-          </button>
-          {% endif %}
-          <form method="POST" action="{{ url_for('delete_order_test', order_test_id=ot['id']) }}" style="display:inline"
-                onsubmit="return handleOrderDeleteSubmit(event, this, {{ ot['test_name']|tojson }}, {{ ot['status']|tojson }});">
-            <button class="btn small danger" type="submit">حذف</button>
-          </form>
+            {% endif %}
+            <form method="POST" action="{{ url_for('delete_order_test', order_test_id=ot['id']) }}"
+                  onsubmit="return handleOrderDeleteSubmit(event, this, {{ ot['test_name']|tojson }}, {{ ot['status']|tojson }});">
+              <button class="btn small danger" type="submit">حذف</button>
+            </form>
+          </div>
         </td>
       </tr>
       {% endfor %}
+      {% else %}
+      <tr><td colspan="7" class="og-empty">ما فيه تحاليل بهذي المعايير.</td></tr>
+      {% endfor %}
     </tbody>
   </table>
+
+  <div class="og-bulk" id="ogBulk">
+    <span id="ogBulkCount">0</span> تحليل محدّد
+    <button type="submit" form="bulkForm" class="btn small" id="ogBulkSend" style="background:#16A34A;border-color:#16A34A;">📤 أرسل المحدد للاستقبال</button>
+    <span id="ogBulkHint" style="font-size:12px;opacity:.85;"></span>
+    <button type="button" class="btn small secondary" id="ogBulkClear">إلغاء التحديد</button>
+  </div>
 </div>
 <script>
   const FEE_WAIVER_CONFIGURED = {{ fee_waiver_configured|tojson }};
+
+  // ------------------------------------------------------------------
+  // اختيار التحاليل: خانة المريض تحدد كل تحاليله، وخانة الرأس تحدد الكل؛ شريط الإرسال الجماعي يظهر عند وجود تحديد
+  // ------------------------------------------------------------------
+  (function () {
+    var all = document.getElementById('ogAll'), bar = document.getElementById('ogBulk');
+    var cnt = document.getElementById('ogBulkCount'), hint = document.getElementById('ogBulkHint'), send = document.getElementById('ogBulkSend');
+    function cbs() { return Array.prototype.slice.call(document.querySelectorAll('.og-ot')); }
+    function refresh() {
+      var sel = cbs().filter(function (c) { return c.checked; });
+      var ok = sel.filter(function (c) { return c.getAttribute('data-sendable') === '1'; });
+      cnt.textContent = sel.length;
+      bar.classList.toggle('on', sel.length > 0);
+      send.disabled = ok.length === 0;
+      hint.textContent = sel.length && ok.length !== sel.length
+        ? ('سيُرسل ' + ok.length + ' فقط — الباقي غير مكتمل أو مُرسل سابقًا') : '';
+      document.querySelectorAll('.og-grp').forEach(function (g) {
+        var mine = cbs().filter(function (c) { return c.getAttribute('data-visit') === g.getAttribute('data-visit'); });
+        g.checked = mine.length > 0 && mine.every(function (c) { return c.checked; });
+        g.indeterminate = !g.checked && mine.some(function (c) { return c.checked; });
+      });
+      all.checked = cbs().length > 0 && cbs().every(function (c) { return c.checked; });
+    }
+    document.addEventListener('change', function (e) {
+      var t = e.target;
+      if (t.classList.contains('og-ot')) refresh();
+      else if (t.classList.contains('og-grp')) {
+        cbs().forEach(function (c) { if (c.getAttribute('data-visit') === t.getAttribute('data-visit')) c.checked = t.checked; });
+        refresh();
+      } else if (t === all) { cbs().forEach(function (c) { c.checked = all.checked; }); refresh(); }
+    });
+    document.getElementById('ogBulkClear').addEventListener('click', function () { cbs().forEach(function (c) { c.checked = false; }); refresh(); });
+    document.getElementById('bulkForm').addEventListener('submit', function (e) {
+      var ok = cbs().filter(function (c) { return c.checked && c.getAttribute('data-sendable') === '1'; });
+      if (!ok.length || !confirm('إرسال ' + ok.length + ' نتيجة مكتملة لشاشة الاستقبال؟')) e.preventDefault();
+    });
+    refresh();
+  })();
 
   // ------------------------------------------------------------------
   // حذف تحليل نتيجته مكتملة/معتمدة (المطلوب: منع الحذف/التعديل على نتيجة

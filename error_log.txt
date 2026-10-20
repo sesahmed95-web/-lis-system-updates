@@ -2083,3 +2083,31 @@ Traceback (most recent call last):
   File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 490, in getattr
     return getattr(obj, attribute)
 jinja2.exceptions.UndefinedError: 'dict object' has no attribute 'r1'
+2026-10-20 07:11:35,478 ERROR: Exception on /api/visits/40/portal-sync [POST]
+Traceback (most recent call last):
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1497, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 14693, in api_portal_sync
+    ok, msg = cloud_sync.sync_visit(db, visit_id, force=True)
+              ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\cloud_sync.py", line 453, in sync_visit
+    db.execute(
+    ~~~~~~~~~~^
+        "INSERT INTO portal_state (visit_id, last_status, last_hash, last_pushed_at, last_error, attempts, next_try_at) "
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        "VALUES (?,?,?,?,?,0,NULL) ON CONFLICT(visit_id) DO UPDATE SET last_status=excluded.last_status, "
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        "last_hash=excluded.last_hash, last_pushed_at=excluded.last_pushed_at, last_error=excluded.last_error, attempts=0, next_try_at=NULL",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (visit_id, payload["status"], stored_hash, now.isoformat(timespec="seconds"), pdf_err))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.ProgrammingError: Cannot operate on a closed database.

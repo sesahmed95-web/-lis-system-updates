@@ -1282,6 +1282,28 @@ def _inject_sky_table_headers(resp):
 
 
 
+# --- v64: زر الإغلاق بصفحات الطباعة ما يبقى ميّت لو المتصفح رفض window.close() ---
+_LIS_CLOSE_SHIM = (b'<script id="lis-close-shim">(function(){var c=window.close.bind(window);'
+                   b'window.close=function(){try{c();}catch(e){}'
+                   b'setTimeout(function(){if(window.closed)return;'
+                   b'var r=document.referrer;window.location.href=(r&&r.indexOf(window.location.origin)===0)?r:"/";},400);};})();</script>')
+
+
+@app.after_request
+def _inject_close_shim(resp):
+    try:
+        if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        data = resp.get_data()
+        if b"window.close()" not in data or b'id="lis-close-shim"' in data or b"</body>" not in data:
+            return resp
+        head, _, tail = data.rpartition(b"</body>")
+        resp.set_data(head + _LIS_CLOSE_SHIM + b"</body>" + tail)
+    except Exception:
+        pass
+    return resp
+
+
 @app.context_processor
 def inject_globals():
     db = get_db()
@@ -6097,7 +6119,7 @@ def print_sample_barcodes(visit_id):
     for r in rows:
         stype = (r["sample_type"] or "").strip()
         dept = (r["department"] or "").strip()
-        key = (dept or stype) if group_mode != "sample_type" else stype
+        key = (dept or stype) if group_mode != "sample_type" else (stype.casefold() or dept)
         if not key:
             ungrouped.append(r)
             continue
@@ -6130,7 +6152,7 @@ def print_sample_barcodes(visit_id):
         tube_samples.append({
             # اسم القسم ما يُطبع على الملصق (فقط أسماء التحاليل/الأنواع المختارة)؛
             # عند التجميع حسب نوع العينة فقط (?group=sample_type) يبقى العنوان القديم
-            "sample_type": stype if group_mode == "sample_type" else "",
+            "sample_type": ((group_rows[0]["sample_type"] or "").strip() if group_mode == "sample_type" else ""),
             "department": (group_rows[0]["department"] or "") if group_rows else "",
             "barcode": tube_barcode,
             "test_names": [n for r in group_rows for n in _label_names(r)],
@@ -7244,6 +7266,33 @@ def accounts_search_export_pdf():
 
 
 
+_CLOSE_BTN_RE = re.compile(r'onclick="\s*window\.close\(\)\s*;?\s*"')
+_SMART_CLOSE_JS = (
+    "<script>window.lisSmartClose=function(){try{window.close();}catch(e){}"
+    "setTimeout(function(){var ref=document.referrer,same=false;"
+    "try{same=!!ref&&new URL(ref).origin===location.origin&&ref!==location.href;}catch(e){}"
+    "location.href=same?ref:'/front-desk/visits';"
+    "},300);};</script>"
+)
+
+
+@app.after_request
+def _smart_close_buttons(resp):
+    """زر «إغلاق» بصفحات الطباعة كان window.close() فقط، وهذا يتجاهله المتصفح لو الصفحة ما انفتحت كنافذة منبثقة (وبوضع التطبيق
+    ما فيه زر رجوع فيعلق المستخدم). نبدّله بدالة تجرّب الإغلاق ثم ترجع للصفحة اللي فتحتها (الـreferrer) أو لقائمة الزيارات."""
+    try:
+        if resp.mimetype == "text/html" and resp.status_code == 200 and not resp.direct_passthrough:
+            body = resp.get_data(as_text=True)
+            if "window.close()" in body and _CLOSE_BTN_RE.search(body) and "lisSmartClose" not in body:
+                body = _CLOSE_BTN_RE.sub('onclick="lisSmartClose()"', body)
+                i = body.rfind("</body>")
+                body = (body[:i] + _SMART_CLOSE_JS + body[i:]) if i >= 0 else (body + _SMART_CLOSE_JS)
+                resp.set_data(body)
+    except Exception:  # noqa: BLE001 — إضافة فقط، ما توقف أي صفحة
+        pass
+    return resp
+
+
 @app.route("/workbench/samples-collection")
 @login_required
 def samples_collection():
@@ -7363,12 +7412,15 @@ def orders_list():
         "SELECT ot.id, ot.barcode, ot.status, ot.created_at, ot.fee_waived, ot.hidden_from_log, "
         "ot.sent_to_reception, ot.sent_to_reception_at, ot.printed_at, "
         "td.name as test_name, td.code as test_code, td.department, td.sample_type, td.is_examining_test, "
-        "p.full_name as patient_name, v.id as visit_id, v.registration_number "
+        "p.full_name as patient_name, v.id as visit_id, v.registration_number, v.created_at as visit_created, "
+        "rd.full_name as ref_doctor, rc.name as center "
         "FROM order_tests ot "
         "JOIN test_definitions td ON td.id = ot.test_definition_id "
         "JOIN orders o ON o.id = ot.order_id "
         "JOIN visits v ON v.id = o.visit_id "
         "JOIN patients p ON p.id = v.patient_id "
+        "LEFT JOIN doctors rd ON rd.id = v.doctor_id "
+        "LEFT JOIN referral_centers rc ON rc.id = v.referral_center_id "
     )
     conditions = []
     params = []
@@ -7388,11 +7440,49 @@ def orders_list():
         params.append(order_date)
     if conditions:
         query += "WHERE " + " AND ".join(conditions) + " "
-    query += "ORDER BY ot.id DESC LIMIT 150"
+    query += "ORDER BY ot.id DESC LIMIT 400"
     order_tests = db.execute(query, params).fetchall()
     fee_waiver_configured = bool(get_setting(db, "fee_waiver_password_hash", ""))
-    return render_template("workbench/orders.html", order_tests=order_tests, status=status, order_date=order_date,
-                            fee_waiver_configured=fee_waiver_configured, q=q)
+    # تجميع كل مريض (زيارة) بعنوان واحد وتحته تحاليله — بنفس ترتيب الأحدث أولاً
+    groups, by_visit = [], {}
+    for ot in order_tests:
+        g = by_visit.get(ot["visit_id"])
+        if g is None:
+            g = {"visit_id": ot["visit_id"], "patient_name": ot["patient_name"], "reg_no": ot["registration_number"],
+                 "created": (ot["visit_created"] or "")[:16].replace("T", " "), "ref_doctor": ot["ref_doctor"] or "",
+                 "center": ot["center"] or "", "tests": []}
+            by_visit[ot["visit_id"]] = g
+            groups.append(g)
+        g["tests"].append(ot)
+    for g in groups:
+        g["completed"] = [t for t in g["tests"] if t["status"] in ("Completed", "Verified")]
+        g["sendable"] = [t for t in g["completed"] if not t["sent_to_reception"]]
+        g["all_done"] = len(g["completed"]) == len(g["tests"])
+    return render_template("workbench/orders.html", order_tests=order_tests, groups=groups, status=status,
+                            order_date=order_date, fee_waiver_configured=fee_waiver_configured, q=q)
+
+
+@app.route("/workbench/orders/send-selected", methods=["POST"])
+@login_required
+def send_selected_to_reception():
+    """إرسال تحاليل مختارة (خانات الاختيار بصفحة Orders) لشاشة الاستقبال دفعة واحدة — فقط المكتملة وغير المُرسَلة."""
+    db = get_db()
+    ids = [int(x) for x in request.form.getlist("ot_id") if x.isdigit()]
+    if not ids:
+        flash("اختر تحليلًا واحدًا على الأقل.")
+        return redirect(url_for("orders_list"))
+    ph = ",".join("?" * len(ids))
+    ready = [r["id"] for r in db.execute(
+        f"SELECT id FROM order_tests WHERE id IN ({ph}) AND status IN ('Completed','Verified') AND sent_to_reception=0", ids)]
+    if ready:
+        now = datetime.now().isoformat(timespec="seconds")
+        db.execute(f"UPDATE order_tests SET sent_to_reception=1, sent_to_reception_at=?, reception_seen=0 "
+                   f"WHERE id IN ({','.join('?' * len(ready))})", [now] + ready)
+        db.commit()
+        log_action("SendToReception", "order_tests", 0, "bulk " + ",".join(map(str, ready)))
+    skipped = len(ids) - len(ready)
+    flash(f"✅ أُرسلت {len(ready)} نتيجة لشاشة الاستقبال." + (f" (تخطّيت {skipped} غير مكتملة أو مُرسلة سابقًا)" if skipped else ""))
+    return redirect(url_for("orders_list"))
 
 
 @app.route("/workbench/orders/<int:order_test_id>/delete", methods=["POST"])
@@ -14689,8 +14779,13 @@ def print_visit_portal_qr(visit_id):
 @login_required
 def api_portal_sync(visit_id):
     db = get_db()
-    cloud_sync.ensure_token(db, visit_id)
-    ok, msg = cloud_sync.sync_visit(db, visit_id, force=True)
+    try:
+        cloud_sync.ensure_token(db, visit_id)
+        ok, msg = cloud_sync.sync_visit(db, visit_id, force=True)
+    except Exception as e:  # noqa: BLE001  v68: أظهر السبب الحقيقي بدل "فشل الاتصال"
+        import traceback
+        traceback.print_exc()
+        return {"ok": False, "message": f"{type(e).__name__}: {e}"[:400]}, 502
     return {"ok": ok, "message": msg}, (200 if ok else 502)
 
 
