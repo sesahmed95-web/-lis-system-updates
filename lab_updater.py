@@ -215,13 +215,38 @@ def _http_get(url, limit):
     return data
 
 
-def fetch_manifest(base):
-    m = json.loads(_http_get(base + "/update.json", 200_000).decode("utf-8"))
+def _my_hw_id():
+    """معرّف جهاز هذا العميل (نفس Hardware ID بالترخيص) — يُستخدم لاستلام تحديثات موجّهة له فقط."""
+    try:
+        import re as _re
+        from license_manager import get_hardware_id
+        return _re.sub(r"[^A-Za-z0-9_-]", "", str(get_hardware_id() or "")).upper()
+    except Exception:
+        return ""
+
+
+def _fetch_one(base, name):
+    m = json.loads(_http_get(base + "/" + name, 200_000).decode("utf-8"))
     for k in ("version", "file", "sha256", "sig"):
         if not m.get(k):
-            raise ValueError("update.json ناقص: " + k)
+            raise ValueError(name + " ناقص: " + k)
     if "/" in m["file"] or "\\" in m["file"]:
         raise ValueError("اسم ملف التحديث غير صالح")
+    return m
+
+
+def fetch_manifest(base):
+    """التحديث العام update.json + (إن وُجد) تحديث موجّه لهذا الجهاز فقط update_for_<HWID>.json.
+    نرجّع الأحدث منهما. تحديث موجّه لجهاز ثاني ما يشوفه هذا الجهاز أبداً (اسم الملف مرتبط بالـHWID)."""
+    m = _fetch_one(base, "update.json")
+    hw = _my_hw_id()
+    if hw:
+        try:
+            t = _fetch_one(base, "update_for_%s.json" % hw)
+            if _vkey(t["version"]) > _vkey(m["version"]):
+                m = t
+        except Exception:
+            pass
     return m
 
 

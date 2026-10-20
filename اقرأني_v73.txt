@@ -1,0 +1,12 @@
+v73 = v69 + v70 + v71 + v72 + تحديث موجّه لعميل معين
+الصق كل شي بنفس مساراته (مجلد البرنامج):
+ app.py
+ lab_updater.py , update_publisher.py   (مفتاحك العام ورابط التحديثات محفوظان كما هما)
+ templates/workbench/orders.html (من v69) , templates/whatsapp_queue.html , templates/pdf_archive.html
+ tools/make_client_installer.py , tools/make_branding_preset.py
+بعدها: kill_old_server.bat ثم افتح البرنامج.
+
+التحديث الموجّه: لوحة المصمم > نشر تحديث > اكتب Hardware ID بالخانة الجديدة (أو أكثر بفاصلة) > ابنِ ووقّع وانشر.
+ - يُرفع الزيب + update_for_<HWID>.json فقط؛ update.json العام ما ينلمس.
+ - الخانة فاضية = لكل العملاء كالمعتاد.
+ - العميل لازم عنده lab_updater.py هذي النسخة: انشر مرة وحدة عامة (خانة فاضية) حتى توصل لكل العملاء، وبعدها كل نشر موجّه يشتغل.

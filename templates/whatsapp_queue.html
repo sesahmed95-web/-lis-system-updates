@@ -7,6 +7,9 @@
     <b>failed</b> يعيد البرنامج محاولتها تلقائيًا كل 3 دقائق عند توفر
     الإنترنت، أو تقدر تضغط "إعادة المحاولة" الآن يدويًا.
   </p>
+  <form method="POST" action="{{ url_for('whatsapp_delete_failed') }}" onsubmit="return confirm('حذف كل العناصر الفاشلة والتي بالانتظار؟')" style="margin-bottom:10px">
+    <button class="btn small secondary" type="submit">🗑 حذف كل الفاشل / بالانتظار</button>
+  </form>
   <table>
     <thead><tr>
       <th>المريض</th><th>النتيجة/التقرير</th><th>الهاتف</th><th>الحالة</th>
@@ -32,8 +35,11 @@
         <td class="muted">{{ r['sent_at'] or r['created_at'] }}</td>
         <td>
           {% if r['status'] != 'sent' %}
-          <form method="POST" action="{{ url_for('whatsapp_retry', send_id=r['id']) }}">
+          <form method="POST" action="{{ url_for('whatsapp_retry', send_id=r['id']) }}" style="display:inline">
             <button class="btn small secondary" type="submit">🔁 إعادة المحاولة</button>
+          </form>
+          <form method="POST" action="{{ url_for('whatsapp_delete', send_id=r['id']) }}" style="display:inline" onsubmit="return confirm('حذف هذا العنصر؟')">
+            <button class="btn small secondary" type="submit">🗑 حذف</button>
           </form>
           {% endif %}
         </td>

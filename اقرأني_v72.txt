@@ -1,0 +1,2 @@
+v72 = v71 + فتح PDF مصمم من أي حاسبة لأي زيارة مكتملة (يتولد عند الفتح لو مو مؤرشف)
+الصق: app.py + templates/whatsapp_queue.html + templates/pdf_archive.html ثم kill_old_server.bat

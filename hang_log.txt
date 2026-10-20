@@ -157,3 +157,5 @@
 
 [2026-10-18T17:52:19] SLOW 21.3s GET /designer? (designer_panel)
 [2026-10-20T06:39:04] SLOW 2.7s POST /designer/update/check-now? (designer_update_check_now)
+[2026-10-20T12:39:39] SLOW 2.2s POST /designer/update/check-now? (designer_update_check_now)
+[2026-10-20T13:09:37] SLOW 3.7s GET /front-desk/notifications/check? (front_desk_notifications_check)

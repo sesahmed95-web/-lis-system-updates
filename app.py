@@ -3858,6 +3858,12 @@ def api_results_quick_search():
     for r in rows:
         link = (url_for("visit_results_entry", visit_id=r["visit_id"]) if use_front_desk
                 else url_for("result_entry", order_test_id=r["order_test_id"]))
+        # v71: نتائج مكتملة + PDF مؤرشف موجود => يفتح الـPDF مباشرة بدل لوحة إدخال النتائج
+        try:
+            if r["n_done"] == r["n_tests"]:
+                link = url_for("pdf_archive_open", visit_id=r["visit_id"])
+        except Exception:
+            pass
         label = f"{r['n_tests']} تحاليل"
         if name_count.get(r["patient_name"], 0) > 1:
             # تشابه أسماء: نضيف العمر وتاريخ الزيارة للتفريق
@@ -10143,7 +10149,12 @@ def _get_pdf_archive_dir(db):
     وبهذي الحالة الأرشفة التلقائية تُتجاهل بصمت بدل ما تكسر حفظ النتائج."""
     d = (get_setting(db, "pdf_archive_dir", "") or "").strip()
     if not d:
-        return None
+        # v71: لو المدير ما حدد مجلد، نستخدم مجلد افتراضي بجانب قاعدة البيانات (PDF_Archive) حتى تشتغل الأرشفة تلقائيًا
+        try:
+            from database import DB_PATH as _DBP
+            d = os.path.join(os.path.dirname(os.path.abspath(_DBP)), "PDF_Archive")
+        except Exception:
+            return None
     try:
         os.makedirs(d, exist_ok=True)
     except OSError:
@@ -10207,7 +10218,7 @@ def _maybe_archive_visit_pdf(db, visit_id):
         return False
 
     visit = db.execute(
-        "SELECT v.*, p.id as patient_id, p.full_name, p.registration_number as _unused, "
+        "SELECT v.*, p.id as patient_id, p.full_name, "
         "d.full_name as referring_doctor_name, rc.name as referral_center_name "
         "FROM visits v JOIN patients p ON p.id = v.patient_id "
         "LEFT JOIN doctors d ON d.id = v.doctor_id "
@@ -10225,10 +10236,19 @@ def _maybe_archive_visit_pdf(db, visit_id):
     if not statuses or any(s not in ("Completed", "Verified") for s in statuses):
         return False  # لسا فيه تحليل ناقص نتيجة — ما نؤرشف بعد
 
+    # v72: نفس "اللوحة المجمّعة" المصممة اللي تنطبع بالضبط؛ لو فشلت نرجع لمولّد التصاميم القديم
+    html_content = None
     try:
-        html_content = _build_combined_designed_reports_html(visit_id)
+        session.setdefault("interface", "both")
+        _h = print_combined_panel(visit_id)
+        html_content = _h if isinstance(_h, str) and len(_h) > 500 else None
     except Exception:
-        return False
+        html_content = None
+    if not html_content:
+        try:
+            html_content = _build_combined_designed_reports_html(visit_id)
+        except Exception:
+            html_content = None
     if not html_content:
         return False
 
@@ -10237,14 +10257,19 @@ def _maybe_archive_visit_pdf(db, visit_id):
         # اسم ملف واضح للبحث اليدوي بمجلد الأرشيف نفسه من خارج البرنامج:
         # رقم_التسجيل - اسم المريض - تاريخ الزيارة.pdf (كل رمز غير آمن
         # بالاسم يُستبدل بشرطة سفلية).
-        safe_name = secure_filename(visit["full_name"] or "patient") or "patient"
+        # v71: عنوان الـPDF = الاسم الكامل للمريض + تاريخ ووقت الزيارة (ثابت لنفس الزيارة فيتحدّث نفس الملف)
+        import re as _re2
+        safe_name = _re2.sub(r'[\\/:*?"<>|\r\n\t]+', " ", (visit["full_name"] or "patient")).strip() or "patient"
         try:
             dt = datetime.fromisoformat(visit["created_at"])
-            date_part = dt.strftime("%Y-%m-%d")
         except (TypeError, ValueError):
-            date_part = datetime.now().strftime("%Y-%m-%d")
-        filename = f"{visit['registration_number']}_{safe_name}_{date_part}.pdf"
+            dt = datetime.now()
+        stamp_part = dt.strftime("%Y-%m-%d %H-%M")
+        filename = f"{safe_name} - {stamp_part}.pdf"
         pdf_path = os.path.join(archive_dir, filename)
+        _other = db.execute("SELECT visit_id FROM saved_reports WHERE pdf_path=? AND visit_id<>?", (pdf_path, visit_id)).fetchone()
+        if _other:  # نفس الاسم ونفس الدقيقة لزيارة ثانية: نضيف رقم التسجيل
+            pdf_path = os.path.join(archive_dir, f"{safe_name} - {stamp_part} - {visit['registration_number']}.pdf")
         pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
     except Exception:
         return False
@@ -10597,8 +10622,18 @@ def pdf_archive():
     db = get_db()
     q = request.args.get("q", "").strip()
     archive_dir = _get_pdf_archive_dir(db)
-    rows = search_saved_reports(db, q) if archive_dir else []
-    return render_template("pdf_archive.html", rows=rows, q=q, archive_configured=bool(archive_dir))
+    # v72: القائمة = كل الزيارات المكتملة (حتى القديمة اللي ما انؤرشفت) — الـPDF يتولّد عند الفتح لو مو موجود
+    like = f"%{q}%"
+    rows = db.execute(
+        "SELECT v.id AS visit_id, v.registration_number, p.full_name, "
+        "COALESCE(sr.updated_at, v.created_at) AS updated_at, sr.referring_doctor_name, sr.referral_center_name "
+        "FROM visits v JOIN patients p ON p.id = v.patient_id LEFT JOIN saved_reports sr ON sr.visit_id = v.id "
+        "WHERE (? = '%%' OR p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR p.phone LIKE ?) "
+        "AND EXISTS (SELECT 1 FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=v.id) "
+        "AND NOT EXISTS (SELECT 1 FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=v.id "
+        "AND ot.status NOT IN ('Completed','Verified')) "
+        "ORDER BY v.id DESC LIMIT 100", (like, like, like, like)).fetchall()
+    return render_template("pdf_archive.html", rows=rows, q=q, archive_configured=True)
 
 
 @app.route("/reports/archive/<int:visit_id>/open")
@@ -10609,6 +10644,13 @@ def pdf_archive_open(visit_id):
     البرنامج (نقل/حذف)، نرجّع رسالة واضحة بدل خطأ سيرفر غامض."""
     db = get_db()
     row = get_saved_report(db, visit_id)
+    if not row or not row["pdf_path"] or not os.path.exists(row["pdf_path"]):
+        # v72: غير مؤرشف (زيارة قديمة أو انحذف الملف) => نولّده الآن من نفس اللوحة المصممة ونحفظه
+        try:
+            _maybe_archive_visit_pdf(db, visit_id)
+        except Exception:
+            pass
+        row = get_saved_report(db, visit_id)
     if not row or not row["pdf_path"] or not os.path.exists(row["pdf_path"]):
         flash("الملف غير موجود بمجلد الأرشيف — يمكن انحذف أو انقل يدويًا من خارج البرنامج.")
         return redirect(url_for("pdf_archive"))
@@ -10651,6 +10693,28 @@ def whatsapp_retry(send_id):
         )
         db.commit()
         flash("❌ تعذّر فتح تطبيق واتساب.")
+    return redirect(url_for("whatsapp_queue"))
+
+
+@app.route("/whatsapp/queue/<int:send_id>/delete", methods=["POST"])
+@roles_required("supervisor")
+def whatsapp_delete(send_id):
+    db = get_db()
+    db.execute("DELETE FROM whatsapp_sends WHERE id=? AND status<>'sent'", (send_id,))
+    db.commit()
+    log_action("DeleteWhatsappQueue", "whatsapp_send", send_id)
+    flash("🗑 تم حذف العنصر من الطابور.")
+    return redirect(url_for("whatsapp_queue"))
+
+
+@app.route("/whatsapp/queue/delete-failed", methods=["POST"])
+@roles_required("supervisor")
+def whatsapp_delete_failed():
+    db = get_db()
+    n = db.execute("DELETE FROM whatsapp_sends WHERE status IN ('failed','pending')").rowcount
+    db.commit()
+    log_action("DeleteWhatsappQueue", "whatsapp_send", 0, f"bulk {n}")
+    flash(f"🗑 تم حذف {n} عنصر (فاشل/بالانتظار).")
     return redirect(url_for("whatsapp_queue"))
 
 
@@ -14695,7 +14759,9 @@ def _portal_make_pdf(visit_id):
     لا تعلّم التحاليل كـ"مطبوعة" (نرجّع printed_at كما كانت). ترجع bytes أو None."""
     import pdf_export
     base = f"http://127.0.0.1:{os.environ.get('LIS_PORT', '9090')}/"
-    with app.test_request_context("/", base_url=base):
+    # v70: سياق طلب واحد فقط (بدون تداخل). السياق الداخلي القديم كان عند خروجه يغلق اتصال القاعدة الخارجي
+    # فيظهر "Cannot operate on a closed database" ولا يُولَّد الـPDF.
+    with app.test_request_context("/?headings=1", base_url=base):
         session["interface"] = "both"
         db = get_db()
         prev = {r["id"]: r["printed_at"] for r in db.execute(
@@ -14706,9 +14772,7 @@ def _portal_make_pdf(visit_id):
             # بدل ما تكون صفحة منفصلة لكل تحليل. لو فشلت لأي سبب نرجع للطريقة القديمة.
             html_content = None
             try:
-                with app.test_request_context("/?headings=1", base_url=base):
-                    session["interface"] = "both"
-                    _h = print_combined_panel(visit_id)
+                _h = print_combined_panel(visit_id)
                 if isinstance(_h, str) and len(_h) > 500:
                     html_content = _h
             except Exception:
@@ -14716,9 +14780,10 @@ def _portal_make_pdf(visit_id):
             if not html_content:
                 html_content = _build_combined_designed_reports_html(visit_id)
         finally:
+            _db2 = get_db()  # اتصال جديد مضمون الفتح
             for otid, pa in prev.items():
-                db.execute("UPDATE order_tests SET printed_at=? WHERE id=?", (pa, otid))
-            db.commit()
+                _db2.execute("UPDATE order_tests SET printed_at=? WHERE id=?", (pa, otid))
+            _db2.commit()
         if not html_content:
             return None
         pdf_path = pdf_export.make_temp_pdf_path(f"portal{visit_id}")

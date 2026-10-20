@@ -227,7 +227,7 @@ def _bump_version():
     return new
 
 
-def job_build(notes, bump, upload, cfg, token):
+def job_build(notes, bump, upload, cfg, token, targets=()):
     pk, url = read_updater_values()
     if not pk:
         raise RuntimeError("PUBLIC_KEY_B64 فاضي بـ lab_updater.py — نفّذ الخطوة 2 أولاً.")
@@ -256,6 +256,14 @@ def job_build(notes, bump, upload, cfg, token):
     msg = "update %s" % man["version"]
     _log("رفع الزيب لـ GitHub ...")
     gh_upload(token, cfg["repo"], cfg["branch"], cfg["folder"], zname, open(os.path.join(outdir, zname), "rb").read(), msg)
+    if targets:
+        # تحديث موجّه: ما نلمس update.json العام (باقي العملاء ما يتأثرون) ولا نحذف زيبات قديمة
+        mdata = open(os.path.join(outdir, "update.json"), "rb").read()
+        for hw in targets:
+            gh_upload(token, cfg["repo"], cfg["branch"], cfg["folder"], "update_for_%s.json" % hw, mdata, msg + " -> " + hw)
+            _log("   ✔ موجّه للجهاز: " + hw)
+        _log("✔ نُشر التحديث %s للأجهزة المحددة فقط (%d). باقي العملاء ما يشوفونه." % (man["version"], len(targets)))
+        return "نُشر التحديث %s لـ %d جهاز فقط" % (man["version"], len(targets))
     _log("رفع update.json (آخر خطوة حتى ما يشوف العميل تحديث ناقص) ...")
     gh_upload(token, cfg["repo"], cfg["branch"], cfg["folder"], "update.json", open(os.path.join(outdir, "update.json"), "rb").read(), msg)
     gh_prune(token, cfg["repo"], cfg["branch"], cfg["folder"], keep=2)
@@ -346,8 +354,13 @@ def register(app, designer_required, get_db, get_setting, set_setting):
         elif action in ("publish", "build"):
             notes = (p.get("notes") or "").strip()[:300]
             bump = bool(p.get("bump", True))
+            targets = []
+            for x in re.split(r"[\s,;،]+", (p.get("targets") or "").strip()):
+                x = re.sub(r"[^A-Za-z0-9_-]", "", x).upper()
+                if x and x not in targets:
+                    targets.append(x)
             ok, msg = _start("بناء ونشر التحديث" if action == "publish" else "بناء التحديث",
-                             lambda: job_build(notes, bump, action == "publish", c, token))
+                             lambda: job_build(notes, bump, action == "publish", c, token, tuple(targets)))
         else:
             return jsonify(ok=False, message="أمر غير معروف")
         return jsonify(ok=ok, message=msg)
@@ -397,6 +410,8 @@ button.s,a.s{background:#fff;color:#205072;border:1px solid #205072}button:disab
  <div class="m">رقم النسخة الحالي (VERSION): <b>{{ k.version or '—' }}</b></div>
  <div class="row"><input type="text" id="notes" placeholder="وصف قصير للتحديث (يظهر للعميل)" style="width:100%;max-width:560px"></div>
  <div class="row"><label><input type="checkbox" id="bump" checked> ارفع رقم النسخة تلقائيًا (+1)</label></div>
+ <div class="row"><input type="text" id="targets" placeholder="(اختياري) Hardware ID لعميل أو أكثر مفصولة بفاصلة — فاضي = لكل العملاء" style="width:100%;max-width:560px" dir="ltr"></div>
+ <div class="m">لو كتبت Hardware ID: التحديث يروح لهذي الأجهزة فقط ولا يتأثر أي عميل ثاني. (يشتغل مع عملاء عندهم lab_updater.py بهذي النسخة أو أحدث.)</div>
  <div class="row"><button id="pubBtn" onclick="publish('publish')">🚀 ابنِ ووقّع وانشر</button>
    <button class="s" onclick="publish('build')">بناء فقط (أرفعه يدويًا)</button></div>
  <div class="m">التحديث ما يضيف مكتبات بايثون ولا ملفات static (صور/خطوط) — هذي تحتاج Setup جديد.</div>
@@ -408,7 +423,7 @@ function post(u,b){return fetch(u,{method:'POST',headers:{'Content-Type':'applic
 function saveCfg(){post('/designer/publish-update/save',{repo:v('repo'),branch:v('branch'),folder:v('folder')}).then(function(d){alert(d.message);if(d.ok)location.reload();});}
 function v(i){return document.getElementById(i).value;}
 function run(a){post('/designer/publish-update/run',{action:a}).then(function(d){if(!d.ok){alert(d.message);return;}poll(true);});}
-function publish(a){if(a==='publish'&&!confirm('نشر التحديث لكل العملاء؟'))return;post('/designer/publish-update/run',{action:a,notes:v('notes'),bump:document.getElementById('bump').checked}).then(function(d){if(!d.ok){alert(d.message);return;}poll(true);});}
+function publish(a){var tg=v('targets').trim();if(a==='publish'&&!confirm(tg?('نشر التحديث للأجهزة المحددة فقط:\n'+tg):'نشر التحديث لكل العملاء؟'))return;post('/designer/publish-update/run',{action:a,notes:v('notes'),bump:document.getElementById('bump').checked,targets:tg}).then(function(d){if(!d.ok){alert(d.message);return;}poll(true);});}
 var t=null;
 function poll(first){var el=document.getElementById('log');el.style.display='block';clearInterval(t);
  function tick(){fetch('/designer/publish-update/status').then(function(r){return r.json();}).then(function(s){
