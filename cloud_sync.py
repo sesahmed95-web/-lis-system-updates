@@ -230,7 +230,7 @@ def _results_html(cfg, data):
         parts.append(
             f"<h3 style='margin:18px 0 6px;font-size:15px;color:#205072;text-align:center;"
             f"border-bottom:2px solid #205072;padding-bottom:4px;'>{_esc(g)}</h3>"
-            "<table><tr><th>التحليل</th><th>النتيجة</th><th>الوحدة</th><th>المدى الطبيعي</th></tr>"
+            "<table dir='ltr'><tr><th style='text-align:left'>Test Name</th><th>Result</th><th>Unit</th><th>Normal Range</th></tr>"
             + "".join(body) + "</table>")
     waiting = [t["name"] for t in data["tests"] if not _is_ready(cfg, t["status"])]
     if waiting:
@@ -247,14 +247,21 @@ def build_payload(db, visit_id, cfg, token=None):
         return None
     token = token or ensure_token(db, visit_id)
     all_ready = all(_is_ready(cfg, t["status"]) for t in data["tests"])
+    # v65: عرض النتائج المكتملة فورًا والباقي "قيد التحضير" (يُطفأ من الإعداد portal_show_partial=0)
+    any_ready = any(_is_ready(cfg, t["status"]) and any(r.get("result") not in (None, "") for r in t["rows"])
+                    for t in data["tests"])
+    partial = (not all_ready) and any_ready and (database.get_setting(db, "portal_show_partial", "1") != "0")
+    show_ready = all_ready or partial
     # الاسم الظاهر للمريض: كامل كما هو بالبرنامج (راجع README لتقليله إن حبيت)
     payload = {"token": token, "patient_name": data["patient_name"] or "—",
-               "status": "ready" if all_ready else "pending",
+               "status": "ready" if show_ready else "pending",
                # اسم المختبر الظاهر بصفحة المريض = اسم المختبر بإعدادات هذا البرنامج (يختلف لكل عميل)
                "lab_name": (database.get_setting(db, "app_name_ar", "") or database.get_setting(db, "app_name", "")
                             or "")[:120]}
-    if all_ready:
+    if show_ready:
         payload["results_html"] = _results_html(cfg, data)
+        if partial:
+            payload["partial"] = True
     else:
         payload["eta_text"] = _eta_text(cfg, data)
     return payload
@@ -398,7 +405,7 @@ def sync_visit(db, visit_id, cfg=None, force=False):
     if payload is None:
         return False, "لا توجد بيانات للزيارة"
     fp = _fingerprint(payload)
-    want_pdf = bool(payload["status"] == "ready" and cfg.get("pdf_enabled") and _pdf_maker is not None)
+    want_pdf = bool(payload["status"] == "ready" and not payload.get("partial") and cfg.get("pdf_enabled") and _pdf_maker is not None)
     st = db.execute("SELECT * FROM portal_state WHERE visit_id=?", (visit_id,)).fetchone()
     now = datetime.now()
     if st and not force:
@@ -608,7 +615,7 @@ def diagnose(db, visit_id, net=False):
         out.append(("bad", "آخر خطأ مزامنة: " + str(st["last_error"])))
     if st and st["last_status"]:
         if st["last_status"] == "ready":
-            out.append(("ok", "حالة الزيارة بالبوابة: جاهزة — النتائج تظهر للمريض."))
+            out.append(("ok", "حالة الزيارة بالبوابة: جاهزة — النتائج تظهر للمريض (النتائج المكتملة فورًا، والباقي «قيد التحضير»)."))
         else:
             out.append(("warn", "حالة الزيارة بالبوابة: «قيد التحضير» — النتائج لا تظهر إلا بعد اكتمال كل تحاليل الزيارة."))
     sts = db.execute(
@@ -617,7 +624,7 @@ def diagnose(db, visit_id, net=False):
     pend = [r["name"] for r in sts if not _is_ready(cfg, r["status"])]
     if pend:
         need = "Verified (معتمدة)" if cfg["ready_when"] == "verified" else "Completed (مكتملة)"
-        out.append(("warn", f"تحاليل غير {need} بعد: " + "، ".join(pend[:8]) + " — لذلك تبقى الصفحة «قيد التحضير»."))
+        out.append(("warn", f"تحاليل غير {need} بعد: " + "، ".join(pend[:8]) + " — تظهر للمريض «قيد التحضير» إلى أن تكتمل."))
     elif sts:
         out.append(("ok", "كل تحاليل الزيارة مكتملة."))
     return out

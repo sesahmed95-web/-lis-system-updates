@@ -49,6 +49,7 @@
   <a class="pill" href="{{ url_for('half_year_report') }}">📆 الحسابات نصف السنوية</a>
   <a class="pill" href="{{ url_for('annual_report') }}">📊 الحسابات السنوية</a>
   <a class="pill" href="{{ url_for('accounts_search', kind='basic') }}">🔍 بحث وتصدير</a>
+  <a class="pill" href="{{ url_for('lab_expenses_page') }}">💸 صرفيات المختبر</a>
   <a class="pill" href="{{ url_for('test_analysis_report') }}">🔎 تحليل التحاليل</a>
   <a class="pill" href="{{ url_for('dashboard') }}" style="margin-inline-start:auto;">🔙 الرجوع للرئيسية</a>
 </div>
@@ -123,6 +124,7 @@
   <tfoot>
     <tr><td class="footer-label">الإجمالي الكلي (الوارد)</td><td data-col="total">{{ "%.0f"|format(grand_total) }}</td><td class="footer-spacer"></td></tr>
     <tr><td class="footer-label">إجمالي الصرفيات العامة</td><td data-col="general_expenses">{{ "%.0f"|format(grand_general_expenses) }}</td><td class="footer-spacer"></td></tr>
+    <tr><td class="footer-label">صرفيات المختبر العامة (من صفحة المصروفات){% if lab_exp_text %}: {{ lab_exp_text }}{% endif %}</td><td data-col="lab_exp">{{ "%.0f"|format(lab_exp_total) }}</td><td class="footer-spacer"></td></tr>
     <tr><td class="footer-label">إجمالي كلفة الفحوصات المرسلة لمختبرات اخرى</td><td data-col="forwarded">{{ "%.0f"|format(grand_forwarded_total) }}</td><td class="footer-spacer"></td></tr>
     <tr><td class="footer-label">إجمالي أجور دكتور المختبر الفاحص</td><td data-col="examining_doctor">{{ "%.0f"|format(grand_examining_fees) }}</td><td class="footer-spacer"></td></tr>
     <tr><td class="footer-label">صافي الوارد الكلي (بعد خصم الصرفيات العامة وكلفة الإرسال وأجور الفاحص)</td><td data-col="net">{{ "%.0f"|format(grand_net) }}</td><td class="footer-spacer"></td></tr>

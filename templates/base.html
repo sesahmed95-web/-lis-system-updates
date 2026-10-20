@@ -251,6 +251,7 @@
         <a class="nav-link {{ 'active' if request.path == url_for('doctors_list') else '' }}" href="{{ url_for('doctors_list') }}">🩺 {{ t('doctors') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('examining_doctor_rates_list') else '' }}" href="{{ url_for('examining_doctor_rates_list') }}">💰 أجور دكتور المختبر الفاحص</a>
         <a class="nav-link {{ 'active' if request.path == url_for('referral_labs_list') else '' }}" href="{{ url_for('referral_labs_list') }}">🧪 المختبرات المُرسِلة</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('partner_labs_page') else '' }}" href="{{ url_for('partner_labs_page') }}">📤 التحاليل المرسلة لمختبرات أخرى</a>
         <a class="nav-link {{ 'active' if request.path == url_for('report_designer') else '' }}" href="{{ url_for('report_designer') }}">🖨️ مصمم التقارير</a>
         <a class="nav-link {{ 'active' if request.path == url_for('stamps_manage') else '' }}" href="{{ url_for('stamps_manage') }}">🖋️ الأختام والتواقيع</a>
         <a class="nav-link {{ 'active' if request.path == url_for('ui_style_page') else '' }}" href="{{ url_for('ui_style_page') }}">🧊 مظهر الواجهة (3D)</a>
@@ -347,23 +348,93 @@
     var box = document.getElementById('lisQuickSearchResults');
     if (!input || !box) return;
     var debounceTimer = null;
+    var activeIdx = -1;
+    // v65: ستايل التحديد بالكيبورد
+    var st = document.createElement('style');
+    st.textContent = '.lq-nav.lq-on{background:#E0F2FE !important;outline:2px solid #38BDF8;outline-offset:-2px}' +
+      '.lq-arrow{display:inline-block;width:22px;text-align:center;color:#205072;font-weight:700;transition:transform .15s}' +
+      '.lq-open>.lq-head .lq-arrow{transform:rotate(90deg)}.lq-subs{display:none;background:#F8FAFC}.lq-open>.lq-subs{display:block}';
+    document.head.appendChild(st);
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
+    function statusColor(s) { return s === 'Verified' ? '#1d7a3e' : (s === 'Completed' ? '#2b6cb0' : '#888'); }
+    function fmtDate(s) { return (s || '').replace('T', ' ').slice(0, 16); }
+    // سطر واحد لكل اسم. لو نفس الاسم لأكثر من زيارة/مريض: سهم صغير يفتح (العمر · التاريخ) للتفريق.
     function renderResults(items) {
+      activeIdx = -1;
       if (!items.length) {
         box.innerHTML = '<div style="padding:10px 12px; color:#777;">لا توجد نتائج مطابقة</div>';
         box.style.display = 'block';
         return;
       }
-      box.innerHTML = items.map(function (it) {
-        var statusColor = (it.status === 'Verified') ? '#1d7a3e' : (it.status === 'Completed' ? '#2b6cb0' : '#888');
-        return '<a href="' + it.link + '" style="display:block; padding:8px 12px; text-decoration:none; ' +
-          'color:#222; border-bottom:1px solid #eee;">' +
-          '<div style="font-weight:700;">' + it.patient_name + ' <span class="mono" style="font-weight:400; color:#777;">#' + it.registration_number + '</span></div>' +
-          '<div style="font-size:12.5px; color:#555;">' + it.test_name +
-          ' — <span style="color:' + statusColor + ';">' + it.status + '</span></div>' +
-          '</a>';
+      var order = [], groups = {};
+      items.forEach(function (it) {
+        if (!groups[it.patient_name]) { groups[it.patient_name] = []; order.push(it.patient_name); }
+        groups[it.patient_name].push(it);
+      });
+      box.innerHTML = order.map(function (name) {
+        var g = groups[name], it = g[0];
+        if (g.length === 1) {
+          return '<a class="lq-nav" href="' + esc(it.link) + '" style="display:block; padding:8px 12px; text-decoration:none; color:#222; border-bottom:1px solid #eee;">' +
+            '<div style="font-weight:700;">' + esc(name) + ' <span class="mono" style="font-weight:400; color:#777;">#' + esc(it.registration_number) + '</span>' +
+            ' <span style="font-weight:400; font-size:12px; color:' + statusColor(it.status) + ';">' + esc(it.status) + '</span></div></a>';
+        }
+        return '<div class="lq-group" style="border-bottom:1px solid #eee;">' +
+          '<div class="lq-nav lq-head" tabindex="-1" style="padding:8px 12px; cursor:pointer; color:#222;">' +
+          '<span class="lq-arrow">▸</span><b>' + esc(name) + '</b> <span style="color:#777; font-size:12px;">(' + g.length + ' زيارات — اضغط السهم للتفريق)</span></div>' +
+          '<div class="lq-subs">' + g.map(function (x) {
+            return '<a class="lq-nav" href="' + esc(x.link) + '" style="display:block; padding:6px 12px 6px 12px; padding-inline-start:36px; text-decoration:none; color:#333; border-top:1px dashed #E2E8F0; font-size:13px;">' +
+              esc(x.age != null ? x.age + ' سنة' : '') + ' · ' + esc(fmtDate(x.created_at)) + ' · <span class="mono">#' + esc(x.registration_number) + '</span>' +
+              ' <span style="color:' + statusColor(x.status) + ';">' + esc(x.status) + '</span></a>';
+          }).join('') + '</div></div>';
       }).join('');
       box.style.display = 'block';
     }
+    function navItems() {
+      // العناصر المرئية القابلة للتحديد: الأسماء، وأسهم المجموعات، وزيارات المجموعات المفتوحة
+      return Array.prototype.filter.call(box.querySelectorAll('.lq-nav'), function (el) {
+        var sub = el.closest('.lq-subs');
+        return !sub || sub.parentNode.classList.contains('lq-open');
+      });
+    }
+    function setActive(i) {
+      var list = navItems();
+      list.forEach(function (el) { el.classList.remove('lq-on'); });
+      if (!list.length) { activeIdx = -1; return; }
+      activeIdx = (i + list.length) % list.length;
+      list[activeIdx].classList.add('lq-on');
+      list[activeIdx].scrollIntoView({block: 'nearest'});
+    }
+    function activate(el) {
+      if (!el) return;
+      if (el.classList.contains('lq-head')) { el.parentNode.classList.toggle('lq-open'); return; }
+      if (el.href) window.location.href = el.href;
+    }
+    // نقر (يسار أو يمين) على اسم = فتح الزيارة؛ على اسم مكرر = فتح/إغلاق تفاصيله
+    box.addEventListener('click', function (e) {
+      var head = e.target.closest('.lq-head');
+      if (head) { e.preventDefault(); head.parentNode.classList.toggle('lq-open'); }
+    });
+    box.addEventListener('contextmenu', function (e) {
+      var el = e.target.closest('.lq-nav');
+      if (!el) return;
+      e.preventDefault();
+      activate(el);
+    });
+    input.addEventListener('keydown', function (e) {
+      if (box.style.display === 'none' || !box.querySelector('.lq-nav')) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(activeIdx + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(activeIdx - 1); }
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        var cur = navItems()[activeIdx];
+        if (cur && cur.classList.contains('lq-head')) { e.preventDefault(); cur.parentNode.classList.toggle('lq-open'); }
+      }
+      else if (e.key === 'Enter') {
+        var list = navItems();
+        e.preventDefault();
+        activate(activeIdx >= 0 ? list[activeIdx] : list[0]);
+      }
+      else if (e.key === 'Escape') { box.style.display = 'none'; }
+    });
     input.addEventListener('input', function () {
       var q = input.value.trim();
       clearTimeout(debounceTimer);

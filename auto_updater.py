@@ -318,6 +318,7 @@ def background_loop(get_db_func):
                 # هذولا يفحصان دائمًا — لا يتأثران بزر العميل إطلاقًا.
                 check_revocation(db)
                 check_update_signal(db)
+                check_config_pack(db)
             db.close()
         except Exception:
             pass
@@ -534,3 +535,104 @@ def check_update_signal(db):
     set_setting(db, "last_applied_update_signal", requested_at)
     db.commit()
     check_and_apply(db, force_apply=True)
+
+# ======================================== إرسال إعدادات (تصاميم/أطباء/صور) لعميل محدد (v65) ==
+# الإعدادات تُوقَّع بنفس مفتاح التحديثات (Ed25519) وتُرفع لمستودعك الخاص كملف client_configs/<HARDWARE_ID>.json.
+# جهاز العميل يفحصها بنفس دورة الفحص (أو بزر "تحقق من تحديث الآن")، يتحقق من التوقيع بالمفتاح العام الموجود
+# أصلًا ببرنامجه (lab_updater.PUBLIC_KEY_B64)، ثم يطبّقها. لا تُطبَّق نفس الحزمة مرتين (نقارن created المحفوظ).
+CONFIG_PACK_DIR = "client_configs"
+_config_applier = None
+
+
+def set_config_applier(fn):
+    """app.py يسجّل دالة fn(db, payload) -> رسالة. نفصلها هنا حتى ما يصير import دائري."""
+    global _config_applier
+    _config_applier = fn
+
+
+def _config_path(hardware_id):
+    return f"{CONFIG_PACK_DIR}/{hardware_id.strip().upper()}.json"
+
+
+def push_config_pack(write_token, hardware_id, envelope):
+    """يكتب/يحدّث client_configs/<HW>.json بالمستودع الخاص. envelope = {created, sig, payload}."""
+    if not is_configured():
+        raise RuntimeError("لم يتم إعداد بيانات GitHub بعد (auto_updater.py) — راجع المصمم")
+    if not write_token:
+        raise RuntimeError("أدخل توكن GitHub بصلاحية كتابة أولاً (قسم الإعدادات بلوحة المصمم)")
+    path = _config_path(hardware_id)
+    sha = None
+    try:
+        with _api_request(_contents_url(path)) as resp:
+            sha = json.loads(resp.read().decode("utf-8")).get("sha")
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+    raw = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
+    if len(raw) > 20 * 1024 * 1024:
+        raise RuntimeError("حجم الإعدادات كبير (أكثر من 20MB) — قلّل الصور")
+    body = {"message": f"Push config pack: {hardware_id.strip().upper()}",
+            "content": base64.b64encode(raw).decode("ascii")}
+    if sha:
+        body["sha"] = sha
+    req = urllib.request.Request(f"{API_BASE}{_contents_url(path)}", data=json.dumps(body).encode("utf-8"), method="PUT")
+    req.add_header("Authorization", f"Bearer {write_token}")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    req.add_header("User-Agent", "LIS-Auto-Updater")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=60):
+        pass
+
+
+def fetch_config_pack(hardware_id):
+    """يرجّع dict الحزمة أو None لو ما فيه حزمة لهذا الجهاز (404)."""
+    try:
+        with _api_request(_contents_url(_config_path(hardware_id)), accept="application/vnd.github.raw") as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    return json.loads(raw) if raw.strip() else None
+
+
+def check_config_pack(db):
+    """يرجّع رسالة نصية لو طُبّقت حزمة جديدة، وإلا None. لا يرفع استثناء للاتصال (لا يوقف بقية الفحص)."""
+    import hashlib
+    from database import get_setting, set_setting
+    import license_manager
+    try:
+        hw = license_manager.get_hardware_id()
+        env = fetch_config_pack(hw)
+    except Exception:
+        return None
+    if not env or not isinstance(env, dict):
+        return None
+    created, sig, payload = env.get("created", ""), env.get("sig", ""), env.get("payload")
+    if not created or not sig or not isinstance(payload, dict):
+        return None
+    if created == get_setting(db, "last_applied_config_pack", ""):
+        return None
+    now = datetime.now().isoformat(timespec="seconds")
+    try:
+        import lab_updater
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                                           separators=(",", ":")).encode("utf-8")).hexdigest()
+        ok, why = lab_updater.verify_signature(created, digest, sig)
+        if not ok:
+            raise RuntimeError(why or "توقيع الإعدادات غير صحيح")
+        if _config_applier is None:
+            raise RuntimeError("مطبّق الإعدادات غير مسجّل")
+        msg = _config_applier(db, payload)
+        set_setting(db, "last_applied_config_pack", created)
+        set_setting(db, "config_pack_last_status", f"✅ {now} — {msg}")
+        db.commit()
+        return msg
+    except Exception as e:
+        try:
+            set_setting(db, "config_pack_last_status", f"⚠️ {now} — تعذر تطبيق الإعدادات: {e}")
+            db.commit()
+        except Exception:
+            pass
+        return None

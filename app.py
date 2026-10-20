@@ -23,6 +23,7 @@ import sqlite3
 from markupsafe import escape as html_escape
 import tempfile
 import zipfile
+import base64
 import threading
 import time
 
@@ -2442,6 +2443,12 @@ def designer_update_check_now():
         result = auto_updater.check_and_apply(db, force_apply=True)
         auto_updater.check_revocation(db)
         auto_updater.check_update_signal(db)
+        try:
+            _cm = auto_updater.check_config_pack(db)
+            if _cm:
+                flash(_cm)
+        except Exception:
+            pass
         flash(result["message"])
     db.close()
     return redirect(url_for("designer_panel"))
@@ -2856,6 +2863,8 @@ def new_visit():
             )
             total += price or 0
 
+        _apply_partner_forward(db, order_id, request.form.get("forward_lab_id"))
+
         # أجرة الزيارة المنزلية الإضافية (إن فُعِّلت) تُضاف لمجموع الفحوصات
         # قبل حساب الفاتورة، بنفس أسلوب أي بند إضافي بالمجموع.
         total += home_visit_fee
@@ -2983,7 +2992,8 @@ def new_visit():
         "SELECT * FROM referral_centers WHERE name != 'Walk-in' ORDER BY name"
     ).fetchall()
     picker = build_test_picker_context(db, tests, referral_labs)
-    return render_template("front_desk/new_visit.html", tests=tests, quick_items=quick_items,
+    partner_labs, partner_prices = _partner_context(db)
+    return render_template("front_desk/new_visit.html", partner_labs=partner_labs, partner_prices=partner_prices, tests=tests, quick_items=quick_items,
                             section_tree=picker["section_tree"], test_meta=picker["test_meta"],
                             lab_prices=picker["lab_prices"], lab_name_to_id=picker["lab_name_to_id"],
                             examining_doctors=get_examining_doctors(db), doctors=doctors,
@@ -3296,6 +3306,125 @@ def api_visit_add_tests(visit_id):
     log_action("AddTestsToVisit", "visit", visit_id, ", ".join(a["name"] for a in added))
     return jsonify({"ok": True, "registration_number": reg, "added": added, "added_total": added_total,
                     "total": new_total, "paid": new_paid, "remaining": max(0.0, new_total - new_paid)})
+
+
+
+# ============== التحاليل المرسلة لمختبرات أخرى (v65) ==============
+def _ensure_partner_labs(db):
+    db.execute("CREATE TABLE IF NOT EXISTS partner_labs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, "
+               "is_active INTEGER DEFAULT 1)")
+    db.execute("CREATE TABLE IF NOT EXISTS partner_lab_prices (id INTEGER PRIMARY KEY AUTOINCREMENT, lab_id INTEGER NOT NULL, "
+               "test_definition_id INTEGER NOT NULL, cost REAL NOT NULL DEFAULT 0, UNIQUE(lab_id, test_definition_id))")
+
+
+def _partner_context(db):
+    """(المختبرات الفعّالة, {labId: {testId: كلفة}}) لشاشة زيارة جديدة."""
+    _ensure_partner_labs(db)
+    labs = db.execute("SELECT id, name FROM partner_labs WHERE is_active=1 ORDER BY name").fetchall()
+    prices = {}
+    for r in db.execute("SELECT lab_id, test_definition_id, cost FROM partner_lab_prices").fetchall():
+        prices.setdefault(str(r["lab_id"]), {})[str(r["test_definition_id"])] = r["cost"]
+    return labs, prices
+
+
+def _apply_partner_forward(db, order_id, lab_id_raw):
+    """بعد إنشاء تحاليل الزيارة: التحاليل اللي لها كلفة عند المختبر المختار تُعلَّم «مرسلة» (forwarded_lab_name/cost)
+    فتنخصم تلقائيًا بالتقارير. الباقي يبقى بمختبرك."""
+    lab_id_raw = (lab_id_raw or "").strip()
+    if not lab_id_raw.isdigit():
+        return 0
+    _ensure_partner_labs(db)
+    lab = db.execute("SELECT id, name FROM partner_labs WHERE id=?", (int(lab_id_raw),)).fetchone()
+    if not lab:
+        return 0
+    rows = db.execute(
+        "SELECT ot.id AS ot_id, pp.cost FROM order_tests ot JOIN partner_lab_prices pp "
+        "ON pp.test_definition_id = ot.test_definition_id AND pp.lab_id = ? WHERE ot.order_id = ?",
+        (lab["id"], order_id)).fetchall()
+    for r in rows:
+        db.execute("UPDATE order_tests SET forwarded_lab_name=?, forwarded_cost=? WHERE id=?",
+                   (lab["name"], r["cost"] or 0, r["ot_id"]))
+    return len(rows)
+
+
+@app.route("/management/partner-labs", methods=["GET", "POST"])
+@roles_required("supervisor")
+def partner_labs_page():
+    """إعدادات «التحاليل المرسلة لمختبرات أخرى»: المختبرات الشريكة + التحاليل اللي ممكن ترسلها لكل مختبر + كلفة كل تحليل عندهم."""
+    db = get_db()
+    _ensure_partner_labs(db)
+    if request.method == "POST":
+        act = request.form.get("act")
+        if act == "add_lab":
+            nm = (request.form.get("name") or "").strip()
+            if nm:
+                try:
+                    db.execute("INSERT INTO partner_labs (name) VALUES (?)", (nm,))
+                    db.commit()
+                    flash("تمت إضافة المختبر.")
+                except Exception:
+                    flash("هذا المختبر موجود مسبقًا.")
+        elif act == "delete_lab":
+            lid = request.form.get("lab_id")
+            db.execute("DELETE FROM partner_lab_prices WHERE lab_id=?", (lid,))
+            db.execute("DELETE FROM partner_labs WHERE id=?", (lid,))
+            db.commit()
+            flash("تم حذف المختبر (التحاليل المرسلة سابقًا تبقى مسجّلة بزياراتها).")
+        elif act == "save_price":
+            q = (request.form.get("test") or "").strip().lower()
+            try:
+                cost = float((request.form.get("cost") or "0").replace(",", ""))
+            except ValueError:
+                cost = 0
+            td = db.execute("SELECT id FROM test_definitions WHERE LOWER(code)=? OR LOWER(name)=? OR LOWER(COALESCE(short_name,''))=? LIMIT 1",
+                            (q, q, q)).fetchone()
+            if not td:
+                flash("ما لقيت هذا التحليل — اكتب رمزه أو اسمه كما بالكتالوج.")
+            else:
+                db.execute("INSERT INTO partner_lab_prices (lab_id, test_definition_id, cost) VALUES (?,?,?) "
+                           "ON CONFLICT(lab_id, test_definition_id) DO UPDATE SET cost=excluded.cost",
+                           (request.form.get("lab_id"), td["id"], cost))
+                db.commit()
+                flash("تم حفظ الكلفة.")
+        elif act == "delete_price":
+            db.execute("DELETE FROM partner_lab_prices WHERE id=?", (request.form.get("id"),))
+            db.commit()
+        return redirect(url_for("partner_labs_page"))
+    labs = db.execute("SELECT id, name FROM partner_labs ORDER BY name").fetchall()
+    prices = {}
+    for r in db.execute("SELECT pp.id, pp.lab_id, pp.cost, td.name AS tname, td.code AS tcode FROM partner_lab_prices pp "
+                        "JOIN test_definitions td ON td.id = pp.test_definition_id ORDER BY td.name").fetchall():
+        prices.setdefault(r["lab_id"], []).append(r)
+    tests = db.execute("SELECT code, name FROM test_definitions WHERE is_active=1 ORDER BY name").fetchall()
+    from flask import render_template_string
+    return render_template_string(
+        "{% extends 'base.html' %}{% block page_title %}التحاليل المرسلة لمختبرات أخرى{% endblock %}{% block content %}"
+        "<style>.pl-t{width:100%;border-collapse:collapse}.pl-t th,.pl-t td{border:1px solid #E2E8F0;padding:6px 9px;font-size:13px;text-align:right}"
+        ".pl-t th{background:#205072;color:#fff}.pl-lab{border:1px solid #CBD5E1;border-radius:10px;padding:12px;margin:12px 0;background:#fff}</style>"
+        "<div class='card'><h3 style='margin:0 0 6px'>📤 التحاليل المرسلة لمختبرات أخرى</h3>"
+        "<p style='color:#475569;font-size:13px'>سجّل المختبرات اللي ترسل لها تحاليل مو متوفرة عندك، وكلفة كل تحليل عند كل مختبر. "
+        "بشاشة «زيارة جديدة» تختار المختبر فتُعلَّم تلقائيًا التحاليل المسجّلة هنا، وتُخصم كلفتها من حسابات اليوم والتقارير "
+        "(عمود «الفحوصات المرسلة لمختبرات أخرى»). سعر المريض يبقى حسب قائمة أسعارك العادية.</p>"
+        "<form method='post' style='display:flex;gap:8px;margin-bottom:8px'><input type='hidden' name='act' value='add_lab'>"
+        "<input type='text' name='name' placeholder='اسم المختبر (مثال: مختبر القمة)' required style='padding:8px 10px;min-width:260px'>"
+        "<button class='btn'>➕ إضافة مختبر</button></form>"
+        "<datalist id='plTests'>{% for t in tests %}<option value='{{ t.code }}'>{{ t.name }}</option>{% endfor %}</datalist>"
+        "{% for lab in labs %}<div class='pl-lab'><div style='display:flex;justify-content:space-between;align-items:center'>"
+        "<b style='font-size:15px'>🧪 {{ lab.name }}</b>"
+        "<form method='post' onsubmit=\"return confirm('حذف هذا المختبر وأسعاره؟')\"><input type='hidden' name='act' value='delete_lab'>"
+        "<input type='hidden' name='lab_id' value='{{ lab.id }}'><button class='btn small secondary'>🗑 حذف المختبر</button></form></div>"
+        "<table class='pl-t' style='margin-top:8px'><thead><tr><th>التحليل</th><th>الرمز</th><th>الكلفة عندهم</th><th></th></tr></thead><tbody>"
+        "{% for p in prices.get(lab.id, []) %}<tr><td>{{ p.tname }}</td><td>{{ p.tcode }}</td><td>{{ '%.0f'|format(p.cost) }}</td>"
+        "<td><form method='post'><input type='hidden' name='act' value='delete_price'><input type='hidden' name='id' value='{{ p.id }}'>"
+        "<button class='btn small secondary'>🗑</button></form></td></tr>"
+        "{% else %}<tr><td colspan='4' style='color:#64748B;text-align:center'>ما أُضيف أي تحليل لهذا المختبر بعد.</td></tr>{% endfor %}</tbody></table>"
+        "<form method='post' style='display:flex;gap:8px;margin-top:8px;flex-wrap:wrap'><input type='hidden' name='act' value='save_price'>"
+        "<input type='hidden' name='lab_id' value='{{ lab.id }}'>"
+        "<input type='text' name='test' list='plTests' placeholder='رمز أو اسم التحليل' required style='padding:7px 9px;min-width:200px'>"
+        "<input type='number' name='cost' min='0' step='any' placeholder='الكلفة' required style='padding:7px 9px;width:130px'>"
+        "<button class='btn small'>حفظ / تحديث الكلفة</button></form></div>"
+        "{% else %}<p class='muted'>لا يوجد مختبرات بعد.</p>{% endfor %}</div>{% endblock %}",
+        labs=labs, prices=prices, tests=tests)
 
 
 @app.route("/master/lab-prices", methods=["GET", "POST"])
@@ -3677,14 +3806,18 @@ def api_dashboard_search():
 @app.route("/api/results/quick-search")
 @login_required
 def api_results_quick_search():
+    """v65: سطر واحد لكل زيارة (قبل: سطر لكل تحليل فيتكرر اسم المريض). لو نفس الاسم لأكثر من مريض/زيارة
+    يظهر مع كل واحد (العمر · تاريخ الزيارة) حتى يتفرقون."""
     q = (request.args.get("q") or "").strip()
     if len(q) < 2:
         return jsonify({"items": []})
     db = get_db()
     _seq_q = _visit_seq_clause(q)
     rows = db.execute(
-        "SELECT ot.id as order_test_id, ot.status, ot.barcode, td.name as test_name, "
-        "p.full_name as patient_name, v.id as visit_id, v.registration_number "
+        "SELECT v.id AS visit_id, v.registration_number, v.created_at, p.full_name AS patient_name, p.age, p.age_unit, "
+        "MIN(ot.id) AS order_test_id, MAX(ot.barcode) AS barcode, COUNT(ot.id) AS n_tests, "
+        "SUM(CASE WHEN ot.status IN ('Completed','Verified') THEN 1 ELSE 0 END) AS n_done, "
+        "GROUP_CONCAT(COALESCE(NULLIF(td.short_name,''), td.name), ', ') AS tests "
         "FROM order_tests ot "
         "JOIN test_definitions td ON td.id = ot.test_definition_id "
         "JOIN orders o ON o.id = ot.order_id "
@@ -3692,18 +3825,27 @@ def api_results_quick_search():
         "JOIN patients p ON p.id = v.patient_id "
         "WHERE p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR ot.barcode LIKE ? "
         + (" OR " + _seq_q[0] if _seq_q else "") +
-        " ORDER BY ot.id DESC LIMIT 20",
+        " GROUP BY v.id ORDER BY v.id DESC LIMIT 15",
         (f"%{q}%", _scan_like(q), f"%{q}%") + tuple(_seq_q[1] if _seq_q else ()),
     ).fetchall()
     use_front_desk = session.get("interface") in (None, "reception", "both")
+    name_count = {}
+    for r in rows:
+        name_count[r["patient_name"]] = name_count.get(r["patient_name"], 0) + 1
     items = []
     for r in rows:
         link = (url_for("visit_results_entry", visit_id=r["visit_id"]) if use_front_desk
                 else url_for("result_entry", order_test_id=r["order_test_id"]))
+        label = f"{r['n_tests']} تحاليل"
+        if name_count.get(r["patient_name"], 0) > 1:
+            # تشابه أسماء: نضيف العمر وتاريخ الزيارة للتفريق
+            label = f"{r['age'] or '?'} {r['age_unit'] or ''} · {(r['created_at'] or '')[:16].replace('T', ' ')} — " + label
         items.append({
-            "test_name": r["test_name"], "patient_name": r["patient_name"],
-            "registration_number": r["registration_number"], "status": r["status"],
-            "barcode": r["barcode"], "link": link,
+            "test_name": label, "patient_name": r["patient_name"],
+            "registration_number": r["registration_number"],
+            "status": "Completed" if r["n_done"] == r["n_tests"] else f"{r['n_done']}/{r['n_tests']}",
+            "barcode": r["barcode"], "link": link, "tests": r["tests"],
+            "age": r["age"], "created_at": r["created_at"], "same_name": name_count.get(r["patient_name"], 0) > 1,
         })
     return jsonify({"items": items})
 
@@ -4195,6 +4337,54 @@ def global_result_search():
             (f"%{q}%", _scan_like(q), f"%{q}%"),
         ).fetchall()
     return render_template("search_results.html", q=q, rows=rows)
+
+
+
+@app.route("/front-desk/barcodes")
+@login_required
+def barcodes_search():
+    """v65: ابحث عن أي مريض/زيارة (اسم، رقم تسجيل، هاتف، باركود) واطبع باركوداته بأي وقت —
+    حتى لو النتيجة غير مكتملة: باركود الأنابيب، باركود الزيارة، QR البوابة، ملصق الطلب."""
+    db = get_db()
+    q = (request.args.get("q") or "").strip()
+    if q:
+        like = f"%{q}%"
+        rows = db.execute(
+            "SELECT DISTINCT v.id AS visit_id, v.registration_number AS reg, v.created_at, p.full_name, p.phone, "
+            "(SELECT COUNT(*) FROM order_tests ot2 JOIN orders o2 ON o2.id=ot2.order_id WHERE o2.visit_id=v.id) AS n_tests, "
+            "(SELECT COUNT(*) FROM order_tests ot3 JOIN orders o3 ON o3.id=ot3.order_id WHERE o3.visit_id=v.id "
+            " AND ot3.status IN ('Completed','Verified')) AS n_done "
+            "FROM visits v JOIN patients p ON p.id=v.patient_id "
+            "LEFT JOIN orders o ON o.visit_id=v.id LEFT JOIN order_tests ot ON ot.order_id=o.id "
+            "WHERE p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR p.phone LIKE ? OR ot.barcode LIKE ? "
+            "ORDER BY v.id DESC LIMIT 60", (like, _scan_like(q), like, like)).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT v.id AS visit_id, v.registration_number AS reg, v.created_at, p.full_name, p.phone, "
+            "(SELECT COUNT(*) FROM order_tests ot2 JOIN orders o2 ON o2.id=ot2.order_id WHERE o2.visit_id=v.id) AS n_tests, "
+            "(SELECT COUNT(*) FROM order_tests ot3 JOIN orders o3 ON o3.id=ot3.order_id WHERE o3.visit_id=v.id "
+            " AND ot3.status IN ('Completed','Verified')) AS n_done "
+            "FROM visits v JOIN patients p ON p.id=v.patient_id ORDER BY v.id DESC LIMIT 30").fetchall()
+    from flask import render_template_string
+    return render_template_string(
+        "{% extends 'base.html' %}{% block page_title %}باركودات المرضى{% endblock %}{% block content %}"
+        "<style>.bc-t{width:100%;border-collapse:collapse}.bc-t th,.bc-t td{border:1px solid #E2E8F0;padding:7px 9px;font-size:13px;text-align:right}"
+        ".bc-t th{background:#205072;color:#fff}.bc-b{display:inline-block;margin:2px;padding:5px 9px;border:1px solid #205072;border-radius:7px;"
+        "text-decoration:none;color:#205072;font-size:12px;background:#fff}.bc-b:hover{background:#205072;color:#fff}</style>"
+        "<div class='card'><h3 style='margin:0 0 8px'>🏷 بحث وطباعة باركودات (حتى لو النتيجة غير مكتملة)</h3>"
+        "<form method='get' style='display:flex;gap:8px;margin-bottom:10px'>"
+        "<input type='text' name='q' value='{{ q }}' placeholder='اسم المريض / رقم التسجيل / الهاتف / الباركود' style='flex:1;padding:9px 12px;font-size:15px' autofocus>"
+        "<button class='btn' type='submit'>بحث</button></form>"
+        "<table class='bc-t'><thead><tr><th>المريض</th><th>رقم التسجيل</th><th>التاريخ</th><th>التحاليل</th><th>طباعة باركود</th></tr></thead><tbody>"
+        "{% for r in rows %}<tr><td><a href='/front-desk/visits/{{ r.visit_id }}/results'><b>{{ r.full_name }}</b></a></td>"
+        "<td>{{ r.reg }}</td><td>{{ (r.created_at or '')[:16] }}</td><td>{{ r.n_done }} / {{ r.n_tests }} مكتمل</td><td>"
+        "<a class='bc-b' target='_blank' href='{{ url_for(\"print_sample_barcodes\", visit_id=r.visit_id) }}'>🧪 أنابيب</a>"
+        "<a class='bc-b' target='_blank' href='{{ url_for(\"print_visit_portal_qr\", visit_id=r.visit_id) }}'>📱 باركود البوابة (QR)</a>"
+        "<a class='bc-b' target='_blank' href='{{ url_for(\"print_visit_barcode\", visit_id=r.visit_id) }}'>🏷 باركود الزيارة</a>"
+        "<a class='bc-b' target='_blank' href='{{ url_for(\"print_request_label\", visit_id=r.visit_id) }}'>📄 ريكويست</a>"
+        "<a class='bc-b' target='_blank' href='{{ url_for(\"labels_center\", visit_id=r.visit_id) }}'>⚙ كل الملصقات</a>"
+        "</td></tr>{% else %}<tr><td colspan='5' style='text-align:center;padding:24px;color:#64748B'>لا توجد نتائج.</td></tr>{% endfor %}"
+        "</tbody></table></div>{% endblock %}", rows=rows, q=q)
 
 
 @app.route("/front-desk/followups")
@@ -5879,7 +6069,7 @@ def print_sample_barcodes(visit_id):
     # تشترك بباركود واحد؛ تحليل بدون قسم يُجمَّع حسب نوع العينة، وبدونهما
     # يبقى ملصقه الفردي. لإرجاع التجميع القديم (حسب نوع العينة فقط):
     # الرابط ?group=sample_type أو إعداد barcode_group_mode = sample_type.
-    group_mode = (request.args.get("group") or get_setting(db, "barcode_group_mode", "department") or "department").strip()
+    group_mode = (request.args.get("group") or get_setting(db, "barcode_group_mode", "sample_type") or "sample_type").strip()
     # أسماء التحاليل المطبوعة على الملصق: لو التحليل مطلوب جزئيًا (مثلاً PT و PTT
     # من Coagulation) تُطبع أسماء البارامترات المختارة نفسها بدل اسم التحليل
     # الكامل، بدون بارامترات الـControl ولا INR (تُضاف تلقائيًا مع PT).
@@ -6435,6 +6625,18 @@ def period_breakdown(db, group_len, base_where, base_params):
         forwarded_here = forwarded_by_period.get(r["period"], 0)
         data[r["period"]]["expenses"] = r["other_expenses"] + r["examining_fees"] + forwarded_here
         data[r["period"]]["examining_fees"] = r["examining_fees"]
+    # v65: صرفيات المختبر العامة (صفحة المصروفات) تُضاف لنفس عمود الصرفيات
+    try:
+        _ensure_lab_expenses_table(db)
+        _lab = db.execute(
+            f"SELECT substr(e.expense_date,1,{group_len}) AS period, COALESCE(SUM(e.amount),0) AS amt "
+            f"FROM lab_expenses e WHERE {base_where.replace('v.created_at', 'e.expense_date')} GROUP BY period", base_params).fetchall()
+    except Exception:
+        _lab = []
+    for r in _lab:
+        data.setdefault(r["period"], {"period": r["period"], "revenue": 0.0, "visits_count": 0,
+                                       "expenses": 0.0, "examining_fees": 0.0})
+        data[r["period"]]["expenses"] += float(r["amt"] or 0)
     rows = sorted(data.values(), key=lambda x: x["period"])
     for r in rows:
         r["net"] = r["revenue"] - r["expenses"]
@@ -6666,12 +6868,113 @@ def daily_report():
         })
 
     grand_total_expenses = grand_expenses + grand_examining_fees
+    try:
+        _ensure_lab_expenses_table(db)
+        lab_exp_rows = db.execute("SELECT kind, amount, note FROM lab_expenses WHERE expense_date=? ORDER BY id", (report_date,)).fetchall()
+    except Exception:
+        lab_exp_rows = []
+    lab_exp_total = sum(r["amount"] or 0 for r in lab_exp_rows)
+    lab_exp_text = "، ".join(f"{r['kind']} ({r['amount']:.0f})" for r in lab_exp_rows)
     return render_template("front_desk/daily_report.html", rows=rows, report_date=report_date,
+                            lab_exp_total=lab_exp_total, lab_exp_text=lab_exp_text,
                             grand_total=grand_total, grand_expenses=grand_total_expenses,
                             grand_expenses_only=grand_expenses, grand_examining_fees=grand_examining_fees,
                             grand_general_expenses=grand_general_expenses,
                             grand_forwarded_total=grand_forwarded_total,
-                            grand_net=grand_total - grand_total_expenses, grand_remaining=grand_remaining)
+                            grand_net=grand_total - grand_total_expenses - lab_exp_total, grand_remaining=grand_remaining)
+
+
+
+def _ensure_lab_expenses_table(db):
+    db.execute("CREATE TABLE IF NOT EXISTS lab_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, expense_date TEXT NOT NULL, "
+               "kind TEXT NOT NULL, amount REAL NOT NULL DEFAULT 0, note TEXT, created_at TEXT, created_by INTEGER)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_lab_expenses_date ON lab_expenses(expense_date)")
+
+
+@app.route("/accounts/expenses", methods=["GET", "POST"])
+@login_required
+def lab_expenses_page():
+    """v65: صرفيات المختبر العامة (مو مرتبطة بمريض): تاريخ + نوع الصرف + مبلغ. تُخصم من الإيراد بالتقارير اليومية/الشهرية/الربعية/النصف سنوية/السنوية."""
+    db = get_db()
+    _ensure_lab_expenses_table(db)
+    if request.method == "POST":
+        act = request.form.get("act") or "add"
+        if act == "delete":
+            db.execute("DELETE FROM lab_expenses WHERE id=?", (request.form.get("id"),))
+            db.commit()
+            flash("تم حذف الصرف.")
+        else:
+            kind = (request.form.get("kind") or "").strip()
+            try:
+                amount = float((request.form.get("amount") or "0").replace(",", ""))
+            except ValueError:
+                amount = 0
+            d = (request.form.get("date") or date.today().isoformat())[:10]
+            if kind and amount > 0:
+                db.execute("INSERT INTO lab_expenses (expense_date, kind, amount, note, created_at, created_by) VALUES (?,?,?,?,?,?)",
+                           (d, kind, amount, (request.form.get("note") or "").strip(),
+                            datetime.now().isoformat(timespec="seconds"), session.get("user_id")))
+                db.commit()
+                log_action("AddLabExpense", "lab_expenses", 0, f"{kind}:{amount}")
+                flash("تمت إضافة الصرف.")
+            else:
+                flash("اكتب نوع الصرف ومبلغًا أكبر من صفر.")
+        return redirect(url_for("lab_expenses_page", period=request.args.get("period") or "month", d=d if act != "delete" else request.args.get("d", "")))
+    today = date.today()
+    period = request.args.get("period") or "month"
+    base = (request.args.get("d") or today.isoformat())[:10]
+    y, m = base[:4], base[5:7] or "01"
+    if period == "day":
+        where, params, title = "expense_date=?", (base,), f"يوم {base}"
+    elif period == "half":
+        h2 = int(m or 1) > 6
+        lo, hi = (f"{y}-07-01", f"{y}-12-31") if h2 else (f"{y}-01-01", f"{y}-06-30")
+        where, params, title = "expense_date BETWEEN ? AND ?", (lo, hi), f"{y} — {'النصف الثاني' if h2 else 'النصف الأول'}"
+    elif period == "year":
+        where, params, title = "substr(expense_date,1,4)=?", (y,), f"سنة {y}"
+    else:
+        period = "month"
+        where, params, title = "substr(expense_date,1,7)=?", (f"{y}-{m}",), f"شهر {y}-{m}"
+    rows = db.execute("SELECT * FROM lab_expenses WHERE " + where + " ORDER BY expense_date DESC, id DESC", params).fetchall()
+    total = sum(r["amount"] or 0 for r in rows)
+    by_kind = {}
+    for r in rows:
+        by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + (r["amount"] or 0)
+    kinds = [r["kind"] for r in db.execute("SELECT kind, COUNT(*) c FROM lab_expenses GROUP BY kind ORDER BY c DESC LIMIT 40")]
+    from flask import render_template_string
+    return render_template_string(
+        "{% extends 'base.html' %}{% block page_title %}صرفيات المختبر{% endblock %}{% block content %}"
+        "<style>.ex-t{width:100%;border-collapse:collapse}.ex-t th,.ex-t td{border:1px solid #E2E8F0;padding:7px 9px;font-size:13px;text-align:right}"
+        ".ex-t th{background:#205072;color:#fff}.ex-q a{text-decoration:none;background:#F3F6F8;color:#205072;padding:5px 11px;border-radius:6px;"
+        "border:1px solid #E2E8F0;font-size:12px;margin-inline-end:4px}.ex-q a.on{background:#205072;color:#fff}"
+        ".ex-f{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin:10px 0}.ex-f label{display:flex;flex-direction:column;font-size:12px;gap:3px}"
+        ".ex-f input{padding:7px 9px}@media print{.no-print{display:none}}</style>"
+        "<div class='card'><h3 style='margin:0 0 8px'>💸 صرفيات المختبر العامة</h3>"
+        "<div class='ex-q no-print'>"
+        "{% for k,l in [('day','يومي'),('month','شهري'),('half','نصف سنوي'),('year','سنوي')] %}"
+        "<a class='{{ 'on' if period==k }}' href='?period={{ k }}&d={{ base }}'>{{ l }}</a>{% endfor %}"
+        "<form method='get' style='display:inline'><input type='hidden' name='period' value='{{ period }}'>"
+        "<input type='date' name='d' value='{{ base }}' onchange='this.form.submit()'></form>"
+        "<button class='btn small secondary' onclick='window.print()' type='button'>🖨 طباعة</button></div>"
+        "<form method='post' class='ex-f no-print'>"
+        "<label>التاريخ<input type='date' name='date' value='{{ today }}'></label>"
+        "<label>نوع الصرف<input type='text' name='kind' list='exKinds' placeholder='مثال: شراء منظفات' required></label>"
+        "<datalist id='exKinds'>{% for k in kinds %}<option value='{{ k }}'>{% endfor %}</datalist>"
+        "<label>المبلغ<input type='number' name='amount' min='0' step='any' required style='width:130px'></label>"
+        "<label>ملاحظة (اختياري)<input type='text' name='note'></label>"
+        "<button class='btn' type='submit'>➕ إضافة</button></form>"
+        "<h4 style='margin:10px 0 4px'>{{ title }} — الإجمالي: <b>{{ '%.0f'|format(total) }}</b></h4>"
+        "{% if by_kind %}<p style='font-size:13px;color:#475569'>حسب النوع: "
+        "{% for k,v in by_kind.items() %}{{ k }} ({{ '%.0f'|format(v) }}){{ '، ' if not loop.last }}{% endfor %}</p>{% endif %}"
+        "<table class='ex-t'><thead><tr><th>التاريخ</th><th>نوع الصرف</th><th>المبلغ</th><th>ملاحظة</th><th class='no-print'></th></tr></thead><tbody>"
+        "{% for r in rows %}<tr><td>{{ r.expense_date }}</td><td>{{ r.kind }}</td><td>{{ '%.0f'|format(r.amount) }}</td><td>{{ r.note or '' }}</td>"
+        "<td class='no-print'><form method='post' onsubmit=\"return confirm('حذف هذا الصرف؟')\">"
+        "<input type='hidden' name='act' value='delete'><input type='hidden' name='id' value='{{ r.id }}'>"
+        "<button class='btn small secondary'>🗑</button></form></td></tr>"
+        "{% else %}<tr><td colspan='5' style='text-align:center;color:#64748B;padding:20px'>لا توجد صرفيات بهذي الفترة.</td></tr>{% endfor %}"
+        "</tbody></table>"
+        "<p style='font-size:12px;color:#64748B'>تُخصم هذي المبالغ من الوارد الكلي بالتقارير اليومية والشهرية والربعية والنصف سنوية والسنوية.</p></div>{% endblock %}",
+        rows=rows, total=total, by_kind=by_kind, kinds=kinds, title=title, period=period, base=base, today=today.isoformat())
 
 
 @app.route("/api/daily/edit", methods=["POST"])
@@ -10705,6 +11008,396 @@ def delete_mapcode(mapcode_id):
 
 
 
+
+# ============== حزمة الإعدادات (v65): نقل التصاميم/الأطباء/الباركودات/الكتالوج من نسخة لنسخة ==============
+# سبب المشكلة: كل هذي الأشياء مخزّنة بقاعدة البيانات (settings + جداول)، والتحديث/التنصيب ينقل الكود والقوالب فقط
+# (بدون قاعدة بيانات عن قصد). هذي الصفحة تصدّر الإعدادات بملف zip وحدة وتستوردها بجهاز العميل الجديد.
+_CFG_SKIP_KEYS = re.compile(r"(token|api_key|secret|password|license|hardware|github|updater|auto_update|"
+                            r"host_listener|analyzer_ip_map|signing|whatsapp_session|"
+                            r"^portal_(url|api_key|enabled|mode)$|^update_channel$|^last_backup_at$|^pdf_archive_dir$|"
+                            r"^backup_gate_username$|^fee_waiver_gate_username$|^fee_waiver_authorized_name$)", re.I)
+# هوية المختبر: اسم/هاتف/عنوان/عنوان الصفحة الرئيسية — تنتقل فقط لو فعّلت خيار "تضمين اسم المختبر"
+_CFG_IDENTITY_KEYS = re.compile(r"^(app_name|app_name_ar|lab_name|lab_phone|lab_address|lab_email|brand|landing_title|landing_title_en)", re.I)
+_CFG_GROUPS = [
+    ("settings", "الإعدادات والتصاميم (تصاميم التقارير، الباركودات، الملصقات، الترويسة، الألوان، الخيارات)",
+     [], False),
+    ("lab_doctors", "أطباء المختبر الفاحصين وشهاداتهم + الأختام والتواقيع الرقمية",
+     ["examining_doctors_list", "examining_doctor_rates", "digital_stamps"], True),
+    ("catalog", "كتالوج التحاليل (التحاليل + الباراميترات + المديات الطبيعية + ربط الأجهزة Mapcodes + الباقات + قوالب التقارير)",
+     ["test_definitions", "test_parameters", "reference_ranges", "mapcodes", "packages", "package_tests",
+      "quick_add_items", "suggestions", "report_templates", "report_layout_overrides", "partner_labs", "partner_lab_prices"], True),
+    ("doctors", "الأطباء المرسلين ومراكز الإحالة وأسعارهم الخاصة",
+     ["doctors", "referral_centers", "doctor_test_prices", "center_test_prices"], True),
+]
+
+
+def _cfg_tables_present(db):
+    return {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+
+def _cfg_is_fresh(db):
+    try:
+        n1 = db.execute("SELECT COUNT(*) FROM visits").fetchone()[0]
+        n2 = db.execute("SELECT COUNT(*) FROM order_tests").fetchone()[0]
+        return (n1 or 0) == 0 and (n2 or 0) == 0
+    except Exception:
+        return False
+
+
+def _cfg_page(db, msg=""):
+    from flask import render_template_string
+    return render_template_string(
+        "<!doctype html><meta charset='utf-8'><body dir='rtl' style='font-family:Tahoma,Arial;padding:20px;max-width:820px'>"
+        "<h2>📦 حزمة الإعدادات (نقل التصاميم والأطباء والباركودات)</h2>"
+        "{% if msg %}<div style='background:#ECFDF5;border:1px solid #6EE7B7;padding:10px;border-radius:8px;margin-bottom:12px'>{{ msg }}</div>{% endif %}"
+        "<p style='color:#475569'>التحديث والتنصيب ينقلان الكود والقوالب فقط. التصاميم والأطباء والباركودات مخزّنة بقاعدة البيانات، "
+        "فتُنقل من هنا: <b>صدّر</b> ثم <b>استورد</b> بجهاز العميل، أو <b>أرسلها لعميل عن بُعد</b>.</p>"
+        "<h3>1) تصدير (ملف zip)</h3>"
+        "<form method='post' action='{{ url_for(\"config_pack_export\") }}'>"
+        "{% for key, label, tables, fresh in groups %}<label style='display:block;margin:6px 0'>"
+        "<input type='checkbox' name='g' value='{{ key }}' checked> {{ label }}</label>{% endfor %}"
+        "<label style='display:block;margin:6px 0'><input type='checkbox' name='identity' value='1'> "
+        "تضمين اسم المختبر وعنوانه وهاتفه وعنوان الصفحة الرئيسية</label>"
+        "<label style='display:block;margin:6px 0'><input type='checkbox' name='files' value='1' checked> "
+        "تضمين الصور (الشعار، التواقيع، الأختام)</label>"
+        "<button class='btn' style='padding:8px 16px'>⬇ تصدير الحزمة</button></form>"
+        "<h3 style='margin-top:26px'>2) استيراد (على جهاز العميل)</h3>"
+        "<p style='color:#92400E'>الإعدادات تُدمج دائمًا. أطباء المختبر وشهاداتهم تُدمج بالاسم إذا فيه زيارات. الكتالوج والأطباء المرسلين "
+        "تُستورد <b>فقط</b> على نسخة بلا زيارات ({{ 'هذي النسخة فارغة ✓' if fresh else 'هذي النسخة فيها زيارات ✗' }}).</p>"
+        "<form method='post' enctype='multipart/form-data' action='{{ url_for(\"config_pack_import\") }}'>"
+        "<input type='file' name='pack' accept='.zip' required><br>"
+        "{% for key, label, tables, fresh in groups %}<label style='display:block;margin:6px 0'>"
+        "<input type='checkbox' name='g' value='{{ key }}' checked> {{ label }}</label>{% endfor %}"
+        "<button class='btn' style='padding:8px 16px;margin-top:8px'>⬆ استيراد</button></form>"
+        "<h3 style='margin-top:26px'>3) إرسال لعميل عن بُعد (بدون الدخول على جهازه)</h3>"
+        "<p style='color:#475569;font-size:13px'>يُرفع الإعداد موقّعًا (بنفس مفتاح التحديثات) لمستودعك الخاص، ويطبّقه جهاز العميل لحاله عند الفحص الدوري "
+        "(كل 6 ساعات) أو لما يضغط «تحقق من تحديث الآن». يُرسَل فقط: الإعدادات + أطباء المختبر وشهاداتهم + الصور "
+        "(الكتالوج والأطباء المرسلين لا يُرسلون لجهاز فيه زيارات). لازم يكون جهاز العميل «مربوط بالإنترنت».</p>"
+        "<form method='post' action='{{ url_for(\"config_pack_push\") }}'>"
+        "<label style='display:block;margin:6px 0'>معرّف جهاز العميل (Hardware ID) "
+        "<input type='text' name='hardware_id' required style='width:340px;direction:ltr'></label>"
+        "<label style='display:block;margin:6px 0'><input type='checkbox' name='g' value='settings' checked> الإعدادات والتصاميم</label>"
+        "<label style='display:block;margin:6px 0'><input type='checkbox' name='g' value='lab_doctors' checked> أطباء المختبر وشهاداتهم والأختام والتواقيع</label>"
+        "<label style='display:block;margin:6px 0'><input type='checkbox' name='g' value='catalog' checked> تصاميم التقارير لكل تحليل (على جهاز فيه زيارات تُدمج بالرمز بدون المساس بالتحاليل والأسعار)</label>"
+        "<label style='display:block;margin:6px 0'><input type='checkbox' name='identity' value='1'> تضمين اسم المختبر والهاتف والعنوان</label>"
+        "<label style='display:block;margin:6px 0'><input type='checkbox' name='files' value='1' checked> تضمين الصور (حتى 15MB إجمالًا)</label>"
+        "<button class='btn' style='padding:8px 16px'>🚀 أرسل للعميل</button></form>"
+        "<p style='margin-top:20px'><a href='{{ url_for(\"designer_panel\") }}'>رجوع للوحة المصمم</a></p></body>",
+        groups=_CFG_GROUPS, msg=msg, fresh=_cfg_is_fresh(db))
+
+
+def _cfg_collect(db, want, identity):
+    """يبني حزمة الإعدادات (dict) بدون ملفات."""
+    present = _cfg_tables_present(db)
+    pack = {"format": "lis-config-pack", "version": 1, "created": datetime.now().isoformat(timespec="seconds"),
+            "groups": sorted(want), "settings": {}, "tables": {}, "maps": {}}
+    if "settings" in want:
+        for r in db.execute("SELECT key, value FROM settings").fetchall():
+            k = r["key"] or ""
+            if _CFG_SKIP_KEYS.search(k):
+                continue
+            if _CFG_IDENTITY_KEYS.search(k) and not identity:
+                continue
+            pack["settings"][k] = r["value"]
+    for key, _label, tables, _fresh in _CFG_GROUPS:
+        if key not in want:
+            continue
+        for t in tables:
+            if t not in present:
+                continue
+            q = "SELECT * FROM " + t
+            if t == "report_layout_overrides":
+                q += " WHERE COALESCE(scope,'') <> 'order_test'"
+            try:
+                cur = db.execute(q)
+            except Exception:
+                continue
+            cols = [d[0] for d in cur.description]
+            pack["tables"][t] = {"cols": cols, "rows": [list(r) for r in cur.fetchall()]}
+    # خرائط رقم→رمز/اسم: تسمح بدمج التصاميم والأختام بجهاز عنده زيارات (الأرقام تختلف بين الأجهزة، الرموز لا)
+    try:
+        pack["maps"]["test_codes"] = {str(r[0]): r[1] for r in db.execute("SELECT id, code FROM test_definitions")}
+        pack["maps"]["doctor_names"] = {str(r[0]): r[1] for r in db.execute("SELECT id, name FROM examining_doctors_list")}
+    except Exception:
+        pass
+    return pack
+
+
+def _cfg_collect_files(max_file=5 * 1024 * 1024, max_total=100 * 1024 * 1024):
+    out, total = {}, 0
+    if os.path.isdir(UPLOAD_DIR):
+        for root, _d, files in os.walk(UPLOAD_DIR):
+            for fn in files:
+                fp = os.path.join(root, fn)
+                try:
+                    sz = os.path.getsize(fp)
+                    if sz > max_file or total + sz > max_total:
+                        continue
+                    with open(fp, "rb") as fh:
+                        out["uploads/" + os.path.relpath(fp, UPLOAD_DIR).replace(os.sep, "/")] = fh.read()
+                    total += sz
+                except OSError:
+                    pass
+    return out
+
+
+def _cfg_apply(db, pack, files, want):
+    """يطبّق حزمة على قاعدة هذا الجهاز. files: dict {"uploads/x.png": bytes}. يرجّع (done, skipped). بدون أي اعتماد على Flask."""
+    done, skipped = [], []
+    fresh = _cfg_is_fresh(db)
+    present = _cfg_tables_present(db)
+    if "settings" in want:
+        n = 0
+        for k, v in (pack.get("settings") or {}).items():
+            if _CFG_SKIP_KEYS.search(k or ""):
+                continue
+            set_setting(db, k, v)
+            n += 1
+        done.append(f"الإعدادات ({n} مفتاح)")
+    db.execute("PRAGMA foreign_keys=OFF")
+    try:
+        for key, label, tables, needs_fresh in _CFG_GROUPS:
+            if key not in want or key == "settings":
+                continue
+            if needs_fresh and not fresh:
+                if key == "lab_doctors":
+                    blob = (pack.get("tables") or {}).get("examining_doctors_list")
+                    n_m = 0
+                    if blob and "examining_doctors_list" in present:
+                        cols = blob["cols"]
+                        for row in blob["rows"]:
+                            rec = dict(zip(cols, row))
+                            nm = (rec.get("name") or "").strip()
+                            if not nm:
+                                continue
+                            fields = [c for c in ("title", "degree_ar", "degree_en", "sort_order", "show_on_letterhead") if c in rec]
+                            ex = db.execute("SELECT id FROM examining_doctors_list WHERE name=?", (nm,)).fetchone()
+                            if ex:
+                                if fields:
+                                    db.execute("UPDATE examining_doctors_list SET " + ",".join(f + "=?" for f in fields) + " WHERE id=?",
+                                               [rec[f] for f in fields] + [ex[0]])
+                            else:
+                                ins = ["name"] + fields
+                                db.execute("INSERT INTO examining_doctors_list (" + ",".join(ins) + ") VALUES (" + ",".join("?" * len(ins)) + ")",
+                                           [nm] + [rec[f] for f in fields])
+                            n_m += 1
+                    # الأختام والتواقيع: دمج بالتسمية (label) وربط الطبيب بالاسم
+                    n_st = 0
+                    sblob = (pack.get("tables") or {}).get("digital_stamps")
+                    dnames = (pack.get("maps") or {}).get("doctor_names") or {}
+                    if sblob and "digital_stamps" in present:
+                        tcols = {r[1] for r in db.execute("PRAGMA table_info(digital_stamps)").fetchall()}
+                        skipc = {"id", "created_by", "linked_examining_doctor_id"}
+                        for row in sblob["rows"]:
+                            rec = dict(zip(sblob["cols"], row))
+                            lab = (rec.get("label") or "").strip()
+                            if not lab:
+                                continue
+                            link = None
+                            dn = dnames.get(str(rec.get("linked_examining_doctor_id")))
+                            if dn:
+                                lr = db.execute("SELECT id FROM examining_doctors_list WHERE name=?", (dn,)).fetchone()
+                                link = lr[0] if lr else None
+                            use = [c for c in rec if c in tcols and c not in skipc]
+                            ex = db.execute("SELECT id FROM digital_stamps WHERE label=?", (lab,)).fetchone()
+                            if ex:
+                                db.execute("UPDATE digital_stamps SET " + ",".join(c + "=?" for c in use) + ", linked_examining_doctor_id=? WHERE id=?",
+                                           [rec[c] for c in use] + [link, ex[0]])
+                            else:
+                                cols2 = use + ["linked_examining_doctor_id"]
+                                db.execute("INSERT INTO digital_stamps (" + ",".join(cols2) + ") VALUES (" + ",".join("?" * len(cols2)) + ")",
+                                           [rec[c] for c in use] + [link])
+                            n_st += 1
+                    done.append(f"أطباء المختبر وشهاداتهم — دمج بالاسم ({n_m} طبيب) + الأختام والتواقيع ({n_st})")
+                    continue
+                if key == "catalog":
+                    # تصاميم التقارير لكل تحليل: دمج بالمطابقة برمز التحليل (بدون المساس بالتحاليل والأسعار)
+                    id2code = (pack.get("maps") or {}).get("test_codes") or {}
+                    code2local = {r[1]: r[0] for r in db.execute("SELECT id, code FROM test_definitions")}
+                    n_d = 0
+                    nowx = datetime.now().isoformat(timespec="seconds")
+                    tb = (pack.get("tables") or {}).get("report_templates")
+                    if tb and "report_templates" in present:
+                        for row in tb["rows"]:
+                            rec = dict(zip(tb["cols"], row))
+                            loc = code2local.get(id2code.get(str(rec.get("test_definition_id"))))
+                            if not loc:
+                                continue
+                            ex = db.execute("SELECT id FROM report_templates WHERE test_definition_id=?", (loc,)).fetchone()
+                            if ex:
+                                db.execute("UPDATE report_templates SET heading=?, rows_json=?, source_docx_name=?, updated_at=? WHERE id=?",
+                                           (rec.get("heading"), rec.get("rows_json"), rec.get("source_docx_name"), nowx, ex[0]))
+                            else:
+                                db.execute("INSERT INTO report_templates (test_definition_id, heading, rows_json, source_docx_name, created_at, updated_at) "
+                                           "VALUES (?,?,?,?,?,?)", (loc, rec.get("heading"), rec.get("rows_json"), rec.get("source_docx_name"), nowx, nowx))
+                            n_d += 1
+                    lb = (pack.get("tables") or {}).get("report_layout_overrides")
+                    if lb and "report_layout_overrides" in present:
+                        for row in lb["rows"]:
+                            rec = dict(zip(lb["cols"], row))
+                            if rec.get("scope") != "test":
+                                continue
+                            loc = code2local.get(id2code.get(str(rec.get("scope_id"))))
+                            if not loc:
+                                continue
+                            db.execute("INSERT INTO report_layout_overrides (scope, scope_id, layout_json, updated_at) VALUES ('test',?,?,?) "
+                                       "ON CONFLICT(scope, scope_id) DO UPDATE SET layout_json=excluded.layout_json, updated_at=excluded.updated_at",
+                                       (loc, rec.get("layout_json"), nowx))
+                            n_d += 1
+                    done.append(f"تصاميم التقارير لكل تحليل — دمج بالرمز ({n_d}؛ التحاليل والأسعار والمديات ما تتغير على نسخة فيها زيارات)")
+                    continue
+                skipped.append(label.split(" (")[0].split(" +")[0])
+                continue
+            cnt = 0
+            for t in tables:
+                blob = (pack.get("tables") or {}).get(t)
+                if not blob or t not in present:
+                    continue
+                tcols = {r["name"] if hasattr(r, "keys") else r[1] for r in db.execute("PRAGMA table_info(" + t + ")").fetchall()}
+                use = [c for c in blob["cols"] if c in tcols]
+                if not use:
+                    continue
+                if t == "report_layout_overrides":
+                    db.execute("DELETE FROM report_layout_overrides WHERE COALESCE(scope,'') <> 'order_test'")
+                else:
+                    db.execute("DELETE FROM " + t)
+                idx = [blob["cols"].index(c) for c in use]
+                sql = "INSERT OR REPLACE INTO " + t + " (" + ",".join(use) + ") VALUES (" + ",".join("?" * len(use)) + ")"
+                for row in blob["rows"]:
+                    db.execute(sql, [row[i] for i in idx])
+                    cnt += 1
+            done.append(f"{label.split(' (')[0].split(' +')[0]} ({cnt} سجل)")
+        db.commit()
+    finally:
+        db.execute("PRAGMA foreign_keys=ON")
+    nfiles = 0
+    base = os.path.realpath(UPLOAD_DIR)
+    for name, data in (files or {}).items():
+        if not name.startswith("uploads/") or name.endswith("/"):
+            continue
+        dest = os.path.realpath(os.path.join(UPLOAD_DIR, name[len("uploads/"):]))
+        if not dest.startswith(base + os.sep):
+            continue
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as out:
+            out.write(data)
+        nfiles += 1
+    if nfiles:
+        done.append(f"الصور ({nfiles} ملف)")
+    return done, skipped
+
+
+@app.route("/designer/config-pack")
+@designer_required
+def config_pack_page():
+    return _cfg_page(get_db())
+
+
+@app.route("/designer/config-pack/export", methods=["POST"])
+@designer_required
+def config_pack_export():
+    db = get_db()
+    want = set(request.form.getlist("g"))
+    pack = _cfg_collect(db, want, request.form.get("identity") == "1")
+    files = _cfg_collect_files() if request.form.get("files") == "1" else {}
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("config.json", json.dumps(pack, ensure_ascii=False, default=str))
+        for name, data in files.items():
+            z.writestr(name, data)
+    buf.seek(0)
+    log_action("ConfigPackExport", "settings", 0, ",".join(sorted(want)))
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name="lis_config_pack_" + datetime.now().strftime("%Y%m%d_%H%M") + ".zip")
+
+
+@app.route("/designer/config-pack/import", methods=["POST"])
+@designer_required
+def config_pack_import():
+    db = get_db()
+    f = request.files.get("pack")
+    if not f:
+        return _cfg_page(db, "اختر ملف الحزمة أولاً.")
+    want = set(request.form.getlist("g"))
+    raw = f.read(150 * 1024 * 1024 + 1)
+    if len(raw) > 150 * 1024 * 1024:
+        return _cfg_page(db, "الملف كبير جدًا.")
+    try:
+        z = zipfile.ZipFile(BytesIO(raw))
+        pack = json.loads(z.read("config.json").decode("utf-8"))
+        assert pack.get("format") == "lis-config-pack"
+    except Exception:
+        return _cfg_page(db, "الملف ليس حزمة إعدادات صالحة.")
+    files = {n: z.read(n) for n in z.namelist() if n.startswith("uploads/") and not n.endswith("/")}
+    done, skipped = _cfg_apply(db, pack, files, want)
+    log_action("ConfigPackImport", "settings", 0, ",".join(done)[:200])
+    msg = "تم استيراد: " + "، ".join(done) if done else "ما تم استيراد شي."
+    if skipped:
+        msg += " — تم تخطي (النسخة فيها زيارات): " + "، ".join(skipped)
+    return _cfg_page(db, msg)
+
+
+# ---- إرسال الإعدادات لعميل عن بُعد (v65) ----
+def _cfg_canon(payload):
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _cfg_signing_key_path(db):
+    cands = [get_setting(db, "update_signing_key_path", "") or "", os.environ.get("LAB_UPDATE_SIGNING_KEY", ""),
+             os.path.join(os.path.expanduser("~"), ".lab_update_signing_key.pem")]
+    for c in cands:
+        if c and os.path.isfile(c):
+            return c
+    return ""
+
+
+def _cfg_sign(db, created, payload):
+    import hashlib
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    kp = _cfg_signing_key_path(db)
+    if not kp:
+        raise RuntimeError("مفتاح توقيع التحديثات غير موجود (~/.lab_update_signing_key.pem). نفس المفتاح اللي تنشر فيه التحديثات.")
+    with open(kp, "rb") as fh:
+        key = load_pem_private_key(fh.read(), password=None)
+    digest = hashlib.sha256(_cfg_canon(payload)).hexdigest()
+    return base64.b64encode(key.sign(("%s|%s" % (created, digest)).encode("utf-8"))).decode("ascii")
+
+
+@app.route("/designer/config-pack/push", methods=["POST"])
+@designer_required
+def config_pack_push():
+    db = get_db()
+    hw = (request.form.get("hardware_id") or "").strip().upper()
+    want = set(request.form.getlist("g")) & {"settings", "lab_doctors", "catalog"}
+    if not hw or not want:
+        return _cfg_page(db, "أدخل معرّف الجهاز واختر مجموعة واحدة على الأقل.")
+    try:
+        pack = _cfg_collect(db, want, request.form.get("identity") == "1")
+        files = _cfg_collect_files(max_file=2 * 1024 * 1024, max_total=15 * 1024 * 1024) if request.form.get("files") == "1" else {}
+        payload = dict(pack)
+        payload["files"] = {n: base64.b64encode(d).decode("ascii") for n, d in files.items()}
+        created = pack["created"]
+        envelope = {"created": created, "sig": _cfg_sign(db, created, payload), "payload": payload}
+        auto_updater.push_config_pack(get_setting(db, "github_write_token", ""), hw, envelope)
+        log_action("ConfigPackPush", "settings", 0, hw)
+        return _cfg_page(db, f"تم إرسال الإعدادات لجهاز {hw} ({len(payload['files'])} صورة) — يطبّقها عند فحصه الدوري أو لما يضغط «تحقق من تحديث الآن».")
+    except Exception as e:
+        return _cfg_page(db, f"⚠️ تعذر الإرسال: {e}")
+
+
+def _cfg_remote_apply(db, payload):
+    """يُستدعى من auto_updater.check_config_pack بعد التحقق من التوقيع. يطبّق فقط الإعدادات وأطباء المختبر."""
+    files = {}
+    for n, b in (payload.get("files") or {}).items():
+        try:
+            files[n] = base64.b64decode(b)
+        except Exception:
+            pass
+    want = set(payload.get("groups") or []) & {"settings", "lab_doctors", "catalog"}
+    done, skipped = _cfg_apply(db, payload, files, want)
+    return "تم تطبيق إعدادات من المصمم: " + "، ".join(done)
+
+
 @app.route("/master/analyzer-ip-map", methods=["GET", "POST"])
 @designer_required
 def analyzer_ip_map():
@@ -14055,7 +14748,9 @@ try:
                            '<a href="/designer/publish-update" style="background:#205072;color:#fff;padding:9px 14px;border-radius:9px;'
                            'text-decoration:none;box-shadow:0 3px 12px rgba(0,0,0,.3);">📦 نشر تحديث للعملاء</a>'
                            '<a href="/designer/client-builder" style="background:#fff;color:#205072;padding:9px 14px;border-radius:9px;'
-                           'text-decoration:none;border:1px solid #205072;box-shadow:0 3px 12px rgba(0,0,0,.2);">🏗 تجهيز Setup العميل</a></div>')
+                           'text-decoration:none;border:1px solid #205072;box-shadow:0 3px 12px rgba(0,0,0,.2);">🏗 تجهيز Setup العميل</a>'
+                           '<a href="/designer/config-pack" style="background:#fff;color:#205072;padding:9px 14px;border-radius:9px;'
+                           'text-decoration:none;border:1px solid #205072;box-shadow:0 3px 12px rgba(0,0,0,.2);">📦 حزمة الإعدادات</a></div>')
                     resp.set_data(body.replace("</body>", bar + "</body>", 1))
         except Exception:
             pass
@@ -14082,6 +14777,10 @@ if __name__ == "__main__":
     # خيط فحص التحديث التلقائي — يشتغل دائماً بالخلفية، لكن ما يتحقق فعلياً
     # من GitHub إلا إذا كان هذا الجهاز "مربوط بالإنترنت" من لوحة المصمم
     # (settings.auto_update_enabled = 1). راجع auto_updater.py.
+    try:
+        auto_updater.set_config_applier(_cfg_remote_apply)
+    except Exception:
+        pass
     threading.Thread(target=auto_updater.background_loop, args=(get_db,), daemon=True).start()
 
     if getattr(sys, "frozen", False):

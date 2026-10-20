@@ -317,6 +317,22 @@
       </div>
     </div>
 
+    <div class="card" id="forwardCard">
+      <h3>📤 إرسال التحاليل إلى مختبر آخر</h3>
+      <div class="form-grid">
+        <div class="form-field">
+          <label>إرسال التحاليل إلى مختبر آخر</label>
+          <select name="forward_lab_id" id="forward_lab_id">
+            <option value="">-- لا شيء (تُجرى بمختبرنا) --</option>
+            {% for pl in partner_labs %}<option value="{{ pl['id'] }}">{{ pl['name'] }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-field" style="grid-column: span 3;">
+          <div id="forwardSummary" style="font-size:13px; color:#334155; min-height:22px;"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h3>{{ t('reference_information') }}</h3>
       <div class="form-grid">
@@ -2389,5 +2405,36 @@ document.addEventListener('DOMContentLoaded', function () {
   document.addEventListener('change', function () { setTimeout(sync, 100); });
   window.addEventListener('load', function () { setTimeout(sync, 300); });
 })();
+</script>
+<script>
+  // v65: ملخّص «إرسال التحاليل إلى مختبر آخر» — أسماء التحاليل المرسلة والكلفة الإجمالية
+  (function () {
+    var PARTNER_PRICES = {{ partner_prices|tojson }};   // {labId: {testId: كلفة}}
+    var sel = document.getElementById('forward_lab_id');
+    var box = document.getElementById('forwardSummary');
+    if (!sel || !box) return;
+    function nm(id) {
+      try { var m = TEST_META[id]; return (m && (m.code || m.name)) || ('#' + id); } catch (e) { return '#' + id; }
+    }
+    function refresh() {
+      var lab = sel.value;
+      if (!lab) { box.innerHTML = ''; return; }
+      var prices = PARTNER_PRICES[lab] || {};
+      var sent = [], stay = [], total = 0;
+      document.querySelectorAll('input.test-check:checked').forEach(function (el) {
+        var id = String(el.value);
+        if (prices.hasOwnProperty(id)) { sent.push(nm(id)); total += Number(prices[id]) || 0; }
+        else { stay.push(nm(id)); }
+      });
+      var h = '';
+      if (sent.length) h += '📤 <b>سيُرسل:</b> ' + sent.join('، ') + ' — <b>كلفتها: ' + Math.round(total).toLocaleString() + '</b> (تُخصم من الحسابات)';
+      else h += '<span style="color:#B45309;">ما فيه تحليل مختار مسجّل لهذا المختبر بصفحة «التحاليل المرسلة لمختبرات أخرى».</span>';
+      if (sent.length && stay.length) h += '<br><span style="color:#64748B;">تبقى بمختبرنا: ' + stay.join('، ') + '</span>';
+      box.innerHTML = h;
+    }
+    sel.addEventListener('change', refresh);
+    document.addEventListener('change', function (e) { if (e.target && e.target.classList && e.target.classList.contains('test-check')) refresh(); });
+    setInterval(function () { if (sel.value) refresh(); }, 1000);   // يلتقط التحاليل المضافة برمجيًا (باقات، شروط ارتباط)
+  })();
 </script>
 {% endblock %}

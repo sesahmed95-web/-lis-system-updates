@@ -22,6 +22,7 @@
   <a href="{{ url_for('quick_entry') }}">⚡ الإدخال السريع</a>
   <a href="{{ url_for('orders_list') if session.get('interface') == 'lab' else url_for('results_list') }}">📝 إدخال النتائج</a>
   <a href="{{ url_for('completed_results') }}" class="on">✅ النتائج المكتملة</a>
+  <a href="{{ url_for('barcodes_search') }}">🏷 باركودات المرضى</a>
 </div>
 <div class="card">
   <form method="get" class="ce-bar">
