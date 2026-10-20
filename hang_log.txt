@@ -159,3 +159,6 @@
 [2026-10-20T06:39:04] SLOW 2.7s POST /designer/update/check-now? (designer_update_check_now)
 [2026-10-20T12:39:39] SLOW 2.2s POST /designer/update/check-now? (designer_update_check_now)
 [2026-10-20T13:09:37] SLOW 3.7s GET /front-desk/notifications/check? (front_desk_notifications_check)
+[2026-10-20T13:37:24] SLOW 4.5s GET /reports/archive/40/open? (pdf_archive_open)
+[2026-10-20T13:37:32] SLOW 2.1s GET /reports/archive/40/open? (pdf_archive_open)
+[2026-10-20T16:31:18] SLOW 2.8s GET /reports/archive/40/open? (pdf_archive_open)
