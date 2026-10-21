@@ -6106,7 +6106,7 @@ def print_sample_barcodes(visit_id):
         return "Not found", 404
     rows = db.execute(
         "SELECT ot.id, ot.barcode, ot.tube_barcode, td.name as test_name, td.short_name as test_short_name, "
-        "td.sample_type, td.department, ot.selected_param_ids FROM order_tests ot "
+        "td.sample_type, td.department, td.code AS test_code, ot.selected_param_ids FROM order_tests ot "
         "JOIN test_definitions td ON td.id = ot.test_definition_id "
         "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
         (visit_id,),
@@ -6128,7 +6128,7 @@ def print_sample_barcodes(visit_id):
     # تشترك بباركود واحد؛ تحليل بدون قسم يُجمَّع حسب نوع العينة، وبدونهما
     # يبقى ملصقه الفردي. لإرجاع التجميع القديم (حسب نوع العينة فقط):
     # الرابط ?group=sample_type أو إعداد barcode_group_mode = sample_type.
-    group_mode = (request.args.get("group") or get_setting(db, "barcode_group_mode", "sample_type") or "sample_type").strip()
+    group_mode = (request.args.get("group") or "sample_type").strip()   # v84: الإعداد القديم barcode_group_mode يُتجاهل — التجميع دائمًا حسب نوع الأنبوب
     # أسماء التحاليل المطبوعة على الملصق: لو التحليل مطلوب جزئيًا (مثلاً PT و PTT
     # من Coagulation) تُطبع أسماء البارامترات المختارة نفسها بدل اسم التحليل
     # الكامل، بدون بارامترات الـControl ولا INR (تُضاف تلقائيًا مع PT).
@@ -6151,12 +6151,37 @@ def print_sample_barcodes(visit_id):
                     return _out
         return [(r["test_short_name"] or r["test_name"]) if short else r["test_name"]]
 
+    # v84: التجميع الافتراضي صار حسب نوع الأنبوب الفعلي: كل تحليل يحتاج EDTA => ملصق واحد، Serum => ملصق واحد،
+    # Plasma (سترات/هيبارين/فلورايد) => ملصق واحد — بغض النظر عن القسم أو طريقة كتابة نوع العينة.
+    # (للرجوع للتجميع القديم حسب القسم: الرابط ?group=department)
+    _V84_EDTA_CODES = {"CBC", "ESR", "BF", "RETIC", "BFRETIC", "WBCDIFF"}
+
+    def _v84_tube_kind(stype, dept, code):
+        t = (stype or "").strip().casefold()
+        if t:
+            if "edta" in t or "whole blood" in t or t in ("wb", "blood", "lavender") or "lavender" in t:
+                return "edta"
+            if "serum" in t or "sst" in t or "gel" in t or "plain" in t:
+                return "serum"
+            if "plasma" in t or "citrate" in t or "heparin" in t or "fluoride" in t:
+                return "plasma"
+            return t
+        if (code or "").strip().upper() in _V84_EDTA_CODES:
+            return "edta"
+        if (dept or "").strip().casefold() == "hematology":
+            return "edta"
+        return ""
+
+    _V84_TITLES = {"edta": "EDTA", "serum": "Serum", "plasma": "Plasma"}
     groups = {}
     ungrouped = []
     for r in rows:
         stype = (r["sample_type"] or "").strip()
         dept = (r["department"] or "").strip()
-        key = (dept or stype) if group_mode != "sample_type" else (stype.casefold() or dept)
+        if group_mode == "department":
+            key = dept or stype
+        else:
+            key = _v84_tube_kind(stype, dept, r["test_code"]) or dept
         if not key:
             ungrouped.append(r)
             continue
@@ -6189,7 +6214,7 @@ def print_sample_barcodes(visit_id):
         tube_samples.append({
             # اسم القسم ما يُطبع على الملصق (فقط أسماء التحاليل/الأنواع المختارة)؛
             # عند التجميع حسب نوع العينة فقط (?group=sample_type) يبقى العنوان القديم
-            "sample_type": ((group_rows[0]["sample_type"] or "").strip() if group_mode == "sample_type" else ""),
+            "sample_type": ((_V84_TITLES.get(stype) or (group_rows[0]["sample_type"] or "").strip()) if group_mode != "department" else ""),
             "department": (group_rows[0]["department"] or "") if group_rows else "",
             "barcode": tube_barcode,
             "test_names": [n for r in group_rows for n in _label_names(r)],
