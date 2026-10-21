@@ -15974,25 +15974,78 @@ def _v87_archive_path(db, visit_id):
     return None
 
 
+def _v88_launch_pdf(path):
+    """v88: يفتح الملف بخيط منفصل (الرد يرجع فورًا). على ويندوز نحدد برنامج الـPDF الافتراضي (أو المسار المحفوظ
+    بالإعداد pdf_viewer_exe) ونشغّله مع مسار الملف صراحةً — هذا يمنع Acrobat من إظهار شاشة Home بدل الملف."""
+    def _run():
+        try:
+            if os.name == "nt":
+                exe = ""
+                try:
+                    exe = (get_setting(get_db(), "pdf_viewer_exe", "") or "").strip()
+                except Exception:
+                    exe = ""
+                if not exe or not os.path.exists(exe):
+                    try:
+                        import ctypes
+                        buf = ctypes.create_unicode_buffer(1024)
+                        r = ctypes.windll.shell32.FindExecutableW(path, None, buf)
+                        exe = buf.value if r > 32 else ""
+                    except Exception:
+                        exe = ""
+                low = os.path.basename(exe).lower()
+                if exe and os.path.exists(exe) and low not in ("explorer.exe", "rundll32.exe"):
+                    subprocess.Popen([exe, path], close_fds=True)
+                else:
+                    os.startfile(path)                  # noqa: S606
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception:
+            try:
+                if os.name == "nt":
+                    os.startfile(path)                  # noqa: S606
+            except Exception:
+                pass
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _v88_is_local_request():
+    """v88: الطلب من نفس جهاز السيرفر حتى لو فُتح البرنامج بعنوان الشبكة (192.168.x.x) وليس localhost."""
+    import socket
+    ra = (request.remote_addr or "").replace("::ffff:", "")
+    if ra in ("127.0.0.1", "::1", ""):
+        return True
+    try:
+        names = {socket.gethostname(), "localhost"}
+        ips = set()
+        for n in names:
+            try:
+                ips.update(i[4][0] for i in socket.getaddrinfo(n, None))
+            except Exception:
+                pass
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("10.255.255.255", 1)); ips.add(s.getsockname()[0]); s.close()
+        except Exception:
+            pass
+        return ra in {i.replace("::ffff:", "") for i in ips}
+    except Exception:
+        return False
+
+
 @app.route("/reports/archive/<int:visit_id>/open-external", methods=["POST"])
 @login_required
 def pdf_archive_open_external(visit_id):
     """«تحميل PDF»: يفتح الملف ببرنامج الـPDF الافتراضي بالحاسبة (مثل Acrobat/Edge) بدل نافذة بتبويب البرنامج
     (اللي إغلاقها كان يسكّر برنامج المختبر). يشتغل فقط لو الطلب من نفس جهاز السيرفر؛ غير هيك الواجهة ترجع للتحميل العادي."""
-    if request.remote_addr not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+    if not _v88_is_local_request():
         return jsonify({"ok": False, "remote": True})
     path = _v87_archive_path(get_db(), visit_id)
     if not path:
         return jsonify({"ok": False, "error": "ملف الأرشيف غير موجود"})
-    try:
-        if os.name == "nt":
-            os.startfile(path)                      # noqa: S606 — يفتح بالبرنامج الافتراضي لـ.pdf
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)})
+    _v88_launch_pdf(path)   # يشتغل بخيط منفصل حتى يرجع الرد فورًا ولا ينتظر برنامج الـPDF يقلع
     return jsonify({"ok": True})
 
 
