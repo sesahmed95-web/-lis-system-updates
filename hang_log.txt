@@ -170,3 +170,6 @@
 [2026-10-21T13:31:02] SLOW 2.8s GET /reports/pdf/test/141? (report_pdf_test)
 [2026-10-21T13:32:03] SLOW 2.2s GET /reports/archive/42/open?download=1 (pdf_archive_open)
 [2026-10-21T13:32:05] SLOW 2.3s GET /reports/pdf/visit/42? (report_pdf_visit)
+[2026-10-21T13:38:39] SLOW 2.6s POST /reports/archive/43/open-external? (pdf_archive_open_external)
+[2026-10-21T13:38:42] SLOW 2.4s GET /reports/archive/43/open?download=1 (pdf_archive_open)
+[2026-10-21T13:38:44] SLOW 2.3s GET /reports/pdf/visit/43? (report_pdf_visit)
