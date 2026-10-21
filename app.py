@@ -15974,6 +15974,83 @@ def _v87_archive_path(db, visit_id):
     return None
 
 
+def _v88_bring_to_front(path, tries=40):
+    """ويندوز يمنع برنامج بالخلفية (السيرفر) من سحب نافذة برنامج ثاني للأمام، فيظهر الـPDF خلف نافذة المختبر
+    ويبدو كأنه ما انفتح. نبحث عن نافذة فيها اسم الملف ونرفعها للأمام (خلال ~10 ثواني)."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        stem = os.path.splitext(os.path.basename(path))[0].lower()
+        found = []
+        enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+        def _cb(hwnd, _lp):
+            if user32.IsWindowVisible(hwnd):
+                n = user32.GetWindowTextLengthW(hwnd)
+                if n:
+                    buf = ctypes.create_unicode_buffer(n + 1)
+                    user32.GetWindowTextW(hwnd, buf, n + 1)
+                    if stem and stem in buf.value.lower():
+                        found.append(hwnd)
+            return True
+        cb = enum_proc(_cb)
+        for _ in range(tries):
+            del found[:]
+            user32.EnumWindows(cb, 0)
+            if found:
+                hwnd = found[0]
+                if user32.IsIconic(hwnd):
+                    user32.ShowWindow(hwnd, 9)          # SW_RESTORE
+                user32.keybd_event(0x12, 0, 0, 0)       # Alt: يسمح بتغيير النافذة الأمامية
+                user32.keybd_event(0x12, 0, 2, 0)
+                user32.SetForegroundWindow(hwnd)
+                return
+            time.sleep(0.25)
+    except Exception:
+        pass
+
+
+def _v88_launch_pdf(path):
+    """v88: يفتح الملف بخيط منفصل (الرد يرجع فورًا). على ويندوز نحدد برنامج الـPDF الافتراضي (أو المسار المحفوظ
+    بالإعداد pdf_viewer_exe) ونشغّله مع مسار الملف صراحةً — هذا يمنع Acrobat من إظهار شاشة Home بدل الملف."""
+    def _run():
+        try:
+            if os.name == "nt":
+                exe = ""
+                try:
+                    exe = (get_setting(get_db(), "pdf_viewer_exe", "") or "").strip()
+                except Exception:
+                    exe = ""
+                if not exe or not os.path.exists(exe):
+                    try:
+                        import ctypes
+                        buf = ctypes.create_unicode_buffer(1024)
+                        r = ctypes.windll.shell32.FindExecutableW(path, None, buf)
+                        exe = buf.value if r > 32 else ""
+                    except Exception:
+                        exe = ""
+                low = os.path.basename(exe).lower()
+                if exe and os.path.exists(exe) and low not in ("explorer.exe", "rundll32.exe"):
+                    subprocess.Popen([exe, path], close_fds=True)
+                else:
+                    os.startfile(path)                  # noqa: S606
+                _v88_bring_to_front(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception:
+            try:
+                if os.name == "nt":
+                    os.startfile(path)                  # noqa: S606
+            except Exception:
+                pass
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def _v88_is_local_request():
     """v88: الطلب من نفس جهاز السيرفر حتى لو فُتح البرنامج بعنوان الشبكة (192.168.x.x) وليس localhost."""
     import socket
@@ -16008,15 +16085,7 @@ def pdf_archive_open_external(visit_id):
     path = _v87_archive_path(get_db(), visit_id)
     if not path:
         return jsonify({"ok": False, "error": "ملف الأرشيف غير موجود"})
-    try:
-        if os.name == "nt":
-            os.startfile(path)                      # noqa: S606 — يفتح بالبرنامج الافتراضي لـ.pdf
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)})
+    _v88_launch_pdf(path)   # يشتغل بخيط منفصل حتى يرجع الرد فورًا ولا ينتظر برنامج الـPDF يقلع
     return jsonify({"ok": True})
 
 

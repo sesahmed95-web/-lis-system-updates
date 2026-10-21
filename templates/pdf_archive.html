@@ -2,12 +2,15 @@
 {% block page_title %}🗄️ أرشيف PDF{% endblock %}
 {% block content %}
 <style>
-  .ar-t{width:100%;border-collapse:collapse;table-layout:fixed;background:#fff}
+  .ar-w{overflow-x:auto}
+  .ar-t{width:100%;min-width:820px;border-collapse:collapse;table-layout:fixed;background:#fff}
   .ar-t th{background:#205072;color:#fff;padding:9px 10px;text-align:right;font-size:13px}
   .ar-t td{text-align:right;padding:8px 10px;border-bottom:1px solid #E2E8F0;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ar-t tr:hover td{background:#F8FAFC}
   .ar-t td.act{overflow:visible;text-overflow:clip}
-  .ar-b{border:0;border-radius:7px;padding:5px 11px;font:700 12.5px Tahoma;cursor:pointer;color:#fff;text-decoration:none;display:inline-block}
+  .ar-t td.nm{white-space:normal;word-break:break-word;overflow:visible}
+  .ar-b{margin-inline-start:2px}
+  .ar-b{border:0;border-radius:7px;padding:5px 9px;font:700 12.5px Tahoma;cursor:pointer;color:#fff;text-decoration:none;display:inline-block}
   .ar-b.v{background:#205072}.ar-b.d{background:#15803D}.ar-b.x{background:#B91C1C}
   #arOv{position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.6);display:none;flex-direction:column;padding:14px}
   #arOv .bar{display:flex;gap:8px;align-items:center;background:#fff;border-radius:10px 10px 0 0;padding:8px 12px}
@@ -24,14 +27,15 @@
   </form>
 
   {% if rows %}
+  <div class="ar-w">
   <table class="ar-t">
-    <colgroup><col style="width:90px"><col><col style="width:22%"><col style="width:150px"><col style="width:330px"></colgroup>
+    <colgroup><col style="width:80px"><col style="width:30%"><col style="width:17%"><col style="width:135px"><col style="width:285px"></colgroup>
     <thead><tr><th>رقم التسجيل</th><th>اسم المريض</th><th>الطبيب المُرسِل</th><th>التاريخ والوقت</th><th>إجراءات</th></tr></thead>
     <tbody>
       {% for row in rows %}
       <tr>
         <td>{{ row['registration_number'] }}</td>
-        <td title="{{ row['full_name'] }}"><b>{{ row['full_name'] }}</b></td>
+        <td class="nm" title="{{ row['full_name'] }}"><b>{{ row['full_name'] }}</b></td>
         <td>{{ row['doctor_name'] or row['center_name'] or '—' }}</td>
         <td dir="ltr" style="text-align:right">{{ (row['visit_at'] or row['updated_at'] or '')[:16].replace('T',' ') }}</td>
         <td class="act">
@@ -43,6 +47,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <p style="color:#64748B;">{% if q %}لا توجد نتائج مطابقة لـ "{{ q }}".{% else %}لا توجد زيارات مكتملة النتائج بعد.{% endif %}</p>
   {% endif %}

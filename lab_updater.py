@@ -40,6 +40,16 @@ _state = {"checking": False, "applying": False}
 _lock = threading.Lock()
 
 
+def _ulog(msg):
+    """v88: سجل بسيط لخطوات التحديث (updates\\update_log.txt) حتى نعرف وين يعلق عند العميل."""
+    try:
+        os.makedirs(updates_dir(), exist_ok=True)
+        with open(os.path.join(updates_dir(), "update_log.txt"), "a", encoding="utf-8") as f:
+            f.write("[%s] %s\n" % (datetime.now().isoformat(timespec="seconds"), msg))
+    except Exception:
+        pass
+
+
 def frozen():
     return bool(getattr(sys, "frozen", False))
 
@@ -284,7 +294,9 @@ def apply_now(db, get_setting, set_setting):
         base = update_url(db, get_setting)
         if not base:
             return {"ok": False, "message": "عنوان التحديثات غير مضبوط"}
+        _ulog("apply: start, base=%s, current=%s" % (base, current_version()))
         m = fetch_manifest(base)
+        _ulog("apply: manifest version=%s" % m.get("version"))
         if _vkey(m["version"]) <= _vkey(current_version()):
             return {"ok": False, "message": "البرنامج محدّث"}
         data = _http_get(base + "/" + m["file"], MAX_ZIP)
@@ -310,6 +322,7 @@ def apply_now(db, get_setting, set_setting):
                 os.remove(zp)
             except Exception:
                 pass
+        _ulog("apply: downloaded+verified, swapping")
         backup_db("pre_update")
         cur, prev = os.path.join(updates_dir(), "current"), os.path.join(updates_dir(), "previous")
         shutil.rmtree(prev, ignore_errors=True)
@@ -323,9 +336,11 @@ def apply_now(db, get_setting, set_setting):
         set_setting(db, "update_available_version", "")
         set_setting(db, "update_last_applied", "%s @ %s" % (m["version"], datetime.now().isoformat(timespec="seconds")))
         db.commit()
+        _ulog("apply: OK -> %s (restart next)" % m["version"])
         return {"ok": True, "version": m["version"], "message": "تم تنزيل التحديث. سيُعاد تشغيل البرنامج الآن."}
     except Exception as e:  # noqa: BLE001
         shutil.rmtree(stage, ignore_errors=True)
+        _ulog("apply: FAILED %r" % (e,))
         return {"ok": False, "message": "فشل التحديث: %s" % e}
     finally:
         with _lock:
@@ -340,9 +355,16 @@ def restart(delay=1.5):
             if frozen():
                 import subprocess
                 exe = sys.executable
+                env = dict(os.environ)
+                env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"      # العملية الجديدة تشتغل كتشغيل مستقل لا ابن للعملية القديمة
+                for k in [k for k in env if k.startswith("_PYI_") or k == "_MEIPASS2"]:
+                    env.pop(k, None)
                 flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+                _ulog("restart: relaunching %s" % exe)
                 subprocess.Popen('cmd /c ping -n 4 127.0.0.1 >nul & start "" "%s"' % exe, shell=True, close_fds=True,
-                                 creationflags=flags, cwd=os.path.dirname(exe))
+                                 creationflags=flags, cwd=os.path.dirname(exe), env=env)
+        except Exception as e:  # noqa: BLE001
+            _ulog("restart: FAILED %r" % (e,))
         finally:
             os._exit(0)
     threading.Thread(target=_go, daemon=True).start()
@@ -371,11 +393,12 @@ _BANNER_JS = r"""
       bar.innerHTML='<span>⏳ جاري التحديث... لا تغلق النافذة</span>';
       fetch('/api/update/apply',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
         if(!j.ok){bar.innerHTML='<span>⚠️ '+esc(j.message)+'</span>';setTimeout(function(){if(bar){bar.remove();bar=null;}},8000);return;}
-        var n=0,t=setInterval(function(){n++;
+        var n=0,down=false,t=setInterval(function(){n++;
           fetch('/api/update/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(s){
-            if(s.current===j.version){clearInterval(t);location.reload();}
-          }).catch(function(){});
-          if(n>60){clearInterval(t);bar.innerHTML='<span>⚠️ لم يعد البرنامج للعمل خلال دقيقة — شغّله من الأيقونة</span>';}
+            if(s.current===j.version || down){clearInterval(t);location.reload();}   // رجع السيرفر بعد ما انقطع => أعد تحميل الصفحة حتى لو اختلف رقم الإصدار
+          }).catch(function(){down=true;});
+          if(n===45){bar.innerHTML='<span>⏳ التحديث ياخذ وقت أطول من المعتاد... انتظر قليلًا</span>';}
+          if(n>90){clearInterval(t);bar.innerHTML='<span>⚠️ لم يعد البرنامج للعمل — أغلق هذه النافذة وشغّل البرنامج من أيقونته. (لو تكرر: أرسل ملف updates\\update_log.txt للمطوّر)</span>';}
         },2000);
       }).catch(function(){bar.innerHTML='<span>⚠️ تعذر الاتصال بالبرنامج</span>';});
     };
