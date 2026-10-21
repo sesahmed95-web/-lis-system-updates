@@ -15541,12 +15541,9 @@ def _v80_esr_html(db, cbc_ot_id):
                         return str(int(x)) if float(x) == int(x) else str(x)
                     rtxt = (_n(low) + " - " + _n(high)) if (low is not None and high is not None) else \
                            (("> " + _n(low)) if low is not None else ("< " + _n(high)))
-            bad = (r["flag"] or "") in ("Low", "High", "Critical")
-            if num is not None:
-                if low is not None and num < low:
-                    bad = True
-                if high is not None and num > high:
-                    bad = True
+            bad = (r["flag"] or "") in ("High", "Critical")   # v87: أحمر فقط لو أعلى من الطبيعي
+            if num is not None and high is not None and num > high:
+                bad = True
             lines.append((r["pname"] or "ESR", val, (r["unit"] or "").strip(), rtxt, bad))
     if not lines:
         return None
@@ -15781,8 +15778,8 @@ def _v86_esr_render(db, lines, cfg=None):
         out.append(
             '<div style="display:flex;align-items:baseline;font-size:%dpx;line-height:1.6;">'
             '<span style="font-weight:700;white-space:nowrap;flex:0 0 %d%%;">%s</span>'
-            '<span style="white-space:nowrap;%s"><b>%s</b>'
-            '<span style="display:inline-block;width:%dpx;"></span><span style="font-weight:600;">%s</span></span>'
+            '<span style="white-space:nowrap;"><b style="%s">%s</b>'
+            '<span style="display:inline-block;width:%dpx;"></span><span style="font-weight:600;color:#111;">%s</span></span>'
             '<span style="white-space:nowrap;color:#333;%s">%s</span></div>'
             % (cfg["esr_font"], cfg["esr_val_x"], _html_escape(nm), col, _html_escape(val),
                cfg["esr_unit_gap"], _html_escape(unit), rng_css,
@@ -15961,6 +15958,42 @@ def _v86_print_popup_isolation(resp):
     except Exception:
         pass
     return resp
+
+
+# ---------------------------------------------------------------- v87: فتح PDF الأرشيف ببرنامج الـPDF المنصّب على الجهاز
+def _v87_archive_path(db, visit_id):
+    row = get_saved_report(db, visit_id)
+    if not row or not row["pdf_path"] or not os.path.exists(row["pdf_path"]):
+        try:
+            _maybe_archive_visit_pdf(db, visit_id)
+        except Exception:
+            pass
+        row = get_saved_report(db, visit_id)
+    if row and row["pdf_path"] and os.path.exists(row["pdf_path"]):
+        return row["pdf_path"]
+    return None
+
+
+@app.route("/reports/archive/<int:visit_id>/open-external", methods=["POST"])
+@login_required
+def pdf_archive_open_external(visit_id):
+    """«تحميل PDF»: يفتح الملف ببرنامج الـPDF الافتراضي بالحاسبة (مثل Acrobat/Edge) بدل نافذة بتبويب البرنامج
+    (اللي إغلاقها كان يسكّر برنامج المختبر). يشتغل فقط لو الطلب من نفس جهاز السيرفر؛ غير هيك الواجهة ترجع للتحميل العادي."""
+    if request.remote_addr not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+        return jsonify({"ok": False, "remote": True})
+    path = _v87_archive_path(get_db(), visit_id)
+    if not path:
+        return jsonify({"ok": False, "error": "ملف الأرشيف غير موجود"})
+    try:
+        if os.name == "nt":
+            os.startfile(path)                      # noqa: S606 — يفتح بالبرنامج الافتراضي لـ.pdf
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@
         <td dir="ltr" style="text-align:right">{{ (row['visit_at'] or row['updated_at'] or '')[:16].replace('T',' ') }}</td>
         <td>
           <button type="button" class="ar-b v" onclick="arOpen({{ row['visit_id'] }}, {{ row['full_name']|tojson }})">📄 عرض</button>
-          <a class="ar-b d" href="{{ url_for('pdf_archive_open', visit_id=row['visit_id']) }}?download=1">⬇ تحميل PDF</a>
+          <a class="ar-b d" href="{{ url_for('pdf_archive_open', visit_id=row['visit_id']) }}?download=1" onclick="return arExt({{ row['visit_id'] }}, this.href);">⬇ تحميل PDF</a>
           <button type="button" class="ar-b x" onclick="arDel({{ row['visit_id'] }}, {{ row['full_name']|tojson }})">🗑 حذف</button>
         </td>
       </tr>
@@ -50,7 +50,7 @@
 <div id="arOv">
   <div class="bar"><b id="arTitle"></b>
     <button class="ar-b v" onclick="arPrint()">🖨 طباعة</button>
-    <a class="ar-b d" id="arDl" href="#">⬇ تحميل</a>
+    <a class="ar-b d" id="arDl" href="#" onclick="return arExt(_cur, this.href);">⬇ تحميل</a>
     <button class="ar-b x" onclick="arClose()">✕ إغلاق</button></div>
   <iframe id="arFrame" src="about:blank"></iframe>
 </div>
@@ -65,8 +65,16 @@
 </div></div>
 <script>
   var OPEN = "{{ url_for('pdf_archive_open', visit_id=0) }}".replace(/0\/open$/, '');
-  var _del = 0;
+  var _del = 0, _cur = 0;
+  function arExt(id, fallback){   // يفتح PDF ببرنامج الـPDF المنصّب بالحاسبة؛ لو ماكو (جهاز ثاني/فشل) تحميل عادي
+    if(!id || fallback==='#' || fallback.slice(-1)==='#') return false;
+    fetch(OPEN + id + '/open-external', {method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){ window.location.href = fallback; }
+    }).catch(function(){ window.location.href = fallback; });
+    return false;
+  }
   function arOpen(id, name){
+    _cur = id;
     document.getElementById('arTitle').textContent = '📄 ' + name;
     document.getElementById('arDl').href = OPEN + id + '/open?download=1';
     document.getElementById('arFrame').src = OPEN + id + '/open';
