@@ -171,6 +171,8 @@
   .nv-sel-summary { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12.5px; }
   .nv-sel-summary td { padding: 3px 6px; border-top: 1px solid #EEF2F7; }
   .nv-sel-summary .nv-p { text-align: left; white-space: nowrap; }
+  .nv-pin { width: 78px; padding: 2px 5px; font-size: 12.5px; text-align: left; border: 1px solid #CBD5E1; border-radius: 6px; }
+  .nv-pin-save { border: 1px solid #CBD5E1; background: #fff; border-radius: 6px; padding: 1px 5px; cursor: pointer; font-size: 12px; }
   .nv-nop { color: #B91C1C; background: #FEE2E2; padding: 1px 6px; border-radius: 6px; font-size: 11.5px; }
   .nv-auto { color: #1D4ED8; background: #DBEAFE; padding: 1px 6px; border-radius: 6px; font-size: 11px; margin-inline-start: 6px; }
   .nv-custom { margin-bottom: 6px; }
@@ -549,7 +551,7 @@
          الحقل الحقيقي اللي يوصل السيرفر: فاضي = كل التحليل (كالسابق
          تماماً)، وإلا = بس معرّفات البارامترات المحددة. #}
       {# GUE/GSE/SFA/CBC/ESR/BF/RETIC/BFRETIC: تقرير واحد بسعر واحد — بدون قائمة بارامترات منفصلة بأسعار (v83) #}
-      {% if test['code'] not in ('GUE', 'GSE', 'SFA', 'CBC', 'ESR', 'BF', 'RETIC', 'BFRETIC') %}
+      {% if test['code'] not in ('GUE', 'GSE', 'SFA', 'CBC', 'ESR', 'BF', 'RETIC', 'BFRETIC') and test['id'] in partial_test_ids %}
       <button type="button" class="nv-param-arrow" title="اختيار بارامترات معيّنة بس من هذا التحليل"
               onclick="nvToggleParamPanel('{{ test['id'] }}')">▾</button>
       {% endif %}
@@ -783,7 +785,9 @@
   }
 
   // يرجّع null = بدون سعر (مختبر مُرسِل عنده قائمة أسعار والتحليل ليس فيها)
+  const NV_OVERRIDE = {};   // v85: سعر معدَّل يدويًا لهذه الزيارة {testId: price}
   function priceFor(testId, doctorId) {
+    if (NV_OVERRIDE.hasOwnProperty(testId)) return NV_OVERRIDE[testId];
     const labId = currentLabId();
     if (labId && LAB_PRICES[labId]) {
       return LAB_PRICES[labId].hasOwnProperty(testId) ? LAB_PRICES[labId][testId] : null;
@@ -889,6 +893,32 @@
     return out;
   }
 
+  // v85: تعديل سعر تحليل مباشرة من قائمة الطلبات — يُرسَل مع الزيارة كـ price_override_<id> (هذه الزيارة فقط)
+  function nvSetOverride(id, val) {
+    const form = document.getElementById('newVisitForm');
+    let h = document.getElementById('price_override_' + id);
+    const v = parseFloat(String(val).replace(',', ''));
+    if (isNaN(v) || v < 0) {
+      delete NV_OVERRIDE[id]; if (h) h.remove();
+    } else {
+      NV_OVERRIDE[id] = v;
+      if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.id = 'price_override_' + id; h.name = 'price_override_' + id; form.appendChild(h); }
+      h.value = v;
+    }
+    refreshPrices();
+  }
+  function nvSaveDefaultPrice(id, val) {
+    const v = parseFloat(String(val).replace(',', ''));
+    if (isNaN(v) || v < 0) { alert('اكتب سعرًا صحيحًا أولًا'); return; }
+    if (!confirm('حفظ ' + v + ' كسعر افتراضي دائم لهذا التحليل؟')) return;
+    fetch('/master/test-catalog/' + id + '/price', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({price: v})})
+      .then(function (r) { return r.json().catch(function () { return {ok: false}; }); })
+      .then(function (d) {
+        if (d && d.ok) { DEFAULT_PRICES[id] = v; delete NV_OVERRIDE[id]; const h = document.getElementById('price_override_' + id); if (h) h.remove(); refreshPrices(); }
+        else { alert((d && d.error) || 'تعذّر الحفظ — هذا الإجراء يتطلب صلاحية مشرف'); }
+      }).catch(function () { alert('تعذّر الاتصال بالخادم'); });
+  }
+
   function nvRenderSummary() {
     const doctorId = currentDoctorId();
     const body = document.getElementById('nvSelBody');
@@ -907,8 +937,15 @@
       if (NV_AUTO[id]) { const b = document.createElement('span'); b.className = 'nv-auto'; b.textContent = 'أُضيف تلقائيًا'; c2.appendChild(b); }
       const c3 = document.createElement('td'); c3.className = 'muted'; c3.textContent = m.section;
       const c4 = document.createElement('td'); c4.className = 'nv-p';
-      if (price === null) { missing.push(m.code || m.name); const b = document.createElement('span'); b.className = 'nv-nop'; b.textContent = 'بدون سعر'; c4.appendChild(b); }
-      else { c4.textContent = Math.round(price).toLocaleString('en-US'); }
+      if (price === null) { missing.push(m.code || m.name); const b = document.createElement('span'); b.className = 'nv-nop'; b.textContent = 'بدون سعر'; c4.appendChild(b); c4.appendChild(document.createTextNode(' ')); }
+      // v85: السعر قابل للتعديل مباشرة (لهذه الزيارة فقط) + زر 💾 لحفظه كسعر افتراضي للتحليل
+      const pin = document.createElement('input'); pin.type = 'number'; pin.min = '0'; pin.step = 'any'; pin.className = 'nv-pin';
+      pin.value = (price === null ? '' : Math.round(price)); pin.placeholder = 'سعر'; pin.title = 'عدّل السعر لهذه الزيارة';
+      pin.addEventListener('change', function () { nvSetOverride(id, pin.value); });
+      c4.appendChild(pin);
+      const sv = document.createElement('button'); sv.type = 'button'; sv.className = 'nv-pin-save'; sv.textContent = '💾'; sv.title = 'حفظ هذا السعر كسعر افتراضي للتحليل';
+      sv.addEventListener('click', function () { nvSaveDefaultPrice(id, pin.value); });
+      c4.appendChild(sv);
       [c1, c2, c3, c4].forEach(function (c) { tr.appendChild(c); });
       body.appendChild(tr);
     });
@@ -1214,6 +1251,7 @@
   });
 
   function refreshPrices() {
+    Object.keys(NV_OVERRIDE).forEach(function (k) { const c = document.getElementById('test_' + k); if (!c || !c.checked) { delete NV_OVERRIDE[k]; const h = document.getElementById('price_override_' + k); if (h) h.remove(); } });
     nvEnforceRequires();
     const doctorId = currentDoctorId();
     let total = 0;

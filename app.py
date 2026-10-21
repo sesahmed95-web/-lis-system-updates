@@ -2873,6 +2873,16 @@ def new_visit():
                     price = get_test_price(db, tid, referring_doctor_id, referral_center_id)
             else:
                 price = get_test_price(db, tid, referring_doctor_id, referral_center_id)
+            # v85: سعر معدَّل يدويًا لهذه الزيارة فقط (يُكتب من قائمة الطلبات بشاشة "زيارة جديدة")
+            _ov_raw = (request.form.get(f"price_override_{tid}") or "").strip().replace(",", "")
+            if _ov_raw:
+                try:
+                    _ov_val = float(_ov_raw)
+                    if _ov_val >= 0:
+                        price = _ov_val
+                        selected_param_ids = None if not selected_param_ids else selected_param_ids
+                except ValueError:
+                    pass
             barcode = f"{reg_number}{tid.zfill(3)}"
             # الحالة تبدأ 'Collected' مباشرة (مو 'Accepted') لأن زر "تم سحب
             # العينة" الإلزامي فوق تأكد إنها انسحبت فعليًا هذي اللحظة —
@@ -3015,7 +3025,12 @@ def new_visit():
     ).fetchall()
     picker = build_test_picker_context(db, tests, referral_labs)
     partner_labs, partner_prices = _partner_context(db)
-    return render_template("front_desk/new_visit.html", partner_labs=partner_labs, partner_prices=partner_prices, tests=tests, quick_items=quick_items,
+    try:   # v85: سهم ▾ (بارامترات معيّنة) يظهر فقط للتحاليل اللي لبارامتراتها أسعار فعلًا
+        _partial_ids = [r[0] for r in db.execute(
+            "SELECT DISTINCT test_definition_id FROM test_parameters WHERE price IS NOT NULL AND price > 0").fetchall()]
+    except Exception:
+        _partial_ids = []
+    return render_template("front_desk/new_visit.html", partial_test_ids=_partial_ids, partner_labs=partner_labs, partner_prices=partner_prices, tests=tests, quick_items=quick_items,
                             section_tree=picker["section_tree"], test_meta=picker["test_meta"],
                             lab_prices=picker["lab_prices"], lab_name_to_id=picker["lab_name_to_id"],
                             examining_doctors=get_examining_doctors(db), doctors=doctors,
@@ -4317,7 +4332,7 @@ def _serve_pdf_or_html(html_content, prefix):
     try:
         import pdf_export
         pdf_path = pdf_export.make_temp_pdf_path(_safe_pdf_name_part(prefix))
-        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+        _v86_html_to_pdf(html_content, request.url_root, pdf_path)
         if os.path.exists(pdf_path):
             return send_file(pdf_path, mimetype="application/pdf", as_attachment=False,
                              download_name=os.path.basename(pdf_path))
@@ -4738,7 +4753,7 @@ def referral_lab_statement_pdf(center_id):
                                     by_day=by_day, by_test=by_test, total=total, month=month)
     pdf_path = pdf_export.make_temp_pdf_path(f"reflab{center_id}_{month}")
     try:
-        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+        _v86_html_to_pdf(html_content, request.url_root, pdf_path)
     except Exception as exc:
         flash(f"❌ تعذّر توليد ملف PDF لكشف الحساب: {exc}")
         return redirect(url_for("referral_lab_statement", center_id=center_id, month=month))
@@ -4765,7 +4780,7 @@ def referral_lab_statement_whatsapp(center_id):
                                     by_day=by_day, by_test=by_test, total=total, month=month)
     pdf_path = pdf_export.make_temp_pdf_path(f"reflab{center_id}_{month}")
     try:
-        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+        _v86_html_to_pdf(html_content, request.url_root, pdf_path)
     except Exception as exc:
         flash(f"❌ تعذّر توليد ملف PDF لإرساله: {exc}")
         return redirect(url_for("referral_lab_statement", center_id=center_id, month=month))
@@ -7317,7 +7332,7 @@ def accounts_search_export_pdf():
     )
     pdf_path = pdf_export.make_temp_pdf_path("accounts_search")
     try:
-        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+        _v86_html_to_pdf(html_content, request.url_root, pdf_path)
     except Exception as exc:
         flash(f"❌ تعذّر توليد ملف PDF: {exc}")
         return redirect(url_for("accounts_search", **request.args))
@@ -10167,7 +10182,7 @@ def _whatsapp_generate_and_queue(db, visit_row, patient_id, patient_name, phone,
     # بصفحة 500 بيضاء بدون أي رسالة توضح شنو صار. الآن أي فشل هنا يُسجَّل
     # كصف "failed" بنفس الطابور بدل ما يكسر الصفحة بالكامل.
     try:
-        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+        _v86_html_to_pdf(html_content, request.url_root, pdf_path)
     except Exception as exc:
         db.execute(
             "INSERT INTO whatsapp_sends (visit_id, order_test_id, patient_id, patient_name, "
@@ -10285,8 +10300,16 @@ _POSTSAVE_LOCKS_GUARD = threading.Lock()
 def _post_save_background(visit_id, order_test_ids=()):
     url_root = request.url_root
     ids = list(order_test_ids or [])
+    if not ids:   # v86: ما تغيّرت نتيجة (مثلاً ضغط طباعة فقط): لا نعيد توليد الـPDF إذا الأرشيف موجود
+        try:
+            _r86 = get_db().execute("SELECT pdf_path FROM saved_reports WHERE visit_id=?", (visit_id,)).fetchone()
+            if _r86 and _r86["pdf_path"] and os.path.exists(_r86["pdf_path"]):
+                return
+        except Exception:
+            pass
 
     def _worker():
+        time.sleep(2.0)   # v86: نخلي نافذة الطباعة تفتح أول قبل ما يبدأ توليد الـPDF
         with _POSTSAVE_LOCKS_GUARD:
             lk = _POSTSAVE_LOCKS.setdefault(visit_id, threading.Lock())
         with lk:
@@ -10383,7 +10406,7 @@ def _maybe_archive_visit_pdf(db, visit_id):
         _other = db.execute("SELECT visit_id FROM saved_reports WHERE pdf_path=? AND visit_id<>?", (pdf_path, visit_id)).fetchone()
         if _other:  # نفس الاسم ونفس الدقيقة لزيارة ثانية: نضيف رقم التسجيل
             pdf_path = os.path.join(archive_dir, f"{safe_name} - {stamp_part} - {visit['registration_number']}.pdf")
-        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+        _v86_html_to_pdf(html_content, request.url_root, pdf_path)
     except Exception:
         _v74_log_exc("PDF archive generation failed for visit %s" % visit_id)
         return False
@@ -10433,7 +10456,7 @@ def _archive_single_test_pdf(db, order_test_id):
             date_part = datetime.now().strftime("%Y-%m-%d")
         filename = f"{row['registration_number']}_{_clean(row['full_name'])}_{_clean(row['test_code'] or row['test_name'])}_{date_part}.pdf"
         pdf_path = os.path.join(archive_dir, filename)
-        pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+        _v86_html_to_pdf(html_content, request.url_root, pdf_path)
         return pdf_path
     except Exception:
         return None
@@ -10533,7 +10556,7 @@ def _whatsapp_generate_and_queue_multi(db, visit_row, patient_id, patient_name, 
         prefix = f"{_safe_pdf_name_part(patient_name)} - {_safe_pdf_name_part(label)}"
         pdf_path = pdf_export.make_temp_pdf_path(prefix)
         try:
-            pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+            _v86_html_to_pdf(html_content, request.url_root, pdf_path)
         except Exception as exc:
             db.execute(
                 "INSERT INTO whatsapp_sends (visit_id, order_test_id, patient_id, patient_name, "
@@ -14937,7 +14960,7 @@ def _portal_make_pdf(visit_id):
             return None
         pdf_path = pdf_export.make_temp_pdf_path(f"portal{visit_id}")
         try:
-            pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
+            _v86_html_to_pdf(html_content, request.url_root, pdf_path)
             with open(pdf_path, "rb") as fh:
                 return fh.read()
         finally:
@@ -15527,22 +15550,7 @@ def _v80_esr_html(db, cbc_ot_id):
             lines.append((r["pname"] or "ESR", val, (r["unit"] or "").strip(), rtxt, bad))
     if not lines:
         return None
-    dots = "border-bottom:2px dotted #666;transform:translateY(-3px);" if _V80_ESR_DOTS else ""
-    out = ['<div class="lis-esr" dir="ltr" style="direction:ltr;margin:12px 0 0;padding-top:9px;border-top:1.5px solid #222;'
-           'font-family:\'Times New Roman\',Georgia,serif;color:#111;">']
-    for nm, val, unit, rtxt, bad in lines:
-        col = "color:#c00;" if bad else ""
-        out.append(
-            '<div style="display:flex;align-items:baseline;gap:6px;font-size:13.5px;line-height:1.6;">'
-            '<span style="font-weight:700;white-space:nowrap;">%s</span>'
-            '<span style="flex:1;min-width:20px;%s"></span>'
-            '<span style="font-weight:700;white-space:nowrap;text-align:center;min-width:90px;%s">%s</span>'
-            '<span style="flex:1;min-width:20px;%s"></span>'
-            '<span style="white-space:nowrap;min-width:120px;text-align:right;color:#333;">%s</span></div>'
-            % (_html_escape(nm), dots, col, _html_escape((val + " " + unit).strip()), dots,
-               _html_escape(("Normal: " + rtxt) if rtxt else "")))
-    out.append("</div>")
-    return "".join(out)
+    return _v86_esr_render(db, lines)
 
 
 def _v80_insert_after_cbc_table(html, block):
@@ -15674,6 +15682,285 @@ def _v80_adjust_entry_boxes(db, visit_id, boxes):
     except Exception:
         _v74_log_exc("v80 entry boxes adjust failed")
     return boxes
+
+
+# ============================== v86 ==============================
+# 1) HCT = RBC x MCV / 10 مباشرة بشاشة الإدخال + Corrected Retic يظهر لحظيًا أول ما تكتب Retic (يعتمد HCT الـCBC)
+# 2) ESR تحت CBC: تنسيق قابل للتحكم (المسافة بين النتيجة والوحدة، موضع النتيجة، قرب/بُعد Normal) من /management/esr-layout
+# 3) منع تجمّد البرنامج عند الطباعة/الأرشفة: توليد PDF صار بحارس واحد + مهلة + إنهاء المتصفح العالق، والأرشفة ما تعيد
+#    توليد PDF إذا ما تغيّرت نتيجة، وتتأخر ثانيتين حتى تفتح نافذة الطباعة أول.
+
+# ---------------------------------------------------------------- PDF guard
+_V86_PDF_GATE = threading.Lock()
+_V86_PDF_TIMEOUT = 45          # ثانية: أقصى وقت لتوليد PDF واحد قبل ما نتجاوزه وننهي المتصفح العالق
+
+
+def _v86_kill_headless():
+    """ينهي أي متصفح headless علق (متصفح Playwright اللي يولّد PDF) — فقط العمليات اللي سطر أمرها فيه --headless + playwright."""
+    if os.name != "nt":
+        return
+    try:
+        ps = ("Get-CimInstance Win32_Process | Where-Object { ($_.Name -match 'msedge|chrome|brave|chromium') "
+              "-and $_.CommandLine -match '--headless' -and $_.CommandLine -match 'playwright|print-to-pdf|remote-debugging-pipe' } "
+              "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                       timeout=15, capture_output=True, creationflags=0x08000000)
+    except Exception:
+        pass
+
+
+def _v86_html_to_pdf(html_content, url_root, pdf_path):
+    """نفس pdf_export.html_to_pdf لكن: (1) commit قبل التوليد حتى ما يبقى قفل كتابة على القاعدة طول مدة التحويل،
+    (2) توليد واحد فقط بنفس الوقت (حارس)، (3) مهلة — لو علق ينهيه ويرمي خطأ بدل ما يجمّد البرنامج كله."""
+    import pdf_export as _pe
+    from flask import copy_current_request_context
+    try:
+        get_db().commit()
+    except Exception:
+        pass
+    if not _V86_PDF_GATE.acquire(timeout=_V86_PDF_TIMEOUT):
+        _hang_log("[%s] PDF busy: gave up waiting for the PDF gate (%s)" % (datetime.now().isoformat(timespec="seconds"), pdf_path))
+        raise RuntimeError("PDF engine busy")
+    try:
+        box = {}
+
+        def _run():
+            try:
+                box["res"] = _pe.html_to_pdf(html_content, url_root, pdf_path)
+            except BaseException as exc:      # noqa: BLE001
+                box["err"] = exc
+        try:
+            _target = copy_current_request_context(_run)
+        except RuntimeError:
+            _target = _run
+        th = threading.Thread(target=_target, daemon=True)
+        th.start()
+        th.join(_V86_PDF_TIMEOUT)
+        if th.is_alive():
+            _hang_log("[%s] PDF TIMEOUT after %ss -> killing headless browser (%s)"
+                      % (datetime.now().isoformat(timespec="seconds"), _V86_PDF_TIMEOUT, pdf_path))
+            _v86_kill_headless()
+            th.join(5)
+            raise TimeoutError("PDF generation timed out after %s seconds" % _V86_PDF_TIMEOUT)
+        if "err" in box:
+            raise box["err"]
+        return box.get("res")
+    finally:
+        _V86_PDF_GATE.release()
+
+
+# ---------------------------------------------------------------- ESR layout
+_V86_ESR_DEFAULTS = {"esr_font": 14, "esr_val_x": 38, "esr_unit_gap": 14, "esr_range_mode": "right",
+                     "esr_range_gap": 60, "esr_top": 12, "esr_line": 1}
+
+
+def _v86_esr_cfg(db):
+    def _num(key, lo, hi):
+        try:
+            return max(lo, min(hi, int(float(get_setting(db, key, str(_V86_ESR_DEFAULTS[key])) or _V86_ESR_DEFAULTS[key]))))
+        except (TypeError, ValueError):
+            return _V86_ESR_DEFAULTS[key]
+    mode = (get_setting(db, "esr_range_mode", _V86_ESR_DEFAULTS["esr_range_mode"]) or "right").strip()
+    return {"esr_font": _num("esr_font", 9, 24), "esr_val_x": _num("esr_val_x", 0, 90),
+            "esr_unit_gap": _num("esr_unit_gap", 0, 80), "esr_range_mode": mode if mode in ("right", "near") else "right",
+            "esr_range_gap": _num("esr_range_gap", 0, 400), "esr_top": _num("esr_top", 0, 60),
+            "esr_line": 0 if str(get_setting(db, "esr_line", "1")) in ("0", "") else 1}
+
+
+def _v86_esr_render(db, lines, cfg=None):
+    cfg = cfg or _v86_esr_cfg(db)
+    border = "border-top:1.5px solid #222;padding-top:9px;" if cfg["esr_line"] else "padding-top:4px;"
+    out = ['<div class="lis-esr" dir="ltr" style="direction:ltr;margin:%dpx 0 0;%sfont-family:\'Times New Roman\',Georgia,serif;color:#111;">'
+           % (cfg["esr_top"], border)]
+    for nm, val, unit, rtxt, bad in lines:
+        col = "color:#c00;" if bad else ""
+        if cfg["esr_range_mode"] == "right":
+            rng_css = "margin-left:auto;text-align:right;"
+        else:
+            rng_css = "margin-left:%dpx;" % cfg["esr_range_gap"]
+        out.append(
+            '<div style="display:flex;align-items:baseline;font-size:%dpx;line-height:1.6;">'
+            '<span style="font-weight:700;white-space:nowrap;flex:0 0 %d%%;">%s</span>'
+            '<span style="white-space:nowrap;%s"><b>%s</b>'
+            '<span style="display:inline-block;width:%dpx;"></span><span style="font-weight:600;">%s</span></span>'
+            '<span style="white-space:nowrap;color:#333;%s">%s</span></div>'
+            % (cfg["esr_font"], cfg["esr_val_x"], _html_escape(nm), col, _html_escape(val),
+               cfg["esr_unit_gap"], _html_escape(unit), rng_css,
+               _html_escape(("Normal: " + rtxt) if rtxt else "")))
+    out.append("</div>")
+    return "".join(out)
+
+
+_V86_ESR_PAGE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تنسيق سطر ESR</title>
+<style>body{font:15px Tahoma,Arial,sans-serif;background:#EEF3F8;margin:0;padding:18px;color:#1E293B}
+.card{background:#fff;border-radius:14px;padding:18px 22px;max-width:760px;margin:0 auto 16px;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+h2{margin:0 0 12px;color:#205072}label{display:block;margin:12px 0 4px;font-weight:700}
+input[type=number],select{width:140px;padding:8px;border:1px solid #94A3B8;border-radius:8px;font-size:15px}
+.row{display:flex;gap:26px;flex-wrap:wrap}small{color:#64748B;display:block;margin-top:2px}
+button{background:#205072;color:#fff;border:0;border-radius:9px;padding:10px 22px;font:700 15px Tahoma;cursor:pointer;margin-top:16px}
+.prev{border:1px dashed #94A3B8;padding:14px;border-radius:10px;background:#fff;direction:ltr}.ok{color:#15803D;font-weight:700}</style></head><body>
+<div class="card"><h2>تنسيق سطر ESR (تحت جدول CBC)</h2>
+<form method="post">
+<div class="row">
+<div><label>حجم الخط (px)</label><input type="number" name="esr_font" value="{{ c.esr_font }}" min="9" max="24"></div>
+<div><label>موضع النتيجة من اليسار (%)</label><input type="number" name="esr_val_x" value="{{ c.esr_val_x }}" min="0" max="90"><small>كبّره = النتيجة تبتعد عن اسم ESR</small></div>
+<div><label>المسافة بين النتيجة والوحدة (px)</label><input type="number" name="esr_unit_gap" value="{{ c.esr_unit_gap }}" min="0" max="80"></div>
+</div><div class="row">
+<div><label>مكان «Normal»</label><select name="esr_range_mode">
+<option value="right" {{ 'selected' if c.esr_range_mode=='right' }}>بأقصى اليمين</option>
+<option value="near" {{ 'selected' if c.esr_range_mode=='near' }}>قريب من النتيجة</option></select></div>
+<div><label>بُعد «Normal» عن الوحدة (px) — للخيار «قريب»</label><input type="number" name="esr_range_gap" value="{{ c.esr_range_gap }}" min="0" max="400"></div>
+<div><label>الفراغ فوق السطر (px)</label><input type="number" name="esr_top" value="{{ c.esr_top }}" min="0" max="60"></div>
+<div><label>الخط العلوي</label><select name="esr_line"><option value="1" {{ 'selected' if c.esr_line }}>يظهر</option><option value="0" {{ 'selected' if not c.esr_line }}>بدون</option></select></div>
+</div>
+<button type="submit">💾 حفظ</button> {% if saved %}<span class="ok">✔ انحفظ — يطبّق على الطباعة والـPDF والواتساب</span>{% endif %}
+</form></div>
+<div class="card"><h2>معاينة</h2><div class="prev">{{ preview|safe }}</div></div></body></html>"""
+
+
+@app.route("/management/esr-layout", methods=["GET", "POST"])
+@login_required
+def esr_layout_settings():
+    db = get_db()
+    saved = False
+    if request.method == "POST":
+        for k in ("esr_font", "esr_val_x", "esr_unit_gap", "esr_range_gap", "esr_top", "esr_line"):
+            set_setting(db, k, (request.form.get(k) or str(_V86_ESR_DEFAULTS[k])).strip())
+        set_setting(db, "esr_range_mode", request.form.get("esr_range_mode") or "right")
+        db.commit()
+        saved = True
+    cfg = _v86_esr_cfg(db)
+    prev = _v86_esr_render(db, [("ESR", "8", "mm/hr", "0 - 10", False)], cfg)
+    from flask import render_template_string
+    return render_template_string(_V86_ESR_PAGE, c=cfg, preview=prev, saved=saved)
+
+
+# ---------------------------------------------------------------- live calc (HCT / Corrected Retic)
+_V86_LIVE_JS = r"""<script id="lis-v86-live">
+(function(){
+  var CFG = __CFG__;
+  function norm(s){return (s||'').replace(/\s+/g,' ').trim();}
+  function first(tr){var c=tr.querySelector('td,th');return c?norm(c.textContent):'';}
+  function rowsIn(el){return Array.prototype.slice.call(el.querySelectorAll('tr'));}
+  function inp(tr){return tr?tr.querySelector('input[name*="param_"]:not([type=hidden]):not([type=checkbox]):not([type=radio])'):null;}
+  function findRow(scope,name){var r=rowsIn(scope);for(var i=0;i<r.length;i++){if(first(r[i])===name)return r[i];}return null;}
+  function num(v){var x=parseFloat(String(v==null?'':v).replace(',','.'));return isFinite(x)?x:null;}
+  function r1(x){return Math.round(x*10)/10;}
+  function put(el,val){
+    var s=String(val); if(el.value===s) return;
+    el.value=s;
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+  }
+  function cards(names){            /* أصغر حاوية فيها كل الصفوف المطلوبة (لكل بطاقة) */
+    var out=[],seen=[];
+    rowsIn(document).forEach(function(tr){
+      if(first(tr)!==names[0]) return;
+      var p=tr.parentElement;
+      for(var i=0;i<14&&p;i++,p=p.parentElement){
+        var rs=rowsIn(p).map(first), ok=names.every(function(n){return rs.indexOf(n)>=0;});
+        if(ok){ if(seen.indexOf(p)<0){seen.push(p);out.push(p);} break; }
+      }
+    });
+    return out;
+  }
+  function tint(el,on){ el.style.backgroundColor=on?'#ECFDF5':''; el.title=on?'محسوب تلقائيًا — اكتب قيمة لتغييره':''; }
+  function hasAuto(el,computed){
+    if(el.dataset.lisAuto!==undefined) return;
+    var cur=num(el.value);
+    el.dataset.lisAuto=(el.value===''||(computed!=null&&cur!=null&&Math.abs(cur-computed)<0.06))?'1':'0';
+  }
+  function cbcHct(){                 /* قيمة HCT الحية من بطاقة CBC بالصفحة */
+    var cs=cards(['RBC','MCV','HCT']);
+    for(var i=0;i<cs.length;i++){var e=inp(findRow(cs[i],'HCT')); if(e&&num(e.value)!=null&&num(e.value)>0) return num(e.value);}
+    return null;
+  }
+  function calcHct(){
+    cards(['RBC','MCV','HCT']).forEach(function(c){
+      var rbc=inp(findRow(c,'RBC')), mcv=inp(findRow(c,'MCV')), h=inp(findRow(c,'HCT'));
+      if(!rbc||!mcv||!h) return;
+      var r=num(rbc.value), m=num(mcv.value), comp=(r>0&&m>0)?r1(r*m/10):null;
+      hasAuto(h,comp);
+      if(h.dataset.lisAuto==='1'){ if(comp!=null){ put(h,comp); tint(h,true);} }
+      else tint(h,false);
+    });
+  }
+  function calcCor(){
+    cards(['Reticulocyte count','Corrected Retic count']).forEach(function(c){
+      var rt=inp(findRow(c,'Reticulocyte count')), co=inp(findRow(c,'Corrected Retic count'));
+      if(!rt||!co) return;
+      var h=cbcHct();
+      if(h==null && CFG.hct) h=CFG.hct;
+      if(h==null){ var hr=inp(findRow(c,'HCT')); if(hr) h=num(hr.value); }
+      var n=CFG.hctNormal, r=num(rt.value);
+      var comp=(r!=null&&h&&n)?r1(r*(h/n)):null;
+      hasAuto(co,comp);
+      if(co.dataset.lisAuto==='1'){ if(comp!=null){ put(co,comp); tint(co,true);} else if(r==null && co.value!==''){ /* مسحت Retic: امسح المحسوب */ put(co,''); tint(co,false);} }
+      else tint(co,false);
+    });
+  }
+  function all(){ calcHct(); calcCor(); }
+  document.addEventListener('input',function(e){
+    var t=e.target;
+    if(e.isTrusted && t && t.dataset && t.dataset.lisAuto!==undefined){ t.dataset.lisAuto=(t.value===''?'1':'0'); }
+    all();
+  },true);
+  function boot(){ all(); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
+  setTimeout(boot,600);
+  var b=document.createElement('a'); b.href='/management/esr-layout'; b.target='lisEsrCfg';
+  b.textContent='⚙ تنسيق ESR';
+  b.style.cssText='position:fixed;bottom:14px;left:14px;z-index:9998;background:#205072;color:#fff;border-radius:9px;padding:7px 12px;font:700 12px Tahoma;text-decoration:none;opacity:.85';
+  b.onclick=function(ev){ev.preventDefault();window.open('/management/esr-layout','lisEsrCfg','width=820,height=640,resizable=yes,scrollbars=yes');};
+  document.addEventListener('DOMContentLoaded',function(){document.body.appendChild(b);});
+  if(document.readyState!=='loading') document.body.appendChild(b);
+})();
+</script>"""
+
+
+@app.after_request
+def _v86_live_calc(resp):
+    try:
+        if request.endpoint not in ("visit_results_entry", "result_entry") or request.method != "GET" \
+                or resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        data = resp.get_data()
+        if b"</body>" not in data or b'id="lis-v86-live"' in data:
+            return resp
+        _va = request.view_args or {}
+        db = get_db()
+        if "visit_id" in _va:
+            vid = _va["visit_id"]
+        else:
+            _r = db.execute("SELECT o.visit_id FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE ot.id=?",
+                            (_va.get("order_test_id"),)).fetchone()
+            vid = _r["visit_id"] if _r else None
+        if vid is None:
+            return resp
+        pt = db.execute("SELECT p.gender, p.age, p.age_unit FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.id=?",
+                        (vid,)).fetchone()
+        cfg = {"hct": get_visit_hct(db, vid),
+               "hctNormal": get_normal_hct(db, pt["gender"], pt["age"], pt["age_unit"]) if pt else None}
+        js = _V86_LIVE_JS.replace("__CFG__", json.dumps(cfg))
+        resp.set_data(data.replace(b"</body>", js.encode("utf-8") + b"</body>", 1))
+    except Exception:
+        _v74_log_exc("v86 live calc inject failed")
+    return resp
+
+
+# ---------------------------------------------------------------- نوافذ الطباعة بمعالج منفصل عن نافذة البرنامج
+# hang_log.txt ما فيه أي توقف من السيرفر وقت الطباعة => الصفنة من جهة المتصفح: window.print() يوقف معالج الصفحة (renderer)
+# والنافذة المفتوحة بـwindow.open تشارك نفس المعالج مع نافذة البرنامج، فتتجمد الاثنتين. هذا الهيدر يفصل نافذة الطباعة بمعالج لحاله.
+@app.after_request
+def _v86_print_popup_isolation(resp):
+    try:
+        p = request.path
+        if request.method == "GET" and resp.status_code == 200 and (
+                "/print/" in p or p.startswith(("/reports/print/", "/reports/pdf/", "/reports/archive/", "/labels/", "/barcode/"))):
+            resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    except Exception:
+        pass
+    return resp
 
 
 if __name__ == "__main__":

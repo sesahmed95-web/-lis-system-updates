@@ -164,3 +164,4 @@
 [2026-10-20T16:31:18] SLOW 2.8s GET /reports/archive/40/open? (pdf_archive_open)
 [2026-10-21T10:05:10] SLOW 6.1s GET /reports/archive/41/open? (pdf_archive_open)
 [2026-10-21T11:24:41] SLOW 3.9s GET /reports/pdf/visit/41? (report_pdf_visit)
+[2026-10-21T12:38:43] SLOW 2.2s POST /designer/update/check-now? (designer_update_check_now)
