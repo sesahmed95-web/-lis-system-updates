@@ -4289,6 +4289,29 @@ def _restore_printed_at(db, snapshot):
         pass
 
 
+def _v74_log_exc(msg):
+    """يكتب سبب الفشل + traceback بـ error_log.txt (بدل ما نبلعه بصمت)."""
+    try:
+        import traceback as _tb
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "error_log.txt"), "a", encoding="utf-8") as _f:
+            _f.write("\n[%s] %s\n%s\n" % (datetime.now().isoformat(timespec="seconds"), msg, _tb.format_exc()))
+    except Exception:
+        pass
+
+
+def _v74_printable_html(html_content):
+    """لما يتعذّر توليد PDF: نعرض التقرير نفسه مع شريط (لا يُطبع) فيه زر طباعة / حفظ كـPDF."""
+    if not isinstance(html_content, str) or "</body>" not in html_content:
+        return html_content
+    bar = ('<style>@media print{#lisV74Bar{display:none!important}}</style>'
+           '<div id="lisV74Bar" style="position:fixed;top:8px;left:8px;z-index:99999;background:#fff;border:1px solid #94A3B8;'
+           'border-radius:10px;padding:6px 12px;font:13px Tahoma,Arial,sans-serif;direction:rtl;box-shadow:0 3px 12px rgba(0,0,0,.25);">'
+           '<button onclick="window.print()" style="background:#205072;color:#fff;border:0;border-radius:7px;padding:6px 14px;'
+           'font:700 13px Tahoma;cursor:pointer;">🖨 طباعة / حفظ كـ PDF</button>'
+           '<span style="color:#64748B;margin-inline-start:8px;">(بنافذة الطباعة اختر الوجهة: Save as PDF)</span></div>')
+    return html_content.replace("</body>", bar + "</body>", 1)
+
+
 def _serve_pdf_or_html(html_content, prefix):
     """يحوّل HTML لـPDF ويعرضه بالمتصفح (inline). لو محرك الـPDF فشل نعرض التقرير نفسه (جاهز للطباعة) بدل خطأ."""
     try:
@@ -4299,8 +4322,8 @@ def _serve_pdf_or_html(html_content, prefix):
             return send_file(pdf_path, mimetype="application/pdf", as_attachment=False,
                              download_name=os.path.basename(pdf_path))
     except Exception:
-        pass
-    return html_content
+        _v74_log_exc("pdf_export failed (_serve_pdf_or_html)")
+    return _v74_printable_html(html_content)
 
 
 @app.route("/reports/pdf/test/<int:order_test_id>")
@@ -4329,7 +4352,15 @@ def report_pdf_visit(visit_id):
         return "Not found", 404
     snap = {r["id"]: r["printed_at"] for r in db.execute(
         "SELECT ot.id, ot.printed_at FROM order_tests ot JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?", (visit_id,))}
-    html_content = _build_combined_designed_reports_html(visit_id)
+    html_content = None
+    try:   # نفس "اللوحة المجمّعة" المصممة اللي تنطبع (مثل الأرشفة v72)، وإلا المولّد القديم
+        session.setdefault("interface", "both")
+        _h74 = print_combined_panel(visit_id)
+        html_content = _h74 if isinstance(_h74, str) and len(_h74) > 500 else None
+    except Exception:
+        _v74_log_exc("print_combined_panel failed (report_pdf_visit)")
+    if not html_content:
+        html_content = _build_combined_designed_reports_html(visit_id)
     _restore_printed_at(db, snap)
     if not html_content:
         return ("<div dir='rtl' style='padding:40px;text-align:center;font-family:Tahoma,Arial,sans-serif;color:#64748B;'>"
@@ -6421,6 +6452,8 @@ def print_visit_results_bundle(visit_id):
     # تجنّب فتح تقرير "لطاخة الدم" مرتين لو الزيارة فيها BF وRETIC كتحليلين
     # منفصلين (بدل BFRETIC الموحّد) — print_report أصلاً يدمجهم بتقرير واحد
     # لو فتحت أي وحدة منهم (انظر BF_RETIC_LINK)، فنكتفي هنا برابط واحد بس.
+    if any((_o["test_code"] or "") == "CBC" for _o in order_tests):   # v80: ESR يطلع داخل تقرير CBC
+        order_tests = [_o for _o in order_tests if not _v80_is_esr(_o["test_code"], _o["test_name"])]
     seen_codes = set()
     reports = []
     for ot in order_tests:
@@ -6523,6 +6556,8 @@ def _build_combined_designed_reports_html(visit_id):
             key=lambda row: (department_priority_rank(row["test_department"]), row["id"]),
         )
 
+    if any((_o["test_code"] or "") == "CBC" for _o in order_tests):   # v80: ESR يطلع داخل تقرير CBC
+        order_tests = [_o for _o in order_tests if not _v80_is_esr(_o["test_code"], _o["test_name"])]
     seen_codes = set()
     order_test_ids = []
     for ot in order_tests:
@@ -7757,6 +7792,25 @@ def save_order_test_results(db, ot, parameters, form, user_id, field_prefix="", 
     # وتعليق _apply_retic_correction أدناه للتفاصيل الكاملة).
     if "test_code" in ot.keys() and ot["test_code"] == "RETIC":
         _apply_retic_correction(db, ot, parameters, form, field_prefix, user_id, now, patient_id)
+    elif "test_code" in ot.keys() and ot["test_code"] == "CBC":
+        # v79: لما يُحفظ CBC (فيه HCT) والمريض عنده Retic فيه Reticulocyte count بدون Corrected => يُحسب تلقائيًا
+        try:
+            _rt = db.execute(
+                "SELECT ot2.*, td2.code AS test_code, v.id AS visit_id, p.gender, p.age, p.age_unit "
+                "FROM order_tests ot2 JOIN test_definitions td2 ON td2.id=ot2.test_definition_id "
+                "JOIN orders o2 ON o2.id=ot2.order_id JOIN visits v ON v.id=o2.visit_id JOIN patients p ON p.id=v.patient_id "
+                "WHERE ot2.order_id=? AND td2.code='RETIC'", (ot["order_id"],)).fetchone()
+            if _rt:
+                _rparams = db.execute("SELECT * FROM test_parameters WHERE test_definition_id=?", (_rt["test_definition_id"],)).fetchall()
+                _cp = next((p for p in _rparams if p["name"] == "Corrected Retic count"), None)
+                _has = _cp and db.execute("SELECT 1 FROM results WHERE order_test_id=? AND test_parameter_id=? AND (value_numeric IS NOT NULL OR value_text IS NOT NULL)",
+                                          (_rt["id"], _cp["id"])).fetchone()
+                if not _has:
+                    _apply_retic_correction(db, _rt, _rparams, {}, "", user_id, now, patient_id)
+        except Exception:
+            pass
+    elif "test_code" in ot.keys() and ot["test_code"] == "BF":
+        _v80_sync_bf_to_retic(db, ot, parameters, user_id, now, patient_id)   # v80: Retic داخل BF
 
     return touched
 
@@ -7809,7 +7863,19 @@ def _apply_retic_correction(db, ot, parameters, form, field_prefix, user_id, now
         return existing["value_numeric"] if existing else None
 
     retic_value = _current_numeric(retic_param)
-    hct_value = _current_numeric(hct_param)
+    # v79: HCT يُسحب تلقائيًا من CBC نفس الزيارة إن وُجد؛ وإلا (Retic لحاله بلا CBC) من حقل HCT المكتوب بتحليل Retic
+    hct_value = None
+    try:
+        _vid = ot["visit_id"] if "visit_id" in ot.keys() else None
+        if _vid is None:
+            _vr = db.execute("SELECT visit_id FROM orders WHERE id=?", (ot["order_id"],)).fetchone()
+            _vid = _vr["visit_id"] if _vr else None
+        if _vid is not None:
+            hct_value = get_visit_hct(db, _vid)
+    except Exception:
+        hct_value = None
+    if hct_value is None:
+        hct_value = _current_numeric(hct_param)
     if retic_value is None or hct_value is None:
         return
 
@@ -7824,6 +7890,12 @@ def _apply_retic_correction(db, ot, parameters, form, field_prefix, user_id, now
             normal_hct = low
         elif high is not None:
             normal_hct = high
+    if not normal_hct:
+        # v79: لو تحليل Retic ما عنده مدى HCT نستخدم مدى HCT الخاص بتحليل CBC (نفس العمر والجنس)
+        try:
+            normal_hct = get_normal_hct(db, ot["gender"], ot["age"], ot["age_unit"])
+        except Exception:
+            normal_hct = None
     if not normal_hct:
         return  # ماكو مدى طبيعي لـHCT محدد بعمر هذا المريض -- ما نقدر نحسب
 
@@ -8355,6 +8427,9 @@ def visit_results_entry(visit_id):
             if touched:
                 any_saved = True
                 touched_ot_ids.append(ot["id"])
+                _rt80 = _v80_retic_sibling_id(db, ot)   # v80: Retic اللي انكمل من BF يدخل بتحديث PDF/الأرشيف
+                if _rt80 and _rt80 not in touched_ot_ids:
+                    touched_ot_ids.append(_rt80)
                 if ot["status"] != "Verified":
                     db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (ot["id"],))
         db.commit()
@@ -8420,6 +8495,7 @@ def visit_results_entry(visit_id):
             "hidden_params": _hidden_params,
         })
 
+    boxes = _v80_adjust_entry_boxes(db, visit_id, boxes)   # v80
     _pv_cfg = get_result_layout(db)
     _pv_has_merge = bool(get_visit_previous_merges(db, visit_id))
     return render_template("front_desk/visit_results_entry.html", visit=visit, boxes=boxes,
@@ -8767,7 +8843,9 @@ def _print_combined_panel_core(visit_id):
             return False
         _hay = (_code + " " + (_ot["test_name"] or "")).lower()
         return not any(k in _hay for k in _excl_kws)
-    order_tests = [_o for _o in order_tests if _merged_ok(_o)]
+    _v80_has_cbc = any((_o["test_code"] or "") == "CBC" for _o in order_tests)   # v80: ESR يطلع داخل تقرير CBC
+    order_tests = [_o for _o in order_tests if _merged_ok(_o)
+                   and not (_v80_has_cbc and _v80_is_esr(_o["test_code"], _o["test_name"]))]
 
     # سطر/أسطر "Done by ..." (المطلوب 7) — كل تحليل داخل هذي اللوحة المجمّعة
     # ممكن يكون له done_by_note مختلف (أجهزة مختلفة لكل تحليل)، فنجمع كل
@@ -8967,6 +9045,8 @@ def print_combined_panel(visit_id):
         "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=? AND ot.status IN ('Completed','Verified') ORDER BY ot.id",
         (visit_id,),
     ).fetchall()
+    if any((_r["code"] or "") == "CBC" for _r in rows):   # v80: ESR يطلع داخل تقرير CBC
+        rows = [_r for _r in rows if not _v80_is_esr(_r["code"], _r["name"])]
     panel_ids, extra_ids = [], []
     for r in rows:
         code = r["code"] or ""
@@ -8978,7 +9058,15 @@ def print_combined_panel(visit_id):
     if not extra_ids:
         return _print_combined_panel_core(visit_id)
     extra_ids.sort(key=lambda r: (department_priority_rank(r["dept"]), r["id"]))
-    extra_ids = [r["id"] for r in extra_ids if not (r["code"] in BF_RETIC_LINK and BF_RETIC_LINK[r["code"]] in {x["code"] for x in rows})]
+    # v79: أزواج BF+RETIC (و SICKLE+HBPREP) تُطبع بتقرير واحد: نُبقي تحليلًا واحدًا من كل زوج (print_report يدمج الثاني معه).
+    # (قبل: كان يحذف الاثنين معًا فيختفي BF/Retic من اللوحة المجمّعة أو يطلعون بملف منفصل)
+    _kept_codes, _kept = set(), []
+    for _r in extra_ids:
+        _c = _r["code"]
+        if _c in BF_RETIC_LINK and BF_RETIC_LINK[_c] in _kept_codes:
+            continue
+        _kept_codes.add(_c); _kept.append(_r["id"])
+    extra_ids = _kept
     from werkzeug.datastructures import MultiDict
     orig_args = request.args
     want_auto = orig_args.get("auto") == "1"
@@ -9115,7 +9203,7 @@ def _auto_report_template(db, test_definition_id, test_name):
     }
 
 
-def _print_report_impl(order_test_id):
+def _print_report_impl_v79(order_test_id):
     db = get_db()
     ot = db.execute(
         "SELECT ot.*, td.code as test_code, td.name as test_name, td.department as test_department, "
@@ -10272,6 +10360,7 @@ def _maybe_archive_visit_pdf(db, visit_id):
             pdf_path = os.path.join(archive_dir, f"{safe_name} - {stamp_part} - {visit['registration_number']}.pdf")
         pdf_export.html_to_pdf(html_content, request.url_root, pdf_path)
     except Exception:
+        _v74_log_exc("PDF archive generation failed for visit %s" % visit_id)
         return False
 
     save_saved_report(
@@ -10279,6 +10368,10 @@ def _maybe_archive_visit_pdf(db, visit_id):
         pdf_path, referring_doctor_name=visit["referring_doctor_name"],
         referral_center_name=visit["referral_center_name"],
     )
+    try:   # نتائج انحفظت/تعدّلت بعد الحذف => ترجع للأرشيف
+        db.execute("DELETE FROM archive_deleted WHERE visit_id=?", (visit_id,)); db.commit()
+    except Exception:
+        pass
     return True
 
 
@@ -10502,6 +10595,8 @@ def _do_whatsapp_send_visit(visit_id, mode):
             "WHERE o.visit_id=? AND ot.status IN ('Completed', 'Verified') ORDER BY ot.id",
             (visit_id,),
         ).fetchall()
+        if any((_o["test_code"] or "") == "CBC" for _o in order_tests):   # v80: ESR يطلع داخل تقرير CBC
+            order_tests = [_o for _o in order_tests if not _v80_is_esr(_o["test_code"], _o["test_name"])]
         seen_codes = set()
         items = []
         for ot in order_tests:
@@ -10622,17 +10717,22 @@ def pdf_archive():
     db = get_db()
     q = request.args.get("q", "").strip()
     archive_dir = _get_pdf_archive_dir(db)
-    # v72: القائمة = كل الزيارات المكتملة (حتى القديمة اللي ما انؤرشفت) — الـPDF يتولّد عند الفتح لو مو موجود
+    # v78: القائمة = كل الزيارات المكتملة (غير المحذوفة من الأرشيف) — الـPDF يتولّد عند الفتح لو مو موجود
+    db.execute("CREATE TABLE IF NOT EXISTS archive_deleted (visit_id INTEGER PRIMARY KEY, deleted_at TEXT, deleted_by TEXT)")
     like = f"%{q}%"
     rows = db.execute(
-        "SELECT v.id AS visit_id, v.registration_number, p.full_name, "
-        "COALESCE(sr.updated_at, v.created_at) AS updated_at, sr.referring_doctor_name, sr.referral_center_name "
+        "SELECT v.id AS visit_id, v.registration_number, p.full_name, v.created_at AS visit_at, "
+        "COALESCE(sr.updated_at, v.created_at) AS updated_at, "
+        "COALESCE(NULLIF(sr.referring_doctor_name,''), d.full_name, '') AS doctor_name, "
+        "COALESCE(NULLIF(sr.referral_center_name,''), rc.name, '') AS center_name "
         "FROM visits v JOIN patients p ON p.id = v.patient_id LEFT JOIN saved_reports sr ON sr.visit_id = v.id "
+        "LEFT JOIN doctors d ON d.id = v.doctor_id LEFT JOIN referral_centers rc ON rc.id = v.referral_center_id "
         "WHERE (? = '%%' OR p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR p.phone LIKE ?) "
+        "AND v.id NOT IN (SELECT visit_id FROM archive_deleted) "
         "AND EXISTS (SELECT 1 FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=v.id) "
         "AND NOT EXISTS (SELECT 1 FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=v.id "
         "AND ot.status NOT IN ('Completed','Verified')) "
-        "ORDER BY v.id DESC LIMIT 100", (like, like, like, like)).fetchall()
+        "ORDER BY v.id DESC LIMIT 200", (like, like, like, like)).fetchall()
     return render_template("pdf_archive.html", rows=rows, q=q, archive_configured=True)
 
 
@@ -10652,10 +10752,34 @@ def pdf_archive_open(visit_id):
             pass
         row = get_saved_report(db, visit_id)
     if not row or not row["pdf_path"] or not os.path.exists(row["pdf_path"]):
-        flash("الملف غير موجود بمجلد الأرشيف — يمكن انحذف أو انقل يدويًا من خارج البرنامج.")
-        return redirect(url_for("pdf_archive"))
-    return send_file(row["pdf_path"], as_attachment=False,
+        # v74: تعذّر توليد/إيجاد الملف المؤرشف — نفتح التقرير نفسه (PDF أو صفحة جاهزة للطباعة) بدل الرجوع للأرشيف برسالة
+        return redirect(url_for("report_pdf_visit", visit_id=visit_id))
+    return send_file(row["pdf_path"], as_attachment=(request.args.get("download") == "1"),
                       download_name=os.path.basename(row["pdf_path"]))
+
+
+@app.route("/reports/archive/<int:visit_id>/delete", methods=["POST"])
+@login_required
+def pdf_archive_delete(visit_id):
+    """v78: حذف من الأرشيف — لا يتم إلا بموافقة مسؤول/مشرف المختبر (يوزر + باسورد حساب admin/supervisor).
+    يحذف ملف الـPDF المؤرشف ويخفي الزيارة من القائمة؛ بيانات المريض ونتائجه ما تنمس."""
+    db = get_db()
+    ok, err = _check_completed_result_gate(db, request.form)
+    if not ok:
+        return jsonify(ok=False, message=err), 403
+    db.execute("CREATE TABLE IF NOT EXISTS archive_deleted (visit_id INTEGER PRIMARY KEY, deleted_at TEXT, deleted_by TEXT)")
+    row = get_saved_report(db, visit_id)
+    if row and row["pdf_path"]:
+        try:
+            os.remove(row["pdf_path"])
+        except OSError:
+            pass
+    db.execute("DELETE FROM saved_reports WHERE visit_id=?", (visit_id,))
+    db.execute("INSERT OR REPLACE INTO archive_deleted (visit_id, deleted_at, deleted_by) VALUES (?,?,?)",
+               (visit_id, datetime.now().isoformat(timespec="seconds"), (request.form.get("gate_username") or "").strip()))
+    db.commit()
+    log_action("ArchiveDelete", "visit", visit_id, "approved_by=%s" % (request.form.get("gate_username") or "shared-password"))
+    return jsonify(ok=True, message="تم الحذف من الأرشيف")
 
 
 @app.route("/whatsapp/queue")
@@ -14830,8 +14954,9 @@ def print_visit_portal_qr(visit_id):
     if not visit:
         return "Not found", 404
     if not cfg["url"]:
-        flash("اضبط رابط بوابة النتائج أولاً من الإعدادات ← بوابة النتائج.")
-        return redirect(url_for("app_settings"))
+        # v77: حساب الاستقبال ما يفتح صفحة الإعدادات -> لا تحوّله لها (كان يطلع رسالتين ويرجع للوحة). ارجع للصفحة السابقة برسالة واضحة.
+        flash("بوابة النتائج غير مفعّلة بهذا الجهاز (رابط البوابة/مفتاحها غير مضبوطين). اطلب من مسؤول النظام أو المصمم ضبطها، ثم أعد المحاولة.")
+        return redirect(request.referrer or url_for("new_visit"))
     token = cloud_sync.ensure_token(db, visit_id)
     data = _portal_collect(db, visit_id) or {"tests": [], "created_at": visit["created_at"]}
     cloud_sync.trigger()
@@ -14917,6 +15042,615 @@ try:
         return resp
 except Exception as _up_err:
     print("update_publisher not loaded:", _up_err)
+# --- v75: بطاقة المريض (نافذة مستقلة بلا مسطرة جانبية) ---
+def _pc_recalc_invoice(db, visit_id):
+    inv = db.execute("SELECT id, extra_charges FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+    if not inv:
+        return
+    tot = db.execute("SELECT COALESCE(SUM(ot.price),0) AS t FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=?", (visit_id,)).fetchone()["t"]
+    fee = db.execute("SELECT COALESCE(home_visit_fee,0) AS f FROM visits WHERE id=?", (visit_id,)).fetchone()["f"]
+    db.execute("UPDATE invoices SET total_amount=? WHERE id=?", (float(tot or 0) + float(fee or 0) + float(inv["extra_charges"] or 0), inv["id"]))
+
+
+def _pc_visit(db, visit_id):
+    return db.execute(
+        "SELECT v.*, p.full_name, p.gender, p.age, p.age_unit, p.phone, p.title, p.email, p.address, p.national_id, p.passport_number, p.travel_certificate_number, p.lab_card_number, d.full_name AS doctor_name, rc.name AS center_name "
+        "FROM visits v JOIN patients p ON p.id = v.patient_id LEFT JOIN doctors d ON d.id = v.doctor_id "
+        "LEFT JOIN referral_centers rc ON rc.id = v.referral_center_id WHERE v.id=?", (visit_id,)).fetchone()
+
+
+@app.route("/patient-card/<int:visit_id>")
+@login_required
+def patient_card(visit_id):
+    db = get_db()
+    v = _pc_visit(db, visit_id)
+    if not v:
+        return "Not found", 404
+    tests = [dict(r) for r in db.execute(
+        "SELECT ot.id, ot.test_definition_id, ot.status, COALESCE(ot.price,0) AS price, COALESCE(ot.forwarded_lab_name,'') AS fwd_lab, "
+        "COALESCE(ot.forwarded_cost,0) AS fwd_cost, td.name, td.department, td.sample_type "
+        "FROM order_tests ot JOIN orders o ON o.id = ot.order_id JOIN test_definitions td ON td.id = ot.test_definition_id "
+        "WHERE o.visit_id=? ORDER BY ot.id", (visit_id,)).fetchall()]
+    groups = {}
+    for t in tests:
+        k = (globals().get("_tube_type_of") or (lambda s, d, n: s or ""))(t["sample_type"], t["department"], t["name"]) or ""
+        if k:
+            g = groups.setdefault(k, {"label": k, "ids": [], "n": 0})
+            g["ids"].append(str(t["id"])); g["n"] += 1
+    tube_groups = [{"label": g["label"], "ids": ",".join(g["ids"]), "n": g["n"]} for g in groups.values()]
+    fwd_ids = ",".join(str(t["id"]) for t in tests if t["fwd_lab"])
+    try:
+        catalog = [dict(r) for r in db.execute("SELECT id, name, department FROM test_definitions ORDER BY department, name").fetchall()]
+    except Exception:
+        catalog = []
+    exam = [r[0] for r in db.execute("SELECT name FROM examining_doctors_list ORDER BY sort_order, name").fetchall()]
+    refd = [r[0] for r in db.execute("SELECT full_name FROM doctors ORDER BY full_name LIMIT 300").fetchall()]
+    fwd_labs = [r[0] for r in db.execute("SELECT DISTINCT forwarded_lab_name FROM order_tests WHERE forwarded_lab_name IS NOT NULL AND forwarded_lab_name<>''").fetchall()]
+    return render_template("patient_card.html", v=v, tests=tests, bal=type("B", (), _visit_balance(db, visit_id)),
+                           tube_groups=tube_groups, fwd_ids=fwd_ids, catalog=catalog, exam_doctors=exam, ref_doctors=refd, fwd_labs=fwd_labs,
+                           pc_prices=_pc_partner_prices(db))
+
+
+@app.route("/api/patient-card/<int:visit_id>/info", methods=["POST"])
+@login_required
+def api_pc_info(visit_id):
+    db = get_db()
+    v = _pc_visit(db, visit_id)
+    if not v:
+        return jsonify(ok=False, error="الزيارة غير موجودة"), 404
+    inv = db.execute("SELECT * FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+    if inv and inv["is_locked"]:
+        return jsonify(ok=False, error="الفاتورة مقفلة — لا يمكن التعديل."), 400
+    p = request.get_json(silent=True) or {}
+    name = (p.get("patient_name") or "").strip()
+    if not name:
+        return jsonify(ok=False, error="اسم المريض مطلوب"), 400
+    db.execute("UPDATE patients SET full_name=?, full_name_en=COALESCE(?, full_name_en), gender=?, age=?, age_unit=?, phone=?, title=?, email=? WHERE id=?",
+               (name, transliterate_arabic_name(name) if name != v["full_name"] else None, p.get("gender") or v["gender"],
+                p.get("age") or None, p.get("age_unit") or "Years", (p.get("phone") or "").strip(), p.get("title") or "Mr.",
+                (p.get("email") or "").strip(), v["patient_id"]))
+    doc_id = find_or_create_doctor(db, p.get("doctor_name", ""))
+    center_id = find_or_create_referral_center(db, p.get("referral_lab_name", ""))
+    exam = (p.get("examining_doctor") or "").strip()
+    db.execute("UPDATE visits SET doctor_id=?, referral_center_id=?, fasting=?, notes=?, examining_doctor=?, attending_doctor=? WHERE id=?",
+               (doc_id, center_id, p.get("fasting") or "Undefined", p.get("notes") or "", exam, exam, visit_id))
+    if (doc_id or None) != (v["doctor_id"] or None) or (center_id or None) != (v["referral_center_id"] or None):
+        for row in db.execute("SELECT ot.id, ot.test_definition_id FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=?", (visit_id,)).fetchall():
+            pr = get_test_price(db, row["test_definition_id"], doc_id, center_id)
+            db.execute("UPDATE order_tests SET price=?, doctor_id=?, price_missing=? WHERE id=?",
+                       (pr if pr is not None else 0, doc_id, 1 if pr is None else 0, row["id"]))
+    try:
+        recompute_examining_doctor_fee(db, visit_id)
+    except Exception:
+        pass
+    _pc_recalc_invoice(db, visit_id)
+    db.commit()
+    log_action("Update", "visit", visit_id, "patient-card")
+    return jsonify(ok=True)
+
+
+@app.route("/api/patient-card/<int:visit_id>/test/<int:ot_id>", methods=["POST"])
+@login_required
+def api_pc_test(visit_id, ot_id):
+    db = get_db()
+    row = db.execute("SELECT ot.id FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE ot.id=? AND o.visit_id=?", (ot_id, visit_id)).fetchone()
+    if not row:
+        return jsonify(ok=False, error="غير موجود"), 404
+    inv = db.execute("SELECT is_locked FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+    p = request.get_json(silent=True) or {}
+    try:
+        price = float(p.get("price")) if str(p.get("price", "")).strip() != "" else None
+        cost = float(p.get("fwd_cost") or 0)
+    except ValueError:
+        return jsonify(ok=False, error="رقم غير صحيح"), 400
+    lab = (p.get("fwd_lab") or "").strip() or None
+    if price is not None:
+        if inv and inv["is_locked"]:
+            return jsonify(ok=False, error="الفاتورة مقفلة — لا يمكن تعديل السعر."), 400
+        db.execute("UPDATE order_tests SET price=?, price_missing=0 WHERE id=?", (price, ot_id))
+        _pc_recalc_invoice(db, visit_id)
+    db.execute("UPDATE order_tests SET forwarded_lab_name=?, forwarded_cost=? WHERE id=?", (lab, cost if lab else 0, ot_id))
+    db.commit()
+    log_action("ForwardTest", "order_tests", ot_id, "patient-card lab=%s cost=%s" % (lab, cost))
+    return jsonify(ok=True)
+
+
+@app.route("/api/patient-card/<int:visit_id>/add-test", methods=["POST"])
+@login_required
+def api_pc_add_test(visit_id):
+    db = get_db()
+    v = _pc_visit(db, visit_id)
+    order = db.execute("SELECT * FROM orders WHERE visit_id=?", (visit_id,)).fetchone()
+    inv = db.execute("SELECT is_locked FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+    if not v or not order:
+        return jsonify(ok=False, error="الزيارة غير موجودة"), 404
+    if inv and inv["is_locked"]:
+        return jsonify(ok=False, error="الفاتورة مقفلة — لا يمكن إضافة تحاليل."), 400
+    tid = str((request.get_json(silent=True) or {}).get("test_id") or "")
+    if not tid.isdigit() or not db.execute("SELECT id FROM test_definitions WHERE id=?", (tid,)).fetchone():
+        return jsonify(ok=False, error="تحليل غير صحيح"), 400
+    have = {str(r["test_definition_id"]) for r in db.execute("SELECT test_definition_id FROM order_tests WHERE order_id=?", (order["id"],)).fetchall()}
+    if tid in have:
+        return jsonify(ok=False, error="هذا التحليل موجود أصلًا بالزيارة."), 400
+    reg = v["registration_number"]
+    for t in [tid] + [x for x in expand_required_tests(db, [tid])[1:] if x not in have]:
+        pr = get_test_price(db, t, v["doctor_id"], v["referral_center_id"])
+        db.execute("INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, created_at, price_missing) "
+                   "VALUES (?, ?, 'Accepted', ?, ?, ?, ?, ?)",
+                   (order["id"], t, f"{reg}{str(t).zfill(3)}", pr if pr is not None else 0, v["doctor_id"],
+                    datetime.now().isoformat(timespec="seconds"), 1 if pr is None else 0))
+    try:
+        recompute_examining_doctor_fee(db, visit_id)
+    except Exception:
+        pass
+    _pc_recalc_invoice(db, visit_id)
+    db.commit()
+    log_action("AddTest", "visit", visit_id, "patient-card test=%s" % tid)
+    return jsonify(ok=True)
+
+
+
+# ============================== v81: بطاقة المريض (بحث فوري + نافذة بلا مسطرة) ==============================
+_V81_PC_JS = ("<script id=\"lis-pc-js\">" + '(function(){\n if(window.__lisPcInit)return; window.__lisPcInit=1;\n var ov=null, fr=null, dd=null, inp=null, seq=0, timer=null, items=[], hi=-1;\n function build(){\n  if(ov)return;\n  ov=document.createElement("div"); ov.id="lisPcOv";\n  ov.style.cssText="position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100000;display:none;align-items:center;justify-content:center;padding:14px;";\n  var box=document.createElement("div");\n  box.style.cssText="width:min(1320px,98vw);height:min(880px,96vh);border-radius:13px;overflow:hidden;background:#fff;box-shadow:0 24px 70px rgba(0,0,0,.45);";\n  fr=document.createElement("iframe"); fr.style.cssText="border:0;width:100%;height:100%;display:block;background:#F1F5F9;";\n  box.appendChild(fr); ov.appendChild(box); document.body.appendChild(ov);\n  ov.addEventListener("mousedown",function(e){ if(e.target===ov) closeCard(); });\n }\n function openCard(id){ build(); fr.src="/patient-card/"+id+"?modal=1"; ov.style.display="flex"; hideDd(); }\n function closeCard(){ if(!ov)return; ov.style.display="none"; fr.src="about:blank"; if(inp){inp.focus();} }\n window.lisOpenPatientCard=openCard;\n window.addEventListener("message",function(e){ if(e.data&&e.data.lisCard==="close") closeCard(); });\n document.addEventListener("keydown",function(e){ if(e.key==="Escape"&&ov&&ov.style.display==="flex") closeCard(); },true);\n function findInput(){\n  var byId=document.getElementById("lisQuickSearchInput"); if(byId) return byId; var a=document.querySelectorAll("input");\n  for(var i=0;i<a.length;i++){ var p=a[i].placeholder||""; if(p.indexOf("باركود")>=0&&p.indexOf("اسم")>=0){ var r=a[i].getBoundingClientRect(); if(r.top<150&&r.width>60) return a[i]; } }\n  return null;\n }\n function hideDd(){ if(dd){dd.style.display="none";} items=[]; hi=-1; }\n function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];}); }\n function paint(){\n  if(!dd){ dd=document.createElement("div"); dd.id="lisPcDd"; document.body.appendChild(dd); }\n  var r=inp.getBoundingClientRect(), w=Math.max(r.width,440);\n  dd.style.cssText="position:fixed;top:"+(r.bottom+4)+"px;left:"+Math.max(8,Math.min(r.left,window.innerWidth-w-8))+"px;width:"+w+"px;max-height:62vh;overflow:auto;background:#fff;border:1px solid #94A3B8;border-radius:11px;box-shadow:0 12px 36px rgba(0,0,0,.28);z-index:99999;direction:rtl;font:13px Tahoma,Arial,sans-serif;display:block;";\n  if(!items.length){ dd.innerHTML="<div style=\\"padding:12px;color:#64748B\\">ما لكيت مريض بهذا الاسم/الرقم</div>"; return; }\n  dd.innerHTML=items.map(function(x,i){\n   return "<div data-i=\\""+i+"\\" style=\\"padding:8px 12px;cursor:pointer;border-bottom:1px solid #EEF2F6;"+(i===hi?"background:#E0F2FE;":"")+"\\"><b style=\\"color:#205072\\">"+esc(x.name)+"</b> <span style=\\"color:#475569\\">#"+esc(x.reg)+" · "+esc(x.age||"")+" "+esc(x.unit||"")+" · "+esc(x.date)+"</span>"+(x.tests?"<div style=\\"font-size:11.5px;color:#64748B;margin-top:2px\\">"+esc(x.tests)+"</div>":"")+"</div>";\n  }).join("");\n  Array.prototype.forEach.call(dd.children,function(el){ el.onmousedown=function(e){ e.preventDefault(); openCard(items[+el.dataset.i].visit_id); }; });\n }\n function search(q){\n  var my=++seq;\n  fetch("/api/pc/search?q="+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ if(my!==seq)return; items=d.items||[]; hi=items.length?0:-1; paint(); }).catch(function(){ if(my!==seq)return; items=[]; paint(); if(dd){ dd.innerHTML="<div style=padding:12px;color:#B91C1C>تعذّر البحث — أعد المحاولة، وإذا تكرر راجع error_log.txt</div>"; } });\n }\n function attach(){\n  inp=findInput(); if(!inp){ if((window.__lisPcTry=(window.__lisPcTry||0)+1)<20) setTimeout(attach,500); return; }\n  ["input","keyup"].forEach(function(ev){\n   document.addEventListener(ev,function(e){\n    if(e.target!==inp) return;\n    e.stopImmediatePropagation();\n    if(ev==="keyup"&&(e.key==="Enter"||e.key==="ArrowDown"||e.key==="ArrowUp"||e.key==="Escape")) return;\n    var q=inp.value.trim();\n    clearTimeout(timer);\n    if(q.length<2){ hideDd(); return; }\n    timer=setTimeout(function(){ search(q); },170);\n   },true);\n  });\n  document.addEventListener("keydown",function(e){\n   if(e.target!==inp) return;\n   if(e.key==="Enter"){ e.preventDefault(); e.stopImmediatePropagation(); if(items.length) openCard(items[Math.max(hi,0)].visit_id); else if(inp.value.trim().length>=2) search(inp.value.trim()); }\n   else if(e.key==="ArrowDown"||e.key==="ArrowUp"){ if(!items.length) return; e.preventDefault(); e.stopImmediatePropagation(); hi=(hi+(e.key==="ArrowDown"?1:-1)+items.length)%items.length; paint(); }\n   else if(e.key==="Escape"){ hideDd(); }\n   else { e.stopImmediatePropagation(); }\n  },true);\n  document.addEventListener("mousedown",function(e){ if(dd&&e.target!==inp&&!dd.contains(e.target)) hideDd(); });\n  inp.setAttribute("title","اكتب اسم المريض أو رقمه أو الباركود — تظهر بطاقة المريض فورًا");\n }\n if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",attach); else attach();\n})();' + "</script>")
+
+
+def _pc_partner_prices(db):
+    """{اسم المختبر: {test_definition_id: الكلفة}} لتعبئة كلفة الإرسال تلقائيًا."""
+    try:
+        labs, prices = _partner_context(db)
+        return {l["name"]: dict(prices.get(str(l["id"]), {})) for l in labs}
+    except Exception:
+        return {}
+
+
+def _pc_state(db, visit_id):
+    b = _visit_balance(db, visit_id)
+    return {"total": b["total"], "paid": b["paid"], "remaining": b["remaining"]}
+
+
+def _pc_locked(db, visit_id):
+    inv = db.execute("SELECT is_locked FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+    return bool(inv and inv["is_locked"])
+
+
+@app.route("/api/pc/search")
+@login_required
+def api_pc_search():
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify({"items": []})
+    db = get_db()
+    seq = _visit_seq_clause(q)
+    rows = db.execute(
+        "SELECT v.id, v.registration_number, v.created_at, p.full_name, p.age, p.age_unit, "
+        "(SELECT GROUP_CONCAT(COALESCE(NULLIF(td.short_name,''), td.name), ', ') FROM order_tests ot "
+        " JOIN orders o ON o.id = ot.order_id JOIN test_definitions td ON td.id = ot.test_definition_id "
+        " WHERE o.visit_id = v.id) AS tests "
+        "FROM visits v JOIN patients p ON p.id = v.patient_id "
+        "WHERE p.full_name LIKE ? OR CAST(v.registration_number AS TEXT) LIKE ? OR p.phone LIKE ? "
+        "OR EXISTS (SELECT 1 FROM order_tests ot JOIN orders o ON o.id = ot.order_id WHERE o.visit_id = v.id AND ot.barcode LIKE ?)"
+        + (" OR " + seq[0] if seq else "") + " ORDER BY v.id DESC LIMIT 20",
+        (f"%{q}%", _scan_like(q), f"%{q}%", f"%{q}%") + tuple(seq[1] if seq else ())).fetchall()
+    return jsonify({"items": [{"visit_id": r["id"], "reg": r["registration_number"], "name": r["full_name"],
+                               "age": r["age"], "unit": r["age_unit"], "tests": r["tests"] or "",
+                               "date": (r["created_at"] or "")[:16].replace("T", " ")} for r in rows]})
+
+
+@app.route("/api/patient-card/<int:visit_id>/state")
+@login_required
+def api_pc_state(visit_id):
+    return jsonify(ok=True, **_pc_state(get_db(), visit_id))
+
+
+@app.route("/api/patient-card/<int:visit_id>/extra", methods=["POST"])
+@login_required
+def api_pc_extra(visit_id):
+    db = get_db()
+    v = _pc_visit(db, visit_id)
+    if not v:
+        return jsonify(ok=False, error="الزيارة غير موجودة"), 404
+    if _pc_locked(db, visit_id):
+        return jsonify(ok=False, error="الفاتورة مقفلة — لا يمكن التعديل."), 400
+    p = request.get_json(silent=True) or {}
+    s = lambda k: (str(p.get(k) or "")).strip()
+    db.execute("UPDATE patients SET address=?, national_id=?, passport_number=?, travel_certificate_number=?, lab_card_number=? WHERE id=?",
+               (s("address"), s("national_id"), s("passport_number"), s("travel_certificate_number"), s("lab_card_number"), v["patient_id"]))
+    home = 1 if s("is_home_visit") in ("1", "true", "True") else 0
+    try:
+        fee = float(s("home_visit_fee") or 0) if home else 0.0
+    except ValueError:
+        fee = 0.0
+    db.execute("UPDATE visits SET weight=?, height=?, symptoms=?, disease=?, therapy=?, is_home_visit=?, home_visit_address=?, home_visit_fee=? WHERE id=?",
+               (s("weight") or None, s("height") or None, s("symptoms"), s("disease"), s("therapy"),
+                home, s("home_visit_address") if home else "", fee, visit_id))
+    _pc_recalc_invoice(db, visit_id)
+    db.commit()
+    log_action("Update", "visit", visit_id, "patient-card extra")
+    return jsonify(ok=True)
+
+
+@app.route("/api/patient-card/<int:visit_id>/forward", methods=["POST"])
+@login_required
+def api_pc_forward(visit_id):
+    """إرسال تحاليل محددة لمختبر آخر دفعة وحدة (الكلفة من قائمة أسعار المختبر إن وُجدت) — مختبر فارغ = إلغاء الإرسال."""
+    db = get_db()
+    p = request.get_json(silent=True) or {}
+    ids = [int(x) for x in (p.get("ot_ids") or []) if str(x).isdigit()]
+    lab = (p.get("lab") or "").strip() or None
+    if not ids:
+        return jsonify(ok=False, error="حدّد تحليلًا واحدًا على الأقل"), 400
+    _ensure_partner_labs(db)
+    pl = db.execute("SELECT id FROM partner_labs WHERE name=?", (lab,)).fetchone() if lab else None
+    n = 0
+    for oid in ids:
+        ot = db.execute("SELECT ot.id, ot.test_definition_id FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE ot.id=? AND o.visit_id=?",
+                        (oid, visit_id)).fetchone()
+        if not ot:
+            continue
+        cost = 0.0
+        if lab and pl:
+            pr = db.execute("SELECT cost FROM partner_lab_prices WHERE lab_id=? AND test_definition_id=?", (pl["id"], ot["test_definition_id"])).fetchone()
+            cost = float(pr["cost"] or 0) if pr else 0.0
+        db.execute("UPDATE order_tests SET forwarded_lab_name=?, forwarded_cost=? WHERE id=?", (lab, cost if lab else 0, oid))
+        n += 1
+    db.commit()
+    log_action("ForwardTest", "visit", visit_id, ("patient-card lab=%s n=%d" % (lab, n)) if lab else "patient-card cleared n=%d" % n)
+    return jsonify(ok=True, n=n)
+
+
+@app.route("/api/patient-card/<int:visit_id>/remove/<int:ot_id>", methods=["POST"])
+@login_required
+def api_pc_remove(visit_id, ot_id):
+    db = get_db()
+    ot = db.execute("SELECT ot.id, ot.status FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE ot.id=? AND o.visit_id=?", (ot_id, visit_id)).fetchone()
+    if not ot:
+        return jsonify(ok=False, error="التحليل غير موجود"), 404
+    if _pc_locked(db, visit_id):
+        return jsonify(ok=False, error="الفاتورة مقفلة — لا يمكن الحذف."), 400
+    if ot["status"] in ("Completed", "Verified"):
+        return jsonify(ok=False, error="هذا التحليل مكتمل ونتيجته محفوظة — احذفه من «التعديل الكامل» (محمي بكلمة مرور)."), 403
+    visit_remove_test(visit_id, ot_id)      # نفس دالة صفحة التعديل (تحفظ نسخة للتراجع وتحدّث أجر الفاحص)
+    try:
+        get_flashed_messages()              # نمسح رسالة flash حتى ما تطلع بصفحة ثانية
+    except Exception:
+        pass
+    try:
+        recompute_examining_doctor_fee(db, visit_id)
+    except Exception:
+        pass
+    _pc_recalc_invoice(db, visit_id)
+    db.commit()
+    return jsonify(ok=True, **_pc_state(db, visit_id))
+
+
+@app.route("/api/patient-card/<int:visit_id>/pay", methods=["POST"])
+@login_required
+def api_pc_pay(visit_id):
+    db = get_db()
+    inv = db.execute("SELECT * FROM invoices WHERE visit_id=?", (visit_id,)).fetchone()
+    if not inv:
+        return jsonify(ok=False, error="ما توجد فاتورة لهذي الزيارة"), 404
+    if inv["is_locked"]:
+        return jsonify(ok=False, error="الفاتورة مقفلة"), 400
+    try:
+        amount = float(str((request.get_json(silent=True) or {}).get("amount") or "0").replace(",", "").strip())
+    except ValueError:
+        return jsonify(ok=False, error="المبلغ غير صالح"), 400
+    if amount <= 0:
+        return jsonify(ok=False, error="أدخل مبلغًا أكبر من صفر"), 400
+    now = datetime.now().isoformat(timespec="seconds")
+    new_paid = float(inv["paid_amount"] or 0) + amount
+    status = "Paid" if new_paid >= float(inv["total_amount"] or 0) else "Partial"
+    db.execute("INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) VALUES (?, ?, 'Cash', ?, ?)",
+               (inv["id"], amount, session.get("user_id"), now))
+    db.execute("UPDATE invoices SET paid_amount=?, status=? WHERE id=?", (new_paid, status, inv["id"]))
+    db.commit()
+    log_action("Payment", "invoice", inv["id"], "amount=%s (patient-card)" % amount)
+    return jsonify(ok=True, **_pc_state(db, visit_id))
+
+
+@app.after_request
+def _pc_inject_search_popup(resp):
+    """يحقن سكربت بحث البطاقة بكل صفحات البرنامج (اللي ترث base.html): مربع البحث العلوي يعرض مرضى فورًا ويفتح البطاقة."""
+    try:
+        if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        data = resp.get_data()
+        if b"lis-sidebar-hidden" not in data or b'id="lis-pc-js"' in data or b"</body>" not in data:
+            return resp
+        head, _, tail = data.rpartition(b"</body>")
+        resp.set_data(head + _V81_PC_JS.encode("utf-8") + b"</body>" + tail)
+    except Exception:
+        pass
+    return resp
+
+
+@app.after_request
+def _pc_inject_search_buttons(resp):
+    """بصفحة نتائج البحث: زر 🪟 بجانب كل نتيجة (وزر عائم لو نتيجة واحدة) يفتح بطاقة المريض بنافذة مستقلة."""
+    try:
+        if request.path == "/search" and resp.mimetype == "text/html" and resp.status_code == 200:
+            body = resp.get_data(as_text=True)
+            if "lisPcBtns" not in body and "</body>" in body:
+                js = ("<script id='lisPcBtns'>(function(){var seen={},first=null;document.querySelectorAll('a[href*=\"/visits/\"]').forEach(function(a){"
+                      "var m=(a.getAttribute('href')||'').match(/\\/visits\\/(\\d+)/);if(!m)return;var id=m[1];first=first||id;seen[id]=1;"
+                      "if(a.dataset.pcDone)return;a.dataset.pcDone=1;var b=document.createElement('a');b.href='#';b.textContent='🪟 بطاقة';b.title='بطاقة المريض';"
+                      "b.style.cssText='margin:0 6px;background:#205072;color:#fff;border-radius:7px;padding:3px 9px;font-size:12px;text-decoration:none;white-space:nowrap';"
+                      "b.onclick=function(e){e.preventDefault();window.open('/patient-card/'+id,'lisCard'+id,'width=1180,height=820,resizable=yes,scrollbars=yes');};"
+                      "a.parentNode.insertBefore(b,a.nextSibling);});"
+                      "var ids=Object.keys(seen);if(ids.length===1){var f=document.createElement('a');f.href='#';f.textContent='🪟 فتح بطاقة المريض';"
+                      "f.style.cssText='position:fixed;bottom:16px;left:16px;z-index:9999;background:#15803D;color:#fff;border-radius:10px;padding:10px 16px;font:700 14px Tahoma;text-decoration:none;box-shadow:0 3px 12px rgba(0,0,0,.3)';"
+                      "f.onclick=function(e){e.preventDefault();window.open('/patient-card/'+ids[0],'lisCard','width=1180,height=820,resizable=yes,scrollbars=yes');};document.body.appendChild(f);}})();</script>")
+                resp.set_data(body.replace("</body>", js + "</body>", 1))
+    except Exception:
+        pass
+    return resp
+
+
+# v79: لو للمريض CBC بنفس الزيارة => حقل HCT بتحليل Retic يختفي من شاشة الإدخال (القيمة تُسحب تلقائيًا من CBC).
+# لو ما عنده CBC يبقى الحقل ظاهر للكتابة (ويُستخدم للحساب فقط، ولا يُطبع بتقرير Retic).
+_V79_HIDE_RETIC_HCT_JS = """<script>
+(function(){
+  function first(tr){var c=tr.querySelector('td,th');return c?c.textContent.replace(/\\s+/g,' ').trim():'';}
+  function rowsOf(el){return Array.prototype.slice.call(el.querySelectorAll('tr'));}
+  var all=rowsOf(document);
+  all.forEach(function(tr){
+    if(first(tr)!=='HCT') return;
+    var p=tr.parentElement,card=null;
+    for(var i=0;i<10&&p;i++,p=p.parentElement){
+      var rs=rowsOf(p).map(first);
+      if(rs.indexOf('Reticulocyte count')>=0){ if(rs.indexOf('WBCs')<0&&rs.indexOf('RBC')<0) card=p; break; }
+    }
+    if(card){ tr.style.display='none'; tr.setAttribute('data-lis-hct-hidden','1'); }
+  });
+})();
+</script>"""
+
+
+@app.after_request
+def _v79_hide_retic_hct(resp):
+    try:
+        if request.endpoint not in ("visit_results_entry", "result_entry") or resp.status_code != 200 \
+                or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        _va = request.view_args or {}
+        db = get_db()
+        if "visit_id" in _va:
+            vid = _va["visit_id"]
+        else:
+            _r = db.execute("SELECT o.visit_id FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE ot.id=?",
+                            (_va.get("order_test_id"),)).fetchone()
+            vid = _r["visit_id"] if _r else None
+        if vid is None:
+            return resp
+        has_cbc = db.execute(
+            "SELECT 1 FROM order_tests ot JOIN orders o ON o.id=ot.order_id JOIN test_definitions td ON td.id=ot.test_definition_id "
+            "WHERE o.visit_id=? AND td.code='CBC'", (vid,)).fetchone()
+        if not has_cbc:
+            return resp
+        data = resp.get_data()
+        if b"</body>" in data and b"data-lis-hct-hidden" not in data:
+            resp.set_data(data.replace(b"</body>", _V79_HIDE_RETIC_HCT_JS.encode("utf-8") + b"</body>", 1))
+    except Exception:
+        pass
+    return resp
+
+
+# ============================== v80: ESR تحت CBC + Retic داخل BF ==============================
+_V80_ESR_DOTS = False      # True = خطوط منقّطة بين الاسم والنتيجة والمدى (الافتراضي: بدون خطوط حسب الطلب)
+_V80_RETIC_NAMES = ("Reticulocyte count", "Corrected Retic count")
+
+
+def _v80_is_esr(code, name):
+    c = (code or "").strip().upper()
+    n = (name or "").strip().lower()
+    return c == "ESR" or n == "esr" or n.startswith("esr ") or n.startswith("esr(") or "erythrocyte sedimentation" in n
+
+
+def _v80_esr_html(db, cbc_ot_id):
+    """سطر ESR الجاهز (HTML) لتقرير CBC، أو None لو ما عنده ESR/ما عنده نتيجة."""
+    cbc = db.execute(
+        "SELECT ot.order_id, p.id AS patient_id, p.gender, p.age, p.age_unit FROM order_tests ot "
+        "JOIN orders o ON o.id = ot.order_id JOIN visits v ON v.id = o.visit_id JOIN patients p ON p.id = v.patient_id "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id WHERE ot.id=? AND td.code='CBC'", (cbc_ot_id,)).fetchone()
+    if not cbc:
+        return None
+    esr_ots = [r for r in db.execute(
+        "SELECT ot.id, ot.analyzer, td.code AS code, td.name AS name FROM order_tests ot "
+        "JOIN test_definitions td ON td.id = ot.test_definition_id WHERE ot.order_id=? ORDER BY ot.id",
+        (cbc["order_id"],)).fetchall() if _v80_is_esr(r["code"], r["name"])]
+    lines = []
+    for eo in esr_ots:
+        for r in db.execute(
+                "SELECT r.value_numeric, r.value_text, r.flag, tp.id AS pid, tp.name AS pname, tp.unit AS unit "
+                "FROM results r JOIN test_parameters tp ON tp.id = r.test_parameter_id "
+                "WHERE r.order_test_id=? ORDER BY tp.sort_order, tp.id", (eo["id"],)).fetchall():
+            num, txt = r["value_numeric"], (r["value_text"] or "").strip()
+            if num is None and not txt:
+                continue
+            if num is not None:
+                val = str(int(num)) if float(num) == int(num) else str(num)
+            else:
+                val = txt
+            rng = None
+            try:
+                rng = find_reference_range(db, r["pid"], cbc["gender"], cbc["age"], cbc["age_unit"],
+                                           patient_id=cbc["patient_id"], analyzer=eo["analyzer"])
+            except Exception:
+                rng = None
+            rtxt, low, high = "", None, None
+            if rng is not None:
+                try:
+                    low, high = rng["low"], rng["high"]
+                except (KeyError, IndexError, TypeError):
+                    low = high = None
+                try:
+                    rtxt = (rng["range_text"] or "").strip()
+                except (KeyError, IndexError, TypeError):
+                    rtxt = ""
+                if not rtxt and (low is not None or high is not None):
+                    def _n(x):
+                        return str(int(x)) if float(x) == int(x) else str(x)
+                    rtxt = (_n(low) + " - " + _n(high)) if (low is not None and high is not None) else \
+                           (("> " + _n(low)) if low is not None else ("< " + _n(high)))
+            bad = (r["flag"] or "") in ("Low", "High", "Critical")
+            if num is not None:
+                if low is not None and num < low:
+                    bad = True
+                if high is not None and num > high:
+                    bad = True
+            lines.append((r["pname"] or "ESR", val, (r["unit"] or "").strip(), rtxt, bad))
+    if not lines:
+        return None
+    dots = "border-bottom:2px dotted #666;transform:translateY(-3px);" if _V80_ESR_DOTS else ""
+    out = ['<div class="lis-esr" dir="ltr" style="direction:ltr;margin:12px 0 0;padding-top:9px;border-top:1.5px solid #222;'
+           'font-family:\'Times New Roman\',Georgia,serif;color:#111;">']
+    for nm, val, unit, rtxt, bad in lines:
+        col = "color:#c00;" if bad else ""
+        out.append(
+            '<div style="display:flex;align-items:baseline;gap:6px;font-size:13.5px;line-height:1.6;">'
+            '<span style="font-weight:700;white-space:nowrap;">%s</span>'
+            '<span style="flex:1;min-width:20px;%s"></span>'
+            '<span style="font-weight:700;white-space:nowrap;text-align:center;min-width:90px;%s">%s</span>'
+            '<span style="flex:1;min-width:20px;%s"></span>'
+            '<span style="white-space:nowrap;min-width:120px;text-align:right;color:#333;">%s</span></div>'
+            % (_html_escape(nm), dots, col, _html_escape((val + " " + unit).strip()), dots,
+               _html_escape(("Normal: " + rtxt) if rtxt else "")))
+    out.append("</div>")
+    return "".join(out)
+
+
+def _v80_insert_after_cbc_table(html, block):
+    if 'class="lis-esr"' in html:
+        return html
+    pos = html.find('class="data-table"')   # v81: جدول CBC الحقيقي (قالب cbc.html)
+    if pos < 0:
+        pos = html.rfind("PLT")
+    if pos < 0:
+        pos = html.rfind("HGB")
+    end = html.find("</table>", pos) if pos >= 0 else -1
+    if end < 0:
+        end = html.rfind("</table>")
+    if end >= 0:
+        end += len("</table>")
+        return html[:end] + block + html[end:]
+    i = html.rfind("</body>")
+    return (html[:i] + block + html[i:]) if i >= 0 else (html + block)
+
+
+def _print_report_impl(order_test_id):
+    """v80: نفس تقرير v79 + سطر ESR أسفل جدول CBC لو عند المريض ESR بنفس الزيارة."""
+    res = _print_report_impl_v79(order_test_id)
+    try:
+        if isinstance(res, str):
+            db = get_db()
+            block = _v80_esr_html(db, order_test_id)
+            if block:
+                return _v80_insert_after_cbc_table(res, block)
+    except Exception:
+        _v74_log_exc("v80 ESR under CBC failed (order_test %s)" % order_test_id)
+    return res
+
+
+def _v80_retic_row(db, order_id):
+    return db.execute(
+        "SELECT ot2.*, td2.code AS test_code, v.id AS visit_id, p.gender, p.age, p.age_unit "
+        "FROM order_tests ot2 JOIN test_definitions td2 ON td2.id = ot2.test_definition_id "
+        "JOIN orders o2 ON o2.id = ot2.order_id JOIN visits v ON v.id = o2.visit_id JOIN patients p ON p.id = v.patient_id "
+        "WHERE ot2.order_id=? AND td2.code='RETIC'", (order_id,)).fetchone()
+
+
+def _v80_sync_bf_to_retic(db, ot, parameters, user_id, now, patient_id):
+    """عند حفظ BF: ينسخ Reticulocyte count / Corrected Retic count لتحليل Retic بنفس الزيارة ويكمّله."""
+    try:
+        if "test_code" not in ot.keys() or ot["test_code"] != "BF":
+            return
+        bf_params = {p["name"]: p for p in parameters if p["name"] in _V80_RETIC_NAMES}
+        if "Reticulocyte count" not in bf_params:
+            return
+        rt = _v80_retic_row(db, ot["order_id"])
+        if not rt:
+            return
+        rparams = db.execute("SELECT * FROM test_parameters WHERE test_definition_id=?", (rt["test_definition_id"],)).fetchall()
+        rby = {p["name"]: p for p in rparams}
+
+        def _has(r):
+            return r is not None and (r["value_numeric"] is not None or (r["value_text"] or "") != "")
+        copied = False
+        for nm, bp in bf_params.items():
+            rp = rby.get(nm)
+            if not rp:
+                continue
+            src = db.execute("SELECT * FROM results WHERE order_test_id=? AND test_parameter_id=?", (ot["id"], bp["id"])).fetchone()
+            if not _has(src):
+                continue
+            note = src["note"] if "note" in src.keys() else None
+            dst = db.execute("SELECT * FROM results WHERE order_test_id=? AND test_parameter_id=?", (rt["id"], rp["id"])).fetchone()
+            if dst:
+                if dst["value_numeric"] != src["value_numeric"] or dst["value_text"] != src["value_text"]:
+                    db.execute(
+                        "INSERT INTO result_history (result_id, order_test_id, test_parameter_id, prev_value_numeric, "
+                        "prev_value_text, prev_flag, changed_by, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (dst["id"], rt["id"], rp["id"], dst["value_numeric"], dst["value_text"], dst["flag"], user_id, now))
+                db.execute("UPDATE results SET value_numeric=?, value_text=?, flag=?, note=?, entered_by=?, entered_at=? WHERE id=?",
+                           (src["value_numeric"], src["value_text"], src["flag"], note, user_id, now, dst["id"]))
+            else:
+                db.execute("INSERT INTO results (order_test_id, test_parameter_id, value_numeric, value_text, flag, note, "
+                           "entered_by, entered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                           (rt["id"], rp["id"], src["value_numeric"], src["value_text"], src["flag"], note, user_id, now))
+            copied = True
+        if copied and rt["status"] != "Verified":
+            db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (rt["id"],))
+        # Corrected لو ما انكتب ببطاقة BF: يُحسب (من HCT الـCBC) ثم يُنسخ لبطاقة BF حتى يظهر هناك
+        cbp = bf_params.get("Corrected Retic count")
+        crp = rby.get("Corrected Retic count")
+        if copied and cbp and crp:
+            bsrc = db.execute("SELECT * FROM results WHERE order_test_id=? AND test_parameter_id=?", (ot["id"], cbp["id"])).fetchone()
+            if not _has(bsrc):
+                _apply_retic_correction(db, rt, rparams, {}, "", user_id, now, patient_id)
+                rc = db.execute("SELECT * FROM results WHERE order_test_id=? AND test_parameter_id=?", (rt["id"], crp["id"])).fetchone()
+                if _has(rc):
+                    if bsrc:
+                        db.execute("UPDATE results SET value_numeric=?, value_text=?, flag=?, note=?, entered_by=?, entered_at=? WHERE id=?",
+                                   (rc["value_numeric"], rc["value_text"], rc["flag"], rc["note"], user_id, now, bsrc["id"]))
+                    else:
+                        db.execute("INSERT INTO results (order_test_id, test_parameter_id, value_numeric, value_text, flag, note, "
+                                   "entered_by, entered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                   (ot["id"], cbp["id"], rc["value_numeric"], rc["value_text"], rc["flag"], rc["note"], user_id, now))
+    except Exception:
+        _v74_log_exc("v80 BF->RETIC sync failed")
+
+
+def _v80_retic_sibling_id(db, ot):
+    try:
+        if "test_code" in ot.keys() and ot["test_code"] == "BF":
+            rt = _v80_retic_row(db, ot["order_id"])
+            return rt["id"] if rt else None
+    except Exception:
+        pass
+    return None
+
+
+def _v80_adjust_entry_boxes(db, visit_id, boxes):
+    """شاشة إدخال نتائج الزيارة: BF+Retic => بطاقة Retic تختفي (حقولها ببطاقة BF). BF بدون Retic => ينلغي حقلا Retic من BF."""
+    try:
+        codes = {r["c"] for r in db.execute(
+            "SELECT td.code AS c FROM order_tests ot JOIN orders o ON o.id = ot.order_id "
+            "JOIN test_definitions td ON td.id = ot.test_definition_id WHERE o.visit_id=?", (visit_id,)).fetchall()}
+        bf = [b for b in boxes if b["ot"]["test_code"] == "BF"]
+        if not bf:
+            return boxes
+        if "RETIC" in codes:
+            if "Reticulocyte count" in {p["name"] for p in bf[0]["parameters"]}:
+                return [b for b in boxes if b["ot"]["test_code"] != "RETIC"]
+            return boxes
+        for b in bf:
+            b["parameters"] = [p for p in b["parameters"] if p["name"] not in _V80_RETIC_NAMES]
+    except Exception:
+        _v74_log_exc("v80 entry boxes adjust failed")
+    return boxes
+
+
 if __name__ == "__main__":
     init_db()
     write_pending_preset_logo(UPLOAD_DIR)   # شعار العميل القادم من portal_preset.json (إن وُجد)

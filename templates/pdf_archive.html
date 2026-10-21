@@ -1,52 +1,87 @@
 {% extends "base.html" %}
 {% block page_title %}🗄️ أرشيف PDF{% endblock %}
 {% block content %}
-<div style="max-width:900px;">
-
-  {% if not archive_configured %}
-  <div class="flash" style="background:#fef3c7; color:#92400e;">
-    ⚠️ ما ضبط مجلد الأرشفة الدائم بعد. المدير لازم يحدده مرة وحدة من
-    <a href="{{ url_for('app_settings') }}">الإدارة ← الإعدادات</a>، وبعدها راح
-    تنحفظ نسخة PDF تلقائيًا لكل زيارة تكتمل نتائجها.
-  </div>
-  {% endif %}
-
-  <form method="get" style="display:flex; gap:10px; margin-bottom:20px;">
-    <input type="text" name="q" value="{{ q }}" placeholder="اسم المريض أو رقم التسجيل..."
+<style>
+  .ar-t{width:100%;border-collapse:collapse;table-layout:fixed;background:#fff}
+  .ar-t th{background:#205072;color:#fff;padding:9px 10px;text-align:right;font-size:13px}
+  .ar-t td{padding:8px 10px;border-bottom:1px solid #E2E8F0;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ar-t tr:hover td{background:#F8FAFC}
+  .ar-b{border:0;border-radius:7px;padding:5px 11px;font:700 12.5px Tahoma;cursor:pointer;color:#fff;text-decoration:none;display:inline-block}
+  .ar-b.v{background:#205072}.ar-b.d{background:#15803D}.ar-b.x{background:#B91C1C}
+  #arOv{position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.6);display:none;flex-direction:column;padding:14px}
+  #arOv .bar{display:flex;gap:8px;align-items:center;background:#fff;border-radius:10px 10px 0 0;padding:8px 12px}
+  #arOv .bar b{flex:1}#arOv iframe{flex:1;border:0;background:#fff;border-radius:0 0 10px 10px}
+  #arDel{position:fixed;inset:0;z-index:100001;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center}
+  #arDel .bx{background:#fff;border-radius:12px;padding:16px 18px;width:340px}
+  #arDel input{width:100%;padding:8px;margin:5px 0 9px;border:1px solid #CBD5E1;border-radius:7px}
+</style>
+<div style="max-width:1100px;">
+  <form method="get" style="display:flex; gap:10px; margin-bottom:16px;">
+    <input type="text" name="q" value="{{ q }}" placeholder="اسم المريض أو رقم التسجيل أو الهاتف..." autofocus
            style="flex:1; padding:10px 12px; border:1px solid #E2E8F0; border-radius:8px; font-size:14px;">
     <button class="btn" type="submit">🔍 بحث</button>
   </form>
 
   {% if rows %}
-  <table style="width:100%; border-collapse:collapse;">
-    <thead>
-      <tr style="background:#205072; color:#fff;">
-        <th style="padding:8px 10px; text-align:right;">رقم التسجيل</th>
-        <th style="padding:8px 10px; text-align:right;">اسم المريض</th>
-        <th style="padding:8px 10px; text-align:right;">الطبيب/المختبر المُرسِل</th>
-        <th style="padding:8px 10px; text-align:right;">آخر تحديث</th>
-        <th style="padding:8px 10px; text-align:right;"></th>
-      </tr>
-    </thead>
+  <table class="ar-t">
+    <colgroup><col style="width:90px"><col><col style="width:22%"><col style="width:150px"><col style="width:260px"></colgroup>
+    <thead><tr><th>رقم التسجيل</th><th>اسم المريض</th><th>الطبيب المُرسِل</th><th>التاريخ والوقت</th><th>إجراءات</th></tr></thead>
     <tbody>
       {% for row in rows %}
-      <tr style="border-bottom:1px solid #E2E8F0;">
-        <td style="padding:8px 10px;">{{ row['registration_number'] }}</td>
-        <td style="padding:8px 10px;">{{ row['full_name'] }}</td>
-        <td style="padding:8px 10px;">{{ row['referring_doctor_name'] or row['referral_center_name'] or '—' }}</td>
-        <td style="padding:8px 10px;">{{ row['updated_at'] }}</td>
-        <td style="padding:8px 10px;">
-          <a class="btn" href="{{ url_for('pdf_archive_open', visit_id=row['visit_id']) }}" target="_blank">📄 فتح</a>
+      <tr>
+        <td>{{ row['registration_number'] }}</td>
+        <td title="{{ row['full_name'] }}"><b>{{ row['full_name'] }}</b></td>
+        <td>{{ row['doctor_name'] or row['center_name'] or '—' }}</td>
+        <td dir="ltr" style="text-align:right">{{ (row['visit_at'] or row['updated_at'] or '')[:16].replace('T',' ') }}</td>
+        <td>
+          <button type="button" class="ar-b v" onclick="arOpen({{ row['visit_id'] }}, {{ row['full_name']|tojson }})">📄 عرض</button>
+          <a class="ar-b d" href="{{ url_for('pdf_archive_open', visit_id=row['visit_id']) }}?download=1">⬇ تحميل PDF</a>
+          <button type="button" class="ar-b x" onclick="arDel({{ row['visit_id'] }}, {{ row['full_name']|tojson }})">🗑 حذف</button>
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
-  {% elif archive_configured %}
-  <p style="color:#64748B;">
-    {% if q %}لا توجد نتائج مطابقة لـ "{{ q }}".{% else %}لا يوجد أي ملف مؤرشف بعد.{% endif %}
-  </p>
+  {% else %}
+  <p style="color:#64748B;">{% if q %}لا توجد نتائج مطابقة لـ "{{ q }}".{% else %}لا توجد زيارات مكتملة النتائج بعد.{% endif %}</p>
   {% endif %}
-
 </div>
+
+<div id="arOv">
+  <div class="bar"><b id="arTitle"></b>
+    <button class="ar-b v" onclick="arPrint()">🖨 طباعة</button>
+    <a class="ar-b d" id="arDl" href="#">⬇ تحميل</a>
+    <button class="ar-b x" onclick="arClose()">✕ إغلاق</button></div>
+  <iframe id="arFrame" src="about:blank"></iframe>
+</div>
+<div id="arDel"><div class="bx">
+  <h3 style="margin:0 0 6px">🗑 حذف من الأرشيف</h3>
+  <div id="arDelName" style="color:#475569;margin-bottom:6px"></div>
+  <div style="font-size:12px;color:#B91C1C;margin-bottom:6px">يحتاج موافقة مسؤول/مشرف المختبر (حسابه وكلمة مروره).</div>
+  <input id="arU" placeholder="اسم مستخدم المسؤول" autocomplete="off">
+  <input id="arP" type="password" placeholder="كلمة المرور" autocomplete="new-password">
+  <div id="arErr" style="color:#B91C1C;font-size:12px;min-height:16px"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end"><button class="ar-b x" onclick="arDelGo()">حذف</button><button class="ar-b v" onclick="arDelClose()">إلغاء</button></div>
+</div></div>
+<script>
+  var OPEN = "{{ url_for('pdf_archive_open', visit_id=0) }}".replace(/0\/open$/, '');
+  var _del = 0;
+  function arOpen(id, name){
+    document.getElementById('arTitle').textContent = '📄 ' + name;
+    document.getElementById('arDl').href = OPEN + id + '/open?download=1';
+    document.getElementById('arFrame').src = OPEN + id + '/open';
+    document.getElementById('arOv').style.display = 'flex';
+  }
+  function arClose(){ document.getElementById('arOv').style.display='none'; document.getElementById('arFrame').src='about:blank'; }
+  function arPrint(){ var f=document.getElementById('arFrame'); try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){ window.open(f.src,'_blank'); } }
+  function arDel(id, name){ _del=id; document.getElementById('arDelName').textContent=name; document.getElementById('arU').value=''; document.getElementById('arP').value=''; document.getElementById('arErr').textContent=''; document.getElementById('arDel').style.display='flex'; document.getElementById('arU').focus(); }
+  function arDelClose(){ document.getElementById('arDel').style.display='none'; }
+  function arDelGo(){
+    var fd = new FormData(); fd.append('gate_username', document.getElementById('arU').value); fd.append('gate_password', document.getElementById('arP').value);
+    fetch(OPEN + _del + '/delete', {method:'POST', body:fd}).then(function(r){return r.json();}).then(function(d){
+      if (d.ok) location.reload(); else document.getElementById('arErr').textContent = d.message || 'مرفوض';
+    }).catch(function(){ document.getElementById('arErr').textContent='تعذر الاتصال'; });
+  }
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape'){ arClose(); arDelClose(); } });
+</script>
 {% endblock %}

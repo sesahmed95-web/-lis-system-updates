@@ -58,6 +58,22 @@ def main():
     # 1) database
     report = seal.sanitize_db(os.path.join(ws, "lis.db"), os.path.join(bld, "lis.db"), a)
 
+    # v77: تأكد أن بوابة النتائج مضبوطة بهذا المجلد — وإلا العميل يطلع له "اضبط رابط بوابة النتائج أولاً" ما يقدر يطبع QR
+    try:
+        _pc = sqlite3.connect(os.path.join(bld, "lis.db"))
+        _ps = dict(_pc.execute("SELECT key, value FROM settings WHERE key IN ('portal_url','portal_api_key','portal_enabled')").fetchall())
+        _pc.close()
+        if not (_ps.get("portal_url") or "").strip() or not (_ps.get("portal_api_key") or "").strip():
+            print("\n" + "!" * 70)
+            print("WARNING: results portal is NOT configured in this folder (portal_url / portal_api_key empty).")
+            print("         The client will get 'set the portal link first' when printing the patient QR.")
+            print("         Fill them in THIS folder's program (Settings > Results portal), or in the designer builder page, then rebuild.")
+            print("!" * 70 + "\n")
+        else:
+            print("Portal: URL + key are set in this build (they travel inside the Setup).")
+    except Exception as _pe:
+        print("WARNING: could not check portal settings:", repr(_pe))
+
     # ملفات static/uploads المشار إليها بأي إعداد (شعار، خلفية الرئيسية، صور الشاشة الأولى...) تُنسخ كلها
     keep_names = set()
     try:
@@ -156,10 +172,13 @@ DESIGN_KEYS = (
 
 
 def build_branding_preset(bld):
-    """يقرأ النسخة المنظَّفة bld/lis.db + bld/static/uploads ويكتب bld/portal_preset.json (بدون أي توكن/باسورد/مفتاح بوابة)."""
+    """يقرأ النسخة المنظَّفة bld/lis.db + bld/static/uploads ويكتب bld/portal_preset.json (مفتاح البوابة يُضمَّن فقط داخل Setup هذا العميل — لا ترفع portal_preset.json لأي مكان)."""
     con = sqlite3.connect(os.path.join(bld, "lis.db")); con.row_factory = sqlite3.Row
     try:
-        keys = ("app_name", "app_name_ar", "lab_phone", "lab_address", "logo_path") + DESIGN_KEYS
+        # v78: إعدادات بوابة النتائج (الرابط + المفتاح) تنتقل داخل الـSetup نفسه (نفس المفتاح اللي أصلاً داخل lis.db بالـSetup) —
+        # حتى لو العميل عنده lis.db قديم ما ينتقل له، الـpreset يضبطها مرة وحدة عند أول تشغيل.
+        keys = ("app_name", "app_name_ar", "lab_phone", "lab_address", "logo_path",
+                "portal_url", "portal_api_key", "portal_enabled", "portal_mode", "portal_pdf_enabled") + DESIGN_KEYS
         st = {r["key"]: r["value"] for r in con.execute(
             "SELECT key, value FROM settings WHERE key IN (%s)" % ",".join("?" * len(keys)), keys)}
         cols = [r[1] for r in con.execute("PRAGMA table_info(examining_doctors_list)")]

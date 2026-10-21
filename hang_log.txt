@@ -162,3 +162,4 @@
 [2026-10-20T13:37:24] SLOW 4.5s GET /reports/archive/40/open? (pdf_archive_open)
 [2026-10-20T13:37:32] SLOW 2.1s GET /reports/archive/40/open? (pdf_archive_open)
 [2026-10-20T16:31:18] SLOW 2.8s GET /reports/archive/40/open? (pdf_archive_open)
+[2026-10-21T10:05:10] SLOW 6.1s GET /reports/archive/41/open? (pdf_archive_open)

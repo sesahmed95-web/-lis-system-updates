@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>بطاقة المريض — {{ v['full_name'] }}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--navy:#205072;--navy2:#173B55;--line:#E2E8F0;--bg:#F1F5F9;--txt:#0F172A;--mut:#64748B;--ok:#15803D;--bad:#B91C1C;--warn:#B45309}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:var(--bg);font:12.5px Tahoma,Arial,sans-serif;color:var(--txt);display:flex;flex-direction:column}
+/* ---------- شريط علوي ---------- */
+.top{background:linear-gradient(90deg,var(--navy2),var(--navy));color:#fff;padding:8px 14px;display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.top h1{margin:0;font-size:17px;font-weight:700}
+.top .meta{font-size:12px;opacity:.88}
+.sp{flex:1}
+.pill{background:rgba(255,255,255,.16);border-radius:99px;padding:3px 11px;font-size:12px;white-space:nowrap}
+.pill.due{background:var(--bad)}
+.x{background:rgba(255,255,255,.18);color:#fff;border:0;border-radius:8px;width:30px;height:30px;font-size:16px;cursor:pointer}
+.x:hover{background:rgba(255,255,255,.32)}
+/* ---------- الشبكة: 3 أعمدة بدون مسطرة ---------- */
+.grid{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(300px,1fr) minmax(430px,1.45fr) minmax(250px,.85fr);gap:10px;padding:10px}
+.col{min-height:0;display:flex;flex-direction:column;gap:10px}
+.card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:9px 11px;display:flex;flex-direction:column;min-height:0}
+.card.fill{flex:1 1 auto}
+.card h3{margin:0 0 7px;font-size:13.5px;color:var(--navy);display:flex;align-items:center;gap:6px}
+.card h3 small{font-weight:400;color:var(--mut);font-size:11.5px}
+/* ---------- حقول ---------- */
+label{display:flex;flex-direction:column;font-size:11.5px;color:#475569;gap:2px;min-width:0}
+input,select,textarea{padding:4px 7px;border:1px solid #CBD5E1;border-radius:7px;font:12.5px Tahoma,Arial;background:#fff;width:100%;min-width:0;color:var(--txt)}
+input:focus,select:focus,textarea:focus{outline:2px solid #93C5FD;border-color:#60A5FA}
+textarea{resize:none}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:6px 8px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 8px}
+.span2{grid-column:1/-1}
+.tabs{display:flex;gap:4px;margin-bottom:8px;border-bottom:1px solid var(--line)}
+.tab{background:none;border:0;border-bottom:3px solid transparent;padding:5px 11px;font:700 12.5px Tahoma;color:var(--mut);cursor:pointer}
+.tab.on{color:var(--navy);border-bottom-color:var(--navy)}
+.pane{display:none;flex:1 1 auto;min-height:0}.pane.on{display:block}
+.bottom{margin-top:auto;padding-top:8px;display:flex;align-items:center;gap:8px}
+/* ---------- أزرار ---------- */
+button,a.b{background:var(--navy);color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px Tahoma;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+button:hover,a.b:hover{filter:brightness(1.12)}
+button.s,a.s{background:#fff;color:var(--navy);border:1px solid var(--navy)}
+button.ok{background:var(--ok)}button.bad{background:var(--bad)}button.warn{background:var(--warn)}
+button[disabled]{opacity:.4;cursor:not-allowed}
+.msg{font-size:12px;min-height:16px}.msg.ok{color:var(--ok)}.msg.er{color:var(--bad)}
+.mut{color:var(--mut);font-size:11.5px}
+/* ---------- جدول التحاليل ---------- */
+.tw{flex:1 1 auto;min-height:0;overflow:auto;border:1px solid var(--line);border-radius:8px}
+table{width:100%;border-collapse:collapse}
+th{background:#E8F1F8;color:var(--navy);padding:5px 6px;font-size:11.5px;text-align:right;position:sticky;top:0;z-index:1}
+td{padding:3px 5px;border-bottom:1px solid #EEF2F6;vertical-align:middle}
+tr.sel td{background:#F0F7FF}
+td input{padding:3px 5px}
+.st{font-size:11px;background:#F1F5F9;border-radius:99px;padding:1px 8px;white-space:nowrap}
+.st.done{background:#DCFCE7;color:#166534}
+.tn{font-weight:700;line-height:1.25}
+.tn small{display:block;font-weight:400;color:var(--mut);font-size:10.5px}
+.fwd{background:#FEF3C7;border-radius:6px;padding:0 5px;font-size:10.5px;color:#92400E}
+.rowx{background:none;border:0;color:var(--bad);font-size:15px;padding:2px 6px;cursor:pointer}
+.bulk{display:flex;gap:6px;align-items:end;flex-wrap:wrap;margin-top:8px;padding:7px;background:#F8FAFC;border:1px dashed #CBD5E1;border-radius:9px}
+.bulk label{flex:1;min-width:130px}
+/* ---------- باركودات ---------- */
+.bars{display:flex;flex-wrap:wrap;gap:6px}
+.bars a.b{flex:1 1 46%;justify-content:center;padding:7px 6px}
+.bars a.b.full{flex:1 1 100%}
+.tot{display:grid;grid-template-columns:1fr auto;gap:3px 8px;font-size:13px;margin-bottom:6px}
+.tot b{font-size:14px}
+.tot .r{color:var(--bad)}
+.payrow{display:flex;gap:6px}
+</style></head><body>
+
+<div class="top">
+  <h1>{{ v['full_name'] }}</h1><span class="pill">#{{ v['registration_number'] }}</span>
+  <span class="meta">{{ (v['created_at'] or '')[:16]|replace('T',' ') }}{% if v['gender'] %} · {{ v['gender'] }}{% endif %}{% if v['age'] %} · {{ v['age'] }} {{ v['age_unit'] or '' }}{% endif %}{% if v['phone'] %} · {{ v['phone'] }}{% endif %}</span>
+  <span class="sp"></span>
+  <span class="pill">الإجمالي <b id="pTot">{{ '%g'|format(bal.total) }}</b></span>
+  <span class="pill">الواصل <b id="pPaid">{{ '%g'|format(bal.paid) }}</b></span>
+  <span class="pill {{ 'due' if bal.remaining > 0 }}" id="pDueWrap">الباقي <b id="pDue">{{ '%g'|format(bal.remaining) }}</b></span>
+  <button class="x" id="xBtn" title="إغلاق (Esc)" onclick="closeCard()">✕</button>
+</div>
+
+<div class="grid">
+
+<!-- ================= العمود 1: معلومات المريض ================= -->
+<div class="col"><div class="card fill">
+  <h3>👤 معلومات المريض</h3>
+  <div class="tabs"><button class="tab on" data-t="t1">البيانات</button><button class="tab" data-t="t2">صحة وهوية وزيارة منزلية</button></div>
+
+  <div class="pane on" id="t1">
+    <div class="g2">
+      <label class="span2">اسم المريض<input id="f_name" value="{{ v['full_name'] }}"></label>
+      <label>اللقب<input id="f_title" value="{{ v['title'] or 'Mr.' }}"></label>
+      <label>الجنس<select id="f_gender"><option {{ 'selected' if v['gender']=='Male' }}>Male</option><option {{ 'selected' if v['gender']=='Female' }}>Female</option></select></label>
+      <label>العمر<input id="f_age" type="number" value="{{ v['age'] or '' }}"></label>
+      <label>الوحدة<select id="f_unit">{% for u in ('Years','Months','Days') %}<option {{ 'selected' if (v['age_unit'] or 'Years')==u }}>{{ u }}</option>{% endfor %}</select></label>
+      <label>الهاتف<input id="f_phone" value="{{ v['phone'] or '' }}"></label>
+      <label>البريد<input id="f_email" dir="ltr" value="{{ v['email'] or '' }}"></label>
+      <label>الطبيب المُرسِل<input id="f_doc" list="dl_docs" value="{{ v['doctor_name'] or '' }}"></label>
+      <label>الطبيب الفاحص<input id="f_exam" list="dl_exam" value="{{ v['examining_doctor'] or '' }}"></label>
+      <label>مختبر وارد (نموذج من مختبر آخر)<input id="f_center" value="{{ v['center_name'] or '' }}" placeholder="— مراجع مباشر —"></label>
+      <label>الصيام<select id="f_fast">{% for k in ('Undefined','Yes','No') %}<option value="{{ k }}" {{ 'selected' if (v['fasting'] or 'Undefined')==k }}>{{ k }}</option>{% endfor %}</select></label>
+      <label class="span2">ملاحظات<textarea id="f_notes" rows="2">{{ v['notes'] or '' }}</textarea></label>
+    </div>
+  </div>
+
+  <div class="pane" id="t2">
+    <div class="g2">
+      <label>الوزن<input id="f_weight" value="{{ v['weight'] or '' }}"></label>
+      <label>الطول<input id="f_height" value="{{ v['height'] or '' }}"></label>
+      <label class="span2">الأعراض<input id="f_sym" value="{{ v['symptoms'] or '' }}"></label>
+      <label>المرض<input id="f_dis" value="{{ v['disease'] or '' }}"></label>
+      <label>العلاج<input id="f_ther" value="{{ v['therapy'] or '' }}"></label>
+      <label>رقم الهوية<input id="f_nid" value="{{ v['national_id'] or '' }}"></label>
+      <label>رقم الجواز<input id="f_pass" value="{{ v['passport_number'] or '' }}"></label>
+      <label>رقم شهادة السفر<input id="f_trav" value="{{ v['travel_certificate_number'] or '' }}"></label>
+      <label>رقم بطاقة المختبر<input id="f_card" value="{{ v['lab_card_number'] or '' }}"></label>
+      <label class="span2">العنوان<input id="f_addr" value="{{ v['address'] or '' }}"></label>
+      <label>زيارة منزلية<select id="f_home"><option value="0" {{ 'selected' if not v['is_home_visit'] }}>لا</option><option value="1" {{ 'selected' if v['is_home_visit'] }}>نعم</option></select></label>
+      <label>أجرة الزيارة المنزلية<input id="f_hfee" type="number" step="any" value="{{ '%g'|format(v['home_visit_fee'] or 0) }}"></label>
+      <label class="span2">عنوان الزيارة المنزلية<input id="f_haddr" value="{{ v['home_visit_address'] or '' }}"></label>
+    </div>
+  </div>
+
+  <div class="bottom"><button class="ok" onclick="saveInfo()">💾 حفظ المعلومات</button><span id="infoMsg" class="msg"></span></div>
+  <datalist id="dl_exam">{% for n in exam_doctors %}<option value="{{ n }}">{% endfor %}</datalist>
+  <datalist id="dl_docs">{% for n in ref_doctors %}<option value="{{ n }}">{% endfor %}</datalist>
+</div></div>
+
+<!-- ================= العمود 2: التحاليل ================= -->
+<div class="col"><div class="card fill">
+  <h3>🧪 التحاليل وأسعارها <small>— عدّل السعر، أو اكتب «مرسل إلى» لمختبر آخر. التغيير يُحفظ تلقائيًا</small></h3>
+  <div class="tw"><table id="tt">
+    <tr><th style="width:26px"><input type="checkbox" id="chkAll" title="تحديد الكل" onchange="selAll(this.checked)"></th><th>التحليل</th><th style="width:88px">السعر</th><th style="width:140px">مرسل إلى</th><th style="width:72px">الكلفة</th><th style="width:28px"></th></tr>
+    {% for t in tests %}
+    <tr id="r_{{ t.id }}" data-def="{{ t.test_definition_id }}">
+      <td><input type="checkbox" class="chk" value="{{ t.id }}" onchange="rowSel(this)"></td>
+      <td><div class="tn">{{ t.name }}<small>{{ t.department or '' }} · <span class="st {{ 'done' if t.status in ('Completed','Verified') }}">{{ t.status }}</span></small></div></td>
+      <td><input id="p_{{ t.id }}" type="number" step="any" value="{{ '%g'|format(t.price) }}" onchange="saveRow({{ t.id }})"></td>
+      <td><input id="fl_{{ t.id }}" list="dl_fwd" value="{{ t.fwd_lab }}" placeholder="— بمختبرنا —" onchange="labPicked({{ t.id }})"></td>
+      <td><input id="fc_{{ t.id }}" type="number" step="any" value="{{ '%g'|format(t.fwd_cost) if t.fwd_cost else '' }}" onchange="saveRow({{ t.id }})"></td>
+      <td><button class="rowx" title="حذف التحليل من الزيارة" {{ 'disabled' if t.status in ('Completed','Verified') }} onclick="rmTest({{ t.id }})">✕</button><span id="tm_{{ t.id }}" class="mut"></span></td>
+    </tr>{% endfor %}
+  </table></div>
+  <datalist id="dl_fwd">{% for n in fwd_labs %}<option value="{{ n }}">{% endfor %}{% for n in pc_prices %}{% if n not in fwd_labs %}<option value="{{ n }}">{% endif %}{% endfor %}</datalist>
+
+  <div class="bulk">
+    <label>📤 إرسال التحاليل المحددة إلى مختبر
+      <input id="bulkLab" list="dl_fwd" placeholder="اسم المختبر (اختر من القائمة أو اكتب)"></label>
+    <button onclick="bulkSend(false)">إرسال المحدد</button>
+    <button class="s" onclick="bulkSend(true)" title="يرجّع المحدد للتحليل بمختبرنا">↩ إلغاء الإرسال</button>
+    <span id="bulkMsg" class="msg"></span>
+  </div>
+  <div class="bulk" style="border-color:#BBF7D0;background:#F0FDF4">
+    <label>➕ إضافة تحليل نسيته<select id="addSel"><option value="">— اختر —</option>{% for c in catalog %}<option value="{{ c.id }}">{{ c.department or '' }} · {{ c.name }}</option>{% endfor %}</select></label>
+    <button class="ok" onclick="addTest()">إضافة</button><span id="addMsg" class="msg"></span>
+  </div>
+</div></div>
+
+<!-- ================= العمود 3: باركودات + دفع ================= -->
+<div class="col">
+  <div class="card">
+    <h3>🏷 الباركودات</h3>
+    <div class="bars">
+      <a class="b full" onclick="op('{{ url_for('print_sample_barcodes', visit_id=v['id']) }}?autoprint=1');return false" href="#">🧪 كل الأنابيب</a>
+      {% for g in tube_groups %}<a class="b s" onclick="op('{{ url_for('print_sample_barcodes', visit_id=v['id']) }}?autoprint=1&ots={{ g.ids }}&req=0');return false" href="#">🧪 {{ g.label }} ({{ g.n }})</a>{% endfor %}
+      <a class="b s" onclick="op('{{ url_for('print_request_label', visit_id=v['id']) }}?autoprint=1');return false" href="#">🏷 باركود الطلب</a>
+      <a class="b s" onclick="op('{{ url_for('print_visit_barcode', visit_id=v['id']) }}');return false" href="#">🔖 باركود الزيارة</a>
+      <a class="b s" id="fwdLbl" style="{{ '' if fwd_ids else 'display:none' }}" onclick="op('{{ url_for('labels_outside_print', visit_id=v['id']) }}?ots='+fwdIds());return false" href="#">📤 ملصق المرسَل لمختبر آخر</a>
+      <a class="b s" onclick="op('{{ url_for('labels_center', visit_id=v['id']) }}');return false" href="#">⚙ كل خيارات الباركود</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>💵 الفاتورة والدفع</h3>
+    <div class="tot"><span>الإجمالي</span><b id="tTot">{{ '%g'|format(bal.total) }}</b><span>الواصل</span><b id="tPaid">{{ '%g'|format(bal.paid) }}</b><span>الباقي</span><b class="r" id="tDue">{{ '%g'|format(bal.remaining) }}</b></div>
+    <div class="payrow"><input id="payAmt" type="number" step="any" placeholder="مبلغ مستلَم الآن" value="{{ '%g'|format(bal.remaining) if bal.remaining > 0 else '' }}"><button class="ok" onclick="pay()">تسجيل</button></div>
+    <span id="payMsg" class="msg"></span>
+  </div>
+
+  <div class="card">
+    <h3>🔗 روابط سريعة</h3>
+    <div class="bars">
+      <a class="b s" target="_blank" href="{{ url_for('visit_results_entry', visit_id=v['id']) }}">📝 إدخال النتائج</a>
+      <a class="b s" onclick="op('{{ url_for('report_pdf_visit', visit_id=v['id']) }}');return false" href="#">📄 النتائج PDF</a>
+      <a class="b s" onclick="op('{{ url_for('print_invoice', visit_id=v['id']) }}');return false" href="#">🧾 الفاتورة</a>
+      <a class="b s" target="_blank" href="{{ url_for('visit_edit', visit_id=v['id']) }}">✏️ التعديل الكامل</a>
+    </div>
+  </div>
+</div>
+
+</div>
+<script>
+var VID={{ v['id'] }},API='/api/patient-card/'+VID,PR={{ pc_prices|tojson }},dirty=false;
+function $(i){return document.getElementById(i);}
+function op(u){var w=null;try{w=window.open(u,'_blank');}catch(e){} if(!w)location.href=u;}
+function post(u,b){return fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){return r.json();});}
+function say(id,m,ok){var e=$(id);e.textContent=m;e.className='msg '+(ok?'ok':'er');if(ok)setTimeout(function(){e.textContent='';},2500);}
+function closeCard(){ if(window.parent!==window){window.parent.postMessage({lisCard:'close'},'*');} else {window.close();} }
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeCard();});
+if(window.parent===window){$('xBtn').style.display='none';}
+/* تبويبات (تُحفظ بين إعادة التحميل) */
+function tab(id){document.querySelectorAll('.tab').forEach(function(b){b.classList.toggle('on',b.dataset.t===id);});document.querySelectorAll('.pane').forEach(function(p){p.classList.toggle('on',p.id===id);});try{sessionStorage.setItem('pcTab',id);}catch(e){}}
+document.querySelectorAll('.tab').forEach(function(b){b.onclick=function(){tab(b.dataset.t);};});
+try{var tt=sessionStorage.getItem('pcTab');if(tt&&$(tt))tab(tt);}catch(e){}
+document.querySelectorAll('#t1 input,#t1 select,#t1 textarea,#t2 input,#t2 select').forEach(function(el){el.addEventListener('input',function(){dirty=true;});});
+function money(n){return (Math.round(n*100)/100).toString();}
+function setState(s){if(!s)return;['pTot','tTot'].forEach(function(i){$(i).textContent=money(s.total);});['pPaid','tPaid'].forEach(function(i){$(i).textContent=money(s.paid);});
+ ['pDue','tDue'].forEach(function(i){$(i).textContent=money(s.remaining);});$('pDueWrap').classList.toggle('due',s.remaining>0);$('payAmt').value=s.remaining>0?money(s.remaining):'';}
+function reloadSafe(){if(dirty&&!confirm('عندك تعديلات غير محفوظة بمعلومات المريض. المتابعة تلغيها. متابعة؟'))return;location.reload();}
+/* حفظ المعلومات (القسمين) */
+function saveInfo(){
+ var a={patient_name:$('f_name').value,phone:$('f_phone').value,gender:$('f_gender').value,age:$('f_age').value,age_unit:$('f_unit').value,title:$('f_title').value,email:$('f_email').value,doctor_name:$('f_doc').value,examining_doctor:$('f_exam').value,referral_lab_name:$('f_center').value,fasting:$('f_fast').value,notes:$('f_notes').value};
+ var b={address:$('f_addr').value,national_id:$('f_nid').value,passport_number:$('f_pass').value,travel_certificate_number:$('f_trav').value,lab_card_number:$('f_card').value,weight:$('f_weight').value,height:$('f_height').value,symptoms:$('f_sym').value,disease:$('f_dis').value,therapy:$('f_ther').value,is_home_visit:$('f_home').value,home_visit_address:$('f_haddr').value,home_visit_fee:$('f_hfee').value};
+ post(API+'/info',a).then(function(d){ if(!d.ok){say('infoMsg',d.error||'تعذّر الحفظ',false);return;}
+  return post(API+'/extra',b).then(function(d2){ if(!d2.ok){say('infoMsg',d2.error||'تعذّر حفظ الباقي',false);return;} dirty=false;say('infoMsg','✔ تم الحفظ',true);setTimeout(function(){location.reload();},600);});
+ }).catch(function(){say('infoMsg','تعذّر الاتصال',false);});}
+/* صف تحليل: سعر + مختبر + كلفة */
+function labPicked(id){var lab=$('fl_'+id).value.trim(),def=$('r_'+id).dataset.def;
+ if(lab&&PR[lab]&&PR[lab][def]!==undefined&&!$('fc_'+id).value){$('fc_'+id).value=PR[lab][def];}
+ if(!lab){$('fc_'+id).value='';} saveRow(id);}
+function saveRow(id){var e=$('tm_'+id);
+ post(API+'/test/'+id,{price:$('p_'+id).value,fwd_lab:$('fl_'+id).value,fwd_cost:$('fc_'+id).value}).then(function(d){
+  e.textContent=d.ok?'✔':'⚠';e.style.color=d.ok?'#15803D':'#B91C1C';if(!d.ok)alert(d.error||'خطأ');else{setTimeout(function(){e.textContent='';},1500);refreshState();}});}
+function refreshState(){fetch(API+'/state').then(function(r){return r.json();}).then(function(d){if(d.ok){setState(d);$('fwdLbl').style.display=fwdIds()?'':'none';}});}
+function fwdIds(){var a=[];document.querySelectorAll('tr[data-def]').forEach(function(tr){var id=tr.id.slice(2);if($('fl_'+id).value.trim())a.push(id);});return a.join(',');}
+/* تحديد + إرسال جماعي */
+function rowSel(c){c.closest('tr').classList.toggle('sel',c.checked);}
+function selAll(on){document.querySelectorAll('.chk').forEach(function(c){c.checked=on;rowSel(c);});}
+function bulkSend(clear){var ids=[];document.querySelectorAll('.chk:checked').forEach(function(c){ids.push(c.value);});
+ var lab=$('bulkLab').value.trim();
+ if(!ids.length){say('bulkMsg','حدّد تحليلًا واحدًا على الأقل (المربعات يمين الجدول)',false);return;}
+ if(!clear&&!lab){say('bulkMsg','اكتب أو اختر اسم المختبر',false);return;}
+ post(API+'/forward',{ot_ids:ids,lab:clear?'':lab}).then(function(d){ if(!d.ok){say('bulkMsg',d.error||'تعذّر',false);return;}
+  ids.forEach(function(id){var def=$('r_'+id).dataset.def;$('fl_'+id).value=clear?'':lab;$('fc_'+id).value=clear?'':((PR[lab]&&PR[lab][def]!==undefined)?PR[lab][def]:'');});
+  say('bulkMsg',clear?'✔ رجعت بمختبرنا':'✔ أُرسل '+d.n+' تحليل إلى '+lab,true);selAll(false);$('chkAll').checked=false;refreshState();});}
+/* حذف / إضافة */
+function rmTest(id){if(!confirm('حذف هذا التحليل من الزيارة؟'))return;
+ post(API+'/remove/'+id).then(function(d){if(!d.ok){alert(d.error||'تعذّر الحذف');return;}reloadSafe();});}
+function addTest(){var v=$('addSel').value;if(!v){say('addMsg','اختر تحليلًا',false);return;}
+ post(API+'/add-test',{test_id:v}).then(function(d){say('addMsg',d.ok?'✔ أُضيف':(d.error||'تعذّر'),d.ok);if(d.ok)setTimeout(function(){location.reload();},500);});}
+/* دفع */
+function pay(){var a=$('payAmt').value;post(API+'/pay',{amount:a}).then(function(d){if(!d.ok){say('payMsg',d.error||'تعذّر',false);return;}setState(d);say('payMsg','✔ سُجّلت الدفعة',true);});}
+</script></body></html>
