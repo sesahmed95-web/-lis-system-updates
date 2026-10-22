@@ -251,7 +251,26 @@ app.logger.setLevel(_logging.ERROR)
 # أي إعادة تشغيل حقيقية للبرنامج (إعادة تشغيل الجهاز، إيقاف ثم تشغيل من
 # جديد...)، فيُطلب اسم المستخدم وكلمة المرور من جديد بشكل مضمون، بدل أن
 # يبقى المتصفح مسجّل دخول تلقائيًا لأشهر لمجرد أن الكوكي القديم لسا شغّال.
-app.secret_key = secrets.token_hex(32)
+def _v90_secret_key():
+    """v90: مفتاح الجلسة ثابت (محفوظ بملف جنب قاعدة البيانات). كان عشوائيًا بكل تشغيل فأي إعادة تشغيل/تحديث/إغلاق للبرنامج
+    تلغي الجلسة ويرجع المستخدم لشاشة اختيار الواجهة (فيضيع اختياره: موظف/مختبر...)."""
+    try:
+        from database import DB_PATH as _P
+        kp = os.path.join(os.path.dirname(os.path.abspath(_P)), ".lis_session_key")
+        if os.path.exists(kp):
+            with open(kp, "r", encoding="utf-8") as _f:
+                k = _f.read().strip()
+            if len(k) >= 32:
+                return k
+        k = secrets.token_hex(32)
+        with open(kp, "w", encoding="utf-8") as _f:
+            _f.write(k)
+        return k
+    except Exception:
+        return secrets.token_hex(32)
+
+
+app.secret_key = _v90_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days when "remember me" is checked
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "static", "uploads")
@@ -10349,6 +10368,7 @@ def _maybe_archive_visit_pdf(db, visit_id):
     توليد/استبدال نفس الملف (upsert بـ visit_id) في كل مرة — حتى يبقى
     الملف المؤرشف مطابقًا دائمًا لآخر تعديل على النتائج، حتى لو تم تعديلها
     بعد الاكتمال. أي خطأ بالتوليد لا يوقف حفظ النتائج أبدًا."""
+    _v90_fix_saved_reports(db)
     archive_dir = _get_pdf_archive_dir(db)
     if not archive_dir:
         return False
@@ -10763,6 +10783,7 @@ def pdf_archive():
     """بحث سريع بأرشيف الـPDF الدائم (باسم المريض أو رقم التسجيل)، من داخل
     البرنامج مباشرة — بدل ما يفتّش المستخدم يدويًا بمجلد الأرشيف بالحاسبة."""
     db = get_db()
+    _v90_fix_saved_reports(db)
     q = request.args.get("q", "").strip()
     archive_dir = _get_pdf_archive_dir(db)
     # v78: القائمة = كل الزيارات المكتملة (غير المحذوفة من الأرشيف) — الـPDF يتولّد عند الفتح لو مو موجود
@@ -10781,7 +10802,7 @@ def pdf_archive():
         "AND NOT EXISTS (SELECT 1 FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=v.id "
         "AND ot.status NOT IN ('Completed','Verified')) "
         "ORDER BY v.id DESC LIMIT 200", (like, like, like, like)).fetchall()
-    return render_template("pdf_archive.html", rows=rows, q=q, archive_configured=True)
+    return render_template("pdf_archive.html", rows=rows, q=q, archive_configured=True, archive_dir=archive_dir)
 
 
 @app.route("/reports/archive/<int:visit_id>/open")
@@ -10791,6 +10812,7 @@ def pdf_archive_open(visit_id):
     وليس توليدًا جديدًا) — لو الملف انمسح يدويًا من مجلد الأرشيف من خارج
     البرنامج (نقل/حذف)، نرجّع رسالة واضحة بدل خطأ سيرفر غامض."""
     db = get_db()
+    _v90_fix_saved_reports(db)
     row = get_saved_report(db, visit_id)
     if not row or not row["pdf_path"] or not os.path.exists(row["pdf_path"]):
         # v72: غير مؤرشف (زيارة قديمة أو انحذف الملف) => نولّده الآن من نفس اللوحة المصممة ونحفظه
@@ -15965,6 +15987,7 @@ _V88_ARCHIVE_ERR = {}
 
 
 def _v87_archive_path(db, visit_id):
+    _v90_fix_saved_reports(db)
     row = get_saved_report(db, visit_id)
     if not row or not row["pdf_path"] or not os.path.exists(row["pdf_path"]):
         try:
@@ -16092,6 +16115,335 @@ def pdf_archive_open_external(visit_id):
     _v88_launch_pdf(path)   # يشتغل بخيط منفصل حتى يرجع الرد فورًا ولا ينتظر برنامج الـPDF يقلع
     return jsonify({"ok": True})
 
+
+
+# ============================== v90 ==============================
+_V90_SR_COLS = [("patient_id", "INTEGER"), ("full_name", "TEXT"), ("registration_number", "TEXT"), ("pdf_path", "TEXT"),
+                ("referring_doctor_name", "TEXT"), ("referral_center_name", "TEXT"), ("created_at", "TEXT"), ("updated_at", "TEXT")]
+
+
+def _v90_fix_saved_reports(db):
+    """جدول saved_reports بقواعد بيانات قديمة ناقص أعمدة (مثل full_name) => كان الأرشفة/فتح الـPDF يفشل بخطأ
+    'table saved_reports has no column named full_name'. نضيف أي عمود ناقص تلقائيًا (بدون لمس البيانات)."""
+    try:
+        cols = {r[1] for r in db.execute("PRAGMA table_info(saved_reports)").fetchall()}
+        if not cols:
+            db.execute("CREATE TABLE IF NOT EXISTS saved_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, visit_id INTEGER NOT NULL UNIQUE, "
+                       "patient_id INTEGER, full_name TEXT, registration_number TEXT, pdf_path TEXT NOT NULL, referring_doctor_name TEXT, "
+                       "referral_center_name TEXT, created_at TEXT, updated_at TEXT)")
+            db.commit()
+            return
+        for name, typ in _V90_SR_COLS:
+            if name not in cols:
+                db.execute("ALTER TABLE saved_reports ADD COLUMN %s %s" % (name, typ))
+        db.commit()
+    except Exception:
+        _v74_log_exc("v90 fix saved_reports failed")
+
+
+try:
+    _v90_boot_db = get_db()
+    _v90_fix_saved_reports(_v90_boot_db)
+except Exception:
+    pass
+
+
+# ---- بوابة النتائج: رابط Cloudflare Worker / Render + مفتاح سري = وضع "سحابي" تلقائيًا ----
+# السبب: الوضع الافتراضي "محلي" (portal_mode=local) لا يدفع النتائج لأي مكان، فالـQR يفتح الـworker ويعطي "لم يُعثر على هذا الرابط".
+_v90_orig_get_cfg = cloud_sync.get_cfg
+
+
+def _v90_get_cfg(db):
+    cfg = _v90_orig_get_cfg(db)
+    try:
+        import urllib.parse as _up
+        host = (_up.urlparse(cfg["url"]).hostname or "").lower()
+        if cfg.get("mode") == "local" and cfg.get("api_key") and (
+                host.endswith(".workers.dev") or host.endswith(".onrender.com") or host.endswith(".pages.dev")):
+            cfg["mode"] = "remote"
+            cfg["mode_auto"] = True
+            if get_setting(db, "portal_remote_synced", "") != "1":     # أول مرة نتحول فيها: أعد دفع الزيارات الأخيرة للبوابة السحابية
+                try:
+                    db.execute("DELETE FROM portal_state")
+                    set_setting(db, "portal_remote_synced", "1")
+                    db.commit()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return cfg
+
+
+cloud_sync.get_cfg = _v90_get_cfg
+
+
+# ---------------- v91: مكان حفظ أرشيف PDF يحدده المستخدم من البرنامج ----------------
+@app.route("/reports/archive/pick-folder", methods=["POST"])
+@login_required
+def pdf_archive_pick_folder():
+    """يفتح نافذة اختيار مجلد ويندوز على جهاز السيرفر (يشتغل فقط من نفس الجهاز)."""
+    if not _v88_is_local_request():
+        return jsonify(ok=False, error="اختيار المجلد بالنافذة متاح من جهاز السيرفر فقط — اكتب المسار يدويًا (مثل D:\\Results).")
+    if os.name != "nt":
+        return jsonify(ok=False, error="اكتب المسار يدويًا.")
+    ps = ("Add-Type -AssemblyName System.Windows.Forms; $o=New-Object System.Windows.Forms.Form; $o.TopMost=$true; "
+          "$f=New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description='اختر مجلد حفظ ملفات PDF'; $f.ShowNewFolderButton=$true; "
+          "if($f.ShowDialog($o) -eq 'OK'){[Console]::OutputEncoding=[Text.Encoding]::UTF8; Write-Output $f.SelectedPath}")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps], capture_output=True, timeout=180,
+                           creationflags=0x08000000)
+        path = (r.stdout or b"").decode("utf-8", "ignore").strip()
+        return jsonify(ok=True, path=path)
+    except Exception as e:  # noqa: BLE001
+        return jsonify(ok=False, error="تعذّر فتح نافذة الاختيار: %s" % e)
+
+
+@app.route("/reports/archive/set-dir", methods=["POST"])
+@login_required
+def pdf_archive_set_dir():
+    db = get_db()
+    p = request.get_json(silent=True) or {}
+    d = (p.get("dir") or "").strip().strip('"')
+    if not d:
+        return jsonify(ok=False, error="المسار فارغ")
+    try:
+        os.makedirs(d, exist_ok=True)
+        t = os.path.join(d, ".lis_write_test")
+        with open(t, "w") as f:
+            f.write("x")
+        os.remove(t)
+    except Exception as e:  # noqa: BLE001
+        return jsonify(ok=False, error="لا يمكن الكتابة بهذا المكان: %s" % e)
+    moved = 0
+    if p.get("move"):
+        try:
+            _v90_fix_saved_reports(db)
+            for r in db.execute("SELECT visit_id, pdf_path FROM saved_reports").fetchall():
+                src = r["pdf_path"]
+                if not src or not os.path.exists(src) or os.path.dirname(os.path.abspath(src)) == os.path.abspath(d):
+                    continue
+                dst = os.path.join(d, os.path.basename(src))
+                if os.path.exists(dst):
+                    dst = os.path.join(d, "%s_%s" % (r["visit_id"], os.path.basename(src)))
+                shutil.move(src, dst)
+                db.execute("UPDATE saved_reports SET pdf_path=? WHERE visit_id=?", (dst, r["visit_id"]))
+                moved += 1
+            db.commit()
+        except Exception:
+            _v74_log_exc("v91 move archive failed")
+    set_setting(db, "pdf_archive_dir", d)
+    db.commit()
+    log_action("Settings", "pdf_archive_dir", 0, d)
+    return jsonify(ok=True, moved=moved)
+
+
+# ---------------- v91: إرسال تحاليل لمختبر آخر (اسم مختبر حر + تحاليل + المجموع + سعر الناقص) ----------------
+@app.route("/patient-card/<int:visit_id>/forward-ui")
+@login_required
+def pc_forward_ui(visit_id):
+    db = get_db()
+    _ensure_partner_labs(db)
+    tests = [dict(r) for r in db.execute(
+        "SELECT ot.id AS ot_id, ot.test_definition_id AS td, td.name, td.code, COALESCE(ot.forwarded_lab_name,'') AS lab, "
+        "COALESCE(ot.forwarded_cost,0) AS cost FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+        "JOIN test_definitions td ON td.id=ot.test_definition_id WHERE o.visit_id=? ORDER BY ot.id", (visit_id,)).fetchall()]
+    labs = [dict(r) for r in db.execute("SELECT id, name FROM partner_labs ORDER BY name").fetchall()]
+    prices = {}
+    for r in db.execute("SELECT pl.name AS lab, pp.test_definition_id AS td, pp.cost FROM partner_lab_prices pp JOIN partner_labs pl ON pl.id=pp.lab_id").fetchall():
+        prices.setdefault(r["lab"], {})[str(r["td"])] = r["cost"]
+    data = json.dumps({"vid": visit_id, "tests": tests, "labs": [l["name"] for l in labs], "prices": prices}, ensure_ascii=False).replace("</", "<\\/")
+    return _V91_FWD_HTML.replace("__DATA__", data)
+
+
+@app.route("/api/patient-card/<int:visit_id>/forward-save", methods=["POST"])
+@login_required
+def api_pc_forward_save(visit_id):
+    db = get_db()
+    _ensure_partner_labs(db)
+    p = request.get_json(silent=True) or {}
+    lab = (p.get("lab") or "").strip()
+    items = p.get("items") or []
+    if not lab:
+        return jsonify(ok=False, error="اكتب اسم المختبر"), 400
+    if not items:
+        return jsonify(ok=False, error="أضف تحليلًا واحدًا على الأقل"), 400
+    row = db.execute("SELECT id FROM partner_labs WHERE name=?", (lab,)).fetchone()
+    if row:
+        lab_id = row["id"]
+    else:
+        db.execute("INSERT INTO partner_labs (name) VALUES (?)", (lab,))
+        lab_id = db.execute("SELECT id FROM partner_labs WHERE name=?", (lab,)).fetchone()["id"]
+    total, n = 0.0, 0
+    for it in items:
+        try:
+            oid = int(it.get("ot_id"))
+            cost = float(str(it.get("cost") or 0).replace(",", ""))
+        except (TypeError, ValueError):
+            continue
+        ot = db.execute("SELECT ot.id, ot.test_definition_id FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE ot.id=? AND o.visit_id=?",
+                        (oid, visit_id)).fetchone()
+        if not ot:
+            continue
+        if cost > 0:   # نحفظ السعر بصفحة «التحاليل المرسلة لمختبرات أخرى» حتى ما يُسأل عنه مرة ثانية
+            db.execute("INSERT INTO partner_lab_prices (lab_id, test_definition_id, cost) VALUES (?,?,?) "
+                       "ON CONFLICT(lab_id, test_definition_id) DO UPDATE SET cost=excluded.cost", (lab_id, ot["test_definition_id"], cost))
+        db.execute("UPDATE order_tests SET forwarded_lab_name=?, forwarded_cost=? WHERE id=?", (lab, cost, oid))
+        total += cost
+        n += 1
+    db.commit()
+    log_action("ForwardTest", "visit", visit_id, "lab=%s n=%d total=%s" % (lab, n, total))
+    return jsonify(ok=True, n=n, total=total)
+
+
+_V91_FWD_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>إرسال تحاليل لمختبر آخر</title>
+<style>body{font:14px Tahoma,Arial,sans-serif;background:#EEF3F8;margin:0;padding:16px;color:#1E293B}
+.c{background:#fff;border-radius:12px;padding:16px 18px;max-width:760px;margin:0 auto;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+h2{margin:0 0 12px;color:#205072}.row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+input{padding:9px 10px;border:1px solid #94A3B8;border-radius:8px;font:inherit}
+.l{flex:1;min-width:200px}table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#205072;color:#fff;padding:7px;text-align:right}
+td{border-bottom:1px solid #E2E8F0;padding:6px 8px}.warn{color:#B91C1C;font-size:12px}.ok{color:#15803D}
+button{background:#205072;color:#fff;border:0;border-radius:8px;padding:9px 18px;font:700 14px Tahoma;cursor:pointer}
+.x{background:#B91C1C;padding:3px 9px}.tot{font-size:17px;font-weight:700;margin:12px 0;color:#205072}</style></head><body>
+<div class="c"><h2>📤 إرسال تحاليل لمختبر آخر</h2>
+<div class="row"><input id="lab" class="l" list="labs" placeholder="اسم المختبر (اختر أو اكتب اسمًا جديدًا)" autocomplete="off">
+<input id="tst" class="l" list="tl" placeholder="اكتب اسم/رمز التحليل ثم Enter" autocomplete="off"></div>
+<datalist id="labs"></datalist><datalist id="tl"></datalist>
+<table><thead><tr><th>التحليل</th><th style="width:230px">الكلفة عند المختبر</th><th style="width:40px"></th></tr></thead><tbody id="rows"></tbody></table>
+<div class="tot">المجموع: <span id="tot">0</span></div><div id="msg" class="warn"></div>
+<div style="display:flex;gap:8px"><button onclick="save()">💾 حفظ الإرسال</button><button style="background:#64748B" onclick="window.close();parent.postMessage({lisCard:'close'},'*')">إغلاق</button></div></div>
+<script>
+var D=__DATA__, sel=[], $=function(i){return document.getElementById(i);};
+D.labs.forEach(function(n){var o=document.createElement('option');o.value=n;$('labs').appendChild(o);});
+D.tests.forEach(function(t){var o=document.createElement('option');o.value=t.name;o.label=t.code;$('tl').appendChild(o);});
+D.tests.forEach(function(t){if(t.lab){ if(!$('lab').value)$('lab').value=t.lab; sel.push({t:t,cost:t.cost||''}); }});
+function known(t){var p=D.prices[$('lab').value.trim()]; return p&&p[String(t.td)]!==undefined?p[String(t.td)]:null;}
+function find(q){q=q.trim().toLowerCase();return D.tests.filter(function(t){return t.name.toLowerCase()===q||(t.code||'').toLowerCase()===q;})[0];}
+function add(){var t=find($('tst').value); if(!t){ if($('tst').value.trim()) $('msg').textContent='هذا التحليل غير مطلوب بهذه الزيارة — أضفه للزيارة أولًا.'; return;}
+ $('msg').textContent=''; if(!sel.some(function(s){return s.t.ot_id===t.ot_id;})){var k=known(t); sel.push({t:t,cost:k!==null?k:''});} $('tst').value=''; draw();}
+function draw(){var h='';sel.forEach(function(s,i){var k=known(s.t); var miss=(k===null);
+ h+='<tr><td>'+s.t.name+'</td><td><input type="number" min="0" step="any" value="'+(s.cost===''?'':s.cost)+'" oninput="sel['+i+'].cost=this.value;tot()" style="width:110px"> '+
+ (miss&&(s.cost===''||+s.cost===0)?'<span class="warn">⚠ اذكر سعره — لم يُضف بصفحة التحاليل المرسلة لمختبر آخر</span>':'')+'</td><td><button class="x" onclick="sel.splice('+i+',1);draw()">×</button></td></tr>';});
+ $('rows').innerHTML=h||'<tr><td colspan=3 style="color:#64748B;text-align:center">لم تُضف تحاليل بعد</td></tr>'; tot();}
+function tot(){var s=0;sel.forEach(function(x){s+=parseFloat(x.cost)||0;});$('tot').textContent=s.toLocaleString();}
+$('tst').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();add();}});
+$('tst').addEventListener('change',add);
+$('lab').addEventListener('change',function(){sel.forEach(function(s){var k=known(s.t);if(k!==null&&(s.cost===''||+s.cost===0))s.cost=k;});draw();});
+function save(){var lab=$('lab').value.trim(); if(!lab){$('msg').textContent='اكتب اسم المختبر';return;} if(!sel.length){$('msg').textContent='أضف تحليلًا واحدًا على الأقل';return;}
+ fetch('/api/patient-card/'+D.vid+'/forward-save',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+ body:JSON.stringify({lab:lab,items:sel.map(function(s){return {ot_id:s.t.ot_id,cost:s.cost};})})}).then(function(r){return r.json();}).then(function(d){
+  if(d.ok){$('msg').className='ok';$('msg').textContent='✅ تم الحفظ ('+d.n+' تحليل — المجموع '+d.total+')';setTimeout(function(){try{parent.postMessage({lisCard:'close'},'*');}catch(e){}if(window.opener)window.close();else location.reload();},900);}
+  else $('msg').textContent=d.error||'فشل';}).catch(function(){$('msg').textContent='تعذّر الاتصال';});}
+draw();
+</script></body></html>"""
+
+
+_V91_CARD_BTN = ("<script>(function(){var m=location.pathname.match(/^\\/patient-card\\/(\\d+)$/);if(!m||document.getElementById('lisFwdBtn'))return;"
+                 "var b=document.createElement('a');b.id='lisFwdBtn';b.href='#';b.textContent='📤 إرسال تحاليل لمختبر آخر';"
+                 "b.style.cssText='position:fixed;bottom:14px;left:14px;z-index:9999;background:#205072;color:#fff;padding:10px 16px;border-radius:10px;font:700 13px Tahoma;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.3)';"
+                 "b.onclick=function(e){e.preventDefault();window.open('/patient-card/'+m[1]+'/forward-ui','lisFwd','width=820,height=640,resizable=yes,scrollbars=yes');};"
+                 "document.body.appendChild(b);})();</script>")
+
+_V91_DESIGNER_JS = ("<script>(function(){function f(){document.querySelectorAll('input[type=password]').forEach(function(i){i.setAttribute('autocomplete','new-password');});"
+                    "document.querySelectorAll('form').forEach(function(x){x.setAttribute('autocomplete','off');});}f();setTimeout(f,800);})();</script>")
+
+
+@app.after_request
+def _v91_inject(resp):
+    try:
+        if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        pth = request.path or ""
+        add = ""
+        if pth.startswith("/patient-card/") and pth.count("/") == 2:
+            add = _V91_CARD_BTN
+        elif pth.startswith("/designer"):
+            add = _V91_DESIGNER_JS
+        elif pth == "/front-desk/new-visit" and request.method == "GET":
+            add = _V91_NV_JS
+        if add:
+            data = resp.get_data()
+            if b"</body>" in data and (b"lisFwdBtn" not in data or add != _V91_CARD_BTN) and b"lis-v91-fwd" not in data:
+                resp.set_data(data.replace(b"</body>", add.encode("utf-8") + b"</body>", 1))
+    except Exception:
+        pass
+    return resp
+
+
+# ---------------- v91b: «إرسال التحاليل إلى مختبر آخر» بصفحة زيارة جديدة: اسم مختبر حر + تحاليل + مجموع + سعر الناقص ----------------
+_v91_orig_apply_partner_forward = _apply_partner_forward
+
+
+def _apply_partner_forward(db, order_id, lab_id_raw):
+    n = _v91_orig_apply_partner_forward(db, order_id, lab_id_raw)
+    try:
+        lab = (request.form.get("fwd2_lab") or "").strip()
+        items = json.loads(request.form.get("fwd2_tests") or "[]")
+        if lab and items:
+            _ensure_partner_labs(db)
+            row = db.execute("SELECT id FROM partner_labs WHERE name=?", (lab,)).fetchone()
+            if not row:
+                db.execute("INSERT INTO partner_labs (name) VALUES (?)", (lab,))
+                row = db.execute("SELECT id FROM partner_labs WHERE name=?", (lab,)).fetchone()
+            for it in items:
+                try:
+                    td = int(it.get("td"))
+                    cost = float(str(it.get("cost") or 0).replace(",", ""))
+                except (TypeError, ValueError):
+                    continue
+                if cost > 0:
+                    db.execute("INSERT INTO partner_lab_prices (lab_id, test_definition_id, cost) VALUES (?,?,?) "
+                               "ON CONFLICT(lab_id, test_definition_id) DO UPDATE SET cost=excluded.cost", (row["id"], td, cost))
+                else:
+                    pr = db.execute("SELECT cost FROM partner_lab_prices WHERE lab_id=? AND test_definition_id=?", (row["id"], td)).fetchone()
+                    cost = float(pr["cost"] or 0) if pr else 0.0
+                db.execute("UPDATE order_tests SET forwarded_lab_name=?, forwarded_cost=? WHERE order_id=? AND test_definition_id=?",
+                           (lab, cost, order_id, td))
+    except Exception:
+        _v74_log_exc("v91 new-visit forward failed")
+    return n
+
+
+@app.route("/api/v91/forward-catalog")
+@login_required
+def api_v91_forward_catalog():
+    db = get_db()
+    _ensure_partner_labs(db)
+    tests = [dict(r) for r in db.execute("SELECT id, code, name FROM test_definitions WHERE is_active=1 ORDER BY name").fetchall()]
+    prices = {}
+    for r in db.execute("SELECT pl.name AS lab, pp.test_definition_id AS td, pp.cost FROM partner_lab_prices pp JOIN partner_labs pl ON pl.id=pp.lab_id").fetchall():
+        prices.setdefault(r["lab"], {})[str(r["td"])] = r["cost"]
+    return jsonify(tests=tests, prices=prices, labs=[r["name"] for r in db.execute("SELECT name FROM partner_labs ORDER BY name").fetchall()])
+
+
+_V91_NV_JS = r"""<script id="lis-v91-fwd">(function(){
+var sel=document.querySelector('select[name="forward_lab_id"]'); if(!sel||document.getElementById('v91Lab'))return;
+var form=sel.form||document.querySelector('form'); var box=sel.parentNode; var D={tests:[],prices:{},labs:[]}, rows=[];
+sel.style.display='none'; var lb=box.querySelector('label'); if(lb) lb.style.display='none';
+var w=document.createElement('div'); w.style.cssText='display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-top:4px';
+w.innerHTML='<div style="flex:1;min-width:230px"><input id="v91Lab" list="v91Labs" autocomplete="off" placeholder="اسم المختبر (اختر أو اكتب اسمًا جديدًا)" style="width:100%;padding:9px 10px;border:1px solid #94A3B8;border-radius:8px">'+
+'<datalist id="v91Labs"></datalist></div><div style="flex:1;min-width:230px"><input id="v91Tst" list="v91Tl" autocomplete="off" placeholder="التحليل — اكتب الاسم/الرمز ثم Enter" style="width:100%;padding:9px 10px;border:1px solid #94A3B8;border-radius:8px">'+
+'<datalist id="v91Tl"></datalist></div><div id="v91Rows" style="flex-basis:100%"></div><div id="v91Tot" style="flex-basis:100%;font-weight:700;color:#205072"></div>';
+box.appendChild(w);
+var h1=document.createElement('input');h1.type='hidden';h1.name='fwd2_lab';var h2=document.createElement('input');h2.type='hidden';h2.name='fwd2_tests';box.appendChild(h1);box.appendChild(h2);
+function $(i){return document.getElementById(i);}
+function known(t){var p=D.prices[$('v91Lab').value.trim()];return p&&p[String(t.id)]!==undefined?p[String(t.id)]:null;}
+function sync(){h1.value=$('v91Lab').value.trim();h2.value=JSON.stringify(rows.map(function(r){return {td:r.t.id,cost:r.cost};}));sel.value='';}
+function tot(){var s=0;rows.forEach(function(r){s+=parseFloat(r.cost)||0;});$('v91Tot').textContent=rows.length?('المجموع: '+s.toLocaleString()):'';sync();}
+function draw(){var c=$('v91Rows');c.innerHTML='';rows.forEach(function(r,i){var d=document.createElement('div');d.style.cssText='display:flex;gap:8px;align-items:center;margin:4px 0;flex-wrap:wrap';
+ var n=document.createElement('b');n.textContent=r.t.name;n.style.minWidth='140px';var inp=document.createElement('input');inp.type='number';inp.min='0';inp.step='any';inp.placeholder='الكلفة';inp.value=r.cost;inp.style.cssText='width:110px;padding:6px 8px;border:1px solid #94A3B8;border-radius:8px';
+ var wn=document.createElement('span');wn.style.cssText='color:#B91C1C;font-size:12px';
+ function chk(){wn.textContent=(known(r.t)===null&&!(parseFloat(r.cost)>0))?'⚠ اذكر سعر هذا التحليل — لم يُضف بصفحة «التحاليل المرسلة لمختبرات أخرى»':'';}
+ inp.oninput=function(){r.cost=this.value;chk();tot();};chk();var x=document.createElement('button');x.type='button';x.textContent='×';x.style.cssText='background:#B91C1C;color:#fff;border:0;border-radius:6px;padding:2px 9px;cursor:pointer';x.onclick=function(){rows.splice(i,1);draw();};
+ d.appendChild(n);d.appendChild(inp);d.appendChild(wn);d.appendChild(x);c.appendChild(d);});tot();}
+function add(){var q=$('v91Tst').value.trim().toLowerCase();if(!q)return;var t=D.tests.filter(function(x){return x.name.toLowerCase()===q||(x.code||'').toLowerCase()===q;})[0];if(!t)return;
+ if(!rows.some(function(r){return r.t.id===t.id;})){var k=known(t);rows.push({t:t,cost:k!==null?k:''});}$('v91Tst').value='';draw();}
+$('v91Tst').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();add();}});$('v91Tst').addEventListener('change',add);
+$('v91Lab').addEventListener('input',function(){rows.forEach(function(r){var k=known(r.t);if(k!==null&&!(parseFloat(r.cost)>0))r.cost=k;});draw();});
+if(form)form.addEventListener('submit',sync,true);
+fetch('/api/v91/forward-catalog',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){D=d;
+ d.labs.forEach(function(n){var o=document.createElement('option');o.value=n;$('v91Labs').appendChild(o);});
+ d.tests.forEach(function(t){var o=document.createElement('option');o.value=t.name;o.label=t.code;$('v91Tl').appendChild(o);});}).catch(function(){});
+})();</script>"""
 
 if __name__ == "__main__":
     init_db()

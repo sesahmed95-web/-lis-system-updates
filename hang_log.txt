@@ -185,3 +185,5 @@
 [2026-10-22T12:31:14] SLOW 5.7s POST /reports/archive/43/open-external? (pdf_archive_open_external)
 [2026-10-22T12:31:30] SLOW 2.5s POST /reports/archive/39/open-external? (pdf_archive_open_external)
 [2026-10-22T12:31:43] SLOW 2.4s POST /reports/archive/43/open-external? (pdf_archive_open_external)
+[2026-10-22T12:38:28] SLOW 2.7s POST /designer/update/check-now? (designer_update_check_now)
+[2026-10-22T12:38:37] SLOW 2.7s POST /reports/archive/43/open-external? (pdf_archive_open_external)
