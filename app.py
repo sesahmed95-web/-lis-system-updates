@@ -16445,6 +16445,34 @@ fetch('/api/v91/forward-catalog',{credentials:'same-origin'}).then(function(r){r
  d.tests.forEach(function(t){var o=document.createElement('option');o.value=t.name;o.label=t.code;$('v91Tl').appendChild(o);});}).catch(function(){});
 })();</script>"""
 
+
+# ---------------- v93: ترويسة الدكاترة: ما ينزل سطر الشهادة — يتصغّر الخط تلقائيًا (لكل الدكاترة بنفس النسبة) حتى يتسع كل سطر ----------------
+_V93_DOCFIT = r"""<script id="lis-docfit">(function(){
+function fit(){var cols=[].slice.call(document.querySelectorAll('.doctors-group .doc-col, .lh .lh-doc'));if(!cols.length)return;
+ if(!document.getElementById('lisDocFitCss')){var st=document.createElement('style');st.id='lisDocFitCss';
+  st.textContent='.doctors-group{grid-template-columns:repeat(3,minmax(0,1fr))!important}.doc-col .doc-name,.doc-col .doc-degree,.doc-col .doc-eng,.doc-col .doc-title,.lh-doc .doc-name,.lh-doc .doc-degree,.lh-doc .doc-eng,.lh-doc .doc-title{white-space:nowrap}';
+  document.head.appendChild(st);}
+ var ratio=1;cols.forEach(function(c){var w=c.clientWidth;if(!w)return;var tw=0;[].slice.call(c.children).forEach(function(d){var r=document.createRange();r.selectNodeContents(d);
+  [].slice.call(d.childNodes).length;var b=r.getBoundingClientRect();tw=Math.max(tw,b.width);});
+  if(tw>w)ratio=Math.min(ratio,(w/tw)*0.98);});
+ if(ratio<1){ratio=Math.max(ratio,0.68);cols.forEach(function(c){if(c.dataset.lisFit)return;c.dataset.lisFit=1;c.style.fontSize=(parseFloat(getComputedStyle(c).fontSize)*ratio).toFixed(2)+'px';});}}
+if(document.readyState==='complete')fit();else window.addEventListener('load',fit);
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){setTimeout(fit,50);});
+})();</script>"""
+
+
+@app.after_request
+def _v93_docfit(resp):
+    try:
+        if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        data = resp.get_data()
+        if (b'class="doctors-row"' in data or b'class="lh ' in data) and b"lis-docfit" not in data and b"</body>" in data:
+            resp.set_data(data.replace(b"</body>", _V93_DOCFIT.encode("utf-8") + b"</body>", 1))
+    except Exception:
+        pass
+    return resp
+
 if __name__ == "__main__":
     init_db()
     write_pending_preset_logo(UPLOAD_DIR)   # شعار العميل القادم من portal_preset.json (إن وُجد)
