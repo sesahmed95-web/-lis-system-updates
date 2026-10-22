@@ -63,7 +63,8 @@
         <td>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
             <a class="btn small secondary" href="{{ url_for('visit_edit', visit_id=v['id']) }}" title="تعديل الزيارة">✏️</a>
-            <a class="btn small secondary" href="{{ url_for('print_visit_barcode', visit_id=v['id']) }}" title="طباعة ملصق باركود الزيارة">🏷️</a>
+            <a class="btn small secondary" href="{{ url_for('print_visit_portal_qr', visit_id=v['id']) }}" title="طباعة QR نتائج المريض (يفتح النتائج بالموبايل)">📱 QR</a>
+            <a class="btn small secondary" href="{{ url_for('print_visit_barcode', visit_id=v['id']) }}" title="ملصق باركود الزيارة (للقناني)">🏷️</a>
             <a class="btn small secondary" href="{{ url_for('print_sample_barcodes', visit_id=v['id']) }}" title="طباعة ملصقات باركود العينات">🧪🏷️</a>
             <a class="btn small secondary" href="{{ url_for('print_invoice', visit_id=v['id']) }}" title="طباعة الفاتورة">🧾</a>
             <button class="btn small danger" type="button" title="حذف الزيارة" data-n="{{ v['full_name']|e }} #{{ v['registration_number'] }}"

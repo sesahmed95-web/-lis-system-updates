@@ -73,11 +73,20 @@
   var OPEN = "{{ url_for('pdf_archive_open', visit_id=0) }}".replace(/0\/open$/, '');
   var _del = 0, _cur = 0;
   function arDownload(url){ var a=document.createElement('a'); a.href=url; a.download=''; document.body.appendChild(a); a.click(); a.remove(); }
-  function arExt(id, fallback, onFail){   // يفتح PDF ببرنامج الـPDF المنصّب بالحاسبة؛ لو ماكو (جهاز ثاني/فشل) يرجع للبديل بدون ما يترك صفحة البرنامج
+  function arToast(msg, bad){ var d=document.getElementById('arToast'); if(!d){ d=document.createElement('div'); d.id='arToast';
+      d.style.cssText='position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:100002;padding:10px 18px;border-radius:10px;color:#fff;font:700 14px Tahoma;box-shadow:0 6px 20px rgba(0,0,0,.3)'; document.body.appendChild(d); }
+    d.style.background = bad ? '#B91C1C' : '#14233a'; d.textContent = msg; d.style.display='block'; clearTimeout(d._t); d._t=setTimeout(function(){ d.style.display='none'; }, bad ? 9000 : 2500); }
+  function arExt(id, fallback, onFail){   // يفتح PDF ببرنامج الـPDF المنصّب بالحاسبة؛ لو ماكو (جهاز ثاني) يرجع للبديل بدون ما يترك صفحة البرنامج
     if(!id) return false;
-    fetch(OPEN + id + '/open-external', {method:'POST'}).then(function(r){return r.json();}).then(function(d){
-      if(!d.ok){ if(onFail) onFail(); else arDownload(fallback); }
-    }).catch(function(){ if(onFail) onFail(); else arDownload(fallback); });
+    arToast('⏳ جاري فتح الملف...');
+    fetch(OPEN + id + '/open-external', {method:'POST', credentials:'same-origin'}).then(function(r){
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function(d){
+      if(d.ok) return;
+      if(d.remote){ if(onFail) onFail(); else arDownload(fallback); return; }   // جهاز ثاني: بديل داخلي
+      arToast('⚠️ ' + (d.error || 'تعذّر فتح الملف'), true);                        // خطأ حقيقي: نعرضه بدل الفشل الصامت
+    }).catch(function(e){ arToast('⚠️ تعذّر الاتصال بالبرنامج: ' + e.message, true); });
     return false;
   }
   function arOpen(id, name){   // «عرض»: يفتح ببرنامج الـPDF مباشرة؛ نافذة العرض الداخلية فقط كاحتياط للأجهزة الثانية

@@ -163,7 +163,8 @@ td input{padding:3px 5px}
       <a class="b full" onclick="op('{{ url_for('print_sample_barcodes', visit_id=v['id']) }}?autoprint=1');return false" href="#">🧪 كل الأنابيب</a>
       {% for g in tube_groups %}<a class="b s" onclick="op('{{ url_for('print_sample_barcodes', visit_id=v['id']) }}?autoprint=1&ots={{ g.ids }}&req=0');return false" href="#">🧪 {{ g.label }} ({{ g.n }})</a>{% endfor %}
       <a class="b s" onclick="op('{{ url_for('print_request_label', visit_id=v['id']) }}?autoprint=1');return false" href="#">🏷 باركود الطلب</a>
-      <a class="b s" onclick="op('{{ url_for('print_visit_barcode', visit_id=v['id']) }}');return false" href="#">🔖 باركود الزيارة</a>
+      <a class="b s" onclick="op('{{ url_for('print_visit_barcode', visit_id=v['id']) }}');return false" href="#">🔖 باركود الزيارة (للقناني)</a>
+      <a class="b s" onclick="op('{{ url_for('print_visit_portal_qr', visit_id=v['id']) }}');return false" href="#">📱 QR نتائج المريض</a>
       <a class="b s" id="fwdLbl" style="{{ '' if fwd_ids else 'display:none' }}" onclick="op('{{ url_for('labels_outside_print', visit_id=v['id']) }}?ots='+fwdIds());return false" href="#">📤 ملصق المرسَل لمختبر آخر</a>
       <a class="b s" onclick="op('{{ url_for('labels_center', visit_id=v['id']) }}');return false" href="#">⚙ كل خيارات الباركود</a>
     </div>
