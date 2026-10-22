@@ -50,7 +50,7 @@
     border-bottom: 2px solid #333;
     padding-bottom: 8px;
     margin-bottom: 10px;
-    gap: 8px;
+    gap: 4px;
   }
   /* شبكة الدكاترة: عمود ثابت بـ 3 خانات دائمًا — إذا زاد عددهم عن 3
      (كيميائي، بايولوجي، إلخ)، ينتقل الرابع تلقائيًا لصف جديد تحت (3
@@ -58,8 +58,8 @@
   .doctors-group {
     flex: 1;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px 6px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 2px;
     align-items: start;
   }
   .doc-col {
@@ -75,6 +75,10 @@
   .doc-col .doc-name { color: #1F3B7A; font-weight: bold; font-size: 1em; }
   .doc-col .doc-degree { color: #1F3B7A; }
   .doc-col .doc-eng { color: #1F3B7A; font-style: italic; }
+  /* v90: سطور الشهادة ما تنكسر لسطر ثاني أبداً (حتى ما ينزل «التشخيصي» ويزيح الشهادة
+     الإنكليزية للأسفل) — الخط يبقى بحجمه (14 أو الخاص بالدكتور) والشعار بحجمه. لو سطر
+     أعرض من عمود الدكتور ينضغط أفقياً بأقل قدر بسكربت fitDoctorLines تحت. */
+  .doc-col .doc-degree, .doc-col .doc-eng { white-space: nowrap; display: table; margin: 0 auto; transform-origin: 0 0; }
 
   /* اتجاه فيزيائي ثابت بالعمودين مهما كانت لغة الواجهة (dir الصفحة يتغيّر
      تبع lang بالـ html tag من base.html): الجهة اليمنى دايماً الدكتور
@@ -703,6 +707,29 @@
     window.addEventListener('load', fitAddressLine);
     window.addEventListener('beforeprint', fitAddressLine);
     window.addEventListener('resize', fitAddressLine);
+  })();
+</script>
+<script>
+  // v90: يضمن سطر واحد لكل سطر شهادة بترويسة الدكاترة بدون تصغير الخط: لو أعرض من
+  // عمود الدكتور يضغطه أفقياً (scaleX) بأقل قدر ويبقيه بالوسط.
+  (function () {
+    function fitDoctorLines() {
+      document.querySelectorAll('.doctors-group .doc-col').forEach(function (col) {
+        var cw = col.clientWidth;
+        col.querySelectorAll('.doc-degree, .doc-eng').forEach(function (el) {
+          el.style.transform = 'none';
+          var w = el.offsetWidth;
+          if (cw > 0 && w > cw) {
+            var sc = cw / w;
+            el.style.transform = 'translateX(' + ((cw - w * sc) / 2) + 'px) scaleX(' + sc + ')';
+          }
+        });
+      });
+    }
+    window.addEventListener('load', fitDoctorLines);
+    window.addEventListener('beforeprint', fitDoctorLines);
+    window.addEventListener('resize', fitDoctorLines);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitDoctorLines);
   })();
 </script>
 <script>

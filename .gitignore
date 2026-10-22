@@ -46,3 +46,10 @@ static/whatsapp_pdfs/*
 portal_preset.json
 portal_preset.applied.json
 client_presets/
+hang_log.txt
+hang_log.txt
+error_log.txt
+crash_log.txt
+PDF_Archive/
+*.db
+.lis_session_key
