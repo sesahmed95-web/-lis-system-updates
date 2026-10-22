@@ -39,9 +39,9 @@
         <td>{{ row['doctor_name'] or row['center_name'] or '—' }}</td>
         <td dir="ltr" style="text-align:right">{{ (row['visit_at'] or row['updated_at'] or '')[:16].replace('T',' ') }}</td>
         <td class="act">
-          <button type="button" class="ar-b v" onclick="arOpen({{ row['visit_id'] }}, {{ row['full_name']|tojson }})">📄 عرض</button>
+          <button type="button" class="ar-b v" data-n="{{ row['full_name']|e }}" onclick="arOpen({{ row['visit_id'] }}, this.dataset.n)">📄 عرض</button>
           <a class="ar-b d" href="{{ url_for('pdf_archive_open', visit_id=row['visit_id']) }}?download=1" onclick="return arExt({{ row['visit_id'] }}, this.href);">⬇ تحميل PDF</a>
-          <button type="button" class="ar-b x" onclick="arDel({{ row['visit_id'] }}, {{ row['full_name']|tojson }})">🗑 حذف</button>
+          <button type="button" class="ar-b x" data-n="{{ row['full_name']|e }}" onclick="arDel({{ row['visit_id'] }}, this.dataset.n)">🗑 حذف</button>
         </td>
       </tr>
       {% endfor %}
