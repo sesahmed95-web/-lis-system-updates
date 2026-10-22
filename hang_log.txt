@@ -180,3 +180,4 @@
 [2026-10-21T14:04:55] SLOW 2.3s POST /reports/archive/43/open-external? (pdf_archive_open_external)
 [2026-10-21T14:04:57] SLOW 2.3s GET /reports/archive/43/open?download=1 (pdf_archive_open)
 [2026-10-21T14:05:00] SLOW 2.6s GET /reports/pdf/visit/43? (report_pdf_visit)
+[2026-10-22T11:16:49] SLOW 2.4s POST /designer/update/check-now? (designer_update_check_now)
