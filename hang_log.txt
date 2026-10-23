@@ -286,3 +286,4 @@
 [2026-10-22T13:33:00] SLOW 3.6s GET /reports/pdf/test/146? (report_pdf_test)
 [2026-10-22T13:33:24] SLOW 2.4s GET /reports/pdf/test/147? (report_pdf_test)
 [2026-10-22T13:35:58] SLOW 3.3s GET /reports/pdf/test/149? (report_pdf_test)
+[2026-10-22T13:55:15] SLOW 3.3s GET /reports/pdf/test/146? (report_pdf_test)

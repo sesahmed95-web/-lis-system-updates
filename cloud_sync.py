@@ -88,7 +88,9 @@ def get_cfg(db):
         _host = ""
     # v88: بوابات Cloudflare Workers/Pages تعمل مثل Render تمامًا (ترفع البيانات لها عبر /api/push بمفتاح سري).
     # بدون هذا كان الوضع الافتراضي «محلي» يحفظ النتائج بجهاز المختبر فقط، والـQR (رابط workers.dev) يعطي «لم يُعثر على هذا الرابط».
-    if cfg["mode"] == "local" and _host.endswith(_REMOTE_PORTAL_HOSTS) and cfg["api_key"]:
+    # v92: رابط Render/Workers لا يمكن أن يكون «محلي» أبدًا — حتى لو المفتاح غير محفوظ. نحوّله remote
+    # فيظهر التشخيص الصحيح («المفتاح السري فاضي») بدل التظاهر بالوضع المحلي.
+    if cfg["mode"] == "local" and _host.endswith(_REMOTE_PORTAL_HOSTS):
         cfg["mode"] = "remote"
         cfg["mode_auto"] = True
     return cfg
@@ -583,6 +585,9 @@ def diagnose(db, visit_id, net=False):
     if url and cfg.get("mode") == "local" and (urllib.parse.urlparse(url).hostname or "").lower().endswith(_REMOTE_PORTAL_HOSTS):
         out.append(("bad", "السبب الجذري: الوضع «محلي» لكن الرابط عنوان Render/Cloudflare Workers بدون مفتاح سري. نتائجك محفوظة بجهازك (9091) وRender ما يعرفها → يظهر «لم يُعثر على هذا الرابط». "
                            "الحل: ضع رابط نفق عام لجهازك (Tailscale Funnel/Cloudflare) بدل رابط Render، أو اختر وضع Render وأدخل المفتاح السري."))
+    if url and not cfg["api_key"]:
+        out.append(("bad", "المفتاح السري (API_SECRET_KEY) غير محفوظ بهذا الجهاز → النتائج لا تُدفع للبوابة أبدًا، لذلك الموبايل يعطي «لم يُعثر على هذا الرابط». "
+                           "الإعدادات ← بوابة النتائج ← الصق المفتاح ← احفظ، ثم «اختبار الاتصال»."))
     if cfg.get("mode_auto"):
         out.append(("warn", "الرابط بوابة سحابية (Render/Workers) ومعه مفتاح سري، فالبرنامج يتعامل معه كبوابة سحابية تلقائيًا (وليس وضع محلي)."))
     if cfg.get("mode") == "local":

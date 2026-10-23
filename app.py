@@ -15049,6 +15049,27 @@ def api_portal_sync(visit_id):
     return {"ok": ok, "message": msg}, (200 if ok else 502)
 
 
+
+@app.route("/admin/doctor", methods=["GET", "POST"])
+@login_required
+@roles_required("admin")
+def admin_doctor():
+    """فحص/إصلاح باراميترات CBC وBF وإعدادات بوابة QR (للمدير فقط)."""
+    import database as _dbm
+    from markupsafe import escape as _esc
+    db = get_db()
+    msg = ""
+    if request.method == "POST":
+        db.execute("DELETE FROM settings WHERE key='repair_cbc_bf_v92_done'")
+        db.commit()
+        _dbm.repair_cbc_bf_parameters_once(db)
+        msg = "<p style='color:#047857;font-weight:700'>تم تنفيذ الإصلاح (نسخة احتياطية: lis.db.before_v92). حدّث الصفحة.</p>"
+    rep = _dbm.lis_doctor_report(db)
+    return ("<!doctype html><meta charset='utf-8'><body dir='rtl' style='font-family:Segoe UI,Tahoma;max-width:900px;margin:20px auto'>"
+            "<h2>🩺 فحص النظام</h2>" + msg + "<pre style='background:#f1f5f9;padding:12px;white-space:pre-wrap;direction:ltr;text-align:left'>"
+            + str(_esc(rep)) + "</pre><form method='post'><button style='padding:10px 18px;font-size:15px'"
+            " onclick=\"return confirm('يرجّع باراميترات CBC وBF الناقصة ويلغي إخفاءها. تستمر؟')\">🛠 إصلاح باراميترات CBC وBF</button></form></body>")
+
 @app.route("/api/visits/<int:visit_id>/portal-diagnose")
 @login_required
 def api_portal_diagnose(visit_id):

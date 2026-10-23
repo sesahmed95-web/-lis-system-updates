@@ -1728,6 +1728,99 @@ def ensure_interface_accounts(conn):
     conn.commit()
 
 
+def repair_cbc_bf_parameters_once(conn):
+    """v92: إصلاح لمرة وحدة (علم بجدول settings): يرجّع باراميترات CBC وBF الأساسية الناقصة بالاسم (مع الوحدة والمدى)،
+    ويلغي إخفاء/اختيار الباراميترات عن طلبات CBC/BF. لا يحذف ولا يغيّر أي باراميتر موجود. ياخذ نسخة احتياطية أولاً."""
+    FLAG = "repair_cbc_bf_v92_done"
+    try:
+        if conn.execute("SELECT 1 FROM settings WHERE key=?", (FLAG,)).fetchone():
+            return
+        if not conn.execute("SELECT 1 FROM test_definitions WHERE code IN ('CBC','BF')").fetchone():
+            return   # قاعدة فاضية/جديدة: ما شي نصلحه، ونعلّم ما نكرر
+        # 1) نسخة احتياطية
+        try:
+            import shutil
+            bk = sqlite3.connect(DB_PATH + ".before_v92")
+            conn.backup(bk)
+            bk.close()
+        except Exception as _e:
+            print("v92 backup skipped:", _e)
+        # 2) كتالوج مرجعي بذاكرة مؤقتة (نفس seed الأصلي)
+        ref = sqlite3.connect(":memory:")
+        ref.row_factory = sqlite3.Row
+        ref.executescript(SCHEMA)
+        migrate(ref)
+        seed(ref)
+        tp_cols = [r[1] for r in conn.execute("PRAGMA table_info(test_parameters)")]
+        rr_cols = [r[1] for r in conn.execute("PRAGMA table_info(reference_ranges)")]
+        ot_cols = [r[1] for r in conn.execute("PRAGMA table_info(order_tests)")]
+        added = 0
+        for code in ("CBC", "BF"):
+            t = conn.execute("SELECT id FROM test_definitions WHERE code=? ORDER BY id LIMIT 1", (code,)).fetchone()
+            rt = ref.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
+            if not t or not rt:
+                continue
+            sets = [c + "=NULL" for c in ("selected_param_ids", "hidden_param_ids") if c in ot_cols]
+            if sets:
+                conn.execute("UPDATE order_tests SET " + ", ".join(sets) + " WHERE test_definition_id IN "
+                             "(SELECT id FROM test_definitions WHERE code=?)", (code,))
+            have = {(r["name"] or "").strip().lower() for r in
+                    conn.execute("SELECT name FROM test_parameters WHERE test_definition_id=?", (t["id"],))}
+            for p in ref.execute("SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (rt["id"],)).fetchall():
+                if (p["name"] or "").strip().lower() in have:
+                    continue
+                vals = {k: p[k] for k in p.keys() if k in tp_cols and k not in ("id", "test_definition_id")}
+                vals["test_definition_id"] = t["id"]
+                pid = conn.execute("INSERT INTO test_parameters (" + ",".join(vals) + ") VALUES (" + ",".join("?" * len(vals)) + ")",
+                                   tuple(vals.values())).lastrowid
+                for r in ref.execute("SELECT * FROM reference_ranges WHERE test_parameter_id=?", (p["id"],)).fetchall():
+                    rv = {k: r[k] for k in r.keys() if k in rr_cols and k not in ("id", "test_parameter_id")}
+                    rv["test_parameter_id"] = pid
+                    conn.execute("INSERT INTO reference_ranges (" + ",".join(rv) + ") VALUES (" + ",".join("?" * len(rv)) + ")",
+                                 tuple(rv.values()))
+                added += 1
+        ref.close()
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (FLAG, "1:%d" % added))
+        conn.commit()
+        print("v92 repair: restored %d CBC/BF parameters" % added)
+    except Exception as _e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("v92 repair skipped:", type(_e).__name__, _e)
+
+
+def lis_doctor_report(conn):
+    """تقرير فحص (قراءة فقط) لباراميترات CBC/BF وإعدادات بوابة QR — تُعرض بصفحة /admin/doctor."""
+    L = []
+    L.append("== بوابة QR ==")
+    for k in ("portal_enabled", "portal_url", "portal_mode"):
+        r = conn.execute("SELECT value FROM settings WHERE key=?", (k,)).fetchone()
+        L.append("%s = %s" % (k, r["value"] if r else "(غير موجود)"))
+    r = conn.execute("SELECT value FROM settings WHERE key='portal_api_key'").fetchone()
+    L.append("portal_api_key = " + ("محفوظ (%d حرف)" % len(r["value"]) if r and r["value"] else "فاضي  <-- المفتاح السري غير محفوظ"))
+    L.append("portal_preset.json: " + ("موجود (!)" if os.path.exists(os.path.join(_BASE_DIR, "portal_preset.json")) else "غير موجود"))
+    ot_cols = [r[1] for r in conn.execute("PRAGMA table_info(order_tests)")]
+    for code in ("CBC", "BF"):
+        L.append("")
+        L.append("== %s ==" % code)
+        for t in conn.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchall():
+            names = [r["name"] for r in conn.execute("SELECT name FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (t["id"],))]
+            L.append("test_definition_id=%s | عدد الباراميترات=%d" % (t["id"], len(names)))
+            L.append("  " + ", ".join(names))
+            n = conn.execute("SELECT COUNT(*) FROM order_tests WHERE test_definition_id=?", (t["id"],)).fetchone()[0]
+            L.append("  طلبات مرضى: %d" % n)
+            for c in ("selected_param_ids", "hidden_param_ids"):
+                if c in ot_cols:
+                    L.append("  فيها %s: %d" % (c, conn.execute("SELECT COUNT(*) FROM order_tests WHERE test_definition_id=? AND COALESCE(%s,'')<>''" % c, (t["id"],)).fetchone()[0]))
+            L.append("  نتائج يتيمة: %d" % conn.execute("SELECT COUNT(*) FROM results r JOIN order_tests ot ON ot.id=r.order_test_id WHERE ot.test_definition_id=? AND r.test_parameter_id NOT IN (SELECT id FROM test_parameters)", (t["id"],)).fetchone()[0])
+    r = conn.execute("SELECT value FROM settings WHERE key='repair_cbc_bf_v92_done'").fetchone()
+    L.append("")
+    L.append("الإصلاح التلقائي v92: " + (("نُفّذ (%s)" % r["value"]) if r else "لم يُنفّذ"))
+    return "\n".join(L)
+
+
 def init_db():
     fresh = not os.path.exists(DB_PATH)
     conn = get_db()
@@ -1758,6 +1851,7 @@ def init_db():
     ensure_retic_parameters(conn)
     ensure_bm_special_parameters(conn)
     ensure_interface_accounts(conn)
+    repair_cbc_bf_parameters_once(conn)
     ensure_nrbc_parameter(conn)
     ensure_atypical_lymphocytes_parameter(conn)
     ensure_reactive_lymphocytes_parameter(conn)
@@ -1969,7 +2063,11 @@ def apply_client_preset(conn):
                 v = str(value).strip()
                 if key == "portal_url":
                     v = v.rstrip("/")
-                row = conn.execute("SELECT key FROM settings WHERE key=?", (key,)).fetchone()
+                row = conn.execute("SELECT key, value FROM settings WHERE key=?", (key,)).fetchone()
+                if row and key.startswith("portal_") and (row["value"] or "").strip() and key != "portal_url":
+                    continue   # v92: لا نمسح إعداد بوابة العميل المحفوظ حتى لو أُعيد تطبيق الملف
+                if row and not v and (row["value"] or "").strip():
+                    continue   # قيمة فاضية بالملف لا تمسح قيمة موجودة
                 if row:
                     conn.execute("UPDATE settings SET value=? WHERE key=?", (v, key))
                 else:
@@ -2089,7 +2187,10 @@ def apply_client_preset(conn):
                 except Exception as _e:   # خطأ بجزء واحد ما يوقف باقي التجهيز
                     print("preset", _key, "skipped:", type(_e).__name__, _e)
         conn.commit()
-        os.replace(path, os.path.join(_BASE_DIR, "portal_preset.applied.json"))
+        try:
+            os.replace(path, os.path.join(_BASE_DIR, "portal_preset.applied.json"))
+        except OSError:
+            os.remove(path)   # v92: لو ما انعاد تسميته نحذفه حتى لا يُطبَّق كل تشغيل
     except (OSError, ValueError):
         pass   # ملف تالف: نتجاهله ولا نوقف تشغيل البرنامج
 
