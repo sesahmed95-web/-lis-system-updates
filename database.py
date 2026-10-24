@@ -1815,10 +1815,42 @@ def lis_doctor_report(conn):
                 if c in ot_cols:
                     L.append("  فيها %s: %d" % (c, conn.execute("SELECT COUNT(*) FROM order_tests WHERE test_definition_id=? AND COALESCE(%s,'')<>''" % c, (t["id"],)).fetchone()[0]))
             L.append("  نتائج يتيمة: %d" % conn.execute("SELECT COUNT(*) FROM results r JOIN order_tests ot ON ot.id=r.order_test_id WHERE ot.test_definition_id=? AND r.test_parameter_id NOT IN (SELECT id FROM test_parameters)", (t["id"],)).fetchone()[0])
+    # --- PDF بوابة النتائج ---
+    L.append("")
+    L.append("== PDF البوابة ==")
+    r = conn.execute("SELECT value FROM settings WHERE key='portal_pdf_enabled'").fetchone()
+    L.append("portal_pdf_enabled = " + (r["value"] if r else "(افتراضي 1)"))
+    try:
+        import importlib.util as _iu
+        L.append("playwright مثبّت: " + ("نعم" if _iu.find_spec("playwright") else "لا  <-- بدونه ما ينولّد PDF"))
+    except Exception:
+        pass
+    try:
+        for ps in conn.execute("SELECT visit_id, last_status, last_hash, last_pushed_at, last_error FROM portal_state ORDER BY last_pushed_at DESC LIMIT 8").fetchall():
+            has_pdf = (ps["last_hash"] or "").endswith(":pdf")
+            L.append("زيارة %s | حالة=%s | PDF مرسل=%s | آخر دفع=%s | خطأ=%s" % (
+                ps["visit_id"], ps["last_status"], "نعم" if has_pdf else "لا", ps["last_pushed_at"], ps["last_error"] or "-"))
+    except Exception as _e:
+        L.append("portal_state: %s" % _e)
     r = conn.execute("SELECT value FROM settings WHERE key='repair_cbc_bf_v92_done'").fetchone()
     L.append("")
     L.append("الإصلاح التلقائي v92: " + (("نُفّذ (%s)" % r["value"]) if r else "لم يُنفّذ"))
     return "\n".join(L)
+
+
+def enable_abnormal_red_once(conn):
+    """v92: مرة وحدة — تلوين أي نتيجة خارج المدى الطبيعي (أعلى أو أقل) بالأحمر بكل التقارير."""
+    FLAG = "abnormal_red_v92_done"
+    try:
+        if conn.execute("SELECT 1 FROM settings WHERE key=?", (FLAG,)).fetchone():
+            return
+        hi = conn.execute("SELECT value FROM settings WHERE key='flag_color_high'").fetchone()
+        red = (hi["value"] if hi and (hi["value"] or "").strip() else "#D40000")
+        for k, v in (("auto_flag_color_enabled", "1"), ("flag_color_low", red), ("flag_color_high", red), (FLAG, "1")):
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, v))
+        conn.commit()
+    except Exception as _e:
+        print("v92 abnormal-red skipped:", _e)
 
 
 def init_db():
@@ -1852,6 +1884,7 @@ def init_db():
     ensure_bm_special_parameters(conn)
     ensure_interface_accounts(conn)
     repair_cbc_bf_parameters_once(conn)
+    enable_abnormal_red_once(conn)
     ensure_nrbc_parameter(conn)
     ensure_atypical_lymphocytes_parameter(conn)
     ensure_reactive_lymphocytes_parameter(conn)

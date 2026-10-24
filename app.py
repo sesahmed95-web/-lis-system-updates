@@ -767,7 +767,7 @@ app.jinja_env.globals["exam_abnormal_red_enabled"] = lambda: get_setting(get_db(
 # Normal ما تدخل هذا القاموس عمدًا — يعني بدون تلوين، كالسابق.
 def build_flag_color_map(db):
     high = get_setting(db, "flag_color_high", "#D40000")
-    low = get_setting(db, "flag_color_low", "#B58900")
+    low = get_setting(db, "flag_color_low", "#D40000")   # v92: High وLow كلاهما أحمر افتراضيًا
     return {"High": high, "Critical": high, "Low": low}
 
 
@@ -781,7 +781,7 @@ def get_report_flag_settings(db):
     ثابتة بالكود.
     """
     return (
-        get_setting(db, "auto_flag_color_enabled", "0") == "1",
+        get_setting(db, "auto_flag_color_enabled", "1") == "1",   # v92: مفعّل افتراضيًا
         get_setting(db, "show_result_flag", "0") == "1",
         build_flag_color_map(db),
     )
@@ -15059,7 +15059,26 @@ def admin_doctor():
     from markupsafe import escape as _esc
     db = get_db()
     msg = ""
-    if request.method == "POST":
+    if request.method == "POST" and request.form.get("act") == "test_pdf":
+        import traceback as _tb
+        try:
+            _vid = int(request.form.get("visit_id") or 0)
+        except ValueError:
+            _vid = 0
+        _box = {}
+
+        def _run_pdf():
+            try:
+                _b = _portal_make_pdf(_vid)
+                _box["r"] = ("PDF تولّد بنجاح: %d بايت" % len(_b)) if _b else "رجع None (ما في محتوى للتقرير)"
+            except BaseException:
+                _box["r"] = "فشل توليد PDF:\n" + _tb.format_exc()[-1800:]
+        _th = threading.Thread(target=_run_pdf, daemon=True)
+        _th.start()
+        _th.join(120)
+        msg = "<pre style='background:#fff7ed;padding:10px;white-space:pre-wrap;direction:ltr;text-align:left'>" + \
+              str(_esc(_box.get("r", "انتهت المهلة (120ث) — المولّد علّق"))) + "</pre>"
+    elif request.method == "POST":
         db.execute("DELETE FROM settings WHERE key='repair_cbc_bf_v92_done'")
         db.commit()
         _dbm.repair_cbc_bf_parameters_once(db)
@@ -15068,7 +15087,7 @@ def admin_doctor():
     return ("<!doctype html><meta charset='utf-8'><body dir='rtl' style='font-family:Segoe UI,Tahoma;max-width:900px;margin:20px auto'>"
             "<h2>🩺 فحص النظام</h2>" + msg + "<pre style='background:#f1f5f9;padding:12px;white-space:pre-wrap;direction:ltr;text-align:left'>"
             + str(_esc(rep)) + "</pre><form method='post'><button style='padding:10px 18px;font-size:15px'"
-            " onclick=\"return confirm('يرجّع باراميترات CBC وBF الناقصة ويلغي إخفاءها. تستمر؟')\">🛠 إصلاح باراميترات CBC وBF</button></form></body>")
+            " onclick=\"return confirm('يرجّع باراميترات CBC وBF الناقصة ويلغي إخفاءها. تستمر؟')\">🛠 إصلاح باراميترات CBC وBF</button></form><hr><form method='post'><input type='hidden' name='act' value='test_pdf'>رقم الزيارة: <input name='visit_id' size='6' style='padding:6px'> <button style='padding:8px 16px'>🧪 اختبار توليد PDF</button></form></body>")
 
 @app.route("/api/visits/<int:visit_id>/portal-diagnose")
 @login_required
@@ -15987,6 +16006,39 @@ def _v86_live_calc(resp):
         _v74_log_exc("v86 live calc inject failed")
     return resp
 
+
+
+# ---------------------------------------------------------------- v92: ورقة QR — زر رجوع/إغلاق + فتحها بنافذة مستقلة
+_V92_QR_BAR = ("<style>@media print{#lis-qr-bar{display:none!important}}</style>"
+    "<div id='lis-qr-bar' style='position:fixed;top:6px;right:6px;z-index:99999;display:flex;gap:6px;font-family:Segoe UI,Tahoma'>"
+    "<button onclick=\"lisQrBack()\" style='padding:7px 14px;border:1px solid #94a3b8;border-radius:8px;background:#fff;cursor:pointer;font-size:14px'>↩ رجوع</button>"
+    "<button onclick=\"lisQrClose()\" style='padding:7px 14px;border:1px solid #fca5a5;border-radius:8px;background:#fff;color:#b91c1c;cursor:pointer;font-size:14px'>✖ إغلاق</button></div>"
+    "<script id='lis-v92-qr'>function lisQrBack(){if(window.opener){window.close();return;}"
+    "if(history.length>1){history.back();}else{location.href='/front-desk/visits';}}"
+    "function lisQrClose(){if(window.opener){window.close();}else{location.href='/front-desk/visits';}}</script>")
+
+_V92_QR_LINKS_JS = ("<script id='lis-v92-qrlinks'>document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href*=\"/print/portal-qr\"]');"
+    "if(!a)return;e.preventDefault();window.open(a.getAttribute('href'),'lisQR','width=560,height=760,resizable=yes,scrollbars=yes');},true);</script>")
+
+
+@app.after_request
+def _v92_qr_page_helpers(resp):
+    """ورقة QR كانت تُفتح بدون رجوع، وإغلاقها يقفل البرنامج كله. نضيف أزرار رجوع/إغلاق، ونفتح روابط QR بنافذة مستقلة."""
+    try:
+        if request.method != "GET" or resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        data = resp.get_data()
+        if b"</body>" not in data:
+            return resp
+        if request.path.endswith("/print/portal-qr"):
+            if b'id="lis-qr-bar"' in data or b"id='lis-qr-bar'" in data:
+                return resp
+            resp.set_data(data.replace(b"<body", b"<body", 1).replace(b"</body>", _V92_QR_BAR.encode("utf-8") + b"</body>", 1))
+        elif b"/print/portal-qr" in data and b"lis-v92-qrlinks" not in data:
+            resp.set_data(data.replace(b"</body>", _V92_QR_LINKS_JS.encode("utf-8") + b"</body>", 1))
+    except Exception:
+        pass
+    return resp
 
 # ---------------------------------------------------------------- نوافذ الطباعة بمعالج منفصل عن نافذة البرنامج
 # hang_log.txt ما فيه أي توقف من السيرفر وقت الطباعة => الصفنة من جهة المتصفح: window.print() يوقف معالج الصفحة (renderer)
