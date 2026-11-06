@@ -43,6 +43,10 @@ EOT = 0x04
 CR = 0x0D
 LF = 0x0A
 
+# كود الطلب الذي يفهمه جهاز Beckman DxH لتحليل CBC (يظهر بخانة Test بشاشة Worklist).
+# لو أردت الرجوع للسلوك القديم (إرسال أكواد الـMapcodes) اجعلها "".
+ORDER_CODE_FOR_CBC = "CD"
+
 _server_thread = None
 _server_socket = None
 _stop_flag = threading.Event()
@@ -103,26 +107,42 @@ def _clean_id(value):
     return (value or "").strip().strip("*").strip()
 
 
+def _id_variants(sid):
+    """كل الصيغ الممكنة للـSpecimen ID الممسوح: الأصلي، ثم الجزء قبل | أو ، أو فاصلة (باركود الريكويست
+    القديم كان 19011|BF,CBC)، ثم رقم التسجيل لو كان باركود أنبوب (19011T1)."""
+    import re as _re
+    sid = _clean_id(sid)
+    out = [sid] if sid else []
+    head = _re.split(r"[|,;\s]", sid, maxsplit=1)[0].strip() if sid else ""
+    if head and head not in out:
+        out.append(head)
+    m = _re.fullmatch(r"(\d+)[Tt]\d+", head or "")
+    if m and m.group(1) not in out:
+        out.append(m.group(1))
+    return out
+
+
 def _find_specimen_order_tests(db, specimen_id):
     """كل صفوف order_tests العائدة لهذا الـSpecimen ID. الترتيب:
-    1) tube_barcode = الباركود المطبوع للأنبوب (مثل 19004T1) — هذا اللي
-       يقرأه الجهاز فعليًا من الأنبوب. 2) barcode الفردي للتحليل.
-    3) رقم التسجيل للزيارة (لو أدخلوا الرقم يدويًا بالجهاز).
-    4) بادئة (LIKE) كاحتياط أخير — نفس سلوك النسخة القديمة."""
-    sid = _clean_id(specimen_id)
-    if not sid:
-        return []
+    1) tube_barcode (مثل 19011T1)  2) barcode التحليل  3) رقم تسجيل الزيارة
+    4) بادئة LIKE كاحتياط أخير. يجرّب كل صيغ _id_variants بالترتيب."""
     base = ("SELECT ot.* FROM order_tests ot JOIN orders o ON o.id = ot.order_id ")
     tail = " ORDER BY ot.created_at DESC, ot.id DESC"
-    attempts = (
-        ("WHERE ot.tube_barcode=?", (sid,)),
-        ("WHERE ot.barcode=?", (sid,)),
-        ("WHERE EXISTS (SELECT 1 FROM visits v WHERE v.id=o.visit_id "
-         "AND CAST(v.registration_number AS TEXT)=?)", (sid,)),
-        ("WHERE ot.tube_barcode LIKE ? OR ot.barcode LIKE ?", (sid + "%", sid + "%")),
-    )
-    for where, params in attempts:
-        rows = db.execute(base + where + tail, params).fetchall()
+    for sid in _id_variants(specimen_id):
+        attempts = (
+            ("WHERE ot.tube_barcode=?", (sid,)),
+            ("WHERE ot.barcode=?", (sid,)),
+            ("WHERE EXISTS (SELECT 1 FROM visits v WHERE v.id=o.visit_id "
+             "AND CAST(v.registration_number AS TEXT)=?)", (sid,)),
+        )
+        for where, params in attempts:
+            rows = db.execute(base + where + tail, params).fetchall()
+            if rows:
+                return rows
+    sid = _clean_id(specimen_id)
+    if sid:
+        rows = db.execute(base + "WHERE ot.tube_barcode LIKE ? OR ot.barcode LIKE ?" + tail,
+                          (sid + "%", sid + "%")).fetchall()
         if rows:
             return rows
     return []
@@ -130,7 +150,7 @@ def _find_specimen_order_tests(db, specimen_id):
 
 def _patient_for_order_test(db, order_test_id):
     return db.execute(
-        "SELECT p.id AS pid, p.full_name, p.gender, p.age, p.age_unit, p.birth_date "
+        "SELECT p.id AS pid, p.full_name, p.full_name_en, p.gender, p.age, p.age_unit, p.birth_date "
         "FROM order_tests ot JOIN orders o ON o.id = ot.order_id "
         "JOIN visits v ON v.id = o.visit_id JOIN patients p ON p.id = v.patient_id "
         "WHERE ot.id=?", (order_test_id,)
@@ -215,6 +235,28 @@ def _ascii_clean(text):
     return " ".join(out.split())
 
 
+def _english_name(pat):
+    """الاسم الإنجليزي للجهاز: full_name_en من سجل المريض، وإلا نحوّل العربي بدالة البرنامج
+    (transliterate_arabic_name)، وإلا نتركه فارغ (الجهاز ما يقبل عربي)."""
+    if not pat:
+        return ""
+    try:
+        en = (pat["full_name_en"] or "").strip()
+    except (KeyError, IndexError):
+        en = ""
+    if not en:
+        import sys as _sys
+        for mod in ("app", "__main__"):
+            fn = getattr(_sys.modules.get(mod), "transliterate_arabic_name", None)
+            if fn:
+                try:
+                    en = fn(pat["full_name"]) or ""
+                    break
+                except Exception:
+                    pass
+    return _ascii_clean(en)
+
+
 def build_query_response(db, specimen_id, analyzer_name=None):
     """رد الـLIS على استعلام الجهاز (Q record) بعد قراءة الباركود: معلومات
     المريض + التحاليل المطلوبة. لو العينة غير موجودة يُرد بـ"لا معلومات" (X)."""
@@ -226,7 +268,7 @@ def build_query_response(db, specimen_id, analyzer_name=None):
         return [header, f"Q|1|^{sid}||||||||||X", "L|1|N"]
 
     pat = _patient_for_order_test(db, rows[0]["id"])
-    name = _ascii_clean(pat["full_name"]) if pat else ""
+    name = _english_name(pat)
     parts = name.split()
     name_field = (f"{parts[-1]}^{' '.join(parts[:-1])}" if len(parts) > 1 else name)
     sex = {"male": "M", "female": "F"}.get(((pat["gender"] if pat else "") or "").strip().lower(), "U")
@@ -256,10 +298,19 @@ def build_query_response(db, specimen_id, analyzer_name=None):
         for m in (picked if picked else mrows):
             if m["machine_code"] not in codes:
                 codes.append(m["machine_code"])
+    # لا نرسل للجهاز إلا ما له Mapcode إرسال (فيرسل CBC فقط ويُهمل Blood Film وغيره)
+    # الجهاز يريد كود طلب واحد (CD = CBC + Diff)، مو كود لكل بارامتر (WBC, RBC...).
+    # لو الطلب فيه CBC نرسل ^^^CD فقط؛ بقية التحاليل (Blood Film...) تُهمل لأن الجهاز ما يقرأها.
+    if ORDER_CODE_FOR_CBC and def_ids:
+        marks = ",".join("?" * len(def_ids))
+        drows = db.execute(
+            f"SELECT name, code, short_name FROM test_definitions WHERE id IN ({marks})", def_ids).fetchall()
+        if any("cbc" in " ".join(str(r[k] or "") for k in ("name", "code", "short_name")).lower() for r in drows):
+            codes = [ORDER_CODE_FOR_CBC]
     tests = "\\".join(f"^^^{c}" for c in codes)
 
     o = [""] * 26
-    o[0], o[1], o[2], o[4], o[5], o[11], o[25] = "O", "1", sid, tests, "R", "A", "Q"
+    o[0], o[1], o[2], o[4], o[5], o[11], o[25] = "O", "1", "".join(ch for ch in sid if ch not in "|^\\&"), tests, "R", "A", "Q"
     # P.8 = تاريخ الميلاد (YYYYMMDD) حتى الجهاز يحسب العمر ويطبّق المدى الطبيعي المناسب
     p = f"P|1||{pid}||{name_field}||{_dob_for_astm(pat)}|{sex}"
     return [header, p, "|".join(o), "L|1|N"]

@@ -5334,7 +5334,7 @@ def visit_barcode_code128(visit_id):
         return "Not found", 404
     test_codes = [row["code"] for row in tests if row["code"]]
     reg = visit["registration_number"]
-    payload = f"{reg}|{','.join(test_codes)}" if test_codes else str(reg)
+    payload = str(reg)  # رقم التسجيل فقط: الرمز | ممنوع بخانة Specimen ID بالجهاز
     img = generate_code128(payload, caption=str(reg))
     buf = BytesIO()
     img.save(buf, format="PNG")
