@@ -6,6 +6,19 @@ except SystemExit:
     raise
 except ImportError:
     pass
+import time as _time_boot
+def _startup_mark(label):
+    try:
+        import sys as _s, os as _o
+        _d = _o.path.dirname(_s.executable) if getattr(_s, "frozen", False) else _o.path.dirname(_o.path.abspath(__file__))
+        _p = _o.path.join(_d, "startup_timing.txt")
+        if _o.path.exists(_p) and _o.path.getsize(_p) > 100000:
+            _o.replace(_p, _p + ".old")
+        with open(_p, "a", encoding="utf-8") as _f:
+            _f.write("%s  %s\n" % (_time_boot.strftime("%Y-%m-%d %H:%M:%S"), label))
+    except Exception:
+        pass
+_startup_mark("--- بدء تحميل app.py (تم تحميل الإعدادات الأولى)")
 from flask import Flask, render_template, request, redirect, url_for, session, g, flash, send_file, jsonify, get_flashed_messages
 from datetime import datetime, date, timedelta
 from functools import wraps
@@ -2045,6 +2058,9 @@ def license_locked():
     db = get_db()
     lic = license_manager.check_license(db)
     db.close()
+    global _license_check_cache
+    with _license_check_lock:
+        _license_check_cache = (time.time(), lic)   # حدّث الذاكرة بالحالة الفعلية
     return render_template("license_locked.html", lic=lic)
 
 
@@ -2056,6 +2072,11 @@ def license_activate():
     ok, err = license_manager.apply_activation(db, username, code)
     db.close()
     if ok:
+        # مهم: امسح نتيجة فحص الترخيص المخزّنة بالذاكرة (كانت "expired" وتبقى 5 دقائق)،
+        # وإلا يرجعك enforce_license لشاشة القفل رغم نجاح التفعيل.
+        global _license_check_cache
+        with _license_check_lock:
+            _license_check_cache = None
         flash("تم تفعيل الترخيص بنجاح")
         return redirect(url_for("landing"))
     flash(err or "فشل التفعيل")
@@ -5334,7 +5355,9 @@ def visit_barcode_code128(visit_id):
         return "Not found", 404
     test_codes = [row["code"] for row in tests if row["code"]]
     reg = visit["registration_number"]
-    payload = str(reg)  # رقم التسجيل فقط: الرمز | ممنوع بخانة Specimen ID بالجهاز
+    # الجهاز يرفض | و , في Specimen ID، لذلك الباركود يحمل رقم التسجيل فقط
+    # والجهاز يستعلم من البرنامج (ASTM Host Query) عن المريض والتحاليل.
+    payload = str(reg)
     img = generate_code128(payload, caption=str(reg))
     buf = BytesIO()
     img.save(buf, format="PNG")
@@ -16546,8 +16569,1935 @@ def _v93_docfit(resp):
         pass
     return resp
 
+# ===== LIS-AI BEGIN (v3) =====
+# v3: + إضافات LIS-PLUS (مخزون، ضبط جودة، تنبيهات، رسوم، أجهزة بالذكاء، ملخص المريض، تحليل الفحص)
+# (v2) — مساعد المختبر بالذكاء الصناعي (Gemini المجاني / Groq) =====
+# وحدة مستقلة: لا تغيّر أي صفحة أو جدول موجود. تُسجَّل داخل try/except، فلو صار أي خطأ يبقى البرنامج يشتغل عادي.
+# - ترسل للذكاء الصناعي النتائج فقط (عمر + جنس + قيم) بدون اسم المريض ولا رقمه ولا هاتفه.
+# - الإيقاف الكامل: Settings → ai_enabled = 0 (أو من صفحة /ai/settings).
+def _lis_ai_register(app, get_db, get_setting, set_setting):
+    import json, re, os, sys, time, uuid, threading, socket
+    import urllib.request, urllib.error
+    from flask import Blueprint, request, jsonify, session, Response
+
+    bp = Blueprint("lis_ai", __name__)
+    _jobs = {}
+    _jobs_lock = threading.Lock()
+    _model_cache = {"t": 0, "key": "", "model": ""}
+    _cfg_cache = {"t": 0, "v": None}
+
+    class _AIErr(Exception):
+        pass
+
+    def _base_dir():
+        try:
+            return os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+        except Exception:
+            return "."
+
+    def _allowed():
+        return bool(session.get("designer_id") or ("interface" in session))
+
+    def _cfg(force=False):
+        if not force and _cfg_cache["v"] and time.time() - _cfg_cache["t"] < 20:
+            return _cfg_cache["v"]
+        db = get_db()
+        try:
+            c = {
+                "enabled": get_setting(db, "ai_enabled", "1") != "0",
+                "provider": (get_setting(db, "ai_provider", "gemini") or "gemini").strip().lower(),
+                "key": (get_setting(db, "ai_api_key", "") or "").strip(),
+                "model": (get_setting(db, "ai_model", "") or "").strip(),
+            }
+        finally:
+            try: db.close()
+            except Exception: pass
+        if not c["key"]:
+            c["key"] = (os.environ.get("LIS_AI_KEY", "") or "").strip()
+        if not c["key"]:
+            try:
+                with open(os.path.join(_base_dir(), "ai_key.txt"), encoding="utf-8") as fh:
+                    c["key"] = fh.read().strip()
+            except Exception:
+                pass
+        _cfg_cache["v"], _cfg_cache["t"] = c, time.time()
+        return c
+
+    # ---------------------------------------------------------------- HTTP
+    def _post(url, headers, body, timeout=60):
+        data = json.dumps(body).encode("utf-8")
+        for _attempt in range(3):
+            req = urllib.request.Request(url, data=data, headers=dict(headers, **{"Content-Type": "application/json"}), method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    return json.loads(r.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                try: msg = e.read().decode("utf-8", "replace")[:300]
+                except Exception: msg = ""
+                if e.code in (401, 403) or ("API key" in msg and e.code == 400):
+                    raise _AIErr("مفتاح الذكاء الصناعي غير صحيح أو غير مفعّل. افتح «إعدادات الذكاء» وتأكد من المفتاح.")
+                if e.code == 404:
+                    raise _AIErr("MODEL_404")
+                # إعادة محاولة تلقائية عند الضغط على الخدمة (429 / 5xx)
+                if e.code in (429, 500, 502, 503, 504, 529) and _attempt < 2:
+                    time.sleep(2 * (_attempt + 1))
+                    continue
+                if e.code == 429:
+                    raise _AIErr("وصلت للحد المجاني للطلبات. انتظر دقيقة وأعد المحاولة.")
+                if e.code >= 500:
+                    raise _AIErr("خدمة الذكاء الصناعي مشغولة حالياً. أعد المحاولة بعد لحظات.")
+                raise _AIErr("رفضت الخدمة الطلب (%s)." % e.code)
+            except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError, OSError):
+                raise _AIErr("ما كو اتصال بالإنترنت أو الخدمة ما ردّت. الذكاء الصناعي يحتاج إنترنت.")
+
+    def _get(url, headers, timeout=25):
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception:
+            return None
+
+    _BAD = re.compile(r"image|tts|live|audio|vision|embed|robot|imagen|veo|aqa|exp|thinking|computer|native|gemma|learnlm|banana", re.I)
+
+    def _pick_gemini_model(key, forced=""):
+        if forced:
+            return forced
+        if _model_cache["model"] and _model_cache["key"] == key and time.time() - _model_cache["t"] < 6 * 3600:
+            return _model_cache["model"]
+        best = ""
+        j = _get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {"x-goog-api-key": key})
+        cands = []
+        for m in (j or {}).get("models", []):
+            n = (m.get("name") or "").replace("models/", "")
+            if "generateContent" not in (m.get("supportedGenerationMethods") or []):
+                continue
+            if "flash" not in n or _BAD.search(n):
+                continue
+            nums = [float(x) for x in re.findall(r"(\d+(?:\.\d+)?)", n)[:2]] or [0]
+            lite = 1 if "lite" in n else 0
+            prev = 1 if "preview" in n else 0
+            cands.append((prev, -nums[0], lite, n))   # نفضّل المستقر، الأحدث، ثم Flash قبل Lite
+        if cands:
+            cands.sort()
+            best = cands[0][3]
+        best = best or "gemini-flash-latest"
+        _model_cache.update({"t": time.time(), "key": key, "model": best})
+        return best
+
+    def _call_ai(cfg, system, messages):
+        key = cfg["key"]
+        if not key:
+            raise _AIErr("NO_KEY")
+        if cfg["provider"] == "anthropic":
+            body = {"model": cfg["model"] or "claude-haiku-5-5", "max_tokens": 2048, "system": system,
+                    "messages": [{"role": m["role"], "content": m["content"]} for m in messages]}
+            j = _post("https://api.anthropic.com/v1/messages", {"x-api-key": key, "anthropic-version": "2023-06-01"}, body, 60)
+            try:
+                txt = "".join(b.get("text", "") for b in j["content"] if b.get("type") == "text").strip()
+                if txt:
+                    return txt
+            except Exception:
+                pass
+            raise _AIErr("جاء ردّ غير مفهوم من الخدمة.")
+        if cfg["provider"] == "groq":
+            model = cfg["model"] or "llama-3.3-70b-versatile"
+            body = {"model": model, "temperature": 0.3, "max_tokens": 2048,
+                    "messages": [{"role": "system", "content": system}] + [{"role": m["role"], "content": m["content"]} for m in messages]}
+            j = _post("https://api.groq.com/openai/v1/chat/completions", {"Authorization": "Bearer " + key}, body)
+            try:
+                return j["choices"][0]["message"]["content"].strip()
+            except Exception:
+                raise _AIErr("جاء ردّ غير مفهوم من الخدمة.")
+        # Gemini
+        body = {"systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in messages],
+                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048}}
+        tried = []
+        for attempt in range(2):
+            model = _pick_gemini_model(key, cfg["model"]) if attempt == 0 else "gemini-flash-latest"
+            if model in tried:
+                break
+            tried.append(model)
+            try:
+                j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
+                          {"x-goog-api-key": key}, body)
+            except _AIErr as e:
+                if str(e) == "MODEL_404" and attempt == 0:
+                    _model_cache["t"] = 0
+                    continue
+                if str(e) == "MODEL_404":
+                    raise _AIErr("الموديل المختار غير متاح. امسح خانة الموديل من «إعدادات الذكاء» ليختار البرنامج تلقائياً.")
+                raise
+            try:
+                parts = j["candidates"][0]["content"]["parts"]
+                txt = "".join(p.get("text", "") for p in parts).strip()
+                if txt:
+                    return txt
+            except Exception:
+                pass
+            fb = (j.get("promptFeedback") or {}).get("blockReason")
+            raise _AIErr("الخدمة امتنعت عن الرد على هذا الطلب." if fb else "جاء ردّ فارغ من الخدمة. أعد المحاولة.")
+        raise _AIErr("تعذّر الاتصال بالموديل.")
+
+    # ---------------------------------------------------------------- context
+    def _age_years(age, unit):
+        try:
+            a = float(age)
+        except Exception:
+            return None
+        u = (unit or "Years").lower()
+        return a / 12 if u.startswith("m") else a / 365 if u.startswith("d") else a / 52 if u.startswith("w") else a
+
+    def _to_years(v, unit):
+        return _age_years(v, unit) or 0
+
+    def _ref_text(db, tpid, gender, ay):
+        try:
+            rows = db.execute("SELECT * FROM reference_ranges WHERE test_parameter_id=?", (tpid,)).fetchall()
+        except Exception:
+            return ""
+        g = (gender or "").lower()[:1]
+        best = None
+        for r in rows:
+            rg = (r["gender"] or "Both").lower()[:1]
+            if rg not in ("b", g) and not (rg == "b"):
+                if rg != g:
+                    continue
+            if ay is not None:
+                lo = _to_years(r["age_from"] or 0, r["age_from_unit"])
+                hi = _to_years(r["age_to"] if r["age_to"] is not None else 120, r["age_to_unit"])
+                if not (lo <= ay <= hi + 0.999):
+                    continue
+            best = r
+            if rg == g:
+                break
+        if not best:
+            return ""
+        if best["range_text"]:
+            return str(best["range_text"]).strip()
+        if best["low"] is not None and best["high"] is not None:
+            return "%g-%g" % (best["low"], best["high"])
+        if best["low"] is not None:
+            return ">=%g" % best["low"]
+        if best["high"] is not None:
+            return "<=%g" % best["high"]
+        return ""
+
+    def _val(num, txt):
+        if num is not None:
+            return "%g" % num
+        return (txt or "").strip()
+
+    def _visit_context(visit_id):
+        db = get_db()
+        try:
+            v = db.execute("SELECT v.id, v.patient_id, v.fasting, v.created_at, p.gender, p.age, p.age_unit "
+                           "FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.id=?", (visit_id,)).fetchone()
+            if not v:
+                return None, None
+            ay = _age_years(v["age"], v["age_unit"])
+            rows = db.execute(
+                "SELECT td.name tname, tp.id tpid, tp.name pname, tp.unit unit, r.value_numeric vn, r.value_text vt, r.flag flag "
+                "FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+                "JOIN test_definitions td ON td.id=ot.test_definition_id "
+                "JOIN results r ON r.order_test_id=ot.id JOIN test_parameters tp ON tp.id=r.test_parameter_id "
+                "WHERE o.visit_id=? AND (r.value_numeric IS NOT NULL OR (r.value_text IS NOT NULL AND TRIM(r.value_text)<>'')) "
+                "ORDER BY ot.id, tp.id LIMIT 220", (visit_id,)).fetchall()
+            lines, abn, cur = [], 0, None
+            for r in rows:
+                if r["tname"] != cur:
+                    cur = r["tname"]
+                    lines.append("\n[%s]" % cur)
+                ref = _ref_text(db, r["tpid"], v["gender"], ay)
+                prev = db.execute(
+                    "SELECT r.value_numeric vn, r.value_text vt, v.created_at ca FROM results r "
+                    "JOIN order_tests ot ON ot.id=r.order_test_id JOIN orders o ON o.id=ot.order_id JOIN visits v ON v.id=o.visit_id "
+                    "WHERE v.patient_id=? AND v.id<? AND r.test_parameter_id=? "
+                    "AND (r.value_numeric IS NOT NULL OR (r.value_text IS NOT NULL AND TRIM(r.value_text)<>'')) "
+                    "ORDER BY v.id DESC LIMIT 1", (v["patient_id"], visit_id, r["tpid"])).fetchone()
+                flag = (r["flag"] or "Normal")
+                if flag != "Normal":
+                    abn += 1
+                s = "- %s: %s %s" % (r["pname"], _val(r["vn"], r["vt"]), r["unit"] or "")
+                if ref:
+                    s += " | المدى الطبيعي: %s" % ref
+                if flag != "Normal":
+                    s += " | الحالة: %s" % flag
+                if prev:
+                    s += " | السابق: %s (%s)" % (_val(prev["vn"], prev["vt"]), (prev["ca"] or "")[:10])
+                lines.append(s)
+            head = "المريض: %s، العمر: %s %s، الصيام: %s" % (
+                {"m": "ذكر", "f": "أنثى"}.get((v["gender"] or "").lower()[:1], v["gender"] or "غير محدد"),
+                v["age"] if v["age"] is not None else "غير محدد", v["age_unit"] or "", v["fasting"] or "غير محدد")
+            if len(lines) == 0:
+                return head, None
+            return head, head + "\nعدد النتائج غير الطبيعية: %d\n" % abn + "\n".join(lines)
+        finally:
+            try: db.close()
+            except Exception: pass
+
+    SYSTEM = ("أنت «مساعد المختبر» داخل نظام مختبر تحليلات مرضية. تساعد الفني والطبيب بتفسير النتائج المسجّلة فقط. "
+              "التزم بالقواعد: (1) اعتمد على القيم المعطاة ولا تخترع قيماً. (2) النتائج الحالية تُقارن بالمدى الطبيعي المرفق وبالنتيجة السابقة إن وُجدت. "
+              "(3) هذا تفسير مخبري مساعد وليس تشخيصاً نهائياً؛ اذكر أن القرار للطبيب المعالج. (4) اكتب بالعربية الواضحة وباختصار ومنظّم بنقاط، "
+              "وابدأ بالأهم (القيم الخطرة/غير الطبيعية). (5) لا تذكر أدوية بجرعات. (6) إذا السؤال خارج نطاق المختبر قل ذلك باختصار.")
+    ACTIONS = {
+        "assess": "قيّم الحالة العامة من النتائج: ما اللافت؟ وما الأنماط التي تجمع عدة نتائج معاً؟",
+        "interpret": "فسّر كل النتائج غير الطبيعية: معنى الارتفاع/الانخفاض، والأسباب المحتملة الشائعة بإيجاز.",
+        "compare": "قارن النتائج الحالية بالزيارة السابقة: ما الذي تحسّن وما الذي ساء وما الذي ثبت؟ (استخدم عمود السابق).",
+        "abnormal": "اذكر النتائج غير الطبيعية فقط مرتبة حسب الأهمية، مع قيمة كل نتيجة ومداها الطبيعي.",
+        "extra": "اقترح فحوصات إضافية قد يطلبها الطبيب لتوضيح النتائج غير الطبيعية، مع سبب كل فحص بجملة.",
+        "comment": "اكتب تعليقاً مخبرياً قصيراً (3-5 أسطر) مناسباً للطباعة أسفل التقرير، بلغة مهنية محايدة.",
+        "summary": "اكتب ملخصاً سريرياً مختصراً للمريض موجهاً للطبيب: أبرز نتائج هذه الزيارة، واتجاه التغيّر عبر الزيارات السابقة (تحسّن/استقرار/تدهور) اعتماداً على سجل الزيارات المرفق، وأهم نقاط المتابعة. إن لم توجد زيارات سابقة قل ذلك.",
+        "test": "حلّل الفحص المحدد بالتفصيل: معنى كل معامل غير طبيعي، والعلاقة بين المعاملات ببعضها (مثل الراسب مع المظهر والـpH)، وما الذي يستحق التأكيد أو إعادة الفحص، ثم اذكر باختصار أي ارتباط مهم مع بقية فحوصات الزيارة.",
+        "report": "اكتب تقريراً شاملاً منظماً: ملخص، النتائج غير الطبيعية، المقارنة بالسابق، توصيات متابعة عامة.",
+    }
+
+    # ---------------------------------------------------------------- jobs
+    def _run_job(jid, cfg, system, messages):
+        try:
+            txt = _call_ai(cfg, system, messages)
+            out = {"done": True, "ok": True, "text": txt}
+        except _AIErr as e:
+            out = {"done": True, "ok": False, "error": str(e)}
+        except Exception as e:
+            out = {"done": True, "ok": False, "error": "خطأ غير متوقع بالمساعد. البرنامج يشتغل عادي."}
+        with _jobs_lock:
+            _jobs[jid] = dict(out, t=time.time())
+
+    def _gc():
+        with _jobs_lock:
+            for k in [k for k, v in _jobs.items() if time.time() - v.get("t", time.time()) > 600]:
+                _jobs.pop(k, None)
+
+    @bp.route("/ai/api/chat", methods=["POST"])
+    def ai_chat():
+        if not _allowed():
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        cfg = _cfg()
+        if not cfg["enabled"]:
+            return jsonify(ok=False, error="المساعد متوقف من الإعدادات."), 403
+        if not cfg["key"]:
+            return jsonify(ok=False, error="NO_KEY"), 200
+        d = request.get_json(silent=True) or {}
+        msg = (d.get("message") or "").strip()[:3000]
+        action = d.get("action") or ""
+        if action in ACTIONS:
+            msg = ACTIONS[action]
+        if not msg:
+            return jsonify(ok=False, error="اكتب سؤالك أولاً."), 400
+        ctx_txt, note = "", ""
+        try:
+            vid = int(d.get("visit_id") or 0)
+        except Exception:
+            vid = 0
+        try:
+            otid = int(d.get("order_test_id") or 0)
+        except Exception:
+            otid = 0
+        if action == "summary" and not _plus_flag("ai_summary"):
+            return jsonify(ok=False, error="ملخص المريض متوقف من «إعدادات الإضافات»."), 403
+        if action == "test" and not _plus_flag("ai_test_btn"):
+            return jsonify(ok=False, error="تحليل الفحص متوقف من «إعدادات الإضافات»."), 403
+        if otid and not vid:
+            vid = _ot_visit(otid)
+        extra_ctx = ""
+        if action == "summary" and vid:
+            extra_ctx = _patient_history(vid)
+        elif action == "test" and otid:
+            extra_ctx = _ot_focus(otid)
+        if vid:
+            try:
+                head, ctx = _visit_context(vid)
+                if ctx and extra_ctx:
+                    ctx = ctx + "\n\n" + extra_ctx
+                if ctx:
+                    ctx_txt = "بيانات الزيارة الحالية (بدون هوية المريض):\n" + ctx
+                elif head:
+                    note = "هذه الزيارة ما فيها نتائج مدخلة بعد."
+            except Exception:
+                ctx_txt = ""
+        system = SYSTEM + ("\n\n" + ctx_txt if ctx_txt else "\n\n(لا توجد زيارة محددة؛ أجب كسؤال عام بالمختبر.)")
+        if note:
+            system += "\n" + note
+        hist = []
+        for m in (d.get("history") or [])[-8:]:
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str):
+                hist.append({"role": m["role"], "content": m["content"][:4000]})
+        while hist and hist[0]["role"] != "user":
+            hist.pop(0)
+        messages = hist + [{"role": "user", "content": msg}]
+        _gc()
+        jid = uuid.uuid4().hex
+        with _jobs_lock:
+            _jobs[jid] = {"done": False, "t": time.time()}
+        threading.Thread(target=_run_job, args=(jid, cfg, system, messages), daemon=True).start()
+        return jsonify(ok=True, job=jid)
+
+    @bp.route("/ai/api/job/<jid>")
+    def ai_job(jid):
+        if not _allowed():
+            return jsonify(done=True, ok=False, error="سجّل الدخول أولاً."), 401
+        with _jobs_lock:
+            j = _jobs.get(jid)
+        if not j:
+            return jsonify(done=True, ok=False, error="انتهت صلاحية الطلب. أعد السؤال.")
+        return jsonify({k: v for k, v in j.items() if k != "t"})
+
+    @bp.route("/ai/api/status")
+    def ai_status():
+        c = _cfg()
+        return jsonify(version="LIS-AI v3", enabled=c["enabled"], has_key=bool(c["key"]), provider=c["provider"])
+
+    @bp.route("/ai/api/save-settings", methods=["POST"])
+    def ai_save_settings():
+        if not _allowed():
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        d = request.get_json(silent=True) or {}
+        db = get_db()
+        try:
+            prov = d.get("provider") if d.get("provider") in ("gemini", "groq", "anthropic") else "gemini"
+            set_setting(db, "ai_provider", prov)
+            set_setting(db, "ai_enabled", "1" if d.get("enabled", True) else "0")
+            set_setting(db, "ai_model", re.sub(r"[^A-Za-z0-9._:-]", "", (d.get("model") or ""))[:80])
+            k = (d.get("key") or "").strip()
+            if k:
+                set_setting(db, "ai_api_key", re.sub(r"\s", "", k)[:200])
+            if d.get("clear_key"):
+                set_setting(db, "ai_api_key", "")
+            db.commit()
+        finally:
+            try: db.close()
+            except Exception: pass
+        _cfg_cache["t"] = 0
+        _model_cache["t"] = 0
+        return jsonify(ok=True)
+
+    @bp.route("/ai/api/test", methods=["POST"])
+    def ai_test():
+        if not _allowed():
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        cfg = _cfg(True)
+        try:
+            t = _call_ai(cfg, "رد بكلمة واحدة فقط.", [{"role": "user", "content": "قل: جاهز"}])
+            return jsonify(ok=True, text=t[:60])
+        except _AIErr as e:
+            return jsonify(ok=False, error="أدخل المفتاح أولاً." if str(e) == "NO_KEY" else str(e))
+
+    @bp.route("/ai/assistant")
+    def ai_page():
+        if not _allowed():
+            return Response("<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;padding:20px'>سجّل الدخول من الشاشة الرئيسية أولاً.</body>", 401, mimetype="text/html")
+        return Response(_PAGE, mimetype="text/html")
+
+    @bp.route("/ai/settings")
+    def ai_settings_page():
+        if not _allowed():
+            return Response("<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;padding:20px'>سجّل الدخول من الشاشة الرئيسية أولاً.</body>", 401, mimetype="text/html")
+        c = _cfg(True)
+        html = _SET_PAGE.replace("__PROV__", c["provider"]).replace("__EN__", "1" if c["enabled"] else "0") \
+            .replace("__HASKEY__", "1" if c["key"] else "0").replace("__MODEL__", re.sub(r"[^A-Za-z0-9._:-]", "", c["model"]))
+        return Response(html, mimetype="text/html")
+
+    # ---------------------------------------------------------------- floating button
+    _FAB = ('<script id="lis-ai-fab">(function(){try{if(window.top!==window.self||document.getElementById("lis-ai-btn"))return;'
+            'var m=location.pathname.match(/\\/visits\\/(\\d+)\\/results/)||location.pathname.match(/\\/patient-card\\/(\\d+)/);var vid=m?m[1]:"";var w=location.pathname.match(/\\/workbench\\/result\\/(\\d+)/);var otid=w?w[1]:"";'
+            'var b=document.createElement("button");b.id="lis-ai-btn";b.type="button";b.title="مساعد المختبر (AI)";'
+            'b.innerHTML="<span style=\\"font-weight:800;letter-spacing:.5px\\">AI</span>";'
+            'b.style.cssText="position:fixed;left:18px;bottom:74px;z-index:99998;width:52px;height:52px;border-radius:50%;border:0;cursor:pointer;'
+            'background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff;font-size:15px;box-shadow:0 6px 18px rgba(15,118,110,.45);font-family:Tahoma,sans-serif";'
+            'var p=document.createElement("div");p.id="lis-ai-panel";p.style.cssText="position:fixed;left:0;top:0;height:100%;width:min(440px,100vw);z-index:99999;'
+            'background:#fff;box-shadow:6px 0 30px rgba(0,0,0,.25);transform:translateX(-105%);transition:transform .25s";'
+            'p.innerHTML="<iframe style=\\"width:100%;height:100%;border:0\\" title=\\"AI\\"></iframe>";'
+            'var open=false;b.onclick=function(){open=!open;if(open){var f=p.firstChild;if(!f.src||window.__lisAiAuto){f.src="/ai/assistant?embed=1"+(vid?"&visit_id="+vid:"")+(otid?"&ot_id="+otid:"")+(window.__lisAiAuto?"&auto="+window.__lisAiAuto:"");window.__lisAiAuto="";}}'
+            'p.style.transform=open?"translateX(0)":"translateX(-105%)";b.style.display=open?"none":"block";};'
+            'window.addEventListener("message",function(e){if(e.data==="lis-ai-close"){open=false;p.style.transform="translateX(-105%)";b.style.display="block";}});'
+            'var st=document.createElement("style");st.textContent="@media print{#lis-ai-btn,#lis-ai-panel{display:none!important}}";(document.head||document.body).appendChild(st);document.body.appendChild(p);document.body.appendChild(b);}catch(e){}})();</script>').encode("utf-8")
+
+    @app.after_request
+    def _lis_ai_inject(resp):
+        try:
+            if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+                return resp
+            if request.path.startswith("/ai/"):
+                return resp
+            data = resp.get_data()
+            if b'id="lis-ai-fab"' in data or b"</body>" not in data or b"<html" not in data[:2000].lower():
+                return resp
+            if not _allowed():
+                return resp
+            if b"lis-sidebar-hidden" not in data:
+                _p = request.path.lower()
+                if any(x in _p for x in ("print", "pdf", "barcode", "labels", "/public", "login", "license", "portal", "designer", "/reports/archive/open", "qr")):
+                    return resp
+            if not _cfg()["enabled"]:
+                return resp
+            head, _, tail = data.rpartition(b"</body>")
+            resp.set_data(head + _FAB + b"</body>" + tail)
+        except Exception:
+            pass
+        return resp
+
+    # ===== LIS-PLUS BEGIN (v1) =====
+    # ---------------------------------------------------------------- LIS-PLUS (v1): مخزون / QC / تنبيهات / رسوم / أجهزة / ملخص المريض
+    # كل شيء هنا إضافي: جداول جديدة بأسماء plus_* فقط، ولا يغيّر أي جدول أو صفحة موجودة. كل ميزة لها مفتاح إيقاف من /plus/settings.
+    _PLUS_FLAGS = ("inventory", "qc", "alerts", "charts", "devices", "ai_summary", "ai_test_btn", "autolearn")
+
+    def _lab_ok():
+        return bool(session.get("designer_id")) or session.get("interface") in ("lab", "both")
+
+    def _plus_flag(name):
+        try:
+            db = get_db()
+            try:
+                return (get_setting(db, "plus_" + name, "1") or "1") != "0"
+            finally:
+                try: db.close()
+                except Exception: pass
+        except Exception:
+            return True
+
+    def _plus_flags():
+        return {n: _plus_flag(n) for n in _PLUS_FLAGS}
+
+    def _plus_ensure():
+        db = get_db()
+        try:
+            db.executescript("""
+            CREATE TABLE IF NOT EXISTS plus_items(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, unit TEXT DEFAULT '',
+                base_qty REAL DEFAULT 0, base_at TEXT, min_qty REAL DEFAULT 0, created_at TEXT);
+            CREATE TABLE IF NOT EXISTS plus_item_links(id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL,
+                test_definition_id INTEGER NOT NULL, per_test REAL DEFAULT 1);
+            CREATE TABLE IF NOT EXISTS plus_stock_log(id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, delta REAL, reason TEXT, ts TEXT);
+            CREATE TABLE IF NOT EXISTS plus_qc_ctrl(id INTEGER PRIMARY KEY AUTOINCREMENT, test TEXT NOT NULL, level TEXT DEFAULT '',
+                mean REAL NOT NULL, sd REAL NOT NULL, unit TEXT DEFAULT '', active INTEGER DEFAULT 1);
+            CREATE TABLE IF NOT EXISTS plus_qc_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, ctrl_id INTEGER NOT NULL, value REAL NOT NULL,
+                ts TEXT, operator TEXT DEFAULT '', status TEXT DEFAULT 'ok', rule TEXT DEFAULT '', note TEXT DEFAULT '');
+            CREATE TABLE IF NOT EXISTS plus_devices(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, brand TEXT, model TEXT,
+                profile TEXT DEFAULT '', mapping TEXT DEFAULT '', created_at TEXT);
+            """)
+            db.commit()
+        finally:
+            try: db.close()
+            except Exception: pass
+
+    def _now():
+        return time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _rows(sql, args=()):
+        db = get_db()
+        try:
+            return [dict(r) for r in db.execute(sql, args).fetchall()]
+        finally:
+            try: db.close()
+            except Exception: pass
+
+    def _exec(sql, args=()):
+        db = get_db()
+        try:
+            cur = db.execute(sql, args)
+            db.commit()
+            return cur.lastrowid
+        finally:
+            try: db.close()
+            except Exception: pass
+
+    _HAS_RESULT = ("EXISTS(SELECT 1 FROM results r WHERE r.order_test_id=ot.id AND "
+                   "(r.value_numeric IS NOT NULL OR TRIM(COALESCE(r.value_text,''))<>''))")
+
+    def _stock_rows():
+        out = []
+        for it in _rows("SELECT * FROM plus_items ORDER BY name"):
+            links = _rows("SELECT l.id lid, l.test_definition_id tid, l.per_test per, td.name tname FROM plus_item_links l "
+                          "LEFT JOIN test_definitions td ON td.id=l.test_definition_id WHERE l.item_id=?", (it["id"],))
+            used = 0.0
+            for l in links:
+                try:
+                    n = _rows("SELECT COUNT(DISTINCT ot.id) n FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+                              "JOIN visits v ON v.id=o.visit_id WHERE ot.test_definition_id=? AND datetime(v.created_at)>=datetime(?) AND "
+                              + _HAS_RESULT, (l["tid"], it["base_at"] or "1970-01-01 00:00:00"))[0]["n"]
+                except Exception:
+                    n = 0
+                l["tests_done"] = n
+                used += n * float(l["per"] or 0)
+            rem = float(it["base_qty"] or 0) - used
+            mn = float(it["min_qty"] or 0)
+            status = "out" if rem <= 0 else "low" if rem <= mn else "ok"
+            out.append({"id": it["id"], "name": it["name"], "unit": it["unit"], "remaining": round(rem, 2), "min": mn,
+                        "base_qty": it["base_qty"], "base_at": it["base_at"], "used": round(used, 2), "status": status, "links": links})
+        return out
+
+    _CRIT_DEFAULT = "crit,panic,HH,LL"
+
+    def _critical_where():
+        db = get_db()
+        try:
+            raw = get_setting(db, "plus_critical_flags", _CRIT_DEFAULT) or _CRIT_DEFAULT
+        finally:
+            try: db.close()
+            except Exception: pass
+        toks = [t.strip().lower() for t in raw.split(",") if t.strip()]
+        conds, args = [], []
+        for t in toks:
+            if len(t) <= 2:
+                conds.append("LOWER(TRIM(r.flag))=?"); args.append(t)
+            else:
+                conds.append("LOWER(r.flag) LIKE ?"); args.append("%" + t + "%")
+        return ("(" + " OR ".join(conds) + ")") if conds else "0", args
+
+    def _alerts():
+        res = {"critical": [], "pending": [], "stock": [], "qc": []}
+        fl = _plus_flags()
+        try:
+            w, a = _critical_where()
+            res["critical"] = _rows(
+                "SELECT DISTINCT v.id vid, td.name tname, tp.name pname, r.value_numeric vn, r.value_text vt, r.flag flag "
+                "FROM results r JOIN order_tests ot ON ot.id=r.order_test_id JOIN orders o ON o.id=ot.order_id "
+                "JOIN visits v ON v.id=o.visit_id JOIN test_definitions td ON td.id=ot.test_definition_id "
+                "JOIN test_parameters tp ON tp.id=r.test_parameter_id "
+                "WHERE r.flag IS NOT NULL AND " + w + " AND datetime(v.created_at)>=datetime('now','-2 days') LIMIT 30", a)
+        except Exception:
+            pass
+        try:
+            res["pending"] = _rows(
+                "SELECT v.id vid, td.name tname FROM order_tests ot JOIN orders o ON o.id=ot.order_id JOIN visits v ON v.id=o.visit_id "
+                "JOIN test_definitions td ON td.id=ot.test_definition_id WHERE datetime(v.created_at)<datetime('now','-1 day') "
+                "AND datetime(v.created_at)>=datetime('now','-30 days') AND NOT " + _HAS_RESULT + " LIMIT 30")
+        except Exception:
+            pass
+        if fl.get("inventory"):
+            try:
+                res["stock"] = [{"id": x["id"], "name": x["name"], "remaining": x["remaining"], "unit": x["unit"], "status": x["status"]}
+                                for x in _stock_rows() if x["status"] != "ok"]
+            except Exception:
+                pass
+        if fl.get("qc"):
+            try:
+                res["qc"] = _rows("SELECT c.id cid, c.test, c.level, r.status, r.rule FROM plus_qc_ctrl c JOIN plus_qc_runs r ON r.id="
+                                  "(SELECT MAX(id) FROM plus_qc_runs WHERE ctrl_id=c.id) WHERE c.active=1 AND r.status IN ('fail','warn')")
+            except Exception:
+                pass
+        return res
+
+    def _westgard(vals, mean, sd):
+        """vals: القيم من الأقدم للأحدث (الأحدث آخرها). يرجع (status, rule)."""
+        if not sd or sd <= 0 or not vals:
+            return "ok", ""
+        z = [(v - mean) / sd for v in vals]
+        cur = z[-1]
+        if abs(cur) > 3:
+            return "fail", "1-3s"
+        if len(z) >= 2:
+            a, b = z[-2], z[-1]
+            if (a > 2 and b > 2) or (a < -2 and b < -2):
+                return "fail", "2-2s"
+            if (a > 2 and b < -2) or (a < -2 and b > 2):
+                return "fail", "R-4s"
+        if len(z) >= 4 and (all(x > 1 for x in z[-4:]) or all(x < -1 for x in z[-4:])):
+            return "fail", "4-1s"
+        if len(z) >= 10 and (all(x > 0 for x in z[-10:]) or all(x < 0 for x in z[-10:])):
+            return "fail", "10x"
+        if abs(cur) > 2:
+            return "warn", "1-2s"
+        return "ok", ""
+
+    def _ot_visit(ot_id):
+        try:
+            r = _rows("SELECT o.visit_id vid FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE ot.id=?", (ot_id,))
+            return int(r[0]["vid"]) if r else 0
+        except Exception:
+            return 0
+
+    def _patient_history(visit_id):
+        """سجل الزيارات السابقة لنفس المريض (غير الطبيعي فقط) — بدون اسم أو رقم أو هاتف."""
+        try:
+            pv = _rows("SELECT patient_id pid, created_at ca FROM visits WHERE id=?", (visit_id,))
+            if not pv:
+                return ""
+            vs = _rows("SELECT id, created_at ca FROM visits WHERE patient_id=? AND id<? ORDER BY id DESC LIMIT 6", (pv[0]["pid"], visit_id))
+            if not vs:
+                return "سجل الزيارات السابقة: لا توجد زيارات سابقة لهذا المريض."
+            lines = ["سجل الزيارات السابقة (الأحدث أولاً، النتائج غير الطبيعية فقط):"]
+            for v in vs:
+                rr = _rows("SELECT td.name tname, tp.name pname, tp.unit unit, r.value_numeric vn, r.value_text vt, r.flag flag "
+                           "FROM order_tests ot JOIN orders o ON o.id=ot.order_id JOIN test_definitions td ON td.id=ot.test_definition_id "
+                           "JOIN results r ON r.order_test_id=ot.id JOIN test_parameters tp ON tp.id=r.test_parameter_id "
+                           "WHERE o.visit_id=? AND r.flag IS NOT NULL AND r.flag<>'Normal' AND "
+                           "(r.value_numeric IS NOT NULL OR TRIM(COALESCE(r.value_text,''))<>'') LIMIT 25", (v["id"],))
+                if not rr:
+                    lines.append("- %s: كل النتائج المدخلة ضمن الطبيعي." % (v["ca"] or "")[:10])
+                    continue
+                lines.append("- %s:" % (v["ca"] or "")[:10])
+                for r in rr:
+                    val = ("%g" % r["vn"]) if r["vn"] is not None else (r["vt"] or "")
+                    lines.append("    %s: %s %s (%s)" % (r["pname"], val, r["unit"] or "", r["flag"]))
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    def _ot_focus(ot_id):
+        try:
+            r = _rows("SELECT td.name tname FROM order_tests ot JOIN test_definitions td ON td.id=ot.test_definition_id WHERE ot.id=?", (ot_id,))
+            if not r:
+                return ""
+            return "ركّز التحليل على هذا الفحص تحديداً: [%s]. اربط بين معاملاته ببعضها، ثم بالفحوص الأخرى في الزيارة عند الحاجة." % r[0]["tname"]
+        except Exception:
+            return ""
+
+    # ---------------------------------------------------------------- جسور الأجهزة: HL7 عبر TCP + ASTM عبر منفذ COM (إضافة لمستمع ASTM/TCP الموجود)
+    import socket as _sk
+    import threading as _th
+
+    _HL7 = {"thread": None, "sock": None, "stop": _th.Event(), "port": 0}
+    _SER = {}   # port -> {"thread":..., "stop": Event, "baud": n, "status": str}
+
+    def _ah():
+        import astm_host
+        return astm_host
+
+    def _hl7_to_records(msg):
+        """يحوّل رسالة HL7 ORU إلى سجلات بنمط ASTM ليمرّ على نفس منطق المطابقة والحفظ الموجود."""
+        segs = [x for x in re.split(r"[\r\n]+", msg) if x.strip()]
+        pid, sid, ctrl = "", "", ""
+        obx = []
+        for sg in segs:
+            f = sg.split("|")
+            t = f[0][:3].upper()
+            if t == "MSH" and len(f) > 9:
+                ctrl = f[9]
+            elif t == "PID" and len(f) > 3:
+                pid = f[3].split("^")[0]
+            elif t == "OBR":
+                for k in (3, 2):
+                    if len(f) > k and f[k].split("^")[0].strip():
+                        sid = sid or f[k].split("^")[0].strip()
+            elif t == "ORC":
+                for k in (3, 2):
+                    if len(f) > k and f[k].split("^")[0].strip():
+                        sid = sid or f[k].split("^")[0].strip()
+            elif t == "OBX" and len(f) > 5:
+                if (f[2] or "").upper() in ("ED", "RP"):
+                    continue
+                comp = f[3].split("^")
+                code = (comp[0] or (comp[1] if len(comp) > 1 else "")).strip()
+                if not code:
+                    continue
+                unit = (f[6].split("^")[0] if len(f) > 6 else "")
+                if (f[2] or "").upper() == "SN":
+                    sc = f[5].split("^")
+                    val = sc[1] if len(sc) > 1 else sc[0]
+                else:
+                    val = f[5]
+                obx.append((code, val, unit))
+        if not sid:
+            sid = pid
+        ts = time.strftime("%Y%m%d%H%M%S")
+        recs = ["H|\\^&|||HL7BRIDGE||||||||P|1|" + ts, "P|1||" + pid, "O|1|" + sid]
+        for i, (c, v, u) in enumerate(obx, 1):
+            recs.append("R|%d|^^^%s|%s|%s" % (i, c.replace("|", " ").replace("^", " "), v.replace("|", " "), u.replace("|", " ")))
+        recs.append("L|1|N")
+        return recs, ctrl
+
+    def _hl7_ack(ctrl, ok=True):
+        ts = time.strftime("%Y%m%d%H%M%S")
+        body = "MSH|^~\\&|LIS||||%s||ACK^R01|%s|P|2.3.1\rMSA|%s|%s\r" % (ts, ctrl or "0", "AA" if ok else "AE", ctrl or "0")
+        return b"\x0b" + body.encode("ascii", "ignore") + b"\x1c\x0d"
+
+    def _hl7_handle(conn, addr):
+        conn.settimeout(30)
+        buf = b""
+        ah = _ah()
+        try:
+            while True:
+                d = conn.recv(4096)
+                if not d:
+                    break
+                buf += d
+                while b"\x1c" in buf:
+                    i = buf.index(b"\x1c")
+                    raw, buf = buf[:i], buf[i + 2:]
+                    raw = raw.lstrip(b"\x0b")
+                    text = raw.decode("utf-8", "ignore")
+                    try:
+                        recs, ctrl = _hl7_to_records(text)
+                        summary, status = ah.process_astm_message(recs)
+                        ah.log_message("IN", text.replace("\r", " | "), status, "[HL7] " + summary)
+                        conn.sendall(_hl7_ack(ctrl, True))
+                    except Exception as e:
+                        ah.log_message("IN", text.replace("\r", " | "), "Error", "[HL7] " + str(e))
+                        conn.sendall(_hl7_ack("", False))
+        except Exception:
+            pass
+        finally:
+            try: conn.close()
+            except Exception: pass
+
+    def _hl7_serve(port, stop, holder):
+        ah = _ah()
+        s = _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM)
+        s.setsockopt(_sk.SOL_SOCKET, _sk.SO_REUSEADDR, 1)
+        try:
+            s.bind(("0.0.0.0", port)); s.listen(5); s.settimeout(1.0)
+            holder["sock"] = s
+            ah.log_message("SYSTEM", "", "Started", "HL7 listener on 0.0.0.0:%d" % port)
+        except Exception as e:
+            ah.log_message("SYSTEM", "", "Error", "HL7 listener failed on port %d: %s" % (port, e))
+            return
+        while not stop.is_set():
+            try:
+                c, a = s.accept()
+            except _sk.timeout:
+                continue
+            except OSError:
+                break
+            _th.Thread(target=_hl7_handle, args=(c, a), daemon=True).start()
+        try: s.close()
+        except Exception: pass
+
+    def _hl7_stop():
+        _HL7["stop"].set()
+        if _HL7["sock"]:
+            try: _HL7["sock"].close()
+            except Exception: pass
+        _HL7["thread"], _HL7["sock"], _HL7["port"] = None, None, 0
+
+    def _hl7_start(port):
+        if _HL7["thread"] and _HL7["thread"].is_alive() and _HL7["port"] == port:
+            return True
+        _hl7_stop()
+        _HL7["stop"] = _th.Event()
+        _HL7["port"] = port
+        t = _th.Thread(target=_hl7_serve, args=(port, _HL7["stop"], _HL7), daemon=True)
+        _HL7["thread"] = t
+        t.start()
+        return True
+
+    class _SerialConn:
+        """يخلّي منفذ COM يتصرف مثل socket حتى يستخدم نفس معالج ASTM الموجود (ENQ/ACK/STX...)."""
+        def __init__(self, ser):
+            self.ser = ser
+        def settimeout(self, t):
+            self.ser.timeout = t
+        def recv(self, n):
+            d = self.ser.read(1)
+            if not d:
+                raise _sk.timeout()
+            try:
+                w = self.ser.in_waiting
+            except Exception:
+                w = 0
+            if w:
+                d += self.ser.read(min(w, n - 1))
+            return d
+        def sendall(self, b):
+            self.ser.write(b)
+            try: self.ser.flush()
+            except Exception: pass
+        def close(self):
+            pass
+
+    def _serial_loop(port, baud, stop, st):
+        ah = _ah()
+        import serial
+        while not stop.is_set():
+            try:
+                ser = serial.Serial(port, baud, bytesize=8, parity="N", stopbits=1, timeout=1)
+            except Exception as e:
+                st["status"] = "تعذّر فتح %s: %s" % (port, e)
+                stop.wait(5)
+                continue
+            st["status"] = "متصل"
+            ah.log_message("SYSTEM", "", "Started", "Serial ASTM on %s @ %d" % (port, baud))
+            try:
+                while not stop.is_set():
+                    ah._handle_connection(_SerialConn(ser), (port, 0))
+            except Exception as e:
+                st["status"] = "خطأ: %s" % e
+            finally:
+                try: ser.close()
+                except Exception: pass
+            stop.wait(2)
+
+    def _serial_start(port, baud):
+        try:
+            import serial  # noqa: F401
+        except Exception:
+            return False, "مكتبة pyserial غير متوفرة بهذه النسخة من البرنامج."
+        cur = _SER.get(port)
+        if cur and cur["thread"].is_alive() and cur["baud"] == baud:
+            return True, ""
+        _serial_stop(port)
+        st = {"stop": _th.Event(), "baud": baud, "status": "جاري الاتصال"}
+        st["thread"] = _th.Thread(target=_serial_loop, args=(port, baud, st["stop"], st), daemon=True)
+        _SER[port] = st
+        st["thread"].start()
+        return True, ""
+
+    def _serial_stop(port):
+        cur = _SER.pop(port, None)
+        if cur:
+            cur["stop"].set()
+
+    def _cfg_get(key, default=""):
+        db = get_db()
+        try:
+            return get_setting(db, key, default)
+        finally:
+            try: db.close()
+            except Exception: pass
+
+    def _cfg_set(key, val):
+        db = get_db()
+        try:
+            set_setting(db, key, val)
+            db.commit()
+        finally:
+            try: db.close()
+            except Exception: pass
+
+
+    # ---------------------------------------------------------------- تعلّم تلقائي: رموز الجهاز غير المربوطة تُربط بالمعاملات (بالاسم/الأسماء الشائعة) وتُعاد معالجة العينة
+    _AUTO = {"thread": None, "stop": _th.Event(), "last": 0}
+
+    def _anorm(c):
+        return re.sub(r"[^a-z0-9#%]", "", (c or "").lower())
+
+    def _auto_param_index():
+        idx = {}
+        for p in _rows("SELECT id, name FROM test_parameters WHERE result_type='Numeric'"):
+            for nm in [p["name"]] + _alias_codes(p["name"]):
+                k = _anorm(nm)
+                if k:
+                    idx.setdefault(k, [])
+                    if p["id"] not in idx[k]:
+                        idx[k].append(p["id"])
+        return idx
+
+    def _auto_tick():
+        ah = _ah()
+        rows = _rows("SELECT id, raw_message rm, parsed_summary ps FROM host_interface_log WHERE direction='IN' AND id>? AND parsed_summary LIKE '%Unmatched:%' ORDER BY id LIMIT 20", (_AUTO["last"],))
+        if not rows:
+            return
+        idx = None
+        for r in rows:
+            _AUTO["last"] = max(_AUTO["last"], r["id"])
+            codes = []
+            for part in (r["ps"] or "").split("Unmatched:", 1)[1].split(";"):
+                part = part.strip()
+                if not part or "(" in part:       # (specimen ...) = مشكلة عينة وليس رمز
+                    continue
+                fld = part.split("=", 1)[0]
+                ps = [x for x in fld.replace("[HL7]", "").split("^") if x.strip()]
+                codes.append((ps[-1] if ps else fld).strip())
+            sender = ""
+            try:
+                h = (r["rm"] or "").split(" | ")[0].split("|")
+                sender = (h[4].split("^")[0] if len(h) > 4 else "").strip()[:40]
+            except Exception:
+                pass
+            added = []
+            db = get_db()
+            try:
+                for code in codes:
+                    if not code or db.execute("SELECT 1 FROM mapcodes WHERE receive_enabled=1 AND machine_code=? COLLATE NOCASE LIMIT 1", (code,)).fetchone():
+                        continue
+                    idx = idx or _auto_param_index()
+                    for pid in idx.get(_anorm(code), [])[:6]:
+                        db.execute("INSERT INTO mapcodes (test_parameter_id, machine_name, machine_code, send_enabled, receive_enabled) VALUES (?,?,?,0,1)", (pid, sender or "auto", code))
+                        added.append(code)
+                db.commit()
+            finally:
+                try: db.close()
+                except Exception: pass
+            if added:
+                try:
+                    recs = [x for x in (r["rm"] or "").replace(" | ", "\r").split("\r")]
+                    summary, status = ah.process_astm_message(recs)
+                    ah.log_message("IN", "[AUTO] reprocess", status, "[AUTO-LEARN] ربط %s ثم أُعيدت المعالجة: %s" % (", ".join(sorted(set(added))), summary))
+                except Exception as e:
+                    ah.log_message("IN", "[AUTO] reprocess", "Error", "[AUTO-LEARN] %s" % e)
+
+    def _auto_loop(stop):
+        try:
+            row = _rows("SELECT COALESCE(MAX(id),0) m FROM host_interface_log")
+            _AUTO["last"] = row[0]["m"] if row else 0
+        except Exception:
+            _AUTO["last"] = 0
+        while not stop.is_set():
+            try:
+                if _plus_flag("autolearn"):
+                    _auto_tick()
+            except Exception as e:
+                print("LIS-PLUS autolearn:", e)
+            try:
+                iv = float(_cfg_get("plus_autolearn_interval", "4") or 4)
+            except Exception:
+                iv = 4
+            stop.wait(max(0.5, iv))
+
+    def _auto_start():
+        if _AUTO["thread"] and _AUTO["thread"].is_alive():
+            return
+        _AUTO["stop"] = _th.Event()
+        _AUTO["thread"] = _th.Thread(target=_auto_loop, args=(_AUTO["stop"],), daemon=True)
+        _AUTO["thread"].start()
+
+    def _bridges_boot():
+        """يشغّل الجسور المفعّلة عند بدء البرنامج."""
+        try:
+            _auto_start()
+        except Exception as e:
+            print("LIS-PLUS autolearn boot:", e)
+        try:
+            if _cfg_get("plus_hl7_enabled", "0") == "1":
+                _hl7_start(int(_cfg_get("plus_hl7_port", "2575") or 2575))
+        except Exception as e:
+            print("LIS-PLUS hl7 boot:", e)
+        try:
+            for c in json.loads(_cfg_get("plus_serial_cfg", "[]") or "[]"):
+                _serial_start(c["port"], int(c.get("baud") or 9600))
+        except Exception as e:
+            print("LIS-PLUS serial boot:", e)
+
+    def _local_ip():
+        try:
+            s = _sk.socket(_sk.AF_INET, _sk.SOCK_DGRAM)
+            s.connect(("10.255.255.255", 1))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            try:
+                return _sk.gethostbyname(_sk.gethostname())
+            except Exception:
+                return "127.0.0.1"
+
+    def _local_ips():
+        ips = set()
+        try:
+            ips.update(_sk.gethostbyname_ex(_sk.gethostname())[2])
+        except Exception:
+            pass
+        try:
+            ips.add(_local_ip())
+        except Exception:
+            pass
+        ips.discard("127.0.0.1")
+        return sorted(ips)
+
+    def _bridge_status():
+        ah = _ah()
+        th = getattr(ah, "_server_thread", None)
+        ser_ok = True
+        try:
+            import serial  # noqa: F401
+        except Exception:
+            ser_ok = False
+        return {
+            "ip": _local_ip(),
+            "astm": {"enabled": _cfg_get("host_listener_enabled", "0") == "1", "port": int(_cfg_get("host_listener_port", "5000") or 5000), "alive": bool(th and th.is_alive())},
+            "hl7": {"enabled": _cfg_get("plus_hl7_enabled", "0") == "1", "port": int(_cfg_get("plus_hl7_port", "2575") or 2575), "alive": bool(_HL7["thread"] and _HL7["thread"].is_alive())},
+            "serial": {"available": ser_ok, "ports": [{"port": p, "baud": v["baud"], "status": v["status"]} for p, v in _SER.items()]},
+        }
+
+
+    # مكتبة أجهزة مدمجة (تعمل بدون إنترنت). معلومات مبدئية من المعرفة العامة — تبقى «تحتاج تحقق» حتى تُجرّب مع الجهاز الفعلي.
+    _DEVICE_LIB = [
+        {"keys": [r"dxh", r"hx ?5", r"beckman", r"coulter"], "name": "Beckman Coulter DxH", "type": "عدّاد دم كامل (CBC)", "protocol": "ASTM E1381/E1394 عبر TCP/IP", "kind": "astm",
+         "default_baud": 0, "default_port": 5000, "direction": "ثنائي الاتجاه (يسأل عن العينة بالباركود)", "confidence": "high",
+         "notes_ar": "مدعوم أصلاً بمستمع ASTM في برنامجك. في الجهاز: Setup > LIS Setup: Protocol=TCP/IP، Host Address = IP الحاسبة، Port = منفذ البرنامج، ثم Enable Host + Ethernet، ومن Communication Setup اضغط Transmit Setup."},
+        {"keys": [r"mindray.*bc", r"\bbc-?\d{2,4}"], "name": "Mindray BC (دم كامل)", "type": "عدّاد دم كامل (CBC)", "protocol": "HL7 عبر TCP/IP", "kind": "hl7",
+         "default_baud": 0, "default_port": 2575, "direction": "أحادي الاتجاه غالباً", "confidence": "medium",
+         "notes_ar": "أغلب أجهزة Mindray BC ترسل HL7. في الجهاز: Setup > Communication/LIS، اختر HL7 وأدخل IP الحاسبة والمنفذ."},
+        {"keys": [r"mindray.*bs", r"\bbs-?\d{2,4}"], "name": "Mindray BS (كيمياء)", "type": "جهاز كيمياء", "protocol": "ASTM أو HL7 (شبكة أو COM)", "kind": "astm",
+         "default_baud": 9600, "default_port": 5000, "direction": "ثنائي الاتجاه غالباً", "confidence": "low",
+         "notes_ar": "راجع دليل الجهاز لمعرفة البروتوكول المفعّل (ASTM أو HL7) قبل الاعتماد."},
+        {"keys": [r"e ?411", r"cobas ?e"], "name": "Roche cobas e 411", "type": "مناعة/هرمونات", "protocol": "ASTM عبر RS-232 (منفذ COM)", "kind": "serial",
+         "default_baud": 9600, "default_port": 0, "direction": "ثنائي الاتجاه (يسأل عن العينة)", "confidence": "medium",
+         "notes_ar": "يحتاج كيبل تسلسلي وتفعيل pyserial في نسخة البرنامج. راجع دليل الجهاز للسرعة والتكافؤ."},
+        {"keys": [r"cobas", r"c ?green", r"\bpure\b", r"c ?\d{3}"], "name": "Roche cobas (كيمياء)", "type": "جهاز كيمياء", "protocol": "ASTM/HL7 (حسب الإعداد، غالباً عبر وسيط cobas)", "kind": "astm",
+         "default_baud": 0, "default_port": 5000, "direction": "ثنائي الاتجاه", "confidence": "low",
+         "notes_ar": "بعض أجهزة cobas تحتاج وسيطاً أو ترخيص واجهة LIS من روش. أرسل لي رسالة التقاط حقيقية من الجهاز لأثبّت الإعداد."},
+        {"keys": [r"abbott", r"alinity", r"architect", r"\bci ?\d{4}"], "name": "Abbott (Alinity / Architect)", "type": "كيمياء/مناعة", "protocol": "ASTM E1394 عبر TCP/IP", "kind": "astm",
+         "default_baud": 0, "default_port": 5000, "direction": "ثنائي الاتجاه", "confidence": "medium",
+         "notes_ar": "فعّل واجهة LIS (Host) في الجهاز واكتب IP الحاسبة والمنفذ. بعض الموديلات تتطلب ترخيص LIS."},
+        {"keys": [r"alegria", r"orgentec"], "name": "ALEGRIA (Orgentec)", "type": "مناعة/أمراض ذاتية", "protocol": "تسلسلي/ASTM — غير مؤكد", "kind": "serial",
+         "default_baud": 9600, "default_port": 0, "direction": "غير معروف", "confidence": "low",
+         "notes_ar": "غير مؤكد من هذا الجهاز. أرسل لي دليل واجهة الـLIS أو رسالة التقاط حقيقية لأضبطه."},
+    ]
+
+    def _lib_match(brand, model):
+        t = ("%s %s" % (brand or "", model or "")).lower()
+        for e in _DEVICE_LIB:
+            if any(re.search(k, t) for k in e["keys"]):
+                return e
+        return None
+
+    # أسماء بديلة شائعة لرموز CBC عند أغلب الأجهزة (Beckman/Mindray/Abbott/Sysmex) — تُضاف كأكواد إضافية للمعامل نفسه.
+    _ALIASES = {
+        "wbcs": ["WBC"], "wbc": ["WBCs"], "ly": ["LY%", "LYM%", "LYMPH%"], "mo": ["MO%", "MON%", "MONO%"], "ne": ["NE%", "NEU%", "GRA%", "GR%", "NEUT%"],
+        "eo": ["EO%", "EOS%"], "ba": ["BA%", "BAS%"], "ly#": ["LYM#", "LYMPH#"], "mo#": ["MON#", "MONO#"], "ne#": ["NEU#", "GRA#", "GR#", "NEUT#"],
+        "eo#": ["EOS#"], "ba#": ["BAS#"], "hgb": ["HB"], "hct": ["PCV"], "rdw": ["RDW-CV", "RDWCV"], "rdw-sd": ["RDWSD"],
+    }
+    def _alias_codes(pname):
+        return _ALIASES.get((pname or "").strip().lower(), [])
+
+    def _clean_code(c):
+        return re.sub(r"[^A-Za-z0-9_.\-/%# +]", "", str(c or "")).strip()[:24]
+
+    def _ai_param_codes(brand, model, params):
+        """يرجّع {param_id: (code, confidence)} — الذكاء يقترح الرمز الذي يرسله الجهاز لكل معامل."""
+        cfg = _cfg()
+        if not cfg["enabled"] or not cfg["key"]:
+            return {}, "الذكاء الصناعي غير مفعّل — استُخدمت أسماء المعاملات كرموز مبدئية."
+        out, note = {}, ""
+        sysm = ("أنت مهندس ربط أجهزة مختبرات. للجهاز المذكور، أعطني رمز الفحص الذي يرسله الجهاز فعلياً (ASTM أو HL7) لكل معامل في القائمة. "
+                'أجب بـ JSON فقط: [{"param_id":12,"code":"WBC","confidence":"high|medium|low"}]. '
+                "إذا لم تكن متأكداً من رمز معامل اجعل code=null. لا تخترع رموزاً. استخدم الأرقام param_id كما هي.")
+        for i in range(0, min(len(params), 160), 40):
+            chunk = params[i:i + 40]
+            try:
+                lst = "\n".join("%s | %s — %s" % (p["id"], p["tname"], p["name"]) for p in chunk)
+                txt = _call_ai(cfg, sysm, [{"role": "user", "content": "الجهاز: %s %s\nالمعاملات (param_id | الفحص — المعامل):\n%s" % (brand, model, lst)}])
+                ids = {p["id"] for p in chunk}
+                for m in _json_from_ai_plain(txt):
+                    try:
+                        pid = int(m.get("param_id"))
+                    except Exception:
+                        continue
+                    c = _clean_code(m.get("code"))
+                    if pid in ids and c:
+                        out[pid] = (c, str(m.get("confidence") or "low"))
+            except _AIErr as e:
+                note = str(e)
+                break
+            except Exception:
+                note = "ردّ الذكاء غير مفهوم لبعض المعاملات."
+        return out, note
+
+    def _json_from_ai_plain(txt):
+        t = (txt or "").strip()
+        t = re.sub(r"^```(?:json)?|```$", "", t, flags=re.M).strip()
+        k, l = t.find("["), t.rfind("]")
+        return json.loads(t[k:l + 1])
+
+    def _unmatched_codes(limit=60):
+        """رموز الجهاز التي وصلت ولم تُطابق (من سجل Host Interface)."""
+        rows = _rows("SELECT parsed_summary ps FROM host_interface_log WHERE direction='IN' AND parsed_summary LIKE '%Unmatched:%' ORDER BY id DESC LIMIT ?", (limit,))
+        seen, out = set(), []
+        for r in rows:
+            ps = r["ps"] or ""
+            if "Unmatched:" not in ps:
+                continue
+            for part in ps.split("Unmatched:", 1)[1].split(";"):
+                part = part.strip()
+                if not part or "specimen" in part.lower():
+                    continue
+                fld = part.split("=", 1)[0]
+                parts = [x for x in fld.replace("[HL7]", "").split("^") if x.strip()]
+                code = (parts[-1] if parts else fld).strip()
+                if code and code.lower() not in seen:
+                    seen.add(code.lower()); out.append(code)
+        return out
+
+    def _plus_routes():
+        from flask import Blueprint
+        bp2 = Blueprint("lis_plus", __name__)
+        _fc = {"t": 0, "v": None}
+
+        def _flags_cached():
+            if _fc["v"] is None or time.time() - _fc["t"] > 15:
+                _fc["v"], _fc["t"] = _plus_flags(), time.time()
+            return _fc["v"]
+
+        def _guard(flag=None, page=False):
+            if not _lab_ok():
+                if page:
+                    return Response("<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;padding:20px'>هذه الصفحة لواجهة المختبر فقط — سجّل الدخول بواجهة «مختبر» أو «الاثنين معًا».</body>", 401, mimetype="text/html")
+                return jsonify(ok=False, error="متاح لواجهة المختبر فقط."), 401
+            if flag and not _plus_flag(flag):
+                if page:
+                    return Response("<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;padding:20px'>هذه الميزة متوقفة من «إعدادات الإضافات». <a href='/plus/settings'>فتح الإعدادات</a></body>", 403, mimetype="text/html")
+                return jsonify(ok=False, error="الميزة متوقفة من الإعدادات."), 403
+            try:
+                _plus_ensure()
+            except Exception:
+                pass
+            return None
+
+        def _shell(title, body, script=""):
+            return ("<!doctype html><html lang='ar' dir='rtl'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>" + title + "</title>"
+                    "<style>*{box-sizing:border-box}body{font-family:Tahoma,Segoe UI,sans-serif;background:#f4f8f7;margin:0;color:#16302b}"
+                    ".top{background:#0f766e;color:#fff;padding:10px 18px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}.top a{color:#d6f5ef;text-decoration:none;font-size:14px}.top a:hover{color:#fff}.top b{font-size:17px;margin-inline-end:auto}"
+                    ".w{max-width:1100px;margin:18px auto;padding:0 14px}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 2px 10px rgba(0,0,0,.07)}"
+                    "h2{margin:0 0 10px;font-size:18px}table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:8px;border-bottom:1px solid #e6eeec;text-align:right;vertical-align:top}th{background:#f0f6f5}"
+                    "input,select,textarea{padding:8px;border:1px solid #c8d6d3;border-radius:8px;font:inherit}button{background:#0f766e;color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit}button.s{background:#e8f1ef;color:#0f4f49}button.d{background:#fde8e8;color:#b42318}"
+                    ".row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}.b{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;color:#fff}.ok{background:#16a34a}.low{background:#d97706}.out{background:#dc2626}.warn{background:#d97706}.fail{background:#dc2626}"
+                    ".chip{display:inline-block;background:#e8f1ef;border-radius:99px;padding:2px 10px;margin:2px;font-size:12px}.muted{color:#6b7f7b;font-size:13px}pre{white-space:pre-wrap;background:#f7faf9;padding:10px;border-radius:8px}</style></head><body>"
+                    "<div class='top'><b>🧩 " + title + "</b><a href='/'>↩ البرنامج</a><a href='/plus/inventory'>📦 المخزون</a><a href='/plus/qc'>🧪 الجودة</a><a href='/plus/charts'>📈 الرسوم</a><a href='/plus/devices'>🔌 الأجهزة</a><a href='/plus/settings'>⚙ الإعدادات</a></div>"
+                    "<div class='w'>" + body + "</div><script>function $(i){return document.getElementById(i)}function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;')}"
+                    "function api(u,b){return fetch(u,b===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json()})}" + script + "</script></body></html>")
+
+        def _j():
+            return request.get_json(silent=True) or {}
+
+        def _num(v, d=0.0):
+            try:
+                return float(v)
+            except Exception:
+                return d
+
+        # ------------------------------------------------------------ settings
+        @bp2.route("/plus/api/settings", methods=["GET", "POST"])
+        def plus_settings_api():
+            g = _guard()
+            if g: return g
+            if request.method == "POST":
+                d = _j()
+                db = get_db()
+                try:
+                    for n in _PLUS_FLAGS:
+                        if n in d:
+                            set_setting(db, "plus_" + n, "1" if d[n] else "0")
+                    if "critical_flags" in d:
+                        set_setting(db, "plus_critical_flags", re.sub(r"[^A-Za-z0-9_,\- ]", "", str(d["critical_flags"]))[:120] or _CRIT_DEFAULT)
+                finally:
+                    try: db.close()
+                    except Exception: pass
+                _fc["v"] = None
+            db = get_db()
+            try:
+                cf = get_setting(db, "plus_critical_flags", _CRIT_DEFAULT) or _CRIT_DEFAULT
+            finally:
+                try: db.close()
+                except Exception: pass
+            return jsonify(ok=True, flags=_plus_flags(), critical_flags=cf)
+
+        @bp2.route("/plus/settings")
+        def plus_settings_page():
+            g = _guard(page=True)
+            if g: return g
+            body = ("<div class='card'><h2>إعدادات الإضافات</h2><p class='muted'>أوقف أي ميزة لا تحتاجها؛ الإيقاف يخفيها ولا يحذف بياناتها.</p>"
+                    "<div id='fl'></div><div class='row'><label>رموز النتائج الحرجة (تُفصل بفاصلة):</label><input id='cf' size='30'></div>"
+                    "<p class='muted'>تُعتبر النتيجة حرجة إذا احتوى رمزها (flag) على أي كلمة من هذه القائمة. إذا ما ظهرت تنبيهات حرجة عندكم، أضف رمز التنبيه الذي يستخدمه برنامجكم.</p>"
+                    "<div class='row'><button id='sv'>حفظ</button><a href='/ai/settings'>⚙ إعدادات الذكاء الصناعي</a><span id='r' class='muted'></span></div></div>")
+            script = r"""
+    var NAMES={inventory:'📦 المخزون ومواد المختبر',qc:'🧪 ضبط الجودة (QC)',alerts:'🔔 تنبيهات الشاشة الرئيسية',charts:'📈 الرسوم البيانية',devices:'🔌 ربط الأجهزة بالذكاء',ai_summary:'🧠 ملخص المريض بالذكاء',ai_test_btn:'🧠 زر تحليل الفحص بالذكاء',autolearn:'🤖 تعلّم تلقائي لرموز الجهاز (يربط الرموز الجديدة ويعيد معالجة العينة)'};
+    api('/plus/api/settings').then(function(j){var h='';Object.keys(NAMES).forEach(function(k){h+='<div class="row"><label><input type="checkbox" id="f_'+k+'" '+(j.flags[k]?'checked':'')+'> '+NAMES[k]+'</label></div>'});$('fl').innerHTML=h;$('cf').value=j.critical_flags});
+    $('sv').onclick=function(){var b={critical_flags:$('cf').value};Object.keys(NAMES).forEach(function(k){b[k]=$('f_'+k).checked});api('/plus/api/settings',b).then(function(j){$('r').textContent=j.ok?'تم الحفظ ✓ (حدّث الصفحة الرئيسية لتظهر التغييرات)':'فشل الحفظ'})};
+    """
+            return Response(_shell("إعدادات الإضافات", body, script), mimetype="text/html")
+
+        @bp2.route("/plus/api/tests")
+        def plus_tests_api():
+            g = _guard()
+            if g: return g
+            try:
+                return jsonify(ok=True, tests=_rows("SELECT id, name FROM test_definitions ORDER BY name"))
+            except Exception:
+                return jsonify(ok=True, tests=[])
+
+        # ------------------------------------------------------------ inventory
+        @bp2.route("/plus/api/inventory")
+        def plus_inv_list():
+            g = _guard("inventory")
+            if g: return g
+            return jsonify(ok=True, items=_stock_rows())
+
+        @bp2.route("/plus/api/inventory/<act>", methods=["POST"])
+        def plus_inv_act(act):
+            g = _guard("inventory")
+            if g: return g
+            d = _j()
+            iid = int(_num(d.get("id")))
+            if act == "add":
+                name = (d.get("name") or "").strip()[:120]
+                if not name:
+                    return jsonify(ok=False, error="اكتب اسم المادة.")
+                _exec("INSERT INTO plus_items(name,unit,base_qty,base_at,min_qty,created_at) VALUES(?,?,?,?,?,?)",
+                      (name, (d.get("unit") or "")[:20], _num(d.get("qty")), _now(), _num(d.get("min")), _now()))
+            elif act in ("receive", "count"):
+                row = [x for x in _stock_rows() if x["id"] == iid]
+                if not row:
+                    return jsonify(ok=False, error="المادة غير موجودة.")
+                q = _num(d.get("qty"))
+                new = row[0]["remaining"] + q if act == "receive" else q
+                _exec("UPDATE plus_items SET base_qty=?, base_at=? WHERE id=?", (new, _now(), iid))
+                _exec("INSERT INTO plus_stock_log(item_id,delta,reason,ts) VALUES(?,?,?,?)", (iid, q if act == "receive" else new - row[0]["remaining"], act, _now()))
+            elif act == "min":
+                _exec("UPDATE plus_items SET min_qty=? WHERE id=?", (_num(d.get("min")), iid))
+            elif act == "link":
+                tid = int(_num(d.get("test_id")))
+                if not tid:
+                    return jsonify(ok=False, error="اختر فحصاً.")
+                _exec("INSERT INTO plus_item_links(item_id,test_definition_id,per_test) VALUES(?,?,?)", (iid, tid, _num(d.get("per_test"), 1)))
+            elif act == "unlink":
+                _exec("DELETE FROM plus_item_links WHERE id=?", (int(_num(d.get("link_id"))),))
+            elif act == "delete":
+                _exec("DELETE FROM plus_item_links WHERE item_id=?", (iid,))
+                _exec("DELETE FROM plus_items WHERE id=?", (iid,))
+            else:
+                return jsonify(ok=False, error="إجراء غير معروف."), 400
+            return jsonify(ok=True)
+
+        @bp2.route("/plus/inventory")
+        def plus_inv_page():
+            g = _guard("inventory", page=True)
+            if g: return g
+            body = ("<div class='card'><h2>➕ إضافة مادة</h2><div class='row'><input id='n' placeholder='اسم المادة (مثال: كاشف الكلوكوز)'><input id='u' placeholder='الوحدة (مل/اختبار/علبة)' size='14'>"
+                    "<input id='q' type='number' step='any' placeholder='الكمية الحالية' size='12'><input id='m' type='number' step='any' placeholder='حد التنبيه' size='10'><button id='add'>إضافة</button></div>"
+                    "<p class='muted'>الكمية المتبقية تُحسب تلقائياً: الكمية عند آخر جرد/استلام − (عدد الفحوصات المنجزة المرتبطة × الاستهلاك لكل فحص). اعمل «جرد» دورياً لتصحيحها.</p></div>"
+                    "<div class='card'><h2>📦 المواد</h2><div id='list'>جاري التحميل…</div></div>")
+            script = r"""
+    var TESTS=[];
+    function load(){api('/plus/api/inventory').then(function(j){if(!j.ok){$('list').textContent=j.error;return}
+     var ST={ok:'متوفر',low:'ناقص قريباً',out:'نفد'};
+     if(!j.items.length){$('list').innerHTML='<p class="muted">لا توجد مواد بعد.</p>';return}
+     var h='<table><tr><th>المادة</th><th>المتبقي</th><th>الحد</th><th>الحالة</th><th>الفحوصات المرتبطة (استهلاك لكل فحص)</th><th></th></tr>';
+     j.items.forEach(function(x){var lk='';x.links.forEach(function(l){lk+='<span class="chip">'+esc(l.tname||('#'+l.tid))+' × '+l.per+' <a href="#" data-un="'+l.lid+'">✕</a></span>'});
+      h+='<tr><td><b>'+esc(x.name)+'</b><div class="muted">منذ '+esc((x.base_at||'').slice(0,10))+' استُهلك '+x.used+'</div></td><td><b>'+x.remaining+'</b> '+esc(x.unit)+'</td><td>'+x.min+'</td><td><span class="b '+x.status+'">'+ST[x.status]+'</span></td><td>'+lk+
+      '<div class="row"><select id="t'+x.id+'"><option value="">— اختر فحص —</option>'+TESTS.map(function(t){return '<option value="'+t.id+'">'+esc(t.name)+'</option>'}).join('')+'</select><input id="p'+x.id+'" type="number" step="any" value="1" size="4" style="width:70px"><button class="s" data-ln="'+x.id+'">ربط</button></div></td>'+
+      '<td><button class="s" data-rc="'+x.id+'">استلام +</button> <button class="s" data-ct="'+x.id+'">جرد</button> <button class="s" data-mn="'+x.id+'">الحد</button> <button class="d" data-dl="'+x.id+'">حذف</button></td></tr>'});
+     $('list').innerHTML=h+'</table>'})}
+    document.addEventListener('click',function(e){var t=e.target,a;
+     if(a=t.getAttribute('data-un')){e.preventDefault();api('/plus/api/inventory/unlink',{link_id:a}).then(load)}
+     else if(a=t.getAttribute('data-ln')){api('/plus/api/inventory/link',{id:a,test_id:$('t'+a).value,per_test:$('p'+a).value}).then(function(j){if(!j.ok)alert(j.error);load()})}
+     else if(a=t.getAttribute('data-rc')){var v=prompt('الكمية المستلمة؟');if(v)api('/plus/api/inventory/receive',{id:a,qty:v}).then(load)}
+     else if(a=t.getAttribute('data-ct')){var v2=prompt('الكمية الفعلية الموجودة الآن (جرد)؟');if(v2!==null&&v2!=='')api('/plus/api/inventory/count',{id:a,qty:v2}).then(load)}
+     else if(a=t.getAttribute('data-mn')){var v3=prompt('حد التنبيه (ينبّه عند الوصول له)؟');if(v3!==null&&v3!=='')api('/plus/api/inventory/min',{id:a,min:v3}).then(load)}
+     else if(a=t.getAttribute('data-dl')){if(confirm('حذف المادة وروابطها؟'))api('/plus/api/inventory/delete',{id:a}).then(load)}});
+    $('add').onclick=function(){api('/plus/api/inventory/add',{name:$('n').value,unit:$('u').value,qty:$('q').value,min:$('m').value}).then(function(j){if(!j.ok)alert(j.error);else{$('n').value='';load()}})};
+    api('/plus/api/tests').then(function(j){TESTS=j.tests||[];load()});
+    """
+            return Response(_shell("المخزون ومواد المختبر", body, script), mimetype="text/html")
+
+        # ------------------------------------------------------------ QC
+        def _qc_payload():
+            out = []
+            for c in _rows("SELECT * FROM plus_qc_ctrl WHERE active=1 ORDER BY test, level"):
+                runs = _rows("SELECT * FROM plus_qc_runs WHERE ctrl_id=? ORDER BY id DESC LIMIT 30", (c["id"],))
+                c["runs"] = list(reversed(runs))
+                out.append(c)
+            return out
+
+        @bp2.route("/plus/api/qc")
+        def plus_qc_list():
+            g = _guard("qc")
+            if g: return g
+            return jsonify(ok=True, controls=_qc_payload())
+
+        @bp2.route("/plus/api/qc/<act>", methods=["POST"])
+        def plus_qc_act(act):
+            g = _guard("qc")
+            if g: return g
+            d = _j()
+            if act == "ctrl":
+                test = (d.get("test") or "").strip()[:80]
+                mean, sd = _num(d.get("mean")), _num(d.get("sd"))
+                if not test or sd <= 0:
+                    return jsonify(ok=False, error="اكتب اسم الفحص والمتوسط والانحراف المعياري (SD أكبر من صفر).")
+                _exec("INSERT INTO plus_qc_ctrl(test,level,mean,sd,unit) VALUES(?,?,?,?,?)", (test, (d.get("level") or "")[:20], mean, sd, (d.get("unit") or "")[:20]))
+            elif act == "run":
+                cid = int(_num(d.get("ctrl_id")))
+                c = _rows("SELECT * FROM plus_qc_ctrl WHERE id=?", (cid,))
+                if not c or d.get("value") in (None, ""):
+                    return jsonify(ok=False, error="اختر المادة الضابطة واكتب القيمة.")
+                v = _num(d.get("value"))
+                prev = [r["value"] for r in reversed(_rows("SELECT value FROM plus_qc_runs WHERE ctrl_id=? ORDER BY id DESC LIMIT 9", (cid,)))]
+                st, rule = _westgard(prev + [v], c[0]["mean"], c[0]["sd"])
+                _exec("INSERT INTO plus_qc_runs(ctrl_id,value,ts,operator,status,rule,note) VALUES(?,?,?,?,?,?,?)",
+                      (cid, v, _now(), (d.get("operator") or "")[:40], st, rule, (d.get("note") or "")[:200]))
+                return jsonify(ok=True, status=st, rule=rule)
+            elif act == "delete-ctrl":
+                _exec("UPDATE plus_qc_ctrl SET active=0 WHERE id=?", (int(_num(d.get("id"))),))
+            elif act == "delete-run":
+                _exec("DELETE FROM plus_qc_runs WHERE id=?", (int(_num(d.get("id"))),))
+            else:
+                return jsonify(ok=False, error="إجراء غير معروف."), 400
+            return jsonify(ok=True)
+
+        @bp2.route("/plus/qc")
+        def plus_qc_page():
+            g = _guard("qc", page=True)
+            if g: return g
+            body = ("<div class='card'><h2>➕ مادة ضابطة جديدة</h2><div class='row'><input id='t' placeholder='الفحص (مثال: Glucose)'><input id='l' placeholder='المستوى (L1/L2)' size='12'>"
+                    "<input id='mn' type='number' step='any' placeholder='المتوسط المستهدف' size='14'><input id='sd' type='number' step='any' placeholder='SD' size='8'><input id='un' placeholder='الوحدة' size='8'><button id='add'>إضافة</button></div>"
+                    "<p class='muted'>القواعد المطبّقة (Westgard): 1-2s تحذير، و1-3s / 2-2s / R-4s / 4-1s / 10x فشل. عند الفشل لا تُصدر نتائج الفحص حتى تُعالج السبب.</p></div><div id='list'>جاري التحميل…</div>")
+            script = r"""
+    function chart(c){var W=520,H=170,P=26,runs=c.runs,n=Math.max(runs.length,2),sd=c.sd,m=c.mean,lo=m-3.5*sd,hi=m+3.5*sd;
+     function y(v){return H-P-(Math.max(lo,Math.min(hi,v))-lo)/(hi-lo)*(H-2*P)}function x(i){return P+i*(W-2*P)/(n-1)}
+     var s='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:560px;background:#fafcfb;border-radius:8px">';
+     [[0,'#0f766e',2],[1,'#d97706',1],[-1,'#d97706',1],[2,'#dc2626',1],[-2,'#dc2626',1],[3,'#7f1d1d',1],[-3,'#7f1d1d',1]].forEach(function(l){var yy=y(m+l[0]*sd);s+='<line x1="'+P+'" x2="'+(W-P)+'" y1="'+yy+'" y2="'+yy+'" stroke="'+l[1]+'" stroke-width="'+l[2]+'" stroke-dasharray="'+(l[0]?'4 3':'0')+'"/><text x="2" y="'+(yy+3)+'" font-size="9" fill="#555">'+(l[0]?(l[0]>0?'+':'')+l[0]+'s':'م')+'</text>'});
+     var pts=runs.map(function(r,i){return x(i)+','+y(r.value)});if(pts.length>1)s+='<polyline fill="none" stroke="#0f766e" stroke-width="1.5" points="'+pts.join(' ')+'"/>';
+     runs.forEach(function(r,i){var col=r.status=='fail'?'#dc2626':r.status=='warn'?'#d97706':'#0f766e';s+='<circle cx="'+x(i)+'" cy="'+y(r.value)+'" r="4" fill="'+col+'"><title>'+r.value+' — '+esc((r.ts||'').slice(0,16))+'</title></circle>'});
+     return s+'</svg>'}
+    function load(){api('/plus/api/qc').then(function(j){if(!j.ok){$('list').textContent=j.error;return}
+     if(!j.controls.length){$('list').innerHTML='<div class="card muted">لا توجد مواد ضابطة بعد.</div>';return}
+     var h='';j.controls.forEach(function(c){var last=c.runs[c.runs.length-1],st=last?last.status:'';
+      h+='<div class="card"><h2>'+esc(c.test)+' '+esc(c.level)+' '+(st?'<span class="b '+st+'">'+(st=='ok'?'مقبول':st=='warn'?'تحذير '+esc(last.rule):'مرفوض '+esc(last.rule))+'</span>':'')+'</h2>'+
+      '<div class="muted">المتوسط '+c.mean+' · SD '+c.sd+' '+esc(c.unit)+' (المقبول '+(c.mean-2*c.sd).toFixed(2)+' – '+(c.mean+2*c.sd).toFixed(2)+')</div>'+chart(c)+
+      '<div class="row"><input id="v'+c.id+'" type="number" step="any" placeholder="قيمة القياس"><input id="o'+c.id+'" placeholder="الفني" size="10"><button data-run="'+c.id+'">تسجيل قياس</button><button class="d" data-dc="'+c.id+'">إيقاف المادة</button></div>'+
+      '<table><tr><th>الوقت</th><th>القيمة</th><th>الحالة</th><th>الفني</th><th></th></tr>'+c.runs.slice().reverse().slice(0,8).map(function(r){return '<tr><td>'+esc((r.ts||'').slice(0,16))+'</td><td>'+r.value+'</td><td><span class="b '+r.status+'">'+(r.status=='ok'?'مقبول':esc(r.rule))+'</span></td><td>'+esc(r.operator)+'</td><td><a href="#" data-dr="'+r.id+'">حذف</a></td></tr>'}).join('')+'</table></div>'});
+     $('list').innerHTML=h})}
+    document.addEventListener('click',function(e){var t=e.target,a;
+     if(a=t.getAttribute('data-run')){api('/plus/api/qc/run',{ctrl_id:a,value:$('v'+a).value,operator:$('o'+a).value}).then(function(j){if(!j.ok)alert(j.error);else if(j.status=='fail')alert('⚠ القياس مرفوض ('+j.rule+'). لا تُصدر نتائج هذا الفحص حتى تعالج السبب.');load()})}
+     else if(a=t.getAttribute('data-dc')){if(confirm('إيقاف هذه المادة؟'))api('/plus/api/qc/delete-ctrl',{id:a}).then(load)}
+     else if(a=t.getAttribute('data-dr')){e.preventDefault();api('/plus/api/qc/delete-run',{id:a}).then(load)}});
+    $('add').onclick=function(){api('/plus/api/qc/ctrl',{test:$('t').value,level:$('l').value,mean:$('mn').value,sd:$('sd').value,unit:$('un').value}).then(function(j){if(!j.ok)alert(j.error);else{$('t').value='';load()}})};
+    load();
+    """
+            return Response(_shell("ضبط الجودة (QC)", body, script), mimetype="text/html")
+
+        # ------------------------------------------------------------ alerts
+        @bp2.route("/plus/api/alerts")
+        def plus_alerts_api():
+            g = _guard("alerts")
+            if g: return g
+            return jsonify(ok=True, **_alerts())
+
+        # ------------------------------------------------------------ charts
+        @bp2.route("/plus/api/charts")
+        def plus_charts_api():
+            g = _guard("charts")
+            if g: return g
+            d1 = re.sub(r"[^0-9\-]", "", request.args.get("from", ""))[:10] or time.strftime("%Y-%m-%d", time.localtime(time.time() - 29 * 86400))
+            d2 = re.sub(r"[^0-9\-]", "", request.args.get("to", ""))[:10] or time.strftime("%Y-%m-%d")
+            out = {"ok": True, "daily": [], "top": [], "abn": []}
+            try:
+                vis = {r["d"]: r["n"] for r in _rows("SELECT date(created_at) d, COUNT(*) n FROM visits WHERE date(created_at) BETWEEN ? AND ? GROUP BY d", (d1, d2))}
+                tst = {r["d"]: r["n"] for r in _rows("SELECT date(v.created_at) d, COUNT(*) n FROM order_tests ot JOIN orders o ON o.id=ot.order_id JOIN visits v ON v.id=o.visit_id "
+                                                     "WHERE date(v.created_at) BETWEEN ? AND ? GROUP BY d", (d1, d2))}
+                for k in sorted(set(vis) | set(tst)):
+                    out["daily"].append({"d": k, "visits": vis.get(k, 0), "tests": tst.get(k, 0)})
+                out["top"] = _rows("SELECT td.name name, COUNT(*) n FROM order_tests ot JOIN orders o ON o.id=ot.order_id JOIN visits v ON v.id=o.visit_id "
+                                   "JOIN test_definitions td ON td.id=ot.test_definition_id WHERE date(v.created_at) BETWEEN ? AND ? GROUP BY td.id ORDER BY n DESC LIMIT 10", (d1, d2))
+                out["abn"] = _rows("SELECT td.name name, COUNT(DISTINCT ot.id) n, COUNT(DISTINCT CASE WHEN r.flag IS NOT NULL AND r.flag<>'Normal' THEN ot.id END) abn "
+                                   "FROM order_tests ot JOIN orders o ON o.id=ot.order_id JOIN visits v ON v.id=o.visit_id JOIN test_definitions td ON td.id=ot.test_definition_id "
+                                   "JOIN results r ON r.order_test_id=ot.id WHERE date(v.created_at) BETWEEN ? AND ? GROUP BY td.id HAVING n>=3 ORDER BY n DESC LIMIT 10", (d1, d2))
+            except Exception as e:
+                out["error"] = "تعذّر قراءة البيانات"
+            out["from"], out["to"] = d1, d2
+            return jsonify(out)
+
+        @bp2.route("/plus/charts")
+        def plus_charts_page():
+            g = _guard("charts", page=True)
+            if g: return g
+            body = ("<div class='card'><div class='row'><label>من</label><input id='a' type='date'><label>إلى</label><input id='b' type='date'><button id='go'>عرض</button>"
+                    "<button class='s' data-q='7'>7 أيام</button><button class='s' data-q='30'>30 يوماً</button><button class='s' data-q='90'>90 يوماً</button></div></div>"
+                    "<div class='card'><h2>الزيارات والفحوصات يومياً</h2><div id='c1'></div></div><div class='card'><h2>أكثر 10 فحوصات طلباً</h2><div id='c2'></div></div>"
+                    "<div class='card'><h2>نسبة النتائج غير الطبيعية لكل فحص</h2><div id='c3'></div></div>")
+            script = r"""
+    function bars(el,labels,series,colors,names){var W=1000,H=240,P=34,n=labels.length;if(!n){el.innerHTML='<p class="muted">لا توجد بيانات في هذه الفترة.</p>';return}
+     var mx=1;series.forEach(function(s){s.forEach(function(v){if(v>mx)mx=v})});var bw=(W-2*P)/n,k=series.length,w=Math.max(2,bw*0.8/k);
+     var s='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;background:#fafcfb;border-radius:8px">';
+     for(var g=0;g<=4;g++){var yy=H-P-(H-2*P)*g/4;s+='<line x1="'+P+'" x2="'+(W-P)+'" y1="'+yy+'" y2="'+yy+'" stroke="#e1ebe8"/><text x="4" y="'+(yy+3)+'" font-size="10" fill="#666">'+Math.round(mx*g/4)+'</text>'}
+     labels.forEach(function(l,i){series.forEach(function(sr,j){var h=(H-2*P)*sr[i]/mx,xx=P+i*bw+bw*0.1+j*w;s+='<rect x="'+xx+'" y="'+(H-P-h)+'" width="'+w+'" height="'+h+'" fill="'+colors[j]+'" rx="2"><title>'+esc(l)+': '+sr[i]+'</title></rect>'});
+      if(n<=31||i%Math.ceil(n/20)==0)s+='<text x="'+(P+i*bw+bw/2)+'" y="'+(H-P+12)+'" font-size="9" fill="#555" text-anchor="middle">'+esc(l.length>10?l.slice(5):l.slice(0,12))+'</text>'});
+     s+='</svg><div class="muted">'+names.map(function(nm,j){return '<span style="color:'+colors[j]+'">■</span> '+nm}).join(' &nbsp; ')+'</div>';el.innerHTML=s}
+    function load(){var q='?from='+($('a').value||'')+'&to='+($('b').value||'');api('/plus/api/charts'+q).then(function(j){if(!j.ok){$('c1').textContent=j.error;return}
+     if(!$('a').value){$('a').value=j.from;$('b').value=j.to}
+     bars($('c1'),j.daily.map(function(x){return x.d}),[j.daily.map(function(x){return x.visits}),j.daily.map(function(x){return x.tests})],['#0f766e','#d97706'],['زيارات','فحوصات']);
+     bars($('c2'),j.top.map(function(x){return x.name}),[j.top.map(function(x){return x.n})],['#0f766e'],['عدد الطلبات']);
+     bars($('c3'),j.abn.map(function(x){return x.name}),[j.abn.map(function(x){return Math.round(100*x.abn/x.n)})],['#dc2626'],['% غير طبيعي (فحوصات فيها 3 نتائج على الأقل)'])})}
+    $('go').onclick=load;document.addEventListener('click',function(e){var d=e.target.getAttribute('data-q');if(d){var t=new Date(),f=new Date(Date.now()-(+d-1)*864e5);function fm(x){return x.getFullYear()+'-'+('0'+(x.getMonth()+1)).slice(-2)+'-'+('0'+x.getDate()).slice(-2)}$('a').value=fm(f);$('b').value=fm(t);load()}});load();
+    """
+            return Response(_shell("الرسوم البيانية", body, script), mimetype="text/html")
+
+        # ------------------------------------------------------------ devices (AI)
+        def _json_from_ai(txt):
+            t = (txt or "").strip()
+            t = re.sub(r"^```(?:json)?|```$", "", t, flags=re.M).strip()
+            i, j = t.find("{"), t.rfind("}")
+            k, l = t.find("["), t.rfind("]")
+            if k != -1 and (i == -1 or k < i):
+                i, j = k, l
+            return json.loads(t[i:j + 1])
+
+        DEV_SYS = ("أنت مهندس أجهزة مختبرات طبية. أعطني بطاقة اتصال لجهاز التحليل المذكور. أجب بـ JSON فقط بلا أي نص آخر وبهذا الشكل: "
+                   '{"type":"نوع الجهاز بالعربية","protocol":"ASTM|HL7|Serial RS-232|TCP/IP|غير معروف","default_baud":9600,"default_port":0,'
+                   '"direction":"أحادي الاتجاه|ثنائي الاتجاه","notes_ar":"ملاحظات قصيرة","connection_steps_ar":["خطوة 1","خطوة 2"],'
+                   '"common_test_codes":[{"code":"WBC","name":"White Blood Cells"}],"confidence":"high|medium|low"}. '
+                   "إذا لم تتأكد من الجهاز اجعل confidence=low وprotocol=غير معروف ولا تخترع معلومات. لا تذكر أرقام منافذ أو سرعات إلا إذا كنت متأكداً من أنها الافتراضية للجهاز.")
+
+        @bp2.route("/plus/api/devices/ports")
+        def plus_dev_ports():
+            g = _guard("devices")
+            if g: return g
+            try:
+                from serial.tools import list_ports
+                return jsonify(ok=True, ports=[{"device": p.device, "desc": p.description, "hwid": p.hwid, "mfr": getattr(p, "manufacturer", "") or ""} for p in list_ports.comports()])
+            except Exception:
+                return jsonify(ok=False, error="تعذّر قراءة المنافذ (مكتبة pyserial غير متوفرة بهذه النسخة).")
+
+        @bp2.route("/plus/api/devices/identify", methods=["POST"])
+        def plus_dev_identify():
+            g = _guard("devices")
+            if g: return g
+            d = _j()
+            brand, model = (d.get("brand") or "").strip()[:60], (d.get("model") or "").strip()[:60]
+            extra = (d.get("hint") or "").strip()[:200]
+            if not (brand or model or extra):
+                return jsonify(ok=False, error="اكتب الشركة والموديل (أو اختر منفذاً).")
+            e = _lib_match(brand, model)
+            if e and not d.get("force_ai"):
+                p = {k: e[k] for k in ("type", "protocol", "default_baud", "default_port", "direction", "notes_ar", "confidence", "kind")}
+                p["connection_steps_ar"] = ["اربط الجهاز بالشبكة أو بالكيبل المناسب.", "من إعدادات الجهاز (LIS/Host) أدخل عنوان الحاسبة والمنفذ اللذين سيظهران بعد «اربط الجهاز».", "شغّل عينة تجريبية ثم اضغط «تعلّم من رسائل الجهاز»."]
+                p["common_test_codes"] = []
+                p["source"] = "library"
+                return jsonify(ok=True, profile=p, source="مكتبة مدمجة (تعمل بدون إنترنت)")
+            cfg = _cfg()
+            if not cfg["enabled"] or not cfg["key"]:
+                return jsonify(ok=False, error="الجهاز غير موجود بالمكتبة المدمجة، ويحتاج الذكاء الصناعي (إنترنت + مفتاح) للتعرّف عليه.")
+            try:
+                txt = _call_ai(cfg, DEV_SYS, [{"role": "user", "content": "الشركة: %s\nالموديل: %s\nمعلومة إضافية: %s" % (brand, model, extra)}])
+                return jsonify(ok=True, profile=_json_from_ai(txt))
+            except _AIErr as e:
+                return jsonify(ok=False, error=str(e))
+            except Exception:
+                return jsonify(ok=False, error="ما قدرت أفهم ردّ الذكاء. أعد المحاولة.")
+
+        @bp2.route("/plus/api/devices", methods=["GET"])
+        def plus_dev_list():
+            g = _guard("devices")
+            if g: return g
+            return jsonify(ok=True, devices=_rows("SELECT * FROM plus_devices ORDER BY id DESC"))
+
+        @bp2.route("/plus/api/devices/save", methods=["POST"])
+        def plus_dev_save():
+            g = _guard("devices")
+            if g: return g
+            d = _j()
+            did = _exec("INSERT INTO plus_devices(name,brand,model,profile,created_at) VALUES(?,?,?,?,?)",
+                        ((d.get("name") or d.get("model") or "جهاز")[:80], (d.get("brand") or "")[:60], (d.get("model") or "")[:60], json.dumps(d.get("profile") or {}, ensure_ascii=False), _now()))
+            return jsonify(ok=True, id=did)
+
+        @bp2.route("/plus/api/devices/<int:did>/delete", methods=["POST"])
+        def plus_dev_delete(did):
+            g = _guard("devices")
+            if g: return g
+            _exec("DELETE FROM plus_devices WHERE id=?", (did,))
+            return jsonify(ok=True)
+
+        @bp2.route("/plus/api/devices/<int:did>/mapping", methods=["POST"])
+        def plus_dev_mapping(did):
+            g = _guard("devices")
+            if g: return g
+            r = _rows("SELECT * FROM plus_devices WHERE id=?", (did,))
+            if not r:
+                return jsonify(ok=False, error="الجهاز غير موجود.")
+            try:
+                prof = json.loads(r[0]["profile"] or "{}")
+            except Exception:
+                prof = {}
+            codes = prof.get("common_test_codes") or []
+            if not codes:
+                return jsonify(ok=False, error="ما كو رموز فحوصات للجهاز. أعد «تعرّف بالذكاء» أولاً.")
+            try:
+                names = [x["name"] for x in _rows("SELECT name FROM test_definitions ORDER BY name LIMIT 400")]
+            except Exception:
+                names = []
+            cfg = _cfg()
+            if not cfg["enabled"] or not cfg["key"]:
+                return jsonify(ok=False, error="فعّل الذكاء الصناعي أولاً.")
+            sysm = ("طابق رموز فحوصات الجهاز مع أسماء فحوصات البرنامج. أجب بـ JSON فقط: قائمة كائنات "
+                    '[{"device_code":"WBC","program_test":"اسم مطابق بالضبط من القائمة أو null","confidence":"high|medium|low"}]. لا تخترع أسماء غير موجودة بالقائمة.')
+            try:
+                txt = _call_ai(cfg, sysm, [{"role": "user", "content": "رموز الجهاز:\n" + json.dumps(codes, ensure_ascii=False) + "\n\nفحوصات البرنامج:\n" + "\n".join(names)}])
+                mp = _json_from_ai(txt)
+                valid = set(names)
+                for m in mp:
+                    if m.get("program_test") not in valid:
+                        m["program_test"] = None
+                _exec("UPDATE plus_devices SET mapping=? WHERE id=?", (json.dumps(mp, ensure_ascii=False), did))
+                return jsonify(ok=True, mapping=mp)
+            except _AIErr as e:
+                return jsonify(ok=False, error=str(e))
+            except Exception:
+                return jsonify(ok=False, error="ما قدرت أفهم ردّ الذكاء. أعد المحاولة.")
+
+        # ------------------------------------------------------------ الربط الذكي للأجهزة (يستخدم mapcodes ومستمع ASTM الموجودين)
+        @bp2.route("/plus/api/bridge", methods=["GET"])
+        def plus_bridge_status():
+            g = _guard("devices")
+            if g: return g
+            try:
+                return jsonify(ok=True, **_bridge_status())
+            except Exception as e:
+                return jsonify(ok=False, error="تعذّر قراءة حالة الجسور: %s" % e)
+
+        def _bridge_apply(kind, port=None, serial_port=None, baud=None):
+            ah = _ah()
+            if kind == "astm":
+                _cfg_set("host_listener_enabled", "1")
+                if port:
+                    _cfg_set("host_listener_port", str(int(port)))
+                ah.start_listener_if_enabled()
+                return True, ""
+            if kind == "hl7":
+                p = int(port or 2575)
+                _cfg_set("plus_hl7_enabled", "1"); _cfg_set("plus_hl7_port", str(p))
+                _hl7_start(p)
+                return True, ""
+            if kind == "serial":
+                if not serial_port:
+                    return False, "اختر منفذ COM الذي ركّبت عليه الجهاز."
+                ok, msg = _serial_start(serial_port, int(baud or 9600))
+                if ok:
+                    try:
+                        cur = json.loads(_cfg_get("plus_serial_cfg", "[]") or "[]")
+                    except Exception:
+                        cur = []
+                    cur = [c for c in cur if c.get("port") != serial_port] + [{"port": serial_port, "baud": int(baud or 9600)}]
+                    _cfg_set("plus_serial_cfg", json.dumps(cur))
+                return ok, msg
+            return False, "نوع اتصال غير معروف."
+
+        @bp2.route("/plus/api/bridge/stop", methods=["POST"])
+        def plus_bridge_stop():
+            g = _guard("devices")
+            if g: return g
+            d = _j(); k = d.get("kind")
+            if k == "hl7":
+                _cfg_set("plus_hl7_enabled", "0"); _hl7_stop()
+            elif k == "serial":
+                p = d.get("port")
+                _serial_stop(p)
+                try:
+                    cur = [c for c in json.loads(_cfg_get("plus_serial_cfg", "[]") or "[]") if c.get("port") != p]
+                    _cfg_set("plus_serial_cfg", json.dumps(cur))
+                except Exception:
+                    pass
+            elif k == "astm":
+                _cfg_set("host_listener_enabled", "0")
+                try: _ah().stop_listener()
+                except Exception: pass
+            return jsonify(ok=True)
+
+        def _kind_of(profile, serial_port):
+            p = ((profile or {}).get("protocol") or "").lower()
+            if serial_port or "serial" in p or "rs-232" in p or "rs232" in p:
+                return "serial"
+            if "hl7" in p:
+                return "hl7"
+            return "astm"
+
+        @bp2.route("/plus/api/devices/link", methods=["POST"])
+        def plus_dev_link():
+            g = _guard("devices")
+            if g: return g
+            d = _j()
+            brand, model = (d.get("brand") or "").strip()[:60], (d.get("model") or "").strip()[:60]
+            mname = ((d.get("name") or "") or ("%s %s" % (brand, model))).strip()[:40]
+            try:
+                tids = [int(x) for x in (d.get("test_ids") or [])][:40]
+            except Exception:
+                tids = []
+            if not mname or not tids:
+                return jsonify(ok=False, error="اكتب اسم/موديل الجهاز واختر الفحوصات التي يجريها.")
+            marks = ",".join("?" * len(tids))
+            params = _rows("SELECT tp.id id, tp.name name, td.name tname FROM test_parameters tp JOIN test_definitions td ON td.id=tp.test_definition_id "
+                           "WHERE tp.test_definition_id IN (%s) AND tp.result_type='Numeric' ORDER BY tp.test_definition_id, tp.id" % marks, tids)
+            if not params:
+                return jsonify(ok=False, error="الفحوصات المختارة ما فيها معاملات رقمية.")
+            try:
+                ai_codes, note = _ai_param_codes(brand, model, params)
+            except Exception:
+                ai_codes, note = {}, "لا يوجد اتصال بالذكاء — استُخدمت أسماء المعاملات والأسماء الشائعة (يعمل بدون إنترنت)."
+            added = skipped = ai_n = 0
+            db = get_db()
+            try:
+                for p in params:
+                    if db.execute("SELECT 1 FROM mapcodes WHERE test_parameter_id=? AND lower(COALESCE(machine_name,''))=lower(?) LIMIT 1", (p["id"], mname)).fetchone():
+                        skipped += 1
+                        continue
+                    code, conf = ai_codes.get(p["id"], (p["name"], "name"))
+                    if conf != "name":
+                        ai_n += 1
+                    seen_c = set()
+                    for n_i, cc in enumerate([code] + _alias_codes(p["name"])):
+                        if cc.lower() in seen_c:
+                            continue
+                        seen_c.add(cc.lower())
+                        # الكود الأساسي يُرسَل ويُستقبَل (مثل الإضافة الجماعية)؛ الأسماء البديلة للاستقبال فقط حتى لا تدخل بقائمة طلبات الجهاز
+                        db.execute("INSERT INTO mapcodes (test_parameter_id, machine_name, machine_code, send_enabled, receive_enabled) VALUES (?,?,?,?,1)", (p["id"], mname, cc, 1 if n_i == 0 else 0))
+                    added += 1
+                ip = re.sub(r"[^0-9.]", "", (d.get("ip") or ""))[:15]
+                if ip:
+                    raw = get_setting(db, "analyzer_ip_map", "") or ""
+                    parts = [x.strip() for x in raw.replace("\n", ";").split(";") if x.strip() and x.split("=")[0].strip() != ip]
+                    parts.append("%s=%s" % (ip, mname))
+                    set_setting(db, "analyzer_ip_map", ";".join(parts))
+                db.commit()
+            finally:
+                try: db.close()
+                except Exception: pass
+            prof = d.get("profile") or {}
+            kind = prof.get("kind") if prof.get("kind") in ("astm", "hl7", "serial") else _kind_of(prof, d.get("serial_port"))
+            if d.get("serial_port"):
+                kind = "serial"
+            want = None
+            try:
+                want = int(re.sub(r"\D", "", str(d.get("port") or ""))) or None
+            except Exception:
+                want = None
+            before = _bridge_status()
+            if kind == "astm":
+                if want is None and not before["astm"]["enabled"]:
+                    want = prof.get("default_port") or None      # أول تفعيل: نستخدم منفذ الجهاز الافتراضي
+                # لو المستمع شغّال مسبقاً ولم تطلب منفذاً صراحة نبقي منفذه حتى لا ينقطع غيرك
+            elif kind == "hl7":
+                want = want or prof.get("default_port") or None
+            try:
+                ok, bmsg = _bridge_apply(kind, port=(want or None), serial_port=d.get("serial_port"), baud=d.get("baud") or prof.get("default_baud"))
+            except Exception as e:
+                ok, bmsg = False, "تعذّر تشغيل الاتصال: %s" % e
+            restart_needed = bool(kind == "astm" and before["astm"]["alive"] and want and want != before["astm"]["port"])
+            hip = re.sub(r"[^0-9.]", "", (d.get("host_ip") or ""))[:15]
+            lips = _local_ips()
+            _exec("INSERT INTO plus_devices(name,brand,model,profile,mapping,created_at) VALUES(?,?,?,?,?,?)",
+                  (mname, brand, model, json.dumps(prof, ensure_ascii=False), json.dumps({"tests": tids, "kind": kind}), _now()))
+            st = _bridge_status()
+            listen_port = st["astm"]["port"] if kind == "astm" else st["hl7"]["port"] if kind == "hl7" else None
+            return jsonify(ok=True, machine_name=mname, kind=kind, added=added, skipped=skipped, ai_codes=ai_n, ai_note=note,
+                           bridge_ok=ok, bridge_msg=bmsg, listen_ip=(hip or st["ip"]), listen_port=listen_port, bridges=st,
+                           local_ips=lips, host_ip=hip, host_ip_ok=(not hip) or (hip in lips), restart_needed=restart_needed)
+
+        @bp2.route("/plus/api/devices/learn", methods=["POST"])
+        def plus_dev_learn():
+            g = _guard("devices")
+            if g: return g
+            d = _j()
+            mname = (d.get("name") or "").strip()[:40]
+            try:
+                tids = [int(x) for x in (d.get("test_ids") or [])][:40]
+            except Exception:
+                tids = []
+            if not mname or not tids:
+                return jsonify(ok=False, error="اكتب اسم الجهاز واختر فحوصاته.")
+            codes = _unmatched_codes()
+            if not codes:
+                return jsonify(ok=True, added=[], message="ما كو رموز غير مطابقة في آخر رسائل الجهاز 👍")
+            marks = ",".join("?" * len(tids))
+            params = _rows("SELECT tp.id id, tp.name name, td.name tname FROM test_parameters tp JOIN test_definitions td ON td.id=tp.test_definition_id "
+                           "WHERE tp.test_definition_id IN (%s) AND tp.result_type='Numeric'" % marks, tids)
+            cfg = _cfg()
+            if not cfg["enabled"] or not cfg["key"]:
+                return jsonify(ok=False, error="فعّل الذكاء الصناعي أولاً.")
+            sysm = ("طابق رموز الجهاز التالية (وصلت فعلياً من الجهاز) مع معاملات البرنامج. أجب بـ JSON فقط: "
+                    '[{"code":"رمز الجهاز كما وصل","param_id":12,"confidence":"high|medium|low"}]. إذا لم تتأكد اجعل param_id=null.')
+            try:
+                lst = "\n".join("%s | %s — %s" % (p["id"], p["tname"], p["name"]) for p in params)
+                txt = _call_ai(cfg, sysm, [{"role": "user", "content": "الجهاز: %s\nرموز وصلت:\n%s\n\nالمعاملات:\n%s" % (mname, "\n".join(codes), lst)}])
+                ids = {p["id"] for p in params}
+                added = []
+                db = get_db()
+                try:
+                    for m in _json_from_ai_plain(txt):
+                        try:
+                            pid = int(m.get("param_id"))
+                        except Exception:
+                            continue
+                        c = _clean_code(m.get("code"))
+                        if pid not in ids or not c or c not in codes:
+                            continue
+                        if db.execute("SELECT 1 FROM mapcodes WHERE lower(machine_code)=lower(?) AND lower(COALESCE(machine_name,''))=lower(?)", (c, mname)).fetchone():
+                            continue
+                        db.execute("INSERT INTO mapcodes (test_parameter_id, machine_name, machine_code, send_enabled, receive_enabled) VALUES (?,?,?,1,1)", (pid, mname, c))
+                        added.append({"code": c, "param_id": pid, "confidence": str(m.get("confidence") or "")})
+                    db.commit()
+                finally:
+                    try: db.close()
+                    except Exception: pass
+                return jsonify(ok=True, added=added, seen=codes)
+            except _AIErr as e:
+                return jsonify(ok=False, error=str(e))
+            except Exception:
+                return jsonify(ok=False, error="ما قدرت أفهم ردّ الذكاء. أعد المحاولة.")
+
+        @bp2.route("/plus/api/devices/log")
+        def plus_dev_log():
+            g = _guard("devices")
+            if g: return g
+            try:
+                return jsonify(ok=True, rows=_rows("SELECT direction d, status s, parsed_summary p, created_at t FROM host_interface_log ORDER BY id DESC LIMIT 12"))
+            except Exception:
+                return jsonify(ok=True, rows=[])
+
+        @bp2.route("/plus/devices")
+        def plus_dev_page():
+            g = _guard("devices", page=True)
+            if g: return g
+            body = ("<div class='card'><h2>🔌 ربط جهاز تحليل جديد (بالذكاء)</h2>"
+                    "<div class='row'><input id='br' placeholder='الشركة (مثال: Mindray)'><input id='md' placeholder='الموديل (مثال: BC-30)'><input id='ip' placeholder='IP الجهاز (Analyzer) مثال 10.10.10.100' size='24'><input id='hip' placeholder='IP الحاسبة المكتوب بالجهاز (Host)' size='24'><input id='prt' placeholder='المنفذ (Port) مثال 5200' size='18'>"
+                    "<button id='id'>① تعرّف على الجهاز</button><button class='s' id='pt'>اكتشف المنافذ الموصولة</button></div><div id='ports' class='muted'></div><div id='res'></div></div>"
+                    "<div class='card'><h2>② اختر الفحوصات التي يجريها الجهاز</h2><input id='flt' placeholder='بحث…' style='width:260px'> <span class='muted' id='cnt'></span><div id='tests' style='max-height:220px;overflow:auto;margin-top:8px'></div>"
+                    "<div class='row'><button id='lk'>③ اربط الجهاز تلقائياً</button><span class='muted'>يُنشئ أكواد الجهاز (Mapcodes) ويفعّل الاستقبال، ثم تتحول نتائج العينات تلقائياً للتقارير.</span></div><div id='lres'></div></div>"
+                    "<div class='card'><h2>④ بعد أول عينة تجريبية</h2><div class='row'><button class='s' id='ln'>تعلّم من رسائل الجهاز وصحّح الأكواد</button><button class='s' id='rl'>تحديث سجل الجهاز</button></div><div id='lnres'></div><div id='log'></div></div>"
+                    "<div class='card'><h2>حالة الاتصالات</h2><div id='br2'></div></div>"
+                    "<p class='muted'>⚠ معلومات الذكاء مساعدة وقد تخطئ في رموز بعض الأجهزة؛ لهذا الخطوة ④ تصحح الأكواد من رسائل الجهاز الحقيقية. راجع دليل الجهاز لإعدادات الشبكة/المنفذ.</p>")
+            script = r"""
+    var CUR=null,ALL=[],SEL={};
+    function names(){return ($('br').value+' '+$('md').value).trim()}
+    function show(p){CUR=p;if(p.source==='library'){ALL.forEach(function(t){if(/cbc|complete blood/i.test(t.name))SEL[t.id]=true});drawTests()}var h='<table>';[['النوع',p.type],['البروتوكول',p.protocol],['السرعة (baud)',p.default_baud],['المنفذ الافتراضي',p.default_port],['الاتجاه',p.direction],['الثقة',p.confidence],['ملاحظات',p.notes_ar]].forEach(function(r){h+='<tr><th>'+r[0]+'</th><td>'+esc(r[1])+'</td></tr>'});
+     h+='</table>';if((p.connection_steps_ar||[]).length)h+='<ol>'+p.connection_steps_ar.map(function(s){return '<li>'+esc(s)+'</li>'}).join('')+'</ol>';$('res').innerHTML=h;
+     if(/serial|rs/i.test(p.protocol||''))loadPorts()}
+    $('id').onclick=function(){$('res').textContent='جاري التعرّف…';api('/plus/api/devices/identify',{brand:$('br').value,model:$('md').value}).then(function(j){if(j.ok)show(j.profile);else $('res').textContent=j.error})};
+    var SP='';
+    function loadPorts(){api('/plus/api/devices/ports').then(function(j){if(!j.ok){$('ports').textContent=j.error;return}if(!j.ports.length){$('ports').textContent='ما كو منافذ COM موصولة حالياً.';return}
+     $('ports').innerHTML='منفذ COM: <select id="sp"><option value="">— اختر —</option>'+j.ports.map(function(p){return '<option value="'+esc(p.device)+'">'+esc(p.device+' — '+p.desc)+'</option>'}).join('')+'</select> <button class="s" data-hint="1">تعرّف من المنفذ</button>';
+     $('sp').onchange=function(){SP=this.value}})}
+    $('pt').onclick=loadPorts;
+    function drawTests(){var f=($('flt').value||'').toLowerCase(),h='',n=0;ALL.forEach(function(t){if(f&&t.name.toLowerCase().indexOf(f)<0)return;h+='<label style="display:inline-block;width:250px"><input type="checkbox" data-t="'+t.id+'" '+(SEL[t.id]?'checked':'')+'> '+esc(t.name)+'</label>'});$('tests').innerHTML=h;$('cnt').textContent=Object.keys(SEL).filter(function(k){return SEL[k]}).length+' مختار'}
+    $('flt').oninput=drawTests;
+    api('/plus/api/tests').then(function(j){ALL=j.tests||[];drawTests()});
+    function tids(){return Object.keys(SEL).filter(function(k){return SEL[k]}).map(Number)}
+    $('lk').onclick=function(){$('lres').textContent='جاري الربط… (قد يستغرق دقيقة)';api('/plus/api/devices/link',{brand:$('br').value,model:$('md').value,name:names(),ip:$('ip').value,host_ip:$('hip').value,port:$('prt').value,test_ids:tids(),profile:CUR,serial_port:SP}).then(function(j){
+     if(!j.ok){$('lres').textContent=j.error;return}
+     var k={astm:'ASTM عبر الشبكة (TCP)',hl7:'HL7 عبر الشبكة (TCP)',serial:'ASTM عبر منفذ COM'}[j.kind];
+     var h='<p>✅ تم: أُضيف <b>'+j.added+'</b> كود (منها '+j.ai_codes+' باقتراح الذكاء) وتُخطّي '+j.skipped+'. نوع الاتصال: <b>'+k+'</b>.</p>';
+     if(j.ai_note)h+='<p class="muted">'+esc(j.ai_note)+'</p>';
+     if(!j.bridge_ok)h+='<p style="color:#b42318">⚠ '+esc(j.bridge_msg)+'</p>';
+     else if(j.kind!='serial')h+='<div class="card" style="background:#f0f9f7"><b>أدخل هذا في إعدادات الجهاز (قسم LIS / Host):</b><br>عنوان الخادم (Host Address): <b>'+esc(j.listen_ip)+'</b> &nbsp; المنفذ (Port): <b>'+j.listen_port+'</b><br><span class="muted">ثم Enable Host + Ethernet وTransmit Setup. إذا ما اتصل الجهاز: اسمح بالمنفذ في جدار حماية ويندوز.</span></div>';
+     if(j.restart_needed)h+='<p style="color:#b42318">⚠ غيّرت المنفذ والمستمع كان شغّالاً: أعد تشغيل البرنامج حتى يعتمد المنفذ الجديد (الإعداد انحفظ).</p>';
+     if(j.host_ip&&!j.host_ip_ok)h+='<div class="card" style="background:#fff4e5"><b>⚠ عنوان الحاسبة '+esc(j.host_ip)+' غير مضبوط على هذا الكمبيوتر.</b><br>عناوين هذا الكمبيوتر الحالية: '+esc((j.local_ips||[]).join(' ، ')||'—')+'<br>اضبط كارت الشبكة (Ethernet) الموصول بالجهاز على IP ثابت <b>'+esc(j.host_ip)+'</b> وMask <b>255.255.255.0</b> (بدون Gateway)، من: إعدادات الشبكة ← Ethernet ← خصائص IPv4. أو بأمر مدير: <code>netsh interface ip set address name="Ethernet" static '+esc(j.host_ip)+' 255.255.255.0</code></div>';
+     else if(j.host_ip)h+='<p>✅ عنوان الحاسبة '+esc(j.host_ip)+' مضبوط على هذا الكمبيوتر.</p>';
+     else h+='<div class="card" style="background:#f0f9f7">اضبط الجهاز على الإرسال عبر المنفذ التسلسلي بنفس السرعة (baud) وبروتوكول ASTM.</div>';
+     $('lres').innerHTML=h;brs()})};
+    document.addEventListener('change',function(e){var t=e.target.getAttribute&&e.target.getAttribute('data-t');if(t){SEL[t]=e.target.checked;$('cnt').textContent=tids().length+' مختار'}});
+    document.addEventListener('click',function(e){var t=e.target;
+     if(t.getAttribute('data-hint')){$('res').textContent='جاري التعرّف…';var sel=$('sp');api('/plus/api/devices/identify',{brand:$('br').value,model:$('md').value,hint:sel?sel.options[sel.selectedIndex].text:''}).then(function(j){if(j.ok)show(j.profile);else $('res').textContent=j.error})}
+     else if(t.getAttribute('data-stop')){api('/plus/api/bridge/stop',{kind:t.getAttribute('data-stop'),port:t.getAttribute('data-port')}).then(brs)}});
+    $('ln').onclick=function(){$('lnres').textContent='جاري التحليل…';api('/plus/api/devices/learn',{name:names(),test_ids:tids()}).then(function(j){if(!j.ok){$('lnres').textContent=j.error;return}
+     if(!j.added.length){$('lnres').innerHTML='<p>'+esc(j.message||'ما قدرت أطابق رموز جديدة. جرّب إرسال عينة أخرى أو أضف الكود يدوياً من صفحة Mapcodes.')+'</p>';return}
+     $('lnres').innerHTML='<p>✅ أُضيفت '+j.added.length+' أكواد من رسائل الجهاز: '+j.added.map(function(a){return '<span class="chip">'+esc(a.code)+'</span>'}).join('')+' — أعد إرسال العينة من الجهاز.</p>'})};
+    function log(){api('/plus/api/devices/log').then(function(j){if(!j.ok)return;$('log').innerHTML='<table><tr><th>الوقت</th><th></th><th>الحالة</th><th>الملخص</th></tr>'+j.rows.map(function(r){return '<tr><td>'+esc((r.t||'').slice(5,16))+'</td><td>'+esc(r.d)+'</td><td><span class="b '+(r.s=='Processed'||r.s=='Started'||r.s=='Sent'?'ok':r.s=='Unmatched'?'warn':'fail')+'">'+esc(r.s)+'</span></td><td>'+esc((r.p||'').slice(0,160))+'</td></tr>'}).join('')+'</table>'})}
+    $('rl').onclick=log;
+    function brs(){api('/plus/api/bridge').then(function(j){if(!j.ok){$('br2').textContent=j.error;return}
+     var h='<p>IP هذا الكمبيوتر: <b>'+esc(j.ip)+'</b></p><div class="row"><span class="chip">ASTM/TCP: '+(j.astm.alive?'🟢 يعمل':'⚪ متوقف')+' — المنفذ '+j.astm.port+'</span>'+(j.astm.enabled?'<button class="d" data-stop="astm">إيقاف</button>':'')+
+     '<span class="chip">HL7/TCP: '+(j.hl7.alive?'🟢 يعمل':'⚪ متوقف')+' — المنفذ '+j.hl7.port+'</span>'+(j.hl7.enabled?'<button class="d" data-stop="hl7">إيقاف</button>':'')+'</div>';
+     h+='<div class="row">COM: '+(j.serial.available?'':'<span class="muted">(pyserial غير متوفرة بهذه النسخة)</span>');j.serial.ports.forEach(function(p){h+='<span class="chip">'+esc(p.port)+' @'+p.baud+' — '+esc(p.status)+'</span><button class="d" data-stop="serial" data-port="'+esc(p.port)+'">إيقاف</button>'});$('br2').innerHTML=h+'</div>'})}
+    brs();log();
+    """
+            return Response(_shell("ربط الأجهزة بالذكاء", body, script), mimetype="text/html")
+
+        # ------------------------------------------------------------ injection (nav + alerts bar + AI buttons)
+        @app.after_request
+        def _lis_plus_inject(resp):
+            try:
+                if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+                    return resp
+                if request.path.startswith(("/plus/", "/ai/")):
+                    return resp
+                data = resp.get_data()
+                if b"lis-sidebar-hidden" not in data or b'id="lis-plus-js"' in data or b"</body>" not in data:
+                    return resp
+                if not _lab_ok():
+                    return resp
+                js = _PLUS_JS.replace("__FLAGS__", json.dumps(_flags_cached()))
+                head, _, tail = data.rpartition(b"</body>")
+                resp.set_data(head + js.encode("utf-8") + b"</body>" + tail)
+            except Exception:
+                pass
+            return resp
+
+        app.register_blueprint(bp2)
+
+    _PLUS_JS = '<script id="lis-plus-js">(function(){try{\nif(window.top!==window.self)return;\nvar F=__FLAGS__,P=location.pathname;\nvar nav=document.querySelector("aside nav");\nif(nav){var L=[["inventory","📦 المخزون ومواد المختبر","/plus/inventory"],["qc","🧪 ضبط الجودة (QC)","/plus/qc"],["charts","📈 رسوم بيانية","/plus/charts"],["devices","🔌 ربط الأجهزة (AI)","/plus/devices"]];\n var g=document.createElement("div");g.className="nav-group";\n L.forEach(function(l){if(F[l[0]]){var a=document.createElement("a");a.className="nav-link";a.href=l[2];a.textContent=l[1];g.appendChild(a)}});\n var s=document.createElement("a");s.className="nav-link";s.href="/plus/settings";s.textContent="🧩 إعدادات الإضافات";g.appendChild(s);nav.appendChild(g)}\nfunction aiOpen(auto){window.__lisAiAuto=auto;var b=document.getElementById("lis-ai-btn");if(b)b.click();else location.href="/ai/assistant?auto="+auto}\nfunction btn(txt,auto){var d=document.createElement("button");d.type="button";d.textContent=txt;\n d.style.cssText="position:fixed;left:18px;bottom:136px;z-index:99997;background:#fff;color:#0f766e;border:2px solid #0f766e;border-radius:99px;padding:8px 14px;cursor:pointer;font:600 13px Tahoma,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.15)";\n d.onclick=function(){aiOpen(auto)};document.body.appendChild(d)}\nif(F.ai_summary&&/\\/patient-card\\/\\d+/.test(P))btn("🧠 ملخص المريض","summary");\nif(F.ai_test_btn&&/\\/workbench\\/result\\/\\d+/.test(P))btn("🧠 تحليل الفحص بالذكاء","test");\nif(F.alerts&&(P==="/"||P==="/dashboard")){\n var tb=document.querySelector(".main .topbar");if(!tb)return;\n var st=document.createElement("style");st.textContent="@keyframes lisp{0%,100%{opacity:1}50%{opacity:.45}}#lis-alerts{margin:10px 14px;font-family:Tahoma,sans-serif}#lis-alerts .c{display:inline-block;margin:3px;padding:7px 14px;border-radius:99px;color:#fff;cursor:pointer;font-size:14px;font-weight:600}#lis-alerts .p{animation:lisp 1s infinite}#lis-alerts .d{background:#fff;border:1px solid #e0e8e6;border-radius:10px;padding:8px 12px;margin:4px 0;font-size:13px}#lis-alerts a{color:#0f766e;text-decoration:none}";\n document.head.appendChild(st);\n var bar=document.createElement("div");bar.id="lis-alerts";tb.parentNode.insertBefore(bar,tb.nextSibling);\n var open=null,data=null;\n function e(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;")}\n function snoozed(){try{return Date.now()-(+localStorage.getItem("lisPlusSnooze")||0)<3600000}catch(x){return false}}\n function draw(){if(!data){return}\n  var K=[["critical","⚠ نتائج حرجة","#dc2626",1],["pending","⏳ نتائج ناقصة +24 ساعة","#d97706"],["stock","📦 مخزون ناقص","#ca8a04"],["qc","🧪 فشل ضبط الجودة","#7c3aed"]];\n  var tot=0;K.forEach(function(k){tot+=(data[k[0]]||[]).length});\n  if(!tot){bar.innerHTML="";return}\n  if(snoozed()){bar.innerHTML=\'<span class="c" style="background:#6b7f7b" id="lp-un">🔕 \'+tot+\' تنبيه مؤجل — إظهار</span>\';document.getElementById("lp-un").onclick=function(){try{localStorage.removeItem("lisPlusSnooze")}catch(x){}draw()};return}\n  var h="";K.forEach(function(k){var n=(data[k[0]]||[]).length;if(n)h+=\'<span class="c\'+(k[3]&&n?" p":"")+\'" style="background:\'+k[2]+\'" data-k="\'+k[0]+\'">\'+k[1]+" ("+n+")</span>"});\n  h+=\' <span class="c" style="background:#6b7f7b" id="lp-sn">🔕 تأجيل ساعة</span>\';\n  if(open&&data[open]){h+=\'<div>\';data[open].slice(0,12).forEach(function(x){var t,l;\n   if(open==="critical"){t=e(x.tname)+" — "+e(x.pname)+": "+e(x.vn!=null?x.vn:x.vt)+" ("+e(x.flag)+")";l="/front-desk/visits/"+x.vid+"/results"}\n   else if(open==="pending"){t="زيارة #"+x.vid+" — "+e(x.tname);l="/front-desk/visits/"+x.vid+"/results"}\n   else if(open==="stock"){t=e(x.name)+": المتبقي "+x.remaining+" "+e(x.unit)+(x.status==="out"?" (نفد)":"");l="/plus/inventory"}\n   else{t=e(x.test)+" "+e(x.level)+" — "+e(x.rule);l="/plus/qc"}\n   h+=\'<div class="d"><a href="\'+l+\'">\'+t+"</a></div>"});h+="</div>"}\n  bar.innerHTML=h;\n  bar.querySelectorAll("[data-k]").forEach(function(c){c.onclick=function(){var k=c.getAttribute("data-k");open=open===k?null:k;draw()}});\n  document.getElementById("lp-sn").onclick=function(){try{localStorage.setItem("lisPlusSnooze",Date.now())}catch(x){}draw()}}\n function pull(){fetch("/plus/api/alerts").then(function(r){return r.json()}).then(function(j){if(j&&j.ok){data=j;draw()}}).catch(function(){})}\n pull();setInterval(pull,60000)}\n}catch(x){}})();</script>\n'
+
+    try:
+        _plus_routes()
+        _bridges_boot()
+    except Exception as _pe:   # الإضافات اختيارية: أي خطأ فيها لا يوقف المساعد ولا البرنامج
+        print("LIS-PLUS not loaded:", _pe)
+    # ===== LIS-PLUS END =====
+
+    app.register_blueprint(bp)
+
+    _PAGE = r'''<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مساعد المختبر</title><style>
+*{box-sizing:border-box}body{margin:0;font-family:Tahoma,"Segoe UI",sans-serif;background:#f4f8f7;color:#16302b;display:flex;flex-direction:column;height:100vh}
+header{background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px}
+header h1{font-size:16px;margin:0;flex:1}header button,header a{background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:12px;text-decoration:none}
+.note{font-size:11px;color:#55706a;padding:6px 14px;background:#e7f3f1}
+.acts{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px;background:#fff;border-bottom:1px solid #dbe8e5}
+.acts button{border:1px solid #0f766e;color:#0f766e;background:#f0fbf9;border-radius:16px;padding:5px 11px;font-size:12px;cursor:pointer}
+.acts button:hover{background:#0f766e;color:#fff}
+#log{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.m{max-width:94%;padding:9px 12px;border-radius:12px;line-height:1.75;font-size:13.5px;white-space:pre-wrap;word-wrap:break-word}
+.u{background:#0f766e;color:#fff;align-self:flex-start;border-bottom-right-radius:3px}
+.a{background:#fff;border:1px solid #d6e6e2;align-self:flex-end;border-bottom-left-radius:3px}
+.e{background:#fff4f4;border:1px solid #f1b8b8;color:#8a1f1f;align-self:flex-end}
+.a b{color:#0b5a53}.a li{margin:2px 0}
+form{display:flex;gap:8px;padding:10px;background:#fff;border-top:1px solid #dbe8e5}
+textarea{flex:1;resize:none;border:1px solid #bcd3ce;border-radius:10px;padding:8px;font-family:inherit;font-size:13.5px;height:44px}
+form button{background:#0f766e;color:#fff;border:0;border-radius:10px;padding:0 18px;cursor:pointer;font-size:14px}
+form button:disabled{opacity:.5}.foot{font-size:10.5px;color:#7a908b;text-align:center;padding:0 8px 6px;background:#fff}
+</style></head><body>
+<header><a id="bk" href="/" onclick="if(history.length>1){history.back();return false}" style="display:none">&#8617; رجوع</a><h1>🧠 مساعد المختبر</h1><button id="clr">محادثة جديدة</button><a href="/ai/settings" target="_blank">إعدادات</a><button id="cls" style="display:none">✕</button></header>
+<div class="note" id="ctx">الأسئلة العامة متاحة. افتح صفحة نتائج زيارة ليشتغل التحليل على نتائجها.</div>
+<div class="acts" id="acts"></div><div id="log"></div>
+<form id="f"><textarea id="q" placeholder="اكتب سؤالك عن النتائج…"></textarea><button id="go">إرسال</button></form>
+<div class="foot">يُرسَل للذكاء الصناعي: العمر والجنس والنتائج فقط (بدون الاسم أو الهاتف). تفسير مساعد وليس تشخيصاً.</div>
+<script>
+var Q=new URLSearchParams(location.search),VID=Q.get("visit_id")||"",OT=Q.get("ot_id")||"",hist=[],busy=false;
+var A=[["assess","تقييم الحالة"],["interpret","تفسير النتائج"],["compare","مقارنة السابق"],["abnormal","غير الطبيعية"],["extra","فحوصات إضافية"],["comment","كتابة تعليق"],["summary","ملخص المريض"],["test","تحليل الفحص"],["report","تقرير شامل"]];
+var log=document.getElementById("log"),q=document.getElementById("q"),go=document.getElementById("go");
+if(Q.get("embed")){var c=document.getElementById("cls");c.style.display="inline-block";c.onclick=function(){parent.postMessage("lis-ai-close","*")}}
+if(VID){document.getElementById("ctx").textContent="الزيارة مرتبطة: التحليل يعتمد على نتائج هذه الزيارة ومقارنتها بالسابق."}
+var acts=document.getElementById("acts");
+A.forEach(function(x){var b=document.createElement("button");b.textContent=x[1];b.onclick=function(){send("",x[0],x[1])};acts.appendChild(b)});
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function md(s){s=esc(s).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/^\s*[-*•]\s+(.+)$/gm,"• $1");return s}
+function add(cls,t,html){var d=document.createElement("div");d.className="m "+cls;if(html)d.innerHTML=t;else d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
+function send(text,action,label){if(busy)return;text=(text||"").trim();if(!text&&!action)return;
+ busy=true;go.disabled=true;add("u",label||text);var w=add("a","جاري التفكير والتحليل…");
+ fetch("/ai/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,action:action||"",visit_id:VID,order_test_id:OT,history:hist})})
+ .then(function(r){return r.json()}).then(function(j){
+  if(!j.ok){fin(w,j.error==="NO_KEY"?"ما مفعّل الذكاء بعد. افتح «إعدادات» وأدخل مفتاح Gemini المجاني (مرة وحدة).":(j.error||"خطأ"),true);return}
+  poll(j.job,w,text||label,0)}).catch(function(){fin(w,"تعذّر الاتصال بالبرنامج.",true)})}
+function poll(id,w,u,n){if(n>90){fin(w,"تأخّر الرد. أعد المحاولة.",true);return}
+ fetch("/ai/api/job/"+id).then(function(r){return r.json()}).then(function(j){
+  if(!j.done){setTimeout(function(){poll(id,w,u,n+1)},1000);return}
+  if(j.ok){hist.push({role:"user",content:u});hist.push({role:"assistant",content:j.text});fin(w,md(j.text),false,true)}else fin(w,j.error,true)})
+ .catch(function(){setTimeout(function(){poll(id,w,u,n+1)},1500)})}
+function fin(w,t,err,html){w.className="m "+(err?"e":"a");if(html)w.innerHTML=t;else w.textContent=t;busy=false;go.disabled=false;log.scrollTop=log.scrollHeight}
+document.getElementById("f").onsubmit=function(e){e.preventDefault();var t=q.value;q.value="";send(t)};
+q.onkeydown=function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();document.getElementById("f").onsubmit(e)}};
+if(!Q.get("embed")){document.getElementById("bk").style.display=""}document.getElementById("clr").onclick=function(){hist=[];log.innerHTML=""};
+if(Q.get("auto")){var AU=Q.get("auto");for(var i=0;i<A.length;i++)if(A[i][0]==AU){(function(x){setTimeout(function(){send("",x[0],x[1])},300)})(A[i])}}
+</script></body></html>'''
+
+    _SET_PAGE = r'''<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>إعدادات الذكاء الصناعي</title>
+<style>body{font-family:Tahoma,sans-serif;background:#f4f8f7;margin:0;padding:24px;color:#16302b}.c{max-width:560px;margin:auto;background:#fff;border-radius:14px;padding:22px;box-shadow:0 4px 18px rgba(0,0,0,.08)}
+h2{margin-top:0;color:#0f766e}label{display:block;margin:14px 0 5px;font-weight:700;font-size:13px}input,select{width:100%;padding:9px;border:1px solid #bcd3ce;border-radius:8px;font-size:14px}
+button{margin-top:16px;padding:10px 18px;border:0;border-radius:9px;background:#0f766e;color:#fff;cursor:pointer;font-size:14px;margin-left:8px}button.s{background:#e7f3f1;color:#0f766e}
+.h{font-size:12px;color:#55706a;line-height:1.8;background:#f0fbf9;padding:10px;border-radius:8px;margin-top:12px}#r{margin-top:12px;font-size:13px}</style></head><body><div class="c">
+<a href="/" onclick="if(window.opener){window.close();return false}if(history.length>1){history.back();return false}" style="display:inline-block;margin-bottom:12px;padding:7px 14px;border-radius:9px;background:#e7f3f1;color:#0f766e;text-decoration:none;font-size:14px">&#8617; رجوع للبرنامج</a>
+<h2>🧠 إعدادات مساعد الذكاء الصناعي</h2>
+<label><input type="checkbox" id="en" style="width:auto"> تفعيل المساعد (إظهار زر AI)</label>
+<label>المزوّد</label><select id="pv"><option value="anthropic">Claude (مدفوع حسب الاستخدام — الأدق)</option><option value="gemini">Google Gemini (مجاني)</option><option value="groq">Groq (مجاني)</option></select>
+<label>مفتاح API <span id="hk" style="font-weight:400;color:#0f766e"></span></label><input id="key" type="password" placeholder="الصق المفتاح هنا (يُحفظ مرة وحدة)" autocomplete="off">
+<label>الموديل (اتركه فارغاً ليختار البرنامج تلقائياً)</label><input id="md" placeholder="auto">
+<div><button id="sv">حفظ</button><button class="s" id="ts">اختبار الاتصال</button></div><div id="r"></div>
+<div class="h">للحصول على مفتاح Gemini مجاني: ادخل aistudio.google.com/app/apikey بحساب Google → Create API key. المفتاح المجاني بدون بطاقة، وله حد للطلبات بالدقيقة واليوم.<br>
+الخدمة تحتاج إنترنت. الحدّ المجاني قد يسمح لجوجل باستخدام المدخلات لتحسين نماذجها، لذلك البرنامج يرسل النتائج فقط بدون اسم المريض أو هاتفه.</div></div>
+<script>var $=function(i){return document.getElementById(i)};$("en").checked="__EN__"==="1";$("pv").value="__PROV__";$("md").value="__MODEL__";$("hk").textContent="__HASKEY__"==="1"?"(مفتاح محفوظ ✓)":"";
+function save(cb){fetch("/ai/api/save-settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:$("en").checked,provider:$("pv").value,key:$("key").value,model:$("md").value})}).then(function(r){return r.json()}).then(function(j){if(j.ok){$("key").value="";$("hk").textContent="(مفتاح محفوظ ✓)";cb&&cb()}else $("r").textContent=j.error})}
+$("sv").onclick=function(){save(function(){$("r").textContent="تم الحفظ ✓"})};
+$("ts").onclick=function(){$("r").textContent="جاري الاختبار…";save(function(){fetch("/ai/api/test",{method:"POST"}).then(function(r){return r.json()}).then(function(j){$("r").textContent=j.ok?"الاتصال شغّال ✓":j.error})})};</script></body></html>'''
+# ===== LIS-AI END =====
+
+try:
+    _lis_ai_register(app, get_db, get_setting, set_setting)
+except Exception as _ai_e:   # الذكاء الصناعي ميزة إضافية: أي خطأ فيها لا يوقف البرنامج
+    print("AI assistant not loaded:", _ai_e)
+
+
 if __name__ == "__main__":
+    _startup_mark("انتهى تحميل كل الوحدات، بدء init_db")
     init_db()
+    _startup_mark("انتهى init_db")
     write_pending_preset_logo(UPLOAD_DIR)   # شعار العميل القادم من portal_preset.json (إن وُجد)
     cloud_sync.start_worker()
     astm_host.start_listener_if_enabled()
@@ -16575,4 +18525,5 @@ if __name__ == "__main__":
     if getattr(sys, "frozen", False):
         import logging
         logging.getLogger("werkzeug").setLevel(logging.WARNING)   # ما نسجّل كل طلب GET بالملف
+    _startup_mark("كل شيء جاهز، تشغيل السيرفر الآن (المنفذ 9090)")
     app.run(host="0.0.0.0", port=9090, debug=False, threaded=True)
