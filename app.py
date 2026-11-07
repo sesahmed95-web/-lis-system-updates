@@ -16627,7 +16627,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     def _post(url, headers, body, timeout=60):
         data = json.dumps(body).encode("utf-8")
         for _attempt in range(3):
-            req = urllib.request.Request(url, data=data, headers=dict(headers, **{"Content-Type": "application/json"}), method="POST")
+            req = urllib.request.Request(url, data=data, headers=dict(headers, **{"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LIS-Assistant/1.0", "Accept": "application/json"}), method="POST")
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as r:
                     return json.loads(r.read().decode("utf-8"))
@@ -16651,7 +16651,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 raise _AIErr("ما كو اتصال بالإنترنت أو الخدمة ما ردّت. الذكاء الصناعي يحتاج إنترنت.")
 
     def _get(url, headers, timeout=25):
-        req = urllib.request.Request(url, headers=headers, method="GET")
+        req = urllib.request.Request(url, headers=dict(headers, **{"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LIS-Assistant/1.0"}), method="GET")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return json.loads(r.read().decode("utf-8"))
