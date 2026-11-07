@@ -291,3 +291,129 @@
 [2026-10-23T09:54:19] SLOW 2.4s POST /designer/update/check-now? (designer_update_check_now)
 [2026-10-23T09:58:19] SLOW 2.5s POST /designer/update/check-now? (designer_update_check_now)
 [2026-10-23T10:07:31] SLOW 2.6s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-07T12:03:21] HANG 8s+ /ai/api/test? (lis_ai.ai_test)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 16982, in ai_test
+    t = _call_ai(cfg, "رد بكلمة واحدة فقط.", [{"role": "user", "content": "قل: جاهز"}])
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 16723, in _call_ai
+    j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 16632, in _post
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1325, in do_open
+    r = h.getresponse()
+  File "C:\Python314\Lib\http\client.py", line 1459, in getresponse
+    response.begin()
+  File "C:\Python314\Lib\http\client.py", line 336, in begin
+    version, status, reason = self._read_status()
+  File "C:\Python314\Lib\http\client.py", line 297, in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+  File "C:\Python314\Lib\socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+  File "C:\Python314\Lib\ssl.py", line 1304, in recv_into
+    return self.read(nbytes, buffer)
+  File "C:\Python314\Lib\ssl.py", line 1138, in read
+    return self._sslobj.read(len, buffer)
+
+[2026-11-07T12:04:13] SLOW 60.8s POST /ai/api/test? (lis_ai.ai_test)
+[2026-11-07T12:05:06] HANG 6s+ /ai/api/test? (lis_ai.ai_test)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 16982, in ai_test
+    t = _call_ai(cfg, "رد بكلمة واحدة فقط.", [{"role": "user", "content": "قل: جاهز"}])
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 16723, in _call_ai
+    j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 16632, in _post
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1325, in do_open
+    r = h.getresponse()
+  File "C:\Python314\Lib\http\client.py", line 1459, in getresponse
+    response.begin()
+  File "C:\Python314\Lib\http\client.py", line 336, in begin
+    version, status, reason = self._read_status()
+  File "C:\Python314\Lib\http\client.py", line 297, in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+  File "C:\Python314\Lib\socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+  File "C:\Python314\Lib\ssl.py", line 1304, in recv_into
+    return self.read(nbytes, buffer)
+  File "C:\Python314\Lib\ssl.py", line 1138, in read
+    return self._sslobj.read(len, buffer)
+
+[2026-11-07T12:05:40] SLOW 40.6s POST /ai/api/test? (lis_ai.ai_test)

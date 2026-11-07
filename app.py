@@ -16704,7 +16704,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
             model = cfg["model"] or "llama-3.3-70b-versatile"
             body = {"model": model, "temperature": 0.3, "max_tokens": 2048,
                     "messages": [{"role": "system", "content": system}] + [{"role": m["role"], "content": m["content"]} for m in messages]}
-            j = _post("https://api.groq.com/openai/v1/chat/completions", {"Authorization": "Bearer " + key}, body)
+            j = _post("https://api.groq.com/openai/v1/chat/completions", {"Authorization": "Bearer " + key}, body, 40)
             try:
                 return j["choices"][0]["message"]["content"].strip()
             except Exception:
@@ -16712,7 +16712,8 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         # Gemini
         body = {"systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in messages],
-                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048}}
+                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096,
+                                 "thinkingConfig": {"thinkingBudget": 0}}}
         tried = []
         for attempt in range(2):
             model = _pick_gemini_model(key, cfg["model"]) if attempt == 0 else "gemini-flash-latest"
@@ -16720,8 +16721,17 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 break
             tried.append(model)
             try:
-                j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
-                          {"x-goog-api-key": key}, body)
+                try:
+                    j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
+                              {"x-goog-api-key": key}, body, 40)
+                except _AIErr as e400:
+                    if "(400)" not in str(e400):
+                        raise
+                    # بعض الموديلات ما تقبل إيقاف التفكير: أعد المحاولة بدونه
+                    b2 = json.loads(json.dumps(body))
+                    b2["generationConfig"].pop("thinkingConfig", None)
+                    j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
+                              {"x-goog-api-key": key}, b2, 40)
             except _AIErr as e:
                 if str(e) == "MODEL_404" and attempt == 0:
                     _model_cache["t"] = 0
@@ -18452,11 +18462,11 @@ function md(s){s=esc(s).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/^\s*[-*�
 function add(cls,t,html){var d=document.createElement("div");d.className="m "+cls;if(html)d.innerHTML=t;else d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
 function send(text,action,label){if(busy)return;text=(text||"").trim();if(!text&&!action)return;
  busy=true;go.disabled=true;add("u",label||text);var w=add("a","جاري التفكير والتحليل…");
- fetch("/ai/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,action:action||"",visit_id:VID,order_test_id:OT,history:hist})})
+ fetch("/ai/api/chat",{method:"POST",signal:(window.AbortSignal&&AbortSignal.timeout?AbortSignal.timeout(20000):undefined),headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,action:action||"",visit_id:VID,order_test_id:OT,history:hist})})
  .then(function(r){return r.json()}).then(function(j){
   if(!j.ok){fin(w,j.error==="NO_KEY"?"ما مفعّل الذكاء بعد. افتح «إعدادات» وأدخل مفتاح Gemini المجاني (مرة وحدة).":(j.error||"خطأ"),true);return}
-  poll(j.job,w,text||label,0)}).catch(function(){fin(w,"تعذّر الاتصال بالبرنامج.",true)})}
-function poll(id,w,u,n){if(n>90){fin(w,"تأخّر الرد. أعد المحاولة.",true);return}
+  poll(j.job,w,text||label,0)}).catch(function(){fin(w,"تعذّر الاتصال بالبرنامج أو تأخّر. أعد المحاولة.",true)})}
+function poll(id,w,u,n){if(n>140){fin(w,"تأخّر الرد. أعد المحاولة.",true);return}
  fetch("/ai/api/job/"+id).then(function(r){return r.json()}).then(function(j){
   if(!j.done){setTimeout(function(){poll(id,w,u,n+1)},1000);return}
   if(j.ok){hist.push({role:"user",content:u});hist.push({role:"assistant",content:j.text});fin(w,md(j.text),false,true)}else fin(w,j.error,true)})
