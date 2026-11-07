@@ -16609,6 +16609,8 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 "key": (get_setting(db, "ai_api_key", "") or "").strip(),
                 "model": (get_setting(db, "ai_model", "") or "").strip(),
             }
+            if c["model"].lower() in ("auto", "none", "default"):
+                c["model"] = ""
         finally:
             try: db.close()
             except Exception: pass
@@ -16685,6 +16687,36 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         _model_cache.update({"t": time.time(), "key": key, "model": best})
         return best
 
+    _groq_cache = {"t": 0, "key": "", "model": ""}
+    _GROQ_BAD = re.compile(r"whisper|tts|guard|orpheus|playai|distil|embed|safeguard|compound", re.I)
+    _GROQ_PREF = ("llama-3.3-70b-versatile", "openai/gpt-oss-120b", "meta-llama/llama-4-scout",
+                  "openai/gpt-oss-20b", "qwen/qwen3", "llama-3.1-8b-instant")
+
+    def _pick_groq_model(key, forced="", refresh=False):
+        """يختار موديل Groq شغّال فعلاً من قائمة حسابك (الأسماء القديمة تنحذف من Groq فيطلع MODEL_404)."""
+        if forced and not refresh:
+            return forced
+        if (not refresh and _groq_cache["model"] and _groq_cache["key"] == key
+                and time.time() - _groq_cache["t"] < 6 * 3600):
+            return _groq_cache["model"]
+        j = _get("https://api.groq.com/openai/v1/models", {"Authorization": "Bearer " + key})
+        ids = []
+        for m in (j or {}).get("data", []):
+            n = m.get("id") or ""
+            if n and m.get("active", True) and not _GROQ_BAD.search(n):
+                ids.append(n)
+        best = ""
+        for pref in _GROQ_PREF:
+            for n in ids:
+                if n.startswith(pref):
+                    best = n
+                    break
+            if best:
+                break
+        best = best or (ids[0] if ids else "llama-3.3-70b-versatile")
+        _groq_cache.update({"t": time.time(), "key": key, "model": best})
+        return best
+
     def _call_ai(cfg, system, messages):
         key = cfg["key"]
         if not key:
@@ -16701,10 +16733,20 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 pass
             raise _AIErr("جاء ردّ غير مفهوم من الخدمة.")
         if cfg["provider"] == "groq":
-            model = cfg["model"] or "llama-3.3-70b-versatile"
-            body = {"model": model, "temperature": 0.3, "max_tokens": 2048,
-                    "messages": [{"role": "system", "content": system}] + [{"role": m["role"], "content": m["content"]} for m in messages]}
-            j = _post("https://api.groq.com/openai/v1/chat/completions", {"Authorization": "Bearer " + key}, body, 40)
+            j = None
+            for attempt in range(2):
+                model = _pick_groq_model(key, cfg["model"], refresh=(attempt > 0))
+                body = {"model": model, "temperature": 0.3, "max_tokens": 2048,
+                        "messages": [{"role": "system", "content": system}] + [{"role": m["role"], "content": m["content"]} for m in messages]}
+                try:
+                    j = _post("https://api.groq.com/openai/v1/chat/completions", {"Authorization": "Bearer " + key}, body, 40)
+                    break
+                except _AIErr as e:
+                    if str(e) == "MODEL_404" and attempt == 0:
+                        continue
+                    if str(e) == "MODEL_404":
+                        raise _AIErr("ما لقيت موديل شغّال بحساب Groq. تأكد من المفتاح وأن الحساب مفعّل.")
+                    raise
             try:
                 return j["choices"][0]["message"]["content"].strip()
             except Exception:
