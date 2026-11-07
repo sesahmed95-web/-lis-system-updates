@@ -6900,6 +6900,11 @@ def test_analysis_report():
 def daily_report():
     db = get_db()
     report_date = request.args.get("date", date.today().isoformat())
+    return _daily_report_html(db, report_date)
+
+
+def _daily_report_html(db, report_date):
+    """يبني صفحة التقرير اليومي ليوم معيّن (تُستخدم للعرض ولتوليد PDF الواتساب)."""
     visits = db.execute(
         "SELECT v.id, v.registration_number, v.examining_doctor, v.expenses, v.examining_doctor_fee, "
         "rd.full_name as referring_doctor_name, v.tests_display, "
@@ -7026,7 +7031,96 @@ def daily_report():
                             grand_expenses_only=grand_expenses, grand_examining_fees=grand_examining_fees,
                             grand_general_expenses=grand_general_expenses,
                             grand_forwarded_total=grand_forwarded_total,
-                            grand_net=grand_total - grand_total_expenses - lab_exp_total, grand_remaining=grand_remaining)
+                            grand_net=grand_total - grand_total_expenses - lab_exp_total, grand_remaining=grand_remaining,
+                            wa_phone=get_setting(db, "daily_report_wa_phone", "") or "")
+
+
+@app.route("/reports/daily/whatsapp", methods=["POST"])
+@login_required
+def daily_report_whatsapp():
+    """يولّد PDF لكل يوم بالمدى المطلوب (يوم واحد أو أيام/شهر) ويفتح واتساب على رقم مدير المختبر
+    مع مجلد الملفات. الإرفاق النهائي يدوي (سحب الملف) لأن واتساب ما يسمح بإرسال ملف تلقائياً بدون Business API."""
+    import pdf_export
+    db = get_db()
+    d = request.get_json(silent=True) or {}
+    phone = re.sub(r"[^\d+]", "", str(d.get("phone") or ""))
+    if len(re.sub(r"\D", "", phone)) < 8:
+        return jsonify(ok=False, error="اكتب رقم واتساب صحيح لمدير المختبر."), 400
+    try:
+        d1 = datetime.strptime(str(d.get("from") or "")[:10], "%Y-%m-%d").date()
+        d2 = datetime.strptime(str(d.get("to") or d.get("from") or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify(ok=False, error="تاريخ غير صحيح."), 400
+    if d2 < d1:
+        d1, d2 = d2, d1
+    if (d2 - d1).days > 92:
+        return jsonify(ok=False, error="المدى أكبر من 3 أشهر — قسّمه على دفعات."), 400
+    set_setting(db, "daily_report_wa_phone", phone)
+    db.commit()
+    folder = os.path.join(_whatsapp_flush_pdf_dir(), "daily_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(folder, exist_ok=True)
+    made, failed = [], []
+    day = d1
+    while day <= d2:
+        iso = day.isoformat()
+        has = db.execute("SELECT 1 FROM visits WHERE substr(created_at,1,10)=? LIMIT 1", (iso,)).fetchone()
+        if has or d1 == d2:           # الأيام الفارغة تُتخطى إلا لو طلب يوم واحد
+            try:
+                html_content = _daily_report_html(db, iso)
+                pdf_path = os.path.join(folder, f"DailyReport_{iso}.pdf")
+                _v86_html_to_pdf(html_content, request.url_root, pdf_path)
+                made.append(pdf_path)
+            except Exception as exc:
+                failed.append(f"{iso}: {exc}")
+        day += timedelta(days=1)
+    if not made:
+        return jsonify(ok=False, error="ما كو أيام فيها زيارات بهذا المدى." + (" " + " | ".join(failed) if failed else ""))
+    opened_wa, _ = _open_whatsapp_with_pdf(phone, made[0], get_setting(db, "whatsapp_country_code", "964"))
+    log_action("WhatsAppSend", "daily_report", None, f"{d1}..{d2} files={len(made)} opened={opened_wa}")
+    return jsonify(ok=True, count=len(made), failed=failed, whatsapp=bool(opened_wa), folder=folder)
+
+
+@app.route("/master/catalog-installer", methods=["GET", "POST"])
+@roles_required("supervisor")
+def catalog_installer():
+    """تثبيت كتالوج التحاليل الجاهز (كيمياء/هرمونات/فيتامينات/دلائل ورمية/دم). يضيف الناقص فقط ولا يعدّل الموجود."""
+    import lab_catalog
+    from flask import render_template_string
+    db = get_db()
+    if request.method == "POST":
+        depts = set(request.form.getlist("dept"))
+        res = lab_catalog.install(db, depts or None)
+        db.commit()
+        try:
+            sync_test_sections(db)
+            db.commit()
+        except Exception:
+            pass
+        log_action("CatalogInstall", "test_definitions", None, json.dumps(res))
+        flash(f"تمت إضافة {res['added']} تحليل ({res['params']} حقل، {res['ranges']} نسبة طبيعية). المتخطّى لأنه موجود: {res['skipped']}.")
+        return redirect(url_for("catalog_installer"))
+    rows = lab_catalog.preview(db)
+    by = {}
+    for e, exists in rows:
+        by.setdefault(e["dept"], []).append((e, exists))
+    page = """<!doctype html><meta charset=utf-8><title>كتالوج التحاليل الجاهز</title>
+<body dir=rtl style="font-family:Tahoma,Arial;background:#f4f8f8;margin:0;padding:18px;color:#16302f">
+<div style="max-width:1050px;margin:auto"><a href="{{ url_for('dashboard') }}">&#8617; رجوع</a>
+<h2>📦 كتالوج التحاليل الجاهز</h2>
+{% for m in get_flashed_messages() %}<div style="background:#e6f7e6;border:1px solid #9bd59b;padding:8px 12px;border-radius:8px;margin:8px 0">{{ m }}</div>{% endfor %}
+<p>يضيف التحاليل الناقصة فقط (الموجودة أصلاً تُتخطى ولا يُغيَّر شيء فيها). الأسعار تُترك 0 وتُحدَّد من صفحة الأسعار. القيم الطبيعية قيم شائعة للبالغين — راجعها حسب كِت/جهاز المختبر، وتعدّل من أيقونة النسب الطبيعية.</p>
+<form method=post>
+{% for dept, items in by.items() %}
+<label style="display:inline-block;margin:4px 10px"><input type=checkbox name=dept value="{{ dept }}" checked> <b>{{ dept }}</b> ({{ items|length }})</label>
+{% endfor %}
+<div><button style="margin:10px 0;padding:9px 22px;border:0;border-radius:9px;background:#0f766e;color:#fff;font-size:15px" onclick="return confirm('تثبيت التحاليل الناقصة؟')">تثبيت التحاليل الناقصة</button></div></form>
+{% for dept, items in by.items() %}
+<h3>{{ dept }}</h3><table style="width:100%;border-collapse:collapse;background:#fff;font-size:13px" dir=ltr>
+<tr style="background:#e0f0ee"><th align=left>الاسم الكامل (يظهر بالتقارير)</th><th>المختصر (باختيار التحاليل)</th><th>الحقول</th><th>الحالة</th></tr>
+{% for e, ex in items %}<tr style="border-top:1px solid #dde"><td>{{ e.name }}</td><td align=center>{{ e.short }}</td><td>{{ e.params|length }}</td>
+<td align=center>{{ 'موجود أصلاً' if ex else 'جديد' }}</td></tr>{% endfor %}</table>
+{% endfor %}</div></body>"""
+    return render_template_string(page, by=by)
 
 
 

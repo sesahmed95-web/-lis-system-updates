@@ -543,7 +543,7 @@
       <label class="checkbox-item">
         <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}"
                data-exam="{{ '1' if test['id'] in examining_test_ids else '0' }}">
-        <span id="test_label_{{ test['id'] }}">{{ test['name'] }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
+        <span id="test_label_{{ test['id'] }}" data-full="{{ test['name'] }}" data-short="{{ test['short_name'] or '' }}" title="{{ test['name'] }}">{{ (test['short_name'] or test['name']) }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
       </label>
       {# سهم اختيار بارامترات معيّنة بس من هذا التحليل بدل طلبه كامل —
          يفتح لائحة تشيك بوكسات (paramPanel_<id>) تتحمّل مرة وحدة عبر
@@ -1223,8 +1223,8 @@
   window.nvRenameTest = function (testId) {
     const label = document.getElementById('test_label_' + testId);
     if (!label) return;
-    const current = label.textContent.trim();
-    const newName = prompt('اسم التحليل الجديد:', current);
+    const current = (label.dataset.full || label.textContent).trim();
+    const newName = prompt('اسم التحليل الجديد (الاسم الكامل — المختصر يبقى ظاهر هنا):', current);
     if (newName === null) return; // إلغاء
     const trimmed = newName.trim();
     if (!trimmed || trimmed === current) return;
@@ -1236,7 +1236,8 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.ok) {
-          label.textContent = data.name;
+          label.dataset.full = data.name; label.title = data.name;
+          label.textContent = label.dataset.short || data.name;
         } else {
           alert(data.error || 'تعذّر تعديل الاسم');
         }
@@ -1559,7 +1560,8 @@
       const wraps = sec.querySelectorAll(':scope > .nv-sec-grid > .checkbox-item-wrap');
       if (wraps.length !== 1) return;
       const sName = nvFlatNorm((sec.querySelector(':scope > summary .nv-sec-name') || {}).textContent);
-      const tName = nvFlatNorm((wraps[0].querySelector('span[id^="test_label_"]') || {}).textContent);
+      const _tl = wraps[0].querySelector('span[id^="test_label_"]') || {};
+      const tName = nvFlatNorm((_tl.dataset && _tl.dataset.full) || _tl.textContent);
       if (!sName || !tName || (tName.indexOf(sName) === -1 && sName.indexOf(tName) === -1)) return;
       if (wraps[0].querySelector('.nv-param-arrow[onclick^="nvToggleParamPanel"]') === null) return;  // GUE/GSE/SFA: بدون بارامترات
       sec.classList.add('nv-flat');

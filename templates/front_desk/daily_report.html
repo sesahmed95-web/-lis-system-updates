@@ -70,7 +70,7 @@
   <label><input type="checkbox" data-col-toggle="gender" checked> الجنس</label>
   <label><input type="checkbox" data-col-toggle="age" checked> العمر</label>
   <label><input type="checkbox" data-col-toggle="referring_doctor" checked> الطبيب المرسل</label>
-  <label><input type="checkbox" data-col-toggle="tests" checked> التحاليل</label>
+  <label><input type="checkbox" data-col-toggle="tests" checked> نوع التحاليل</label>
   <label><input type="checkbox" data-col-toggle="examining_doctor" checked> دكتور المختبر الفاحص + اجوره</label>
   <label><input type="checkbox" data-col-toggle="forwarded" checked> الفحوصات المرسلة لمختبرات اخرى + اجورها</label>
   <label><input type="checkbox" data-col-toggle="general_expenses" checked> الصرفيات العامة</label>
@@ -80,7 +80,16 @@
   <label class="extra-col"><input type="checkbox" data-col-toggle="remaining"> الباقي (غير المحصَّل) — عمود إضافي</label>
 </div>
 
-<div class="no-print" style="margin:0 0 8px;padding:6px 10px;background:#eaf7ff;border:1px solid #6FD0FF;border-radius:8px;font-size:13px">✏️ دبل كلك على خانة <b>التحاليل</b> لتعديلها (مختصر) — لأي موظف. تعديل الاسم/الجنس/العمر/الصرفيات/الملاحظات لمسؤول المختبر بكلمة مرور.</div>
+<div class="no-print" style="margin:0 0 8px;padding:6px 10px;background:#eaf7ff;border:1px solid #6FD0FF;border-radius:8px;font-size:13px">✏️ دبل كلك على خانة <b>نوع التحاليل</b> لتعديلها (مختصر) — لأي موظف. تعديل الاسم/الجنس/العمر/الصرفيات/الملاحظات لمسؤول المختبر بكلمة مرور.</div>
+<div class="no-print" id="waBox" style="margin:0 0 10px;padding:8px 10px;background:#eefaf3;border:1px solid #7bd3a0;border-radius:8px;font-size:13px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+  <b>📤 إرسال الحسابات PDF واتساب:</b>
+  رقم مدير المختبر <input id="waPhone" dir="ltr" placeholder="07xxxxxxxxx" value="{{ wa_phone or '' }}" style="width:140px">
+  من <input type="date" id="waFrom" value="{{ report_date }}"> إلى <input type="date" id="waTo" value="{{ report_date }}">
+  <button type="button" class="btn small" id="waDay">اليوم المعروض</button>
+  <button type="button" class="btn small secondary" id="waMonth">الشهر كامل (PDF لكل يوم)</button>
+  <button type="button" class="btn small" id="waSend">📤 إرسال الحسابات</button>
+  <span id="waMsg" style="font-size:12px"></span>
+</div>
 <div class="report-heading">{{ brand_name }} — التقرير اليومي</div>
 <div class="report-sub">التاريخ: {{ report_date }}</div>
 
@@ -92,7 +101,7 @@
       <th data-col="gender">الجنس</th>
       <th data-col="age">العمر</th>
       <th data-col="referring_doctor">الطبيب المرسل</th>
-      <th data-col="tests">التحاليل</th>
+      <th data-col="tests">نوع التحاليل</th>
       <th data-col="examining_doctor">دكتور المختبر الفاحص + اجوره</th>
       <th data-col="forwarded">الفحوصات المرسلة لمختبرات اخرى + اجورها</th>
       <th data-col="general_expenses">الصرفيات العامة</th>
@@ -207,7 +216,7 @@ function save(id,field,val,cb){
     if(!j.ok){if(field!=='tests')gate=null;alert(j.error||'فشل الحفظ');cb(false);}else cb(true,j.value);
   }).catch(function(){alert('تعذر الاتصال');cb(false);});
 }
-var LABELS={tests:'التحاليل (مختصر)',name:'اسم المريض',gender:'الجنس',age:'العمر',notes:'الملاحظات',general_expenses:'الصرفيات'};
+var LABELS={tests:'نوع التحاليل (مختصر)',name:'اسم المريض',gender:'الجنس',age:'العمر',notes:'الملاحظات',general_expenses:'الصرفيات'};
 var FIELD={tests:'tests',name:'name',gender:'gender',age:'age',notes:'notes',general_expenses:'expenses'};
 table.querySelectorAll('tbody tr[data-vid]').forEach(function(tr){
   var id=tr.getAttribute('data-vid');
@@ -234,6 +243,28 @@ table.querySelectorAll('tbody tr[data-vid]').forEach(function(tr){
     });
   });
 });
+})();
+
+(function(){
+  var $=function(i){return document.getElementById(i);};
+  var base='{{ report_date }}';
+  $('waDay').onclick=function(){$('waFrom').value=base;$('waTo').value=base;};
+  $('waMonth').onclick=function(){
+    var y=+base.slice(0,4),m=+base.slice(5,7),last=new Date(y,m,0).getDate(),mm=('0'+m).slice(-2);
+    $('waFrom').value=y+'-'+mm+'-01';$('waTo').value=y+'-'+mm+'-'+('0'+last).slice(-2);
+  };
+  $('waSend').onclick=function(){
+    var msg=$('waMsg');msg.style.color='#444';msg.textContent='جاري تجهيز ملفات PDF… انتظر';
+    $('waSend').disabled=true;
+    fetch('{{ url_for("daily_report_whatsapp") }}',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({phone:$('waPhone').value,from:$('waFrom').value,to:$('waTo').value})})
+    .then(function(r){return r.json();}).then(function(j){
+      $('waSend').disabled=false;
+      if(!j.ok){msg.style.color='#b00020';msg.textContent=j.error||'فشل';return;}
+      msg.style.color='#0a7a3b';
+      msg.textContent='تم تجهيز '+j.count+' ملف. '+(j.whatsapp?'فُتح واتساب ومجلد الملفات — اسحب الملف(ات) إلى المحادثة وأرسل.':'تعذّر فتح واتساب، الملفات بالمجلد: '+j.folder);
+    }).catch(function(){$('waSend').disabled=false;msg.style.color='#b00020';msg.textContent='تعذر الاتصال بالبرنامج';});
+  };
 })();
 </script>
 {% endblock %}
