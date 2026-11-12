@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block page_title %}ستايلات التقارير{% endblock %}
+{% block content %}
+<style>
+  .rs-tabs { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0 0; border-bottom:2px solid #CBD5E1; padding-bottom:0; }
+  .rs-tab { border:1px solid #CBD5E1; border-bottom:0; background:#F1F5F9; padding:8px 16px; border-radius:10px 10px 0 0; cursor:pointer; font-weight:700; font-family:inherit; font-size:.95em; }
+  .rs-tab.on { background:#fff; color:#1D4ED8; border-color:#1D4ED8; position:relative; top:2px; }
+  .rs-tab small { font-weight:400; color:#64748B; margin-inline-start:4px; }
+  .rs-pane { display:none; padding-top:14px; }
+  .rs-pane.on { display:block; }
+  .rs-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:14px; }
+  .rs-card { border:2px solid #E2E8F0; border-radius:12px; background:#fff; padding:10px; display:flex; flex-direction:column; gap:6px; }
+  .rs-card.act { border-color:#16A34A; box-shadow:0 0 0 3px rgba(22,163,74,.15); }
+  .rs-wrap { direction:ltr; width:100%; height:228px; overflow:hidden; border:1px solid #E2E8F0; border-radius:6px; background:#fff; position:relative; }
+  .rs-frame { width:800px; height:540px; border:0; transform:scale(.42); transform-origin:0 0; pointer-events:none; }
+  .rs-badge { display:inline-block; background:#16A34A; color:#fff; border-radius:10px; padding:1px 9px; font-size:.8em; font-weight:700; }
+  .rs-badge.fam { background:#E0E7FF; color:#3730A3; font-weight:600; }
+  .rs-acts { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .rs-acts form { display:inline; margin:0; }
+  .rs-acts select { max-width:150px; }
+  .rs-edit { border:1px dashed #94A3B8; border-radius:8px; padding:8px; background:#F8FAFC; }
+  .rs-edit label { display:block; font-size:.88em; margin:6px 0 2px; font-weight:600; }
+  .rs-edit input[type=text], .rs-edit input[type=number] { width:100%; box-sizing:border-box; }
+  .rs-tabbar-tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:12px 0; }
+  .rs-tabbar-tools form { display:flex; gap:6px; align-items:center; margin:0; }
+</style>
+
+<div class="card">
+  <div style="margin-bottom:6px;"><a class="btn small secondary" href="{{ url_for('report_designer') }}">↩ رجوع لمصمم التقارير</a></div>
+  <h2 style="margin-top:0;">🗂️ ستايلات التقارير بتبويبات</h2>
+  <p class="muted" style="margin:4px 0 0;">
+    كل ستايل بطاقة داخل تبويب. <b>اعتماد</b> = يطبّق الستايل على <b>كل الزيارات</b> (الحالية والقادمة) لذلك التحليل. تقدر تعدّل ألوان/خط/نصوص الستايل، تنسخه، تنقله لتبويب ثاني، وتضيف تبويبات جديدة.
+    المعاينات ببيانات نموذجية للتوضيح فقط.
+  </p>
+
+  <div class="rs-tabs" id="rsTabs">
+    {% for t in tabs %}
+    <button type="button" class="rs-tab" data-tab="{{ t.id }}">{{ t.name }}<small>({{ t.cards|length }})</small></button>
+    {% endfor %}
+  </div>
+
+  <div class="rs-tabbar-tools">
+    <form method="POST" action="{{ url_for('report_styles_act') }}">
+      <input type="hidden" name="act" value="add_tab">
+      <input type="text" name="name" placeholder="اسم تبويب جديد" maxlength="40" required>
+      <button class="btn small" type="submit">➕ إضافة تبويب</button>
+    </form>
+    <form method="POST" action="{{ url_for('report_styles_act') }}" id="rsRenameForm">
+      <input type="hidden" name="act" value="rename_tab"><input type="hidden" name="tab" id="rsRenTab">
+      <input type="text" name="name" id="rsRenName" placeholder="اسم التبويب الحالي" maxlength="40" required>
+      <button class="btn small secondary" type="submit">✏️ إعادة تسمية الحالي</button>
+    </form>
+    <form method="POST" action="{{ url_for('report_styles_act') }}" id="rsDelForm" onsubmit="return confirm('حذف هذا التبويب؟ ستنتقل ستايلاته للتبويب الأول.')">
+      <input type="hidden" name="act" value="del_tab"><input type="hidden" name="tab" id="rsDelTab">
+      <button class="btn small secondary" type="submit">🗑 حذف التبويب الحالي</button>
+    </form>
+  </div>
+
+  {% for t in tabs %}
+  <div class="rs-pane" data-pane="{{ t.id }}">
+    {% if not t.cards %}
+    <div class="muted" style="padding:20px; text-align:center; border:2px dashed #CBD5E1; border-radius:10px;">
+      هذا التبويب فاضي. انقل إليه ستايلات من التبويبات الأخرى (زر «نقل» على أي بطاقة).
+    </div>
+    {% endif %}
+    <div class="rs-grid">
+      {% for key in t.cards %}{% set s = styles[key] %}
+      <div class="rs-card{{ ' act' if s.active }}" id="card-{{ key|replace(':','-') }}">
+        <div style="display:flex; justify-content:space-between; gap:6px; align-items:flex-start;">
+          <b>{{ s.title }}</b>
+          <span>{% if s.active %}<span class="rs-badge">✅ المعتمد</span>{% endif %}</span>
+        </div>
+        <div><span class="rs-badge fam">{{ families[s.family][0] }}</span>{% if s.custom %} <span class="rs-badge fam">نسخة مخصّصة</span>{% endif %}</div>
+        {% if s.desc %}<div class="muted" style="font-size:.85em;">{{ s.desc }}</div>{% endif %}
+        <div class="rs-wrap">{% if s.preview %}<iframe class="rs-frame" data-src="{{ s.preview }}"></iframe>{% else %}<div class="muted" style="padding:14px;">لا توجد معاينة</div>{% endif %}</div>
+
+        <div class="rs-acts">
+          {% if not s.active %}
+          <form method="POST" action="{{ url_for('report_styles_act') }}"><input type="hidden" name="act" value="activate"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="tab" value="{{ t.id }}">
+            <button class="btn small" type="submit">✅ اعتماد لكل الزيارات</button></form>
+          {% endif %}
+          {% if s.preview %}<a class="btn small secondary" target="_blank" href="{{ s.preview }}">👁 معاينة كاملة</a>{% endif %}
+          {% if s.editable %}
+          <button type="button" class="btn small secondary" onclick="var e=document.getElementById('ed-{{ key|replace(':','-') }}'); e.style.display = e.style.display=='none' ? 'block' : 'none';">✏️ تعديل</button>
+          <form method="POST" action="{{ url_for('report_styles_act') }}"><input type="hidden" name="act" value="clone"><input type="hidden" name="key" value="{{ key }}">
+            <button class="btn small secondary" type="submit">📋 نسخ</button></form>
+          {% elif s.family == 'result' %}
+          <a class="btn small secondary" href="{{ url_for('report_designer') }}#resultStyleCard">⚙ تعديل متقدم (التسميات/الألوان/الأعمدة)</a>
+          {% else %}
+          <a class="btn small secondary" href="{{ url_for('report_designer') }}#designs">⚙ إعدادات متقدمة</a>
+          {% endif %}
+          {% if s.custom %}
+          <form method="POST" action="{{ url_for('report_styles_act') }}" onsubmit="return confirm('حذف هذه النسخة؟')"><input type="hidden" name="act" value="delete"><input type="hidden" name="key" value="{{ key }}">
+            <button class="btn small secondary" type="submit">🗑</button></form>
+          {% endif %}
+        </div>
+
+        <form method="POST" action="{{ url_for('report_styles_act') }}" class="rs-acts">
+          <input type="hidden" name="act" value="move"><input type="hidden" name="key" value="{{ key }}">
+          <span class="muted" style="font-size:.85em;">نقل إلى:</span>
+          <select name="dest">{% for t2 in tabs %}{% if t2.id != t.id %}<option value="{{ t2.id }}">{{ t2.name }}</option>{% endif %}{% endfor %}</select>
+          <button class="btn small secondary" type="submit">↪ نقل</button>
+        </form>
+
+        {% if s.editable %}
+        <form method="POST" action="{{ url_for('report_styles_act') }}" class="rs-edit" id="ed-{{ key|replace(':','-') }}" style="display:none;">
+          <input type="hidden" name="act" value="save_opts"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="tab" value="{{ t.id }}">
+          <label>اسم الستايل</label><input type="text" name="_title" value="{{ s.title }}" maxlength="60">
+          {% if not s.spec %}<div class="muted" style="margin-top:6px;">هذا الستايل الكلاسيكي ثابت — انسخه لتحصل على نسخة قابلة للتعديل، أو اعتمد ستايلًا آخر.</div>{% endif %}
+          {% for name, label, typ, dflt in s.spec %}
+            {% set val = opts[key].get(name, dflt) %}
+            {% if typ == 'bool' %}
+              <label style="font-weight:400; display:flex; gap:6px; align-items:center;"><input type="checkbox" name="o_{{ name }}" value="1" {{ 'checked' if val }}> {{ label }}</label>
+            {% elif typ == 'color' %}
+              <label>{{ label }}</label><input type="color" name="o_{{ name }}" value="{{ val }}">
+            {% elif typ == 'num' %}
+              <label>{{ label }}</label><input type="number" name="o_{{ name }}" value="{{ val }}" min="9" max="26">
+            {% else %}
+              <label>{{ label }}</label><input type="text" name="o_{{ name }}" value="{{ val }}" maxlength="60">
+            {% endif %}
+          {% endfor %}
+          <div class="rs-acts" style="margin-top:10px;">
+            <button class="btn small" type="submit">💾 حفظ</button>
+            <button class="btn small secondary" type="submit" name="act" value="reset_opts" formnovalidate onclick="return confirm('رجوع للإعدادات الافتراضية لهذا الستايل؟')">↩ افتراضي</button>
+          </div>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<script>
+(function () {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.rs-tab'));
+  var panes = Array.prototype.slice.call(document.querySelectorAll('.rs-pane'));
+  var KEY = 'rs_last_tab';
+  function show(id) {
+    tabs.forEach(function (b) { b.classList.toggle('on', b.dataset.tab === id); });
+    panes.forEach(function (p) {
+      var on = p.dataset.pane === id; p.classList.toggle('on', on);
+      if (on) p.querySelectorAll('iframe[data-src]').forEach(function (f) { if (!f.src) f.src = f.dataset.src; });
+    });
+    document.getElementById('rsRenTab').value = id; document.getElementById('rsDelTab').value = id;
+    var cur = tabs.filter(function (b) { return b.dataset.tab === id; })[0];
+    document.getElementById('rsRenName').value = cur ? cur.firstChild.textContent : '';
+    try { localStorage.setItem(KEY, id); } catch (e) {}
+  }
+  tabs.forEach(function (b) { b.addEventListener('click', function () { show(b.dataset.tab); }); });
+  var want = {{ cur_tab|tojson }};
+  if (!want) { try { want = localStorage.getItem(KEY) || ''; } catch (e) {} }
+  if (!tabs.some(function (b) { return b.dataset.tab === want; })) want = tabs.length ? tabs[0].dataset.tab : '';
+  if (want) show(want);
+})();
+</script>
+{% endblock %}

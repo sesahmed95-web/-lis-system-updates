@@ -1,0 +1,75 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+{# تقرير بلانك: ترويسة + بيانات المريض (من base_report) + عنوان حر + نص منسّق وجداول + قوالب محفوظة. يُحفظ لكل تحليل لحاله. #}
+{% set bl = ot_blank(ot['id'] or 0) %}
+<style>
+  .bl-body { min-height:150mm; font-size:16px; line-height:1.7; padding:4px 2px; }
+  .bl-body table { border-collapse:collapse; width:100%; margin:8px 0; }
+  .bl-body td, .bl-body th { border:1px solid #000; padding:5px 8px; min-width:40px; }
+  .bl-bar { margin:8px 0; display:flex; gap:6px; flex-wrap:wrap; align-items:center; font-size:13px; }
+  .bl-bar button, .bl-bar select { padding:4px 10px; }
+  @media print { .bl-bar { display:none !important; } .bl-body:hover { outline:none !important; } }
+  .bl-body:hover { outline:1px dashed #94a3b8; }
+</style>
+<div class="bl-bar">
+  <button type="button" onclick="document.execCommand('bold')"><b>B</b></button>
+  <button type="button" onclick="document.execCommand('italic')"><i>I</i></button>
+  <button type="button" onclick="document.execCommand('insertUnorderedList')">• List</button>
+  <button type="button" onclick="blTable()">▦ Table</button>
+  <button type="button" onclick="blRow()">+ Row</button>
+  <button type="button" onclick="blSave()">💾 Save</button>
+  <select id="blTpl" onchange="blLoad(this.value)"><option value="">— Templates —</option></select>
+  <button type="button" onclick="blSaveTpl()">⭐ Save as template</button>
+  <button type="button" onclick="blDelTpl()">🗑 Delete template</button>
+  <span id="blMsg"></span>
+</div>
+<div class="report-heading" data-keep="1" id="blTitle" contenteditable="true" spellcheck="false">{{ bl.title or ('Report' if ot['test_name'] == 'Blank Report' else ot['test_name']) }}</div>
+<div class="bl-body" id="blBody" contenteditable="true" spellcheck="false">{{ bl.html|safe }}</div>
+<script>
+  var BL_TPLS = [];
+  function blMsg(t) { document.getElementById('blMsg').textContent = t; }
+  function blTable() {
+    var r = parseInt(prompt('Rows?', '4'), 10), c = parseInt(prompt('Columns?', '3'), 10);
+    if (!r || !c || r > 40 || c > 10) return;
+    var h = '<table>';
+    for (var i = 0; i < r; i++) { h += '<tr>'; for (var j = 0; j < c; j++) h += (i === 0 ? '<th>&nbsp;</th>' : '<td>&nbsp;</td>'); h += '</tr>'; }
+    document.execCommand('insertHTML', false, h + '</table><p><br></p>');
+  }
+  function blRow() {
+    var sel = window.getSelection(); if (!sel.anchorNode) return;
+    var n = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentNode;
+    var tr = n.closest ? n.closest('tr') : null; if (!tr) { blMsg('Click inside a table row first'); return; }
+    var nr = tr.cloneNode(true); nr.querySelectorAll('td,th').forEach(function (x) { x.innerHTML = '&nbsp;'; });
+    tr.parentNode.insertBefore(nr, tr.nextSibling);
+  }
+  function blPost(url, body, cb) {
+    fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); }).then(cb).catch(function () { blMsg('Connection error'); });
+  }
+  function blSave() {
+    blPost('/api/order-tests/{{ ot["id"] or 0 }}/blank-body', { title: document.getElementById('blTitle').innerText, html: document.getElementById('blBody').innerHTML },
+      function (d) { blMsg(d.ok ? 'Saved ✓' : (d.error || 'Failed')); });
+  }
+  function blFill(list) {
+    BL_TPLS = list; var s = document.getElementById('blTpl');
+    s.innerHTML = '<option value="">— Templates —</option>' + list.map(function (t) { return '<option value="' + t.id + '">' + t.name.replace(/</g, '&lt;') + '</option>'; }).join('');
+  }
+  function blLoad(id) {
+    var t = BL_TPLS.filter(function (x) { return String(x.id) === String(id); })[0]; if (!t) return;
+    if (document.getElementById('blBody').innerText.trim() && !confirm('Replace the current text with this template?')) return;
+    document.getElementById('blTitle').innerText = t.title || document.getElementById('blTitle').innerText;
+    document.getElementById('blBody').innerHTML = t.html;
+  }
+  function blSaveTpl() {
+    var n = prompt('Template name (e.g. GeneXpert HBV):'); if (!n) return;
+    blPost('/api/blank-templates', { name: n, title: document.getElementById('blTitle').innerText, html: document.getElementById('blBody').innerHTML },
+      function (d) { if (d.ok) { blFill(d.templates); blMsg('Template saved ✓'); } else blMsg(d.error || 'Failed'); });
+  }
+  function blDelTpl() {
+    var v = document.getElementById('blTpl').value; if (!v || !confirm('Delete this template?')) return;
+    fetch('/api/blank-templates/' + v, { method: 'DELETE' }).then(function (r) { return r.json(); })
+      .then(function () { return fetch('/api/blank-templates'); }).then(function (r) { return r.json(); }).then(function (d) { blFill(d.templates); });
+  }
+  fetch('/api/blank-templates').then(function (r) { return r.json(); }).then(function (d) { if (d.ok) blFill(d.templates); });
+</script>
+{% endblock %}

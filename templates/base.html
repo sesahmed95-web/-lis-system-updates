@@ -257,6 +257,7 @@
         <a class="nav-link {{ 'active' if request.path == url_for('ui_style_page') else '' }}" href="{{ url_for('ui_style_page') }}">🧊 مظهر الواجهة (3D)</a>
         <a class="nav-link {{ 'active' if request.path == url_for('app_settings') else '' }}" href="{{ url_for('app_settings') }}">⚙️ {{ t('settings') }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('dashboard_look') else '' }}" href="{{ url_for('dashboard_look') }}">🎨 مظهر الشاشة الرئيسية</a>
+        <a class="nav-link {{ 'active' if request.path == url_for('report_integrity') else '' }}" href="{{ url_for('report_integrity') }}">🩺 {{ 'فحص سلامة التقارير' if lang=='ar' else 'Report integrity' }}</a>
         <a class="nav-link {{ 'active' if request.path == url_for('backup_center') else '' }}" href="{{ url_for('backup_center') }}">💾 {{ 'نسخ احتياطي' if lang=='ar' else 'Backup' }}</a>
         </div>
       </div>
@@ -334,6 +335,30 @@
       group.classList.toggle('collapsed', saved === '1');
     }
   });
+</script>
+<script>
+  // ------------------------------------------------------------------
+  // أسماء الشريط الجانبي القابلة للتعديل (Management → الإعدادات → 🧭 أسماء الشريط الجانبي).
+  // تُحفظ بالإعدادات: groups بمفتاح data-group، links بمسار الرابط. بدون تعديل تبقى الأسماء الأصلية كما هي.
+  // ------------------------------------------------------------------
+  (function () {
+    var L = {{ nav_labels_json|safe }};
+    window.lisApplyNavLabels = function (map) {
+      document.querySelectorAll('.sidebar .nav-group-toggle').forEach(function (t) {
+        var s = t.querySelector('span'); if (!s) return;
+        if (!s.dataset.default) s.dataset.default = s.textContent.trim();
+        var og = map.groups && map.groups[t.dataset.group];
+        if (og) { s.textContent = og; s.dataset.ov = '1'; } else if (s.dataset.ov) { s.textContent = s.dataset.default; delete s.dataset.ov; }
+      });
+      document.querySelectorAll('.sidebar a.nav-link').forEach(function (a) {
+        if (!a.dataset.default) a.dataset.default = a.textContent.replace(/\s+/g, ' ').trim();
+        var p = a.getAttribute('href') || '';
+        var ol = map.links && map.links[p];
+        if (ol) { a.textContent = ol; a.dataset.ov = '1'; } else if (a.dataset.ov) { a.textContent = a.dataset.default; delete a.dataset.ov; }
+      });
+    };
+    window.lisApplyNavLabels(L);
+  })();
 </script>
 <script>
   // ------------------------------------------------------------------

@@ -49,7 +49,7 @@ def single(dept, group, name, short, sample, unit, ranges, aliases=()):
 
 # =============================== الكيمياء ===============================
 C, CG, S = "Biochemistry", "Biochemistry Tests", "Serum"
-single(C, CG, "Fasting Blood Glucose", "FBS", "Serum", "mg/dL", [r(70, 100)], ["Blood sugar(F)", "FBG", "Blood Glucose Fasting"])
+single(C, CG, "Fasting Blood Glucose", "FBS", "Serum", "mg/dL", [r(70, 100, text="Normal: Less than 100\nPre-diabetic: 100 - 125\nDiabetic: 126 or more")], ["Blood sugar(F)", "FBG", "Blood Glucose Fasting"])
 single(C, CG, "Random Blood Glucose", "RBS", "Serum", "mg/dL", [r(None, 140)], ["Blood sugar(R)", "Random Blood Sugar"])
 single(C, CG, "2-Hour Postprandial Blood Glucose", "2HPP", "Serum", "mg/dL", [r(None, 140)], ["2 hr PP", "PPBS"])
 single(C, CG, "Fructosamine", "Fructosamine", "Serum", "µmol/L", [r(200, 285)])
@@ -99,16 +99,16 @@ t(C, CG, "Liver Function Tests", "LFT", S, [
 ], ["liver function tests", "LFTs"])
 
 t(C, CG, "Lipid Profile", "Lipid", S, [
-    p("Total Cholesterol", "mg/dL", [r(None, 200)]),
-    p("Triglycerides", "mg/dL", [r(None, 150)]),
-    p("HDL Cholesterol", "mg/dL", [r(40, None, M), r(50, None, F)]),
+    p("Total Cholesterol", "mg/dL", [r(None, 200, text="Desirable level: Less than 200\nBorderline high: 200 - 240\nHigh risk: More than 240")]),
+    p("Triglycerides", "mg/dL", [r(None, 150, text="Normal: Less than 150\nBorderline high: 150 - 199\nHigh: 200 - 499\nVery high: 500 or more")]),
+    p("HDL Cholesterol", "mg/dL", [r(45, None, text="No risk: More than 65\nModerate risk: 45 - 55\nHigh risk: Less than 45")]),
     p("LDL Cholesterol", "mg/dL", [r(None, 100)]),
     p("VLDL Cholesterol", "mg/dL", [r(2, 30)]),
     p("Cholesterol / HDL Ratio", "", [r(None, 5)]),
 ], ["lipid profil", "Lipid Profile"])
-single(C, CG, "Total Cholesterol", "Chol", S, "mg/dL", [r(None, 200)], ["Cholesterol"])
-single(C, CG, "Triglycerides", "TG", S, "mg/dL", [r(None, 150)])
-single(C, CG, "HDL Cholesterol", "HDL", S, "mg/dL", [r(40, None, M), r(50, None, F)])
+single(C, CG, "Total Cholesterol", "Chol", S, "mg/dL", [r(None, 200, text="Desirable level: Less than 200\nBorderline high: 200 - 240\nHigh risk: More than 240")], ["Cholesterol"])
+single(C, CG, "Triglycerides", "TG", S, "mg/dL", [r(None, 150, text="Normal: Less than 150\nBorderline high: 150 - 199\nHigh: 200 - 499\nVery high: 500 or more")])
+single(C, CG, "HDL Cholesterol", "HDL", S, "mg/dL", [r(45, None, text="No risk: More than 65\nModerate risk: 45 - 55\nHigh risk: Less than 45")])
 single(C, CG, "LDL Cholesterol", "LDL", S, "mg/dL", [r(None, 100)])
 
 single(C, CG, "Serum Amylase", "Amylase", S, "U/L", [r(28, 100)])
@@ -144,14 +144,14 @@ single(H, HG, "Anti-Thyroid Peroxidase Antibodies", "Anti-TPO", S, "IU/mL", [r(N
 single(H, HG, "Anti-Thyroglobulin Antibodies", "Anti-TG", S, "IU/mL", [r(None, 115)])
 
 single(H, HG, "Follicle Stimulating Hormone", "FSH", S, "mIU/mL",
-      [r(1.5, 12.4, M)] + txt("Follicular 3.5-12.5 | Mid-cycle 4.7-21.5 | Luteal 1.7-7.7 | Post-menopausal 25.8-134.8", F))
+      [r(1.5, 12.4, M)] + txt("Follicular: 3.5 - 12.5\nMid-cycle: 4.7 - 21.5\nLuteal: 1.7 - 7.7\nPost-menopausal: 25.8 - 134.8", F))
 single(H, HG, "Luteinizing Hormone", "LH", S, "mIU/mL",
-      [r(1.7, 8.6, M)] + txt("Follicular 2.4-12.6 | Mid-cycle 14.0-95.6 | Luteal 1.0-11.4 | Post-menopausal 7.7-58.5", F))
+      [r(1.7, 8.6, M)] + txt("Follicular: 2.4 - 12.6\nMid-cycle: 14.0 - 95.6\nLuteal: 1.0 - 11.4\nPost-menopausal: 7.7 - 58.5", F))
 single(H, HG, "Prolactin", "PRL", S, "ng/mL", mf(4.0, 15.2, 4.8, 23.3))
 single(H, HG, "Estradiol", "E2", S, "pg/mL",
-      [r(7.6, 42.6, M)] + txt("Follicular 12.5-166 | Mid-cycle 85.8-498 | Luteal 43.8-211 | Post-menopausal < 54.7", F))
+      [r(7.6, 42.6, M)] + txt("Follicular: 12.5 - 166\nMid-cycle: 85.8 - 498\nLuteal: 43.8 - 211\nPost-menopausal: Less than 54.7", F))
 single(H, HG, "Progesterone", "PROG", S, "ng/mL",
-      [r(0.2, 1.4, M)] + txt("Follicular 0.2-1.5 | Luteal 1.7-27 | Post-menopausal 0.1-0.8", F))
+      [r(0.2, 1.4, M)] + txt("Follicular: 0.2 - 1.5\nLuteal: 1.7 - 27\nPost-menopausal: 0.1 - 0.8", F))
 single(H, HG, "Total Testosterone", "Testo", S, "ng/mL", [r(2.49, 8.36, M), r(0.084, 0.481, F)])
 single(H, HG, "Sex Hormone Binding Globulin", "SHBG", S, "nmol/L", mf(18.3, 54.1, 32.4, 128))
 single(H, HG, "Dehydroepiandrosterone Sulfate", "DHEA-S", S, "µg/dL", txt("Age dependent"))
@@ -219,6 +219,9 @@ t(HM, HMG, "Hemoglobin Electrophoresis", "Hb Electro", WB, [
     p("Hemoglobin A", "%", [r(95, 98)]), p("Hemoglobin A2", "%", [r(2.0, 3.5)]),
     p("Hemoglobin F", "%", [r(None, 1.0)]), p("Hemoglobin S", "%", txt("Absent")),
     p("Hemoglobin C", "%", txt("Absent")), pt("Comment")], ["HB.ELECTROPHORESIS", "Hb Electrophoresis"])
+t(HM, HMG, "Serum Protein Electrophoresis", "S.Protein Electro", S, [
+    p("Albumin", "%"), p("Alpha-1 Globulin", "%"), p("Alpha-2 Globulin", "%"),
+    p("Beta Globulin", "%"), p("Gamma Globulin", "%"), pt("Comment")], ["S.Protein Electrophoresis", "SPEP"])
 t(HM, HMG, "Sickling Test", "Sickling", WB, [pt("Sickling Test", txt("Negative"))], ["Sickling Test"])
 t(HM, HMG, "G6PD Assay (Quantitative)", "G6PD", WB, [p("G6PD Activity", "U/g Hb", [r(4.6, 13.5)])], ["G6PD", "G6PD Assay"])
 t(HM, HMG, "G6PD Screening (Qualitative)", "G6PD Screen", WB, [pt("G6PD Screening", txt("Normal"))])
@@ -255,7 +258,7 @@ t(HM, HMG, "Direct Coombs Test", "DCT", WB, [pt("Direct Coombs Test", txt("Negat
 t(HM, HMG, "Indirect Coombs Test", "ICT", S, [pt("Indirect Coombs Test", txt("Negative"))])
 t(HM, HMG, "Osmotic Fragility Test", "OFT", WB, [pt("Osmotic Fragility Test")])
 t(HM, HMG, "Lupus Anticoagulant", "LA", "Plasma (Citrate)", [pt("Lupus Anticoagulant", txt("Negative"))])
-t(HM, HMG, "Glycated Hemoglobin", "HbA1c", WB, [p("Glycated Hemoglobin (HbA1c)", "%", [r(4.0, 5.6)])], ["HbA1c"])
+t(HM, HMG, "Glycated Hemoglobin", "HbA1c", WB, [p("Glycated Hemoglobin (HbA1c)", "%", [r(4.0, 5.6, text="Non-diabetic: Up to 5.7\nPre-diabetic: 5.7 - 6.4\nDiabetic: 6.5 or more")])], ["HbA1c"])
 
 CATALOG = _CATALOG
 

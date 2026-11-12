@@ -1,0 +1,17 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+{# تقارير الصبغات والفحص المجهري (Gram / Acid Fast / Skin Scraping): جدول حقل ← نتيجة. الصفوف الفاضية لا تُطبع. #}
+{% set sd = ot_struct(ot['id'] or 0, ot['test_code']) %}
+<div class="report-heading" data-keep="1" style="font-style:italic; text-decoration:underline;">{{ sd.title or ot['test_name'] }}</div>
+<table style="width:100%; direction:ltr; border-collapse:collapse; margin-top:10px; font-size:17px;">
+  {% for r in sd.vrows %}
+  <tr>
+    <td style="border:1px solid #000; padding:8px 10px; width:38%; font-weight:bold; font-style:italic; vertical-align:top;">{{ r.k }}{{ ':' if r.k and not r.k.endswith(':') }}</td>
+    <td style="border:1px solid #000; padding:8px 10px; vertical-align:top;">{{ rich_note(ot['id'] or 0, 'fld-' ~ loop.index, r.v) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% if sd.note %}
+<div style="direction:ltr; text-align:left; margin-top:14px; font-size:16px; display:flex; gap:6px;"><b><u>Comment:</u></b>{{ rich_note(ot['id'] or 0, 'sd-note', sd.note, style='flex:1') }}</div>
+{% endif %}
+{% endblock %}

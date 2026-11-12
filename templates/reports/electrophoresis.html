@@ -1,0 +1,102 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+{# Hb Electrophoresis / Serum Protein Electrophoresis.
+   1) إذا انحفظت بيانات القمم (شاشة إدخال النتائج ← 📎 ← 🧬 Hb Curve): يُرسم المنحنى SVG نظيف + جدول + النتائج الرئيسية.
+   2) وإلا: نفس السلوك القديم (صورة نتيجة الجهاز أو جدول الباراميترات).
+   التعليق: نص منسّق (حجم خط + رموز) بدون أي خط تحت كلمة Comments. عنوان التقرير إنجليزي دائماً. #}
+{% set media = ot_media(ot['id'] or 0) %}
+{% set hb = ot_hb(ot['id'] or 0) %}
+{% set comment_text = media.comment or params.get('Comment', '') or '' %}
+<style>
+  .doc-col.logo-col { order:-1; }   /* الشعار على يسار الترويسة بتقرير Hb فقط */
+  @media print { .el-img { display:none !important; } }
+  .el-img { text-align:center; margin:10px 0; }
+  .el-img img { max-width:100%; max-height:165mm; height:auto; display:block; margin:0 auto 8px; }
+  .el-dev { text-align:center; direction:ltr; font-size:12px; color:#333; margin:2px 0 4px; }
+  .el-curve { text-align:center; margin:4px 0 0; }
+  .el-curve svg { width:150mm; max-width:100%; height:auto; }
+  .el-cap { text-align:center; font-size:10px; color:#777; direction:ltr; margin-top:-2px; }
+  .el-t { width:92%; margin:10px auto 0; direction:ltr; border-collapse:collapse; font-family:'Times New Roman',serif; font-size:16px; }
+  .el-t th { border-bottom:2px solid #000; padding:4px 6px; text-align:center; }
+  .el-t td { padding:3px 6px; text-align:center; border-bottom:1px dotted #bbb; }
+  .el-tot { width:92%; margin:3px auto 0; direction:ltr; text-align:left; font-size:12px; color:#333; }
+  .el-key { width:92%; margin:10px auto 0; direction:ltr; text-align:left; display:flex; flex-wrap:wrap; gap:4px 34px;
+            font-family:'Times New Roman',serif; font-size:22px; }
+  .el-ch { font-weight:700; font-size:17px; margin:14px 0 4px; direction:ltr; text-align:left; }
+  .el-c { display:block !important; float:none !important; width:100% !important; box-sizing:border-box; direction:ltr; text-align:left;
+          font-family:Georgia,'Times New Roman',serif; font-style:italic; font-weight:600; font-size:16px; line-height:1.6; margin:0; padding:0 0 0 2px; white-space:pre-wrap; tab-size:4; }
+  .el-c ul, .el-c ol { margin:0; padding:0 0 0 4px; }
+  .el-c ul { list-style:none; }
+  .el-c ol { padding-left:26px; }
+  .el-c ul li:before { content:"\27A2\00a0\00a0"; font-size:13px; font-style:normal; }   /* ➢ مثل قوائم الوورد */
+  .el-c p, .el-c div { margin:0; }
+  .el-c blockquote { margin:0; padding:0; border:0; }
+  .el-c:hover { outline:1px dashed #94a3b8; }
+  .el-curve svg text.hbt { cursor:pointer; }
+  .el-curve svg text.hbt:hover { fill:#d00; text-decoration:line-through; }
+  .el-hint { text-align:center; font-size:11px; color:#64748b; direction:rtl; margin:2px 0; }
+  @media print { .el-c:hover { outline:none; } .el-hint { display:none !important; } }
+</style>
+<div class="report-heading" data-keep="1" style="font-style:italic; text-decoration:underline; direction:ltr;">{{ hb_title(ot['test_name'], hb.source) }}</div>
+
+{% if hb.has_data %}
+  {% if hb.device_line %}<div class="el-dev">{{ hb.device_line }}</div>{% endif %}
+  {% if hb.svg %}
+    <div class="el-curve">{{ hb.svg|safe }}</div>
+    <div class="el-cap">Curve redrawn from the instrument's peak table</div>
+    <div class="el-hint no-print">👆 اضغط على أي رقم أو كلمة بالمنحنى لحذفها
+      {% if hb.hidden %}<a href="#" id="elRestore" style="margin-inline-start:8px;">↩ استرجاع المحذوف ({{ hb.hidden|length }})</a>{% endif %}</div>
+    <script>
+    (function () {
+      var id = {{ (ot['id'] or 0)|int }}, hidden = {{ hb.hidden|tojson }};
+      function send() {
+        fetch('/api/order-tests/' + id + '/hb-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hidden: hidden }) })
+          .then(function (r) { return r.json(); }).then(function (d) { if (d.ok) location.reload(); else alert(d.error || 'تعذّر الحفظ'); });
+      }
+      var c = document.querySelector('.el-curve');
+      if (c) c.addEventListener('click', function (e) {
+        var t = e.target.closest && e.target.closest('text.hbt'); if (!t) return;
+        var n = +t.getAttribute('data-t'); if (hidden.indexOf(n) < 0) hidden.push(n); send();
+      });
+      var r = document.getElementById('elRestore');
+      if (r) r.addEventListener('click', function (e) { e.preventDefault(); hidden = []; send(); });
+    })();
+    </script>
+  {% endif %}
+  <table class="el-t">
+    <tr>{% for h in hb.headers %}<th>{{ h }}</th>{% endfor %}</tr>
+    {% for r in hb.rows %}<tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>{% endfor %}
+  </table>
+  {% if hb.total_area %}<div class="el-tot">Total area: {{ hb.total_area }}</div>{% endif %}
+  {% if hb.key %}<div class="el-key">{% for k, v in hb.key %}<div><b>{{ k }}</b> : {{ v }}</div>{% endfor %}</div>{% endif %}
+{% elif media.images %}
+  <div class="no-print" style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:6px;padding:6px 10px;margin:6px 0;font-size:12px;direction:rtl;">⚠️ الصورة الملتقطة لا تُطبع. لتظهر نتيجتها بالتقرير (منحنى + جدول مرتبين) افتح شاشة إدخال النتائج ← 📎 ← 🧬 Hb Curve، اقرأي الجدول ثم احفظيه.</div>
+  <div class="el-img no-print">{% for im in media.images %}<img src="{{ im.url }}" alt="">{% endfor %}</div>
+{% else %}
+  <table style="width:80%; margin:10px auto; direction:ltr; border-collapse:collapse; font-size:16px;">
+    <tr style="border-bottom:2px solid #000;"><th style="text-align:left; padding:5px;">Fraction</th><th style="padding:5px;">Result</th><th style="padding:5px;">Ref. Range</th></tr>
+    {% for name, val in params.items() if name != 'Comment' and val not in ('', None) %}
+      {% set rg = ranges.get(name) %}
+      <tr><td style="padding:5px;">{{ name }}</td>
+        <td style="padding:5px; text-align:center;"><b>{{ val }}</b> {{ units.get(name, '') }}</td>
+        <td style="padding:5px; text-align:center;">{% if rg and rg['range_text'] %}{{ rg['range_text'] }}{% elif rg and rg['low'] is not none and rg['high'] is not none %}{{ rg['low'] }} - {{ rg['high'] }}{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+{% endif %}
+
+{% if hb.comment_html %}
+  <div class="el-ch">Comments:-</div>
+  <div class="el-c" contenteditable="true" spellcheck="false">{{ hb.comment_html|safe }}</div>
+{% elif comment_text.strip() %}
+  <div class="el-ch">Comments:-</div>
+  <div class="el-c" contenteditable="true" spellcheck="false"><ul class="el-b">{% for line in comment_text.splitlines() if line.strip() %}<li>{{ line.strip().lstrip('*-•➢ ').strip() }}</li>{% endfor %}</ul></div>
+{% endif %}
+<script>
+document.addEventListener('keydown', function (e) {   /* Tab داخل التعليق = مسافات (مثل الوورد) */
+  if (e.key !== 'Tab') return;
+  var c = e.target && e.target.closest && e.target.closest('.el-c');
+  if (!c || !window.lisTabSpaces) return;
+  e.preventDefault(); window.lisTabSpaces(e.shiftKey);
+});
+</script>
+{% endblock %}

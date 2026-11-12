@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block page_title %}فحص سلامة التقارير{% endblock %}
+{% block content %}
+<div style="max-width:860px;margin:0 auto;direction:rtl">
+  <h2>🩺 فحص سلامة التقارير</h2>
+  <p style="color:#555">هذي الصفحة تفحص أن كل تحليل عنده باراميتراته، وترجّع باراميترات CBC (الأسماء، الوحدات، المدى الطبيعي، وترتيب العرض). <b>ما تحذف ولا تغيّر أي نتيجة مريض</b>، وتاخذ نسخة احتياطية قبل أي إصلاح.</p>
+
+  {% if result %}
+  <div style="background:#e8f7ec;border:1px solid #9fd5ae;border-radius:10px;padding:12px;margin:12px 0">
+    <b>✅ تم الإصلاح.</b>
+    <div>أسماء أُعيدت: {{ result.renamed|length }}{% if result.renamed %} — {{ result.renamed|join('، ') }}{% endif %}</div>
+    <div>باراميترات أُضيفت: {{ result.added|length }}{% if result.added %} — {{ result.added|join('، ') }}{% endif %}</div>
+    <div>مدايات طبيعية أُضيفت: {{ result.ranges }}</div>
+  </div>
+  {% endif %}
+
+  <div style="border:1px solid #ddd;border-radius:10px;padding:14px;margin:12px 0;background:#fff">
+    <h3 style="margin-top:0">CBC</h3>
+    {% if not scan.cbc %}
+      <p style="color:#b00">تحليل CBC غير موجود بقاعدة البيانات.</p>
+    {% elif scan.cbc.missing %}
+      <p style="color:#b00">ناقص {{ scan.cbc.missing|length }} باراميتر: {{ scan.cbc.missing|join('، ') }}</p>
+    {% else %}
+      <p style="color:#117a37">✔ كل باراميترات CBC موجودة ({{ scan.cbc.have }}).</p>
+    {% endif %}
+    <form method="post" onsubmit="return confirm('ترجيع باراميترات CBC الناقصة؟ (يأخذ نسخة احتياطية أولاً ولا يمس النتائج)')">
+      <button class="btn btn-primary" type="submit">↺ إرجاع باراميترات CBC</button>
+    </form>
+  </div>
+
+  <div style="border:1px solid #ddd;border-radius:10px;padding:14px;margin:12px 0;background:#fff">
+    <h3 style="margin-top:0">تحاليل مفعّلة بلا باراميترات</h3>
+    {% if scan.empty_tests %}
+      <ul>{% for t in scan.empty_tests %}<li>{{ t.name }} <small style="color:#888">({{ t.code }})</small></li>{% endfor %}</ul>
+      <p style="color:#777;font-size:.9em">أضف لها باراميترات من صفحة تصميم التقارير/كتالوج التحاليل.</p>
+    {% else %}
+      <p style="color:#117a37">✔ ما فيه أي تحليل فارغ.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

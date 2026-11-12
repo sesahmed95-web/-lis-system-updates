@@ -513,7 +513,7 @@
               var sc = document.currentScript;
               var root = (sc && (sc.closest('table') || sc.parentElement)) || document;
               root.querySelectorAll('.report-heading, .report-title').forEach(function (h) {
-                if (names.indexOf(norm(h.textContent)) >= 0) h.style.display = 'none';
+                if (!h.hasAttribute('data-keep') && names.indexOf(norm(h.textContent)) >= 0) h.style.display = 'none';
               });
             } catch (e) {}
           })();
@@ -580,7 +580,7 @@
 
           <div class="footer-block">
             {% block extra_note %}{% endblock %}
-            {% if previous_visit_date and (layout_view is not defined or layout_view.show_prev_visit_line) %}
+            {% if previous_visit_date and (layout_view is not defined or layout_view.show_prev_visit_line) and not (ot and rs_hide_prev_footer(ot)) %}
             <div class="prev-visit-note">زيارة سابقة بتاريخ: {{ previous_visit_date }}</div>
             {% endif %}
             {% if from_other_lab %}
@@ -742,6 +742,105 @@
       window.addEventListener('load', function () { setTimeout(function () { if (window.__lisPrinted) return; window.__lisPrinted = true; window.print(); }, 150); });
     }
   })();
+</script>
+
+{# ===== ملاحظات منسّقة مثل الوورد (lab_rich): اضغط على أي ملاحظة/تعليق/استنتاج لتعديله وتحريكه يمين/يسار ===== #}
+<style>
+  .rich-note { unicode-bidi:plaintext; text-align:start; line-height:1.55; min-height:1.2em; white-space:pre-wrap; tab-size:4; }   /* المسطرة (Space) تحرّك الكتابة مثل الوورد */
+  .rich-note p, .rich-note div, .rich-note li { unicode-bidi:plaintext; margin:0; }
+  .rich-note ul { list-style:none; margin:0; padding:0 0 0 4px; }
+  .rich-note ol { margin:0; padding:0 0 0 26px; }
+  .rich-note ul li:before { content:"\27A2\00a0\00a0"; font-size:.85em; font-style:normal; }
+  .rich-note blockquote { margin:0; padding:0; border:0; }
+  .rich-note[data-ot]:hover { outline:1px dashed #94a3b8; cursor:text; }
+  .rich-note.rn-edit { outline:2px solid #2563eb !important; background:#f8fbff; }
+  #rnBar { position:fixed; top:6px; left:50%; transform:translateX(-50%); z-index:99999; display:none; flex-wrap:wrap; gap:3px;
+           background:#fff; border:1px solid #94a3b8; border-radius:8px; padding:4px 6px; box-shadow:0 4px 16px rgba(0,0,0,.2); max-width:96vw; direction:ltr; }
+  #rnBar button, #rnBar select { font:13px Arial; padding:3px 7px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:5px; cursor:pointer; }
+  #rnBar button:hover { background:#e0e7ff; }
+  #rnBar .sep { width:6px; }
+  #rnToast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:#166534; color:#fff; padding:5px 14px; border-radius:6px; font:13px Arial; z-index:99999; display:none; }
+  @media print { .rich-note[data-ot]:hover, .rich-note.rn-edit { outline:none !important; background:none !important; } #rnBar, #rnToast { display:none !important; } }
+</style>
+<div id="rnBar" class="no-print">
+  <button data-c="bold"><b>B</b></button><button data-c="italic"><i>I</i></button><button data-c="underline"><u>U</u></button>
+  <span class="sep"></span>
+  <button data-c="insertUnorderedList" title="قائمة ➢">☰ ➢</button><button data-c="insertOrderedList" title="ترقيم">1.</button>
+  <span class="sep"></span>
+  <button data-c="justifyLeft" title="يسار (Ctrl+L)">⇤</button><button data-c="justifyCenter" title="وسط (Ctrl+E)">↔</button><button data-c="justifyRight" title="يمين (Ctrl+R)">⇥</button><button data-c="justifyFull" title="ضبط (Ctrl+J)">☰</button>
+  <button data-c="outdent" title="Shift+Tab">◀</button><button data-c="indent" title="Tab">▶</button>
+  <span class="sep"></span>
+  <button data-c="fontSize:5" title="تكبير">A+</button><button data-c="fontSize:3" title="عادي">A</button><button data-c="fontSize:2" title="تصغير">A-</button>
+  <span class="sep"></span>
+  <select id="rnSym" title="رموز"><option value="">رمز…</option><option>➢</option><option>➤</option><option>●</option><option>○</option><option>■</option><option>✓</option><option>✔</option><option>✘</option><option>←</option><option>→</option><option>↑</option><option>↓</option><option>±</option><option>≥</option><option>≤</option><option>°</option><option>µ</option></select>
+  <span class="sep"></span>
+  <button id="rnReset" title="رجوع للنص الأصلي بدون تنسيق">↺ أصلي</button><button id="rnDone" style="background:#dcfce7">✓ تم</button>
+</div>
+<div id="rnToast"></div>
+<script>
+/* Tab = 4 مسافات (Shift+Tab يرجّع 4) — لتحريك النص يمين/يسار مثل الوورد */
+window.lisTabSpaces = function (back) {
+  if (!back) { document.execCommand('insertText', false, '    '); return; }
+  var s = window.getSelection();
+  for (var i = 0; i < 4; i++) {
+    var n = s && s.anchorNode, o = s ? s.anchorOffset : 0;
+    if (n && n.nodeType === 3 && o > 0 && /[ \u00a0]/.test(n.data.charAt(o - 1))) document.execCommand('delete'); else break;
+  }
+};
+</script>
+<script>
+(function () {
+  var bar = document.getElementById('rnBar'), cur = null, dirty = false, tt;
+  if (!bar) return;
+  function toast(m, bad) { var t = document.getElementById('rnToast'); t.textContent = m; t.style.background = bad ? '#b91c1c' : '#166534'; t.style.display = 'block'; clearTimeout(tt); tt = setTimeout(function () { t.style.display = 'none'; }, 1600); }
+  function save(html) {
+    if (!cur) return Promise.resolve();
+    var el = cur;
+    return fetch('/api/order-tests/' + el.dataset.ot + '/rich', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: el.dataset.rich, html: html }) })
+      .then(function (r) { return r.json(); }).then(function (d) { if (d.ok) { toast('✓ حُفظ'); return d; } toast(d.error || 'تعذّر الحفظ', true); });
+  }
+  function fixFonts(el) { // <font size=N> الذي يخرجه المتصفح → حجم بالبكسل
+    var px = { '1': 10, '2': 13, '3': 16, '4': 18, '5': 24, '6': 32, '7': 48 };
+    el.querySelectorAll('font[size]').forEach(function (f) { var s = document.createElement('span'); s.style.fontSize = px[f.getAttribute('size')] + 'px'; while (f.firstChild) s.appendChild(f.firstChild); f.replaceWith(s); });
+  }
+  function open(el) {
+    if (cur === el) return; if (cur) close(true);
+    cur = el; dirty = false; el.contentEditable = 'true'; el.classList.add('rn-edit'); bar.style.display = 'flex'; el.focus();
+  }
+  function close(keep) {
+    if (!cur) return; var el = cur; fixFonts(el);
+    el.contentEditable = 'false'; el.classList.remove('rn-edit'); bar.style.display = 'none';
+    var d = dirty; var html = el.innerHTML; dirty = false;
+    if (d) save(html).then(function (r) { if (r && r.html != null) el.innerHTML = r.html; });
+    cur = null;
+  }
+  document.addEventListener('click', function (e) {
+    var n = e.target.closest && e.target.closest('.rich-note[data-ot]');
+    if (n) { open(n); return; }
+    if (cur && !(e.target.closest && e.target.closest('#rnBar'))) close();
+  });
+  document.addEventListener('input', function (e) { if (cur && cur.contains(e.target)) dirty = true; });
+  document.addEventListener('keydown', function (e) {
+    if (!cur) return;
+    if (e.key === 'Escape') { close(); return; }
+    if (e.key === 'Tab') { e.preventDefault(); window.lisTabSpaces(e.shiftKey); dirty = true; return; }
+    if (e.ctrlKey || e.metaKey) {
+      var m = { l: 'justifyLeft', e: 'justifyCenter', r: 'justifyRight', j: 'justifyFull' }[(e.key || '').toLowerCase()];
+      if (m) { e.preventDefault(); document.execCommand(m); dirty = true; }
+    }
+  });
+  bar.addEventListener('mousedown', function (e) { if (e.target.id !== 'rnSym') e.preventDefault(); });
+  bar.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b || !cur) return;
+    if (b.id === 'rnDone') { close(); return; }
+    if (b.id === 'rnReset') { var el = cur; cur = el; dirty = false; save('').then(function () { location.reload(); }); return; }
+    var c = b.dataset.c || ''; var p = c.split(':');
+    document.execCommand(p[0], false, p[1] || null); dirty = true; fixFonts(cur);
+  });
+  document.getElementById('rnSym').addEventListener('change', function () {
+    if (this.value && cur) { cur.focus(); document.execCommand('insertText', false, this.value + ' '); dirty = true; } this.value = '';
+  });
+})();
 </script>
 </body>
 </html>

@@ -1,0 +1,39 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+{# Histopathology / Histopathology and CD Marker: عنوان + أقسام نصية حرة (Gross / Microscopic / Diagnosis ...) + جزء CD اختياري. #}
+{% set sd = ot_struct(ot['id'] or 0, ot['test_code']) %}
+{% set ff = {'serif': "'Times New Roman', Georgia, serif", 'mono': "'Courier New', monospace", 'sans': "Arial, sans-serif"}[sd.font or 'serif'] %}
+<style>
+  .hp { direction:ltr; text-align:left; font-family:{{ ff }}; font-size:16px; line-height:1.6; }
+  .hp h4 { margin:14px 0 3px; font-size:16px; text-decoration:underline; font-weight:700; }
+  .hp .t { white-space:pre-wrap; }
+  .hp .title { font-size:17px; font-weight:700; text-decoration:underline; margin-top:8px; text-transform:uppercase; }
+  .hp .ihc { margin:2px 0; }
+  .hp .ihc td { vertical-align:top; padding:1px 0; }
+  .hp .ihc { border-collapse:collapse; }
+  .hp .ihc .m { white-space:nowrap; width:1%; padding-right:4px; font-weight:600; }
+  .hp .ihc .ld { width:90px; min-width:90px; background:radial-gradient(circle, #000 0.8px, transparent 1px) 0 1.1em / 6px 2px repeat-x; }
+  .hp .ihc .d { padding-left:6px; }
+  .hp .foot { margin-top:16px; font-size:13px; border-top:1px solid #000; padding-top:4px; }
+</style>
+<div class="hp">
+  <div class="title">{{ sd.title or ot['test_name'] }}{{ ':' if sd.title }}{% if sd.rep_no %}<span style="font-weight:400; text-decoration:none; text-transform:none; float:right;">Rep. No.: {{ sd.rep_no }}</span>{% endif %}</div>
+  {% set secs = sd.vsections %}
+  {% set last_i = (secs|length - 1) %}
+  {% for s in secs %}
+    {% if sd.vihc and loop.last and secs|length > 1 %}
+      <h4>{{ sd.ihc_title }}:</h4>
+      <table class="ihc">
+        {% for r in sd.vihc %}<tr><td class="m">{{ r.m }}</td><td class="ld"></td><td class="d"><span class="t">{{ r.r }}</span></td></tr>{% endfor %}
+      </table>
+    {% endif %}
+    {% if s.h %}<h4>{{ s.h }}:</h4>{% endif %}
+    {{ rich_note(ot['id'] or 0, 'sec-' ~ loop.index, s.t) }}
+  {% endfor %}
+  {% if sd.vihc and secs|length <= 1 %}
+    <h4>{{ sd.ihc_title }}:</h4>
+    <table class="ihc">{% for r in sd.vihc %}<tr><td class="m">{{ r.m }}</td><td class="ld"></td><td class="d"><span class="t">{{ r.r }}</span></td></tr>{% endfor %}</table>
+  {% endif %}
+  {% if sd.footer %}<div class="foot">{{ sd.footer }}</div>{% endif %}
+</div>
+{% endblock %}

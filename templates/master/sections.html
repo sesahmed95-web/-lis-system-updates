@@ -59,6 +59,74 @@
   </form>
 </div>
 
+<div class="card" id="namesCard">
+  <h3>🏷️ أسماء الفحوصات واختصاراتها (مجمّعة حسب القسم)</h3>
+  <p class="muted">عدّلي اسم الفحص أو اختصاره مباشرة — يُحفظ تلقائيًا (✓). Enter ينقلك للحقل التالي. «➕ فحص» يضيف فحصًا جديدًا داخل القسم، و«🙈 إخفاء» يخفي القسم وفحوصاته من قائمة الطلبات (لا يُحذف شيء من الزيارات السابقة). الاختصار يُستخدم بملصق الباركود.</p>
+  <input id="nmFilter" placeholder="🔎 بحث باسم أو رمز أو اختصار…" autocomplete="off" style="margin-bottom:8px;max-width:340px;">
+  {% set ns = namespace(cur='', open=false) %}
+  {% for t in tests %}
+    {% set sn = t['section_name'] or '— بلا قسم —' %}
+    {% if sn != ns.cur %}
+      {% if ns.open %}</tbody></table></div>{% endif %}
+      {% set ns.cur = sn %}{% set ns.open = true %}
+      <div class="nm-group" style="margin-top:12px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+          <h4 style="margin:0;">{{ sn }}</h4>
+          {% if t['section_id'] %}
+          <button type="button" class="btn small secondary" data-nm-add="{{ t['section_id'] }}" data-nm-sec="{{ sn }}">➕ فحص</button>
+          <button type="button" class="btn small secondary" data-nm-hide="{{ t['section_id'] }}" data-nm-sec="{{ sn }}">🙈 إخفاء</button>
+          {% endif %}
+        </div>
+        <table style="width:100%"><thead><tr><th style="width:90px">الرمز</th><th>اسم الفحص</th><th style="width:170px">الاختصار</th></tr></thead><tbody>
+    {% endif %}
+    <tr class="nm-row">
+      <td dir="ltr"><b>{{ t['code'] }}</b></td>
+      <td><div style="display:flex;align-items:center;gap:6px"><input class="nm-in" data-id="{{ t['id'] }}" data-f="name" value="{{ t['name'] }}" style="width:100%;max-width:340px"><span class="nm-st" style="visibility:hidden;font-size:12px">✓</span></div></td>
+      <td><div style="display:flex;align-items:center;gap:6px"><input class="nm-in" data-id="{{ t['id'] }}" data-f="short_name" value="{{ t['short_name'] or '' }}" placeholder="—" dir="ltr" style="width:130px"><span class="nm-st" style="visibility:hidden;font-size:12px">✓</span></div></td>
+    </tr>
+  {% endfor %}
+  {% if ns.open %}</tbody></table></div>{% endif %}
+</div>
+<script>
+(function () {
+  function flash(st, ok) { st.style.visibility = 'visible'; st.style.color = ok ? '#2e7d32' : '#c62828'; st.textContent = ok ? '✓' : '✕'; setTimeout(function () { st.style.visibility = 'hidden'; }, 1500); }
+  document.querySelectorAll('.nm-in').forEach(function (inp) {
+    var timer = null, last = inp.value;
+    function save() {
+      if (inp.value === last) return;
+      var st = inp.parentNode.querySelector('.nm-st');
+      fetch('/master/test-catalog/' + inp.dataset.id + '/field', { method: 'POST', body: new URLSearchParams({ field: inp.dataset.f, value: inp.value }) })
+        .then(function (r) { return r.json(); }).then(function (d) {
+          flash(st, d.ok); if (d.ok) last = inp.value; else { if (d.error) alert(d.error); inp.value = last; }
+        }).catch(function () { flash(st, false); });
+    }
+    inp.addEventListener('change', save);
+    inp.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(save, 700); });
+  });
+  var f = document.getElementById('nmFilter');
+  f.addEventListener('input', function () {
+    var q = f.value.toLowerCase().trim();
+    document.querySelectorAll('#namesCard .nm-row').forEach(function (r) {
+      var txt = r.textContent + ' ' + Array.prototype.map.call(r.querySelectorAll('input'), function (i) { return i.value; }).join(' ');
+      r.style.display = (!q || txt.toLowerCase().indexOf(q) !== -1) ? '' : 'none';
+    });
+  });
+  function api(url, body) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then(function (r) { return r.json(); });
+  }
+  document.getElementById('namesCard').addEventListener('click', function (e) {
+    var a = e.target.closest('[data-nm-add]'), h = e.target.closest('[data-nm-hide]');
+    if (a) {
+      var n = prompt('اسم الفحص الجديد داخل «' + a.dataset.nmSec + '»:'); if (!n || !n.trim()) return;
+      api('/api/sections/' + a.dataset.nmAdd + '/add-test', { name: n.trim() }).then(function (d) { if (d.ok) location.reload(); else alert(d.error || 'تعذّرت الإضافة'); });
+    } else if (h) {
+      if (!confirm('إخفاء القسم «' + h.dataset.nmSec + '» وكل فحوصاته من قائمة الطلبات؟ (لا يُحذف شيء من الزيارات السابقة)')) return;
+      api('/api/sections/' + h.dataset.nmHide + '/hide').then(function (d) { if (d.ok) location.reload(); else alert(d.error || 'تعذّر الإخفاء'); });
+    }
+  });
+})();
+</script>
+
 <div class="card">
   <h3>⌨️ رموز بديلة وشرط الارتباط</h3>
   <p class="muted">«رموز بديلة»: أسماء تُفهم عند كتابة التحاليل بصفحة الزيارة (مفصولة بفاصلة). «يحتاج»: تحليل يُضاف تلقائيًا معه (مثال: BF يحتاج CBC؛ والعكس غير مطلوب).</p>
@@ -88,4 +156,5 @@
     document.querySelectorAll('.meta-row').forEach(function(r){ r.style.display=(!q||r.textContent.toLowerCase().indexOf(q)!==-1)?'':'none'; }); });
 })();
 </script>
+{% include "_enter_nav.html" ignore missing %}
 {% endblock %}

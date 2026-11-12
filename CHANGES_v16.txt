@@ -1,0 +1,4 @@
+v16 — ستايلات التقارير بتبويبات
+ملفات جديدة:  lab_styles.py · templates/management/report_styles.html
+ملفات معدّلة: app.py · database.py · templates/reports/{cbc,blood_film,bma,bm_biopsy,base_report}.html · templates/management/report_designer.html
+التشغيل: انسخ الملفات فوق مشروعك وأعد تشغيل البرنامج، ثم: الإدارة ← مصمم التقارير ← «فتح صفحة الستايلات».

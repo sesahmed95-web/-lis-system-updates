@@ -381,6 +381,11 @@ EXAMINING_DOCTORS = ["د.خليل حمود", "د.هدى نصيف", "د.اسرا�
 # ------------------------------------------------------------- print reports --
 # Maps a test_definitions.code to the printable report template that
 # reproduces the lab's paper letterhead for that report type.
+def _is_electrophoresis(code, name):
+    """Hb Electrophoresis / Serum (S.) Protein Electrophoresis -> قالب reports/electrophoresis.html"""
+    return "electroph" in (((code or "") + " " + (name or "")).lower())
+
+
 REPORT_TEMPLATE_MAP = {
     "CBC": "reports/cbc.html",
     "BF": "reports/blood_film.html",
@@ -396,6 +401,12 @@ REPORT_TEMPLATE_MAP = {
     "BMBIOPSY": "reports/bm_biopsy.html",
     "SICKLE": "reports/special_hematology.html",
     "HBPREP": "reports/special_hematology.html",
+    "CULTURE": "reports/culture.html",       # زرع وحساسية: بكتيريا + مضادات S/I/R
+    "GRAMSTAIN": "reports/struct_fields.html", "AFB": "reports/struct_fields.html", "SKINSCRAP": "reports/struct_fields.html",
+    "FOODPROF": "reports/struct_panel.html", "DRUGPROF": "reports/struct_panel.html", "ELISA": "reports/struct_panel.html",
+    "IFAT": "reports/struct_panel.html", "ANAPANEL": "reports/struct_panel.html", "GADAB": "reports/struct_panel.html",
+    "HISTO": "reports/struct_histo.html", "HISTOCD": "reports/struct_histo.html",
+    "BLANK": "reports/blank_report.html",     # تقرير بلانك: ترويسة + بيانات المريض + عنوان حر + نص/صور
 }
 
 # نفس القوائم Macroscopic/Microscopic المكتوبة داخل reports/urine_exam.html،
@@ -528,7 +539,42 @@ def format_unit2_value(value, factor):
 #   Very high: More than 500
 # وسطر بدون ":" (أو حقل range_text بسطر وحيد فقط، مثل "166 - 507") يُعرض
 # كقيمة بسيطة بلا تسمية — بنفس شكل باقي التحاليل العادية (Cortisol, TSH...).
+_RANGE_LABEL_RE = re.compile(
+    r"(?<![A-Za-z])("
+    r"non[\s-]*diabet(?:ic|es)|pre\s*[-\u2013]?\s*diabet(?:ic|es)|diabet(?:ic|es)|"
+    r"desirable(?:\s+level)?|borderline(?:\s+high)?|near[\s-]*optimal|above\s+optimal|optimal|"
+    r"very\s+high|high\s+risk|moderate\s+risk|low\s+risk|no\s+risk|normal|high|low|"
+    r"deficien(?:t|cy)|insufficien(?:t|cy)|sufficien(?:t|cy)|toxic(?:ity)?"
+    r")(?![A-Za-z])", re.I)
+
+
+def normalize_range_text(text):
+    """نسبة طبيعية مكتوبة بسطر واحد بعدة حالات (Normal ... Pre diabetic ... Diabetic ...) تتحوّل لأسطر
+    «التسمية: القيمة» حتى تظهر كل حالة بسطر مستقل بالتقرير. النص اللي فيه أسطر أصلاً أو أقل من حالتين يبقى كما هو."""
+    t = (text or "").strip()
+    if not t or "\n" in t:
+        return text or ""
+    if "|" in t or ";" in t:          # العميل يكتب | أو ; بين الحالات = سطر جديد
+        parts = [x.strip() for x in re.split(r"[|;]", t) if x.strip()]
+        if len(parts) > 1:
+            return "\n".join(parts)
+    ms = list(_RANGE_LABEL_RE.finditer(t))
+    if len(ms) < 2 or t[:ms[0].start()].strip():
+        return t
+    out = []
+    for i, m in enumerate(ms):
+        end = ms[i + 1].start() if i + 1 < len(ms) else len(t)
+        val = t[m.end():end].strip(" :,;")
+        if not val:
+            return t
+        label = re.sub(r"\s+", " ", m.group(1)).strip()
+        label = re.sub(r"(?i)^pre\s*[-\u2013]?\s*diabet", "Pre-diabet", label)
+        out.append(f"{label[0].upper()}{label[1:]}: {val}")
+    return "\n".join(out)
+
+
 def parse_range_tiers(text):
+    text = normalize_range_text(text)
     if not text:
         return []
     tiers = []
@@ -700,6 +746,7 @@ def exam_range_display(range_row, unit=None):
 
 
 app.jinja_env.globals["exam_range_display"] = exam_range_display
+app.jinja_env.globals["normalize_range_text"] = normalize_range_text
 
 # ------------------------------------------------------------------------
 # تلوين النتيجة غير الطبيعية بالأحمر بتقارير الفحص (GUE/GSE/SFA). خيار قابل للتشغيل/الإيقاف من
@@ -1160,7 +1207,10 @@ def _check_completed_result_gate(db, form):
         return True, None
     stored_hash = get_setting(db, "fee_waiver_gate_password_hash", "")
     if not stored_hash:
-        return False, "لم تُضبط كلمة مرور حماية تعديل النتائج المكتملة بعد -- اضبطها من صفحة الإعدادات أولاً."
+        if session.get("role") in ("admin", "supervisor"):
+            return True, None      # ما انضبط باسورد حماية: المشرف/الأدمن المسجّل دخوله يعدّل مباشرة
+        return False, ("تعديل قيمة محفوظة بنتيجة مكتملة يحتاج المشرف: سجّل دخول بحساب المشرف، "
+                       "أو يضبط المشرف كلمة مرور التعديل من «الإعدادات ← تحليل مجاني ← يوزر/باسوورد التعديل».")
     if hash_password(entered_password) != stored_hash:
         return False, "كلمة مرور الحماية غير صحيحة -- التعديل مرفوض."
     return True, None
@@ -1175,7 +1225,7 @@ def _ot_has_result_changes(db, ot, parameters, form, field_prefix=""):
     if analyzer_field in form:
         new_an = (form.get(analyzer_field, "") or "").strip() or None
         old_an = (ot["analyzer"] if "analyzer" in ot.keys() else None) or None
-        if new_an != old_an:
+        if new_an != old_an and old_an:      # تعبئة الجهاز لأول مرة ليست «تعديل»
             return True
     for param in parameters:
         value = (form.get(f"{field_prefix}param_{param['id']}", "") or "").strip()
@@ -1185,8 +1235,8 @@ def _ot_has_result_changes(db, ot, parameters, form, field_prefix=""):
             "SELECT value_numeric, value_text FROM results WHERE order_test_id=? AND test_parameter_id=?",
             (ot["id"], param["id"]),
         ).fetchone()
-        if not existing:
-            return True
+        if not existing or (existing["value_numeric"] is None and not (existing["value_text"] or "").strip()):
+            continue    # إضافة قيمة لحقل كان فاضي (مثل LDL بعد حفظ الكوليسترول) ليست تعديلاً → بدون باسورد
         new_num, new_txt = None, value
         if param["result_type"] == "Numeric":
             try:
@@ -1377,6 +1427,7 @@ def inject_globals():
     # A5 — نقطة #10) بدون تمريرهما يدويًا من كل route.
     lab_address = get_setting(db, "lab_address", "")
     lab_phone = get_setting(db, "lab_phone", "")
+    lab_email = get_setting(db, "lab_email", "")
     # ارتفاع/عرض خلايا جدول نتائج التقرير (Test/Result/Control/Unit...) — يتحكم
     # بيها الأدمن من Management → Settings، تنطبق تلقائيًا على كل التقارير
     # لأنها محقونة هنا بدل تمريرها يدويًا بكل route.
@@ -1505,7 +1556,7 @@ def inject_globals():
                 dashboard_overlay_rgb=_hex_to_rgb_str(dashboard_overlay_color),
                 dashboard_bg_brightness=dashboard_bg_brightness,
                 dashboard_hero_text_color=dashboard_hero_text_color,
-                lab_address=lab_address, lab_phone=lab_phone,
+                lab_address=lab_address, lab_phone=lab_phone, lab_email=lab_email,
                 report_row_pad=report_row_pad, report_col_pad=report_col_pad,
                 patient_info_top_gap=patient_info_top_gap,
                 patient_info_label_width=patient_info_label_width,
@@ -3419,8 +3470,9 @@ def _apply_partner_forward(db, order_id, lab_id_raw):
         "ON pp.test_definition_id = ot.test_definition_id AND pp.lab_id = ? WHERE ot.order_id = ?",
         (lab["id"], order_id)).fetchall()
     for r in rows:
-        db.execute("UPDATE order_tests SET forwarded_lab_name=?, forwarded_cost=? WHERE id=?",
-                   (lab["name"], r["cost"] or 0, r["ot_id"]))
+        db.execute("UPDATE order_tests SET forwarded_lab_name=?, forwarded_cost=?, "
+                   "analyzer=CASE WHEN analyzer IS NULL OR TRIM(analyzer)='' THEN ? ELSE analyzer END WHERE id=?",
+                   (lab["name"], r["cost"] or 0, lab["name"], r["ot_id"]))
     return len(rows)
 
 
@@ -7080,6 +7132,636 @@ def daily_report_whatsapp():
     return jsonify(ok=True, count=len(made), failed=failed, whatsapp=bool(opened_wa), folder=folder)
 
 
+# ====================== صور/لقطات نتائج الأجهزة + ملاحظة التقرير ======================
+def _ensure_media_tables(db):
+    db.execute("CREATE TABLE IF NOT EXISTS lis_result_images (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+               "order_test_id INTEGER NOT NULL, filename TEXT NOT NULL, created_at TEXT, created_by INTEGER)")
+    db.execute("CREATE TABLE IF NOT EXISTS lis_result_notes (order_test_id INTEGER PRIMARY KEY, comment TEXT)")
+    db.execute("CREATE INDEX IF NOT EXISTS ix_lis_result_images_ot ON lis_result_images(order_test_id)")
+
+
+def lab_media_for(db, order_test_id):
+    """للقوالب: {'images': [{'id','url'}], 'comment': str} — تُستدعى بالتقرير المطبوع بـ ot_media(ot['id'])."""
+    try:
+        _ensure_media_tables(db)
+        imgs = db.execute("SELECT id, filename FROM lis_result_images WHERE order_test_id=? ORDER BY id",
+                          (order_test_id,)).fetchall()
+        note = db.execute("SELECT comment FROM lis_result_notes WHERE order_test_id=?", (order_test_id,)).fetchone()
+    except Exception:
+        return {"images": [], "comment": ""}
+    return {"images": [{"id": r_["id"], "url": url_for("static", filename="uploads/result_images/" + r_["filename"])}
+                       for r_ in imgs],
+            "comment": (note["comment"] if note and note["comment"] else "")}
+
+
+app.jinja_env.globals["ot_media"] = lambda ot_id: lab_media_for(get_db(), ot_id)
+
+
+@app.route("/api/order-tests/<int:order_test_id>/media", methods=["GET", "POST"])
+@login_required
+def api_ot_media(order_test_id):
+    db = get_db()
+    ot = db.execute("SELECT id, status FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    if not ot:
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    _ensure_media_tables(db)
+    if request.method == "GET":
+        return jsonify(dict(ok=True, **lab_media_for(db, order_test_id)))
+    if ot["status"] == "Verified":
+        return jsonify({"ok": False, "error": "النتيجة معتمدة — افتحها للتعديل أولاً."}), 400
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "اختر صورة أولاً."}), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
+        return jsonify({"ok": False, "error": "الصيغة غير مدعومة. ارفع صورة (JPG/PNG). ملفات PDF: صوّرها أو خذ لقطة شاشة."}), 400
+    mode = "screen" if request.form.get("mode") == "screen" else "paper"
+    import tempfile
+    import uuid as _uuid
+    try:
+        import lab_media
+    except Exception:
+        return jsonify({"ok": False, "error": "وحدة معالجة الصور غير موجودة بهذا الإصدار."}), 500
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+    try:
+        f.save(tmp.name)
+        tmp.close()
+        if os.path.getsize(tmp.name) > 25 * 1024 * 1024:
+            return jsonify({"ok": False, "error": "الصورة كبيرة جداً (أكثر من 25MB)."}), 400
+        out_dir = os.path.join(UPLOAD_DIR, "result_images")
+        os.makedirs(out_dir, exist_ok=True)
+        fname = f"ot{order_test_id}_{_uuid.uuid4().hex[:10]}.png"
+        try:
+            lab_media.clean_result_image(tmp.name, os.path.join(out_dir, fname), mode)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": f"تعذّر معالجة الصورة: {exc}"}), 400
+    finally:
+        try:
+            os.remove(tmp.name)
+        except Exception:
+            pass
+    cur = db.execute("INSERT INTO lis_result_images (order_test_id, filename, created_at, created_by) VALUES (?, ?, ?, ?)",
+                     (order_test_id, fname, datetime.now().isoformat(timespec="seconds"), session.get("user_id")))
+    db.commit()
+    log_action("MediaUpload", "order_tests", order_test_id, fname)
+    return jsonify({"ok": True, "id": cur.lastrowid, "url": url_for("static", filename="uploads/result_images/" + fname)})
+
+
+@app.route("/api/order-tests/<int:order_test_id>/media/<int:img_id>", methods=["DELETE"])
+@login_required
+def api_ot_media_delete(order_test_id, img_id):
+    db = get_db()
+    _ensure_media_tables(db)
+    row = db.execute("SELECT i.filename, ot.status FROM lis_result_images i JOIN order_tests ot ON ot.id=i.order_test_id "
+                     "WHERE i.id=? AND i.order_test_id=?", (img_id, order_test_id)).fetchone()
+    if not row:
+        return jsonify({"ok": False, "error": "غير موجودة"}), 404
+    if row["status"] == "Verified":
+        return jsonify({"ok": False, "error": "النتيجة معتمدة — افتحها للتعديل أولاً."}), 400
+    db.execute("DELETE FROM lis_result_images WHERE id=?", (img_id,))
+    db.commit()
+    try:
+        os.remove(os.path.join(UPLOAD_DIR, "result_images", row["filename"]))
+    except Exception:
+        pass
+    log_action("MediaDelete", "order_tests", order_test_id, row["filename"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/order-tests/<int:order_test_id>/media-comment", methods=["POST"])
+@login_required
+def api_ot_media_comment(order_test_id):
+    db = get_db()
+    ot = db.execute("SELECT id, status FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    if not ot:
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    if ot["status"] == "Verified":
+        return jsonify({"ok": False, "error": "النتيجة معتمدة — افتحها للتعديل أولاً."}), 400
+    _ensure_media_tables(db)
+    text = ((request.get_json(silent=True) or {}).get("comment") or "").replace("\r\n", "\n").strip()[:3000]
+    db.execute("INSERT INTO lis_result_notes (order_test_id, comment) VALUES (?, ?) "
+               "ON CONFLICT(order_test_id) DO UPDATE SET comment=excluded.comment", (order_test_id, text))
+    db.commit()
+    log_action("MediaComment", "order_tests", order_test_id, "")
+    return jsonify({"ok": True})
+
+
+# ====================== Hb Electrophoresis: منحنى مُعاد الرسم + جدول + تعليق منسّق ======================
+def _ensure_hb_table(db):
+    db.execute("CREATE TABLE IF NOT EXISTS lis_hb_data (order_test_id INTEGER PRIMARY KEY, data TEXT, comment_html TEXT)")
+
+
+def hb_for(db, order_test_id):
+    """للقالب: {'has_data','title','svg','headers','rows','key','total_area','device_line','source','comment_html'}"""
+    empty = {"has_data": False, "svg": "", "comment_html": "", "source": "", "headers": [], "rows": [], "key": [],
+             "total_area": "", "device_line": "", "hidden": []}
+    try:
+        import lab_hbcurve as hbc
+        _ensure_hb_table(db)
+        row = db.execute("SELECT data, comment_html FROM lis_hb_data WHERE order_test_id=?", (order_test_id,)).fetchone()
+        if not row:
+            return empty
+        d = hbc.normalize(json.loads(row["data"] or "{}"))
+        headers, rows = hbc.table_rows(d)
+        return {"has_data": bool(d["peaks"]), "svg": hbc.curve_svg(d), "headers": headers, "rows": rows,
+                "key": hbc.key_results(d), "total_area": d["total_area"], "device_line": d["device_line"],
+                "source": d["source"], "comment_html": row["comment_html"] or "", "hidden": d["hidden"]}
+    except Exception:
+        return empty
+
+
+def _hb_title(test_name, source=""):
+    try:
+        import lab_hbcurve as hbc
+        return hbc.en_title(test_name, source or None)
+    except Exception:
+        return "Hb Electrophoresis"
+
+
+app.jinja_env.globals["ot_hb"] = lambda ot_id: hb_for(get_db(), ot_id)
+app.jinja_env.globals["hb_title"] = _hb_title
+
+
+@app.route("/api/order-tests/<int:order_test_id>/hb-data", methods=["GET", "POST"])
+@login_required
+def api_ot_hb_data(order_test_id):
+    """GET: البيانات المحفوظة للتعديل. POST: حفظ {data:{source,device_line,peaks[],total_area,key[]}, comment_html}
+    ويرجّع SVG المنحنى للمعاينة. الأرقام تُحفظ كما كتبها/راجعها المستخدم بالضبط."""
+    import lab_hbcurve as hbc
+    db = get_db()
+    ot = db.execute("SELECT id, status FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    if not ot:
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    _ensure_hb_table(db)
+    if request.method == "GET":
+        row = db.execute("SELECT data, comment_html FROM lis_hb_data WHERE order_test_id=?", (order_test_id,)).fetchone()
+        try:
+            d = hbc.normalize(json.loads(row["data"])) if row and row["data"] else None
+        except Exception:
+            d = None
+        return jsonify(ok=True, data=d, comment_html=(row["comment_html"] if row and row["comment_html"] else ""),
+                       svg=hbc.curve_svg(d) if d else "")
+    if ot["status"] == "Verified":
+        return jsonify({"ok": False, "error": "النتيجة معتمدة — افتحها للتعديل أولاً."}), 400
+    body = request.get_json(silent=True) or {}
+    row = db.execute("SELECT data, comment_html FROM lis_hb_data WHERE order_test_id=?", (order_test_id,)).fetchone()
+    data_json = row["data"] if row else None
+    comment = row["comment_html"] if row else ""
+    svg = ""
+    if "data" in body:
+        d = hbc.normalize(body.get("data"))
+        data_json = json.dumps(d, ensure_ascii=False)
+        svg = hbc.curve_svg(d)
+    elif "hidden" in body and data_json:          # حذف/استرجاع نصوص من المنحنى فقط (أرقام/كلمات)
+        d = hbc.normalize(json.loads(data_json))
+        d["hidden"] = hbc.normalize({"hidden": body.get("hidden")})["hidden"]
+        data_json = json.dumps(d, ensure_ascii=False)
+        svg = hbc.curve_svg(d)
+    if "comment_html" in body:
+        comment = hbc.clean_comment_html(body.get("comment_html"))
+    db.execute("INSERT INTO lis_hb_data (order_test_id, data, comment_html) VALUES (?, ?, ?) "
+               "ON CONFLICT(order_test_id) DO UPDATE SET data=excluded.data, comment_html=excluded.comment_html",
+               (order_test_id, data_json, comment))
+    db.commit()
+    log_action("HbDataSave", "order_tests", order_test_id, "")
+    return jsonify(ok=True, svg=svg, comment_html=comment)
+
+
+# ====================== التقرير البلانك: نص منسّق + جداول + قوالب محفوظة ======================
+from html import escape as html_escape
+from html.parser import HTMLParser as _HTMLParser
+
+_BLANK_TAGS = {"p", "br", "b", "strong", "i", "em", "u", "ul", "ol", "li", "table", "thead", "tbody", "tr", "td", "th",
+               "div", "span", "h3", "h4", "hr", "sub", "sup"}
+_BLANK_ATTRS = {"colspan", "rowspan", "dir"}
+
+
+class _BlankSanitizer(_HTMLParser):
+    """يبقي وسوم التنسيق والجداول فقط ويحذف أي سكربت/سمات (on*, style, src...)."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out, self.skip = [], 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style", "iframe", "object"):
+            self.skip += 1
+            return
+        if self.skip or tag not in _BLANK_TAGS:
+            return
+        at = "".join(' %s="%s"' % (k, html_escape(v or "", quote=True)) for k, v in attrs
+                     if k in _BLANK_ATTRS and (k != "dir" or v in ("ltr", "rtl")) and (k == "dir" or (v or "").isdigit()))
+        self.out.append("<%s%s>" % (tag, at))
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style", "iframe", "object"):
+            self.skip = max(0, self.skip - 1)
+        elif not self.skip and tag in _BLANK_TAGS and tag not in ("br", "hr"):
+            self.out.append("</%s>" % tag)
+
+    def handle_data(self, data):
+        if not self.skip:
+            self.out.append(html_escape(data))
+
+
+def _blank_clean_html(raw):
+    p = _BlankSanitizer()
+    try:
+        p.feed(str(raw or "")[:60000])
+        p.close()
+    except Exception:
+        return ""
+    return "".join(p.out)
+
+
+def _ensure_blank_tables(db):
+    db.execute("CREATE TABLE IF NOT EXISTS lis_blank_body (order_test_id INTEGER PRIMARY KEY, title TEXT, html TEXT)")
+    db.execute("CREATE TABLE IF NOT EXISTS lis_blank_templates (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+               "name TEXT UNIQUE NOT NULL, title TEXT, html TEXT)")
+
+
+def blank_for(db, order_test_id):
+    """{'title','html'} للتقرير البلانك. لو ما انحفظ شي بعد: نرجع نص ملاحظة التقرير القديمة (إن وُجدت)."""
+    try:
+        _ensure_blank_tables(db)
+        row = db.execute("SELECT title, html FROM lis_blank_body WHERE order_test_id=?", (order_test_id,)).fetchone()
+        if row:
+            return {"title": row["title"] or "", "html": row["html"] or ""}
+    except Exception:
+        pass
+    old = (lab_media_for(db, order_test_id) or {}).get("comment", "")
+    return {"title": "", "html": html_escape(old).replace("\n", "<br>") if old else ""}
+
+
+app.jinja_env.globals["ot_blank"] = lambda ot_id: blank_for(get_db(), ot_id)
+
+
+@app.route("/api/order-tests/<int:order_test_id>/blank-body", methods=["POST"])
+@login_required
+def api_ot_blank_body(order_test_id):
+    db = get_db()
+    ot = db.execute("SELECT id, status FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    if not ot:
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    if ot["status"] == "Verified":
+        return jsonify({"ok": False, "error": "النتيجة معتمدة — افتحها للتعديل أولاً."}), 400
+    _ensure_blank_tables(db)
+    d = request.get_json(silent=True) or {}
+    title = str(d.get("title") or "").strip()[:200]
+    body = _blank_clean_html(d.get("html"))
+    db.execute("INSERT INTO lis_blank_body (order_test_id, title, html) VALUES (?, ?, ?) "
+               "ON CONFLICT(order_test_id) DO UPDATE SET title=excluded.title, html=excluded.html",
+               (order_test_id, title, body))
+    db.commit()
+    log_action("BlankSave", "order_tests", order_test_id, "")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/blank-templates", methods=["GET", "POST"])
+@login_required
+def api_blank_templates():
+    db = get_db()
+    _ensure_blank_tables(db)
+    if request.method == "POST":
+        d = request.get_json(silent=True) or {}
+        name = str(d.get("name") or "").strip()[:80]
+        if not name:
+            return jsonify({"ok": False, "error": "اكتب اسم للقالب."}), 400
+        db.execute("INSERT INTO lis_blank_templates (name, title, html) VALUES (?, ?, ?) "
+                   "ON CONFLICT(name) DO UPDATE SET title=excluded.title, html=excluded.html",
+                   (name, str(d.get("title") or "")[:200], _blank_clean_html(d.get("html"))))
+        db.commit()
+    rows = db.execute("SELECT id, name, title, html FROM lis_blank_templates ORDER BY name").fetchall()
+    return jsonify({"ok": True, "templates": [dict(r) for r in rows]})
+
+
+@app.route("/api/blank-templates/<int:tid>", methods=["DELETE"])
+@login_required
+def api_blank_template_delete(tid):
+    db = get_db()
+    _ensure_blank_tables(db)
+    db.execute("DELETE FROM lis_blank_templates WHERE id=?", (tid,))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+# ====================== زرع وحساسية (Culture & Sensitivity) ======================
+CULTURE_DEFAULT_ANTIBIOTICS = [
+    "Amoxicillin", "Amoxicillin/Clavulanic acid", "Ampicillin", "Cefixime", "Ceftriaxone", "Cefotaxime", "Ceftazidime",
+    "Cefepime", "Cefuroxime", "Cephalexin", "Ciprofloxacin", "Levofloxacin", "Gentamicin", "Amikacin", "Imipenem",
+    "Meropenem", "Nitrofurantoin", "Trimethoprim/Sulfamethoxazole", "Azithromycin", "Erythromycin", "Clindamycin",
+    "Doxycycline", "Vancomycin", "Linezolid", "Tetracycline", "Piperacillin/Tazobactam", "Fosfomycin", "Colistin",
+]
+
+
+def _ensure_culture_tables(db):
+    db.execute("CREATE TABLE IF NOT EXISTS lis_culture (order_test_id INTEGER PRIMARY KEY, data TEXT)")
+
+
+def _culture_defaults():
+    return {"specimen": "", "growth": "growth", "no_growth_text": "No growth after 48 hours of incubation.",
+            "organisms": [], "note": ""}
+
+
+def culture_for(db, order_test_id):
+    """للقالب/الواجهة: بيانات الزرع + المضادات مجمّعة S / I / R لكل بكتيريا."""
+    d = _culture_defaults()
+    try:
+        _ensure_culture_tables(db)
+        row = db.execute("SELECT data FROM lis_culture WHERE order_test_id=?", (order_test_id,)).fetchone()
+        if row and row["data"]:
+            saved = json.loads(row["data"])
+            if isinstance(saved, dict):
+                d.update(saved)
+    except Exception:
+        pass
+    for o in d.get("organisms", []):
+        res = o.get("results") or []
+        for k in ("S", "I", "R"):
+            o[k] = [x["name"] for x in res if x.get("r") == k]
+    return d
+
+
+def _culture_clean(d):
+    out = _culture_defaults()
+    out["specimen"] = str(d.get("specimen") or "")[:80]
+    out["growth"] = "no_growth" if d.get("growth") == "no_growth" else "growth"
+    out["no_growth_text"] = str(d.get("no_growth_text") or out["no_growth_text"])[:300]
+    out["note"] = str(d.get("note") or "").replace("\r\n", "\n")[:2000]
+    orgs = []
+    for o in (d.get("organisms") or [])[:6]:
+        name = str(o.get("name") or "").strip()[:120]
+        if not name:
+            continue
+        res = []
+        for x in (o.get("results") or [])[:60]:
+            an = str(x.get("name") or "").strip()[:80]
+            if an and x.get("r") in ("S", "I", "R"):
+                res.append({"name": an, "r": x["r"]})
+        orgs.append({"name": name, "count": str(o.get("count") or "")[:80], "results": res})
+    out["organisms"] = orgs
+    return out
+
+
+def culture_antibiotic_list(db):
+    raw = get_setting(db, "culture_antibiotics", "")
+    lst = [x.strip() for x in (raw or "").splitlines() if x.strip()]
+    return lst or list(CULTURE_DEFAULT_ANTIBIOTICS)
+
+
+app.jinja_env.globals["ot_culture"] = lambda ot_id: culture_for(get_db(), ot_id)
+
+
+@app.route("/api/order-tests/<int:order_test_id>/culture", methods=["GET", "POST"])
+@login_required
+def api_ot_culture(order_test_id):
+    db = get_db()
+    ot = db.execute("SELECT id, status FROM order_tests WHERE id=?", (order_test_id,)).fetchone()
+    if not ot:
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    _ensure_culture_tables(db)
+    if request.method == "GET":
+        return jsonify(ok=True, data=culture_for(db, order_test_id), antibiotics=culture_antibiotic_list(db))
+    if ot["status"] == "Verified":
+        return jsonify({"ok": False, "error": "النتيجة معتمدة — افتحها للتعديل أولاً."}), 400
+    clean = _culture_clean(request.get_json(silent=True) or {})
+    db.execute("INSERT INTO lis_culture (order_test_id, data) VALUES (?, ?) "
+               "ON CONFLICT(order_test_id) DO UPDATE SET data=excluded.data",
+               (order_test_id, json.dumps(clean, ensure_ascii=False)))
+    db.commit()
+    log_action("CultureSave", "order_tests", order_test_id, "")
+    if clean["growth"] == "no_growth":
+        summary = "No growth"
+    else:
+        summary = ", ".join(o["name"] for o in clean["organisms"]) or "Growth"
+    return jsonify(ok=True, summary=summary)
+
+
+@app.route("/api/culture/antibiotics", methods=["POST"])
+@login_required
+def api_culture_antibiotics():
+    db = get_db()
+    raw = ((request.get_json(silent=True) or {}).get("list") or "")
+    lst = []
+    for x in raw.splitlines():
+        x = x.strip()[:80]
+        if x and x not in lst:
+            lst.append(x)
+    set_setting(db, "culture_antibiotics", "\n".join(lst[:200]))
+    db.commit()
+    return jsonify(ok=True, antibiotics=culture_antibiotic_list(db))
+
+
+# ====================== تقارير منظّمة: صبغات / لوحات (ELISA، IFAT، ANA، حساسية) / أنسجة ======================
+# كل تقرير منها تحليل مستقل (يُنشأ تلقائيًا) ببيانات تُحفظ لكل order_test لحاله: عنوان + صفوف/أعمدة/أقسام حرة
+# يعدّلها المستخدم من شاشة إدخال النتائج، مع حفظ قوالب جاهزة (مثل: Food Profile، ANA، تقرير نسيجي متكرر).
+import copy as _copy
+
+def _sf(title, rows):
+    return {"title": title, "rows": [{"k": k, "v": ""} for k in rows], "note": ""}
+
+def _sp(title, cols, method=""):
+    return {"title": title, "method": method, "cols": cols, "rows": [[""] * len(cols)], "note": ""}
+
+def _sh(title, sections, ihc=False):
+    return {"title": title, "rep_no": "", "font": "serif", "sections": [{"h": h, "t": ""} for h in sections],
+            "ihc": bool(ihc), "ihc_title": "Immunohistochemical Study", "ihc_rows": [{"m": "", "r": ""}], "footer": ""}
+
+STRUCT_META = {
+    "GRAMSTAIN": {"name": "Gram Stain", "dept": "Microbiology", "kind": "fields",
+                  "defaults": _sf("Gram Stain", ["Specimen", "Pus Cells (WBCs)", "Epithelial Cells", "Gram-Positive Cocci",
+                                                 "Gram-Negative Bacilli", "Yeast Cells", "Other Findings"])},
+    "AFB": {"name": "Acid Fast Stain", "dept": "Microbiology", "kind": "fields",
+            "defaults": _sf("Acid Fast Stain (Ziehl-Neelsen)", ["Specimen", "Stain", "Result"])},
+    "SKINSCRAP": {"name": "Skin Scraping", "dept": "Microbiology", "kind": "fields",
+                  "defaults": _sf("Skin Scraping", ["Site of Scraping", "Direct Microscopy (KOH)", "Fungal Elements",
+                                                    "Parasites (Scabies / Demodex)", "Other Findings"])},
+    "FOODPROF": {"name": "Food Allergy Profile", "dept": "Immunology", "kind": "panel",
+                 "defaults": _sp("Food Allergy / Intolerance Profile", ["Food Item", "Result", "Class"])},
+    "DRUGPROF": {"name": "Drug Allergy Profile", "dept": "Immunology", "kind": "panel",
+                 "defaults": _sp("Drug Allergy Profile", ["Drug", "Result", "Class"])},
+    "ELISA": {"name": "ELISA Report", "dept": "Immunology", "kind": "panel",
+              "defaults": _sp("ELISA Report", ["Test", "Result", "Reference Range", "Interpretation"], "Method: ELISA")},
+    "IFAT": {"name": "IFAT Report", "dept": "Immunology", "kind": "panel",
+             "defaults": _sp("Indirect Fluorescent Antibody Test (IFAT)", ["Test", "Titer", "Interpretation"])},
+    "ANAPANEL": {"name": "ANA Panel", "dept": "Immunology", "kind": "panel",
+                 "defaults": _sp("ANA Profile", ["Antibody", "Result", "Reference", "Interpretation"])},
+    "GADAB": {"name": "Anti-GAD Antibodies", "dept": "Immunology", "kind": "panel",
+              "defaults": _sp("Anti-GAD Antibodies", ["Test", "Result", "Unit", "Reference Range"])},
+    "HISTO": {"name": "Histopathology", "dept": "Histopathology", "kind": "histo",
+              "defaults": _sh("Histopathology", ["Specimen", "Relevant Clinical Data", "Gross Examination",
+                                                 "Microscopic Examination", "Diagnosis"], False)},
+    "HISTOCD": {"name": "Histopathology and CD Marker", "dept": "Histopathology", "kind": "histo",
+                "defaults": _sh("Histopathology and CD Markers", ["Specimen", "Relevant Clinical Data", "Gross Examination",
+                                                                  "Microscopic Examination", "Conclusion"], True)},
+}
+
+_ST_POS = re.compile(r"\b(positive|reactive|high|detected|present|elevated)\b|\+", re.I)
+_ST_NEG = re.compile(r"\b(negative|non[- ]?reactive|not detected|absent|normal|nil)\b", re.I)
+
+
+def _st_txt(x, n=2000):
+    return str(x if x is not None else "").replace("\r\n", "\n").strip()[:n]
+
+
+def _struct_clean(kind, defaults, d):
+    out = _copy.deepcopy(defaults)
+    d = d if isinstance(d, dict) else {}
+    out["title"] = _st_txt(d.get("title", out.get("title")), 200)
+    if kind == "fields":
+        out["rows"] = [{"k": _st_txt(r.get("k"), 120), "v": _st_txt(r.get("v"), 1500)}
+                       for r in (d.get("rows") or [])[:60] if isinstance(r, dict)]
+        out["note"] = _st_txt(d.get("note"), 3000)
+    elif kind == "panel":
+        cols = [_st_txt(c, 60) for c in (d.get("cols") or [])[:6]] or list(defaults["cols"])
+        out["cols"] = cols
+        rows = []
+        for r in (d.get("rows") or [])[:600]:
+            if isinstance(r, list):
+                cells = [_st_txt(c, 300) for c in r[:len(cols)]]
+                rows.append(cells + [""] * (len(cols) - len(cells)))
+        out["rows"] = rows
+        out["method"] = _st_txt(d.get("method"), 200)
+        out["note"] = _st_txt(d.get("note"), 3000)
+    elif kind == "histo":
+        out["rep_no"] = _st_txt(d.get("rep_no"), 60)
+        out["font"] = d.get("font") if d.get("font") in ("serif", "mono", "sans") else "serif"
+        out["sections"] = [{"h": _st_txt(s.get("h"), 120), "t": _st_txt(s.get("t"), 8000)}
+                           for s in (d.get("sections") or [])[:20] if isinstance(s, dict)]
+        out["ihc"] = bool(d.get("ihc"))
+        out["ihc_title"] = _st_txt(d.get("ihc_title") or out["ihc_title"], 120)
+        out["ihc_rows"] = [{"m": _st_txt(r.get("m"), 80), "r": _st_txt(r.get("r"), 600)}
+                           for r in (d.get("ihc_rows") or [])[:80] if isinstance(r, dict)]
+        out["footer"] = _st_txt(d.get("footer"), 1000)
+    return out
+
+
+def _struct_view(kind, d):
+    """يجهّز للطباعة: يخفي الصفوف/الأعمدة الفاضية ويعلّم النتائج الإيجابية."""
+    if kind == "fields":
+        d["vrows"] = [r for r in d["rows"] if r["v"].strip()]
+    elif kind == "panel":
+        data_rows = [r for r in d["rows"] if not r[0].startswith("#")]
+        keep = [0] + [i for i in range(1, len(d["cols"])) if any(r[i].strip() for r in data_rows)]
+        d["vcols"] = [d["cols"][i] for i in keep]
+        vr = []
+        for r in d["rows"]:
+            if r[0].startswith("#"):
+                vr.append({"group": r[0].lstrip("# ").strip()})
+            elif any(c.strip() for c in r):
+                cells = []
+                for n, i in enumerate(keep):
+                    t = r[i]
+                    b = n > 0 and bool(_ST_POS.search(t)) and not _ST_NEG.search(t)
+                    cells.append({"t": t, "b": b})
+                vr.append({"cells": cells})
+        # لا نطبع عنوان مجموعة بلا صفوف تحته
+        clean = []
+        for i, r in enumerate(vr):
+            if "group" in r and (i + 1 >= len(vr) or "group" in vr[i + 1]):
+                continue
+            clean.append(r)
+        d["vrows"] = clean
+    elif kind == "histo":
+        d["vsections"] = [s for s in d["sections"] if s["t"].strip()]
+        d["vihc"] = [r for r in d["ihc_rows"] if r["m"].strip() or r["r"].strip()] if d["ihc"] else []
+    return d
+
+
+def struct_for(db, ot_id, code):
+    meta = STRUCT_META.get(code)
+    if not meta:
+        return {}
+    d = _copy.deepcopy(meta["defaults"])
+    try:
+        db.execute("CREATE TABLE IF NOT EXISTS lis_struct (order_test_id INTEGER PRIMARY KEY, data TEXT)")
+        row = db.execute("SELECT data FROM lis_struct WHERE order_test_id=?", (ot_id,)).fetchone()
+        if row and row["data"]:
+            d = _struct_clean(meta["kind"], meta["defaults"], json.loads(row["data"]))
+    except Exception:
+        pass
+    d["kind"] = meta["kind"]
+    return _struct_view(meta["kind"], d)
+
+
+app.jinja_env.globals["ot_struct"] = lambda ot_id, code: struct_for(get_db(), ot_id, code)
+
+
+def _struct_summary(kind, d):
+    if kind == "fields":
+        return next((r["v"] for r in d["rows"] if r["v"]), "") or "Reported"
+    if kind == "panel":
+        n = sum(1 for r in d["rows"] if not r[0].startswith("#") and any(c.strip() for c in r[1:]))
+        return ("%d result(s)" % n) if n else "Reported"
+    return (d["sections"][-1]["t"][:80] if d["sections"] and d["sections"][-1]["t"] else "Reported")
+
+
+@app.route("/api/order-tests/<int:order_test_id>/struct", methods=["GET", "POST"])
+@login_required
+def api_ot_struct(order_test_id):
+    db = get_db()
+    ot = db.execute("SELECT ot.id, ot.status, td.code FROM order_tests ot JOIN test_definitions td "
+                    "ON td.id=ot.test_definition_id WHERE ot.id=?", (order_test_id,)).fetchone()
+    if not ot or ot["code"] not in STRUCT_META:
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    meta = STRUCT_META[ot["code"]]
+    if request.method == "GET":
+        d = struct_for(db, order_test_id, ot["code"])
+        return jsonify(ok=True, kind=meta["kind"], data={k: v for k, v in d.items() if k not in ("vrows", "vcols", "vsections", "vihc")})
+    if ot["status"] == "Verified":
+        return jsonify({"ok": False, "error": "النتيجة معتمدة — افتحها للتعديل أولاً."}), 400
+    clean = _struct_clean(meta["kind"], meta["defaults"], request.get_json(silent=True) or {})
+    db.execute("CREATE TABLE IF NOT EXISTS lis_struct (order_test_id INTEGER PRIMARY KEY, data TEXT)")
+    db.execute("INSERT INTO lis_struct (order_test_id, data) VALUES (?, ?) "
+               "ON CONFLICT(order_test_id) DO UPDATE SET data=excluded.data",
+               (order_test_id, json.dumps(clean, ensure_ascii=False)))
+    db.commit()
+    log_action("StructSave", "order_tests", order_test_id, ot["code"])
+    return jsonify(ok=True, summary=_struct_summary(meta["kind"], clean))
+
+
+def _ensure_struct_tpl(db):
+    db.execute("CREATE TABLE IF NOT EXISTS lis_struct_templates (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+               "code TEXT NOT NULL, name TEXT NOT NULL, data TEXT, UNIQUE(code, name))")
+
+
+@app.route("/api/struct-templates", methods=["GET", "POST"])
+@login_required
+def api_struct_templates():
+    db = get_db()
+    _ensure_struct_tpl(db)
+    code = (request.args.get("code") or "").strip()
+    if request.method == "POST":
+        d = request.get_json(silent=True) or {}
+        code = str(d.get("code") or "").strip()
+        name = str(d.get("name") or "").strip()[:80]
+        meta = STRUCT_META.get(code)
+        if not meta or not name:
+            return jsonify({"ok": False, "error": "اكتب اسم للقالب."}), 400
+        clean = _struct_clean(meta["kind"], meta["defaults"], d.get("data"))
+        db.execute("INSERT INTO lis_struct_templates (code, name, data) VALUES (?, ?, ?) "
+                   "ON CONFLICT(code, name) DO UPDATE SET data=excluded.data",
+                   (code, name, json.dumps(clean, ensure_ascii=False)))
+        db.commit()
+    rows = db.execute("SELECT id, name, data FROM lis_struct_templates WHERE code=? ORDER BY name", (code,)).fetchall()
+    out = []
+    for r in rows:
+        try:
+            out.append({"id": r["id"], "name": r["name"], "data": json.loads(r["data"])})
+        except Exception:
+            pass
+    return jsonify(ok=True, templates=out)
+
+
+@app.route("/api/struct-templates/<int:tid>", methods=["DELETE"])
+@login_required
+def api_struct_template_delete(tid):
+    db = get_db()
+    _ensure_struct_tpl(db)
+    db.execute("DELETE FROM lis_struct_templates WHERE id=?", (tid,))
+    db.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/master/catalog-installer", methods=["GET", "POST"])
 @roles_required("supervisor")
 def catalog_installer():
@@ -7886,6 +8568,8 @@ def save_order_test_results(db, ot, parameters, form, user_id, field_prefix="", 
     analyzer_field = f"{field_prefix}analyzer"
     if analyzer_field in form:
         analyzer_value = form.get(analyzer_field, "").strip() or None
+        if not analyzer_value and "forwarded_lab_name" in ot.keys() and (ot["forwarded_lab_name"] or "").strip():
+            analyzer_value = ot["forwarded_lab_name"].strip()    # تحليل مرسل: الجهاز = اسم المختبر الثاني
         db.execute("UPDATE order_tests SET analyzer=? WHERE id=?", (analyzer_value, ot["id"]))
     else:
         analyzer_value = ot["analyzer"] if "analyzer" in ot.keys() else None
@@ -7988,7 +8672,99 @@ def save_order_test_results(db, ot, parameters, form, user_id, field_prefix="", 
     elif "test_code" in ot.keys() and ot["test_code"] == "BF":
         _v80_sync_bf_to_retic(db, ot, parameters, user_id, now, patient_id)   # v80: Retic داخل BF
 
+    try:
+        if _apply_lipid_autocalc(db, ot, parameters, form, field_prefix, user_id, now, patient_id, analyzer_value):
+            touched = True
+    except Exception:
+        pass
     return touched
+
+
+def _lipid_role(name):
+    n = re.sub(r"[^a-z]", "", (name or "").lower())
+    if not n or "ratio" in n or "non" in n:
+        return None
+    if "vldl" in n:
+        return "vldl"
+    if "ldl" in n:
+        return "ldl"
+    if "hdl" in n:
+        return "hdl"
+    if "triglycerid" in n or n in ("tg", "trig"):
+        return "tg"
+    if "cholesterol" in n or n in ("chol", "tc"):
+        return "tc"
+    return None
+
+
+def _apply_lipid_autocalc(db, ot, parameters, form, field_prefix, user_id, now, patient_id, analyzer_value):
+    """VLDL = TG/5 ، LDL = TC - HDL - TG/5 (Friedewald، mg/dL، TG أقل من 400) — فقط للحقل اللي ما كتبه العميل.
+    القيمة المكتوبة يدوياً تبقى لها الأولوية دائماً، والمحسوبة تتحدث تلقائياً لو تغيّرت قيم الدهون."""
+    roles = {}
+    for p in parameters:
+        r_ = _lipid_role(p["name"])
+        if r_ and r_ not in roles:
+            roles[r_] = p
+    if not ({"tc", "tg", "hdl"} <= set(roles) and ("ldl" in roles or "vldl" in roles)):
+        return False
+    if any("mmol" in ((q["unit"] or "").lower()) for q in roles.values()):
+        return False
+    db.execute("CREATE TABLE IF NOT EXISTS lis_auto_calc (order_test_id INTEGER, test_parameter_id INTEGER, "
+               "PRIMARY KEY (order_test_id, test_parameter_id))")
+
+    def _stored(pid):
+        return db.execute("SELECT id, value_numeric, value_text, flag FROM results WHERE order_test_id=? AND test_parameter_id=?",
+                          (ot["id"], pid)).fetchone()
+    vals = {}
+    for k in ("tc", "tg", "hdl"):
+        row = _stored(roles[k]["id"])
+        vals[k] = row["value_numeric"] if row else None
+    auto_ids = {r_["test_parameter_id"] for r_ in
+                db.execute("SELECT test_parameter_id FROM lis_auto_calc WHERE order_test_id=?", (ot["id"],)).fetchall()}
+    changed = False
+    for role in ("vldl", "ldl"):
+        prm = roles.get(role)
+        if not prm:
+            continue
+        typed = (form.get(f"{field_prefix}param_{prm['id']}", "") or "").strip()
+        cur = _stored(prm["id"])
+        has_val = cur is not None and (cur["value_numeric"] is not None or (cur["value_text"] or "").strip() != "")
+        if typed:
+            db.execute("DELETE FROM lis_auto_calc WHERE order_test_id=? AND test_parameter_id=?", (ot["id"], prm["id"]))
+            continue
+        if has_val and prm["id"] not in auto_ids:
+            continue                                  # قيمة يدوية قديمة: لا نلمسها
+        val = None
+        if None not in (vals["tc"], vals["tg"], vals["hdl"]) and vals["tg"] < 400:
+            vldl = vals["tg"] / 5.0
+            val = vldl if role == "vldl" else vals["tc"] - vals["hdl"] - vldl
+            if val < 0:
+                val = None
+        if val is None:
+            if cur is not None and prm["id"] in auto_ids:
+                db.execute("DELETE FROM results WHERE id=?", (cur["id"],))
+                db.execute("DELETE FROM lis_auto_calc WHERE order_test_id=? AND test_parameter_id=?", (ot["id"], prm["id"]))
+                changed = True
+            continue
+        val = round(val, 1)
+        rng = find_reference_range(db, prm["id"], ot["gender"], ot["age"], ot["age_unit"],
+                                   patient_id=patient_id, analyzer=analyzer_value)
+        flag = "Normal"
+        if rng and rng["low"] is not None and val < rng["low"]:
+            flag = "Low"
+        elif rng and rng["high"] is not None and val > rng["high"]:
+            flag = "High"
+        if cur is not None:
+            if cur["value_numeric"] == val:
+                continue
+            db.execute("UPDATE results SET value_numeric=?, value_text=NULL, flag=?, entered_by=?, entered_at=? WHERE id=?",
+                       (val, flag, user_id, now, cur["id"]))
+        else:
+            db.execute("INSERT INTO results (order_test_id, test_parameter_id, value_numeric, value_text, flag, entered_by, entered_at) "
+                       "VALUES (?, ?, ?, NULL, ?, ?, ?)", (ot["id"], prm["id"], val, flag, user_id, now))
+        db.execute("INSERT OR IGNORE INTO lis_auto_calc (order_test_id, test_parameter_id) VALUES (?, ?)", (ot["id"], prm["id"]))
+        changed = True
+    return changed
 
 
 def _apply_retic_correction(db, ot, parameters, form, field_prefix, user_id, now, patient_id):
@@ -8281,6 +9057,10 @@ _orig_find_reference_range = find_reference_range
 def find_reference_range(db, param_id, gender, age, age_unit, *args, **kwargs):
     """غلاف حول find_reference_range الأصلية: لو للمريض نسبة طبيعية معدّلة (لهذا المريض فقط) تُفضَّل."""
     base = _orig_find_reference_range(db, param_id, gender, age, age_unit, *args, **kwargs)
+    if base is None and kwargs.get("analyzer"):
+        _kw = dict(kwargs)
+        _kw["analyzer"] = None          # جهاز/مختبر بدون نسبة خاصة به -> النسبة العامة (حسب العمر والجنس)
+        base = _orig_find_reference_range(db, param_id, gender, age, age_unit, *args, **_kw)
     pid = kwargs.get("patient_id")
     ov = _get_patient_override(db, pid, param_id) if pid else None
     if ov is not None and (ov["range_text"] or ov["low"] is not None or ov["high"] is not None):
@@ -8318,7 +9098,7 @@ def api_order_test_param_edit(order_test_id):
     db = get_db()
     _ensure_overrides_table(db)
     ot = db.execute(
-        "SELECT ot.id, ot.status, ot.analyzer, ot.test_definition_id, p.id AS patient_id, "
+        "SELECT ot.id, ot.status, ot.analyzer, ot.forwarded_lab_name, ot.test_definition_id, p.id AS patient_id, "
         "p.gender, p.age, p.age_unit FROM order_tests ot "
         "JOIN orders o ON o.id=ot.order_id JOIN visits v ON v.id=o.visit_id "
         "JOIN patients p ON p.id=v.patient_id WHERE ot.id=?", (order_test_id,)).fetchone()
@@ -8336,15 +9116,40 @@ def api_order_test_param_edit(order_test_id):
     if not prm:
         return jsonify({"ok": False, "error": "الباراميتر ليس من هذا التحليل"}), 404
     scope = body.get("scope")
-    if scope not in ("all", "patient"):
-        return jsonify({"ok": False, "error": "حدّد النطاق (كل المرضى / هذا المريض)"}), 400
+    if scope not in ("all", "patient", "lab"):
+        return jsonify({"ok": False, "error": "حدّد النطاق (كل المرضى / هذا المريض / هذا المختبر)"}), 400
     has_unit = "unit" in body
     has_range = "range" in body
     unit = (body.get("unit") or "").strip() if has_unit else None
-    rtxt = (body.get("range") or "").strip() if has_range else None
+    rtxt = normalize_range_text((body.get("range") or "").strip()) if has_range else None
     low, high = _parse_range_text(rtxt) if has_range else (None, None)
 
-    if scope == "patient":
+    if scope == "lab":
+        # نسبة خاصة بجهاز/مختبر (مثلاً المختبر الثاني): تُحفظ باسمه وتنزل تلقائياً لكل مريض يُرسَل له.
+        lab = (body.get("analyzer") or ot["analyzer"] or ot["forwarded_lab_name"] or "").strip()
+        if not lab:
+            return jsonify({"ok": False, "error": "اكتب اسم الجهاز/المختبر بخانة «الجهاز» أولاً ثم احفظ."}), 400
+        if not has_range:
+            return jsonify({"ok": False, "error": "اكتب النسبة الطبيعية."}), 400
+        if (ot["analyzer"] or "").strip() != lab:
+            db.execute("UPDATE order_tests SET analyzer=? WHERE id=?", (lab, order_test_id))
+        row = db.execute(
+            "SELECT id FROM reference_ranges WHERE test_parameter_id=? AND analyzer=? "
+            "AND gender='Both' AND patient_id IS NULL", (param_id, lab)).fetchone()
+        if row:
+            db.execute("UPDATE reference_ranges SET low=?, high=?, range_text=? WHERE id=?",
+                       (low, high, rtxt or None, row["id"]))
+        else:
+            db.execute(
+                "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, "
+                "low, high, range_text, analyzer) VALUES (?, 'Both', 0, 'Years', 120, 'Years', ?, ?, ?, ?)",
+                (param_id, low, high, rtxt or None, lab))
+        # لو كان للمريض تخصيص سابق لنفس النسبة نلغيه حتى تظهر نسبة المختبر
+        db.execute("UPDATE lis_patient_param_overrides SET low=NULL, high=NULL, range_text=NULL "
+                   "WHERE patient_id=? AND test_parameter_id=?", (ot["patient_id"], param_id))
+        if has_unit:
+            db.execute("UPDATE test_parameters SET unit=? WHERE id=?", (unit, param_id))
+    elif scope == "patient":
         if body.get("reset"):
             db.execute("DELETE FROM lis_patient_param_overrides WHERE patient_id=? AND test_parameter_id=?",
                        (ot["patient_id"], param_id))
@@ -9416,6 +10221,9 @@ def _print_report_impl_v79(order_test_id):
         db.commit()
 
     template_name = REPORT_TEMPLATE_MAP.get(ot["test_code"])
+    if not template_name and _is_electrophoresis(ot["test_code"], ot["test_name"]) \
+            and not get_report_template(db, ot["test_definition_id"]):
+        template_name = "reports/electrophoresis.html"   # قالب جاهز (إلا لو صمّمت له قالباً خاصاً بنفسك)
     _coag_table = (ot["test_code"] == "COAG" and _coag_table_mode(db))
     if _coag_table:
         template_name = None
@@ -9618,6 +10426,24 @@ def _print_report_impl_v79(order_test_id):
                     "value_align": resolve_value_align(params_by_name_row.get(name)),
                 })
             cbc_groups.append(rows)
+        # ستايل «جدول المختبر»: يعرض أيضًا أي بارامتر CBC له نتيجة وما كان ضمن المجموعات الثابتة (PDW/PCT/...)
+        if app.config["LAB_STYLES"]["cbc_wants_extra"]():
+            _used = {n for g_ in CBC_ROW_GROUPS for n in g_}
+            _extra = []
+            for p in parameters:
+                n = p["name"]
+                if n in _used or params.get(n, "") in ("", None):
+                    continue
+                rng = ranges.get(n)
+                res_row = results_by_name.get(n)
+                _extra.append({
+                    "name": resolve_label(params_by_name_row.get(n)), "result": params.get(n, ""), "unit": units_by_name.get(n, ""),
+                    "low": rng["low"] if rng else "", "high": rng["high"] if rng else "", "highlight": False,
+                    "previous": previous_values.get(n, "") if show_prev_values else "",
+                    "flag": res_row["flag"] if res_row else None, "value_align": resolve_value_align(params_by_name_row.get(n)),
+                })
+            if _extra:
+                cbc_groups.append(_extra)
 
     custom_rows = None
     custom_heading = None
@@ -11148,9 +11974,9 @@ def delete_rate_test(test_id):
         db.commit()
         flash(f"\"{test['name']}\" مستخدم بـ{used} طلب سابق فما يُمسح نهائيًا — تم تعطيله بدل ذلك (ما يظهر بقوائم الطلب الجديدة).")
     else:
-        db.execute("DELETE FROM test_parameters WHERE test_definition_id=?", (test_id,))
         db.execute("DELETE FROM reference_ranges WHERE test_parameter_id IN "
                    "(SELECT id FROM test_parameters WHERE test_definition_id=?)", (test_id,))
+        db.execute("DELETE FROM test_parameters WHERE test_definition_id=?", (test_id,))
         db.execute("DELETE FROM test_definitions WHERE id=?", (test_id,))
         db.commit()
         flash(f"تم حذف \"{test['name']}\" نهائيًا.")
@@ -12754,15 +13580,131 @@ def api_quick_add_test_with_price():
     ).fetchone()
     if existing:
         return jsonify({"id": existing["id"], "name": name, "price": existing["price"], "existed": True})
+    # القسم: تابع لقسم موجود (section_id) أو قسم جديد باسم يحدده المستخدم (new_section) ويُحفظ للمستقبل
+    sec = None
+    new_section = (request.form.get("new_section") or "").strip()[:80]
+    section_id = request.form.get("section_id", type=int)
+    if new_section:
+        sec = db.execute("SELECT * FROM sections WHERE LOWER(name)=LOWER(?)", (new_section,)).fetchone()
+        if not sec:
+            nxt = db.execute("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM sections").fetchone()["n"]
+            sid_new = db.execute("INSERT INTO sections (name, parent_id, dept_name, sort_order) VALUES (?, NULL, ?, ?)",
+                                 (new_section, new_section, nxt)).lastrowid
+            sec = db.execute("SELECT * FROM sections WHERE id=?", (sid_new,)).fetchone()
+            log_action("Create", "section", sid_new, new_section)
+    elif section_id:
+        sec = db.execute("SELECT * FROM sections WHERE id=?", (section_id,)).fetchone()
+    dept = ((sec["dept_name"] or "").strip() or sec["name"]) if sec else ""
     code = unique_test_code(db, name)
     cur = db.execute(
-        "INSERT INTO test_definitions (code, name, department, sample_type, price, is_active, is_examining_test) "
-        "VALUES (?, ?, '', '', ?, 1, 0)",
-        (code, name, price),
+        "INSERT INTO test_definitions (code, name, department, sample_type, price, is_active, is_examining_test, section_id) "
+        "VALUES (?, ?, ?, '', ?, 1, 0, ?)",
+        (code, name, dept, price, sec["id"] if sec else None),
     )
     db.commit()
-    log_action("QuickAddTestWithPrice", "test_definition", cur.lastrowid, f"{name} ({price})")
-    return jsonify({"id": cur.lastrowid, "name": name, "price": price, "existed": False})
+    log_action("QuickAddTestWithPrice", "test_definition", cur.lastrowid, f"{name} ({price}) dept={dept}")
+    return jsonify({"id": cur.lastrowid, "name": name, "price": price, "existed": False,
+                    "section_id": sec["id"] if sec else None, "section_name": sec["name"] if sec else ""})
+
+
+@app.route("/api/sections/list")
+@login_required
+def api_sections_list():
+    """قائمة الأقسام (مسطّحة بترتيبها) لقائمة اختيار القسم عند إضافة فحص جديد."""
+    db = get_db()
+    secs = db.execute("SELECT id, name, parent_id FROM sections ORDER BY sort_order, id").fetchall()
+    counts = {r["section_id"]: r["c"] for r in db.execute(
+        "SELECT section_id, COUNT(*) AS c FROM test_definitions WHERE is_active=1 GROUP BY section_id").fetchall()}
+    by_parent = {}
+    for s in secs:
+        by_parent.setdefault(s["parent_id"], []).append(s)
+    out = []
+
+    def walk(pid, depth):
+        for s in by_parent.get(pid, []):
+            out.append({"id": s["id"], "name": s["name"], "depth": depth, "count": counts.get(s["id"], 0)})
+            walk(s["id"], depth + 1)
+    walk(None, 0)
+    seen = {o["id"] for o in out}
+    out += [{"id": s["id"], "name": s["name"], "depth": 0, "count": counts.get(s["id"], 0)} for s in secs if s["id"] not in seen]
+    return jsonify(ok=True, sections=out)
+
+
+# ---- إدارة الأقسام: تجميع الفحوصات تحت قسم + تعديل اسم/اختصار كل فحص (تُستخدم بصفحة الأقسام الجديدة) ----
+@app.route("/api/departments")
+@login_required
+def api_departments():
+    db = get_db()
+    secs = db.execute("SELECT id, name, parent_id, dept_name FROM sections ORDER BY sort_order, id").fetchall()
+    tests = db.execute("SELECT id, code, name, short_name, section_id, price, is_active FROM test_definitions "
+                       "ORDER BY name").fetchall()
+    by = {}
+    for t in tests:
+        by.setdefault(t["section_id"], []).append({"id": t["id"], "code": t["code"], "name": t["name"],
+                                                    "short_name": t["short_name"] or "", "price": t["price"],
+                                                    "active": bool(t["is_active"])})
+    return jsonify(ok=True, departments=[{"id": s["id"], "name": s["name"], "parent_id": s["parent_id"],
+                                           "tests": by.get(s["id"], [])} for s in secs],
+                   unassigned=by.get(None, []))
+
+
+@app.route("/api/departments/create", methods=["POST"])
+@login_required
+def api_department_create():
+    db = get_db()
+    name = _req_text("name")[:80]
+    if not name:
+        return jsonify({"ok": False, "error": "اسم القسم إلزامي"}), 400
+    if db.execute("SELECT 1 FROM sections WHERE LOWER(name)=LOWER(?)", (name,)).fetchone():
+        return jsonify({"ok": False, "error": "يوجد قسم بهذا الاسم"}), 409
+    nxt = db.execute("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM sections").fetchone()["n"]
+    sid = db.execute("INSERT INTO sections (name, parent_id, dept_name, sort_order) VALUES (?, NULL, ?, ?)",
+                     (name, name, nxt)).lastrowid
+    db.commit()
+    log_action("Create", "section", sid, name)
+    return jsonify(ok=True, id=sid, name=name)
+
+
+@app.route("/api/departments/<int:sid>/assign", methods=["POST"])
+@login_required
+def api_department_assign(sid):
+    """يضيف فحوصات موجودة (test_ids) إلى القسم؛ department الفحص يتبع اسم القسم حتى يظهر بمصمم التقارير."""
+    db = get_db()
+    sec = db.execute("SELECT * FROM sections WHERE id=?", (sid,)).fetchone()
+    if not sec:
+        return jsonify({"ok": False, "error": "القسم غير موجود"}), 404
+    ids = [int(x) for x in ((request.get_json(silent=True) or {}).get("test_ids") or []) if str(x).isdigit()]
+    dept = (sec["dept_name"] or "").strip() or sec["name"]
+    for tid in ids:
+        db.execute("UPDATE test_definitions SET section_id=?, department=? WHERE id=?", (sid, dept, tid))
+    db.commit()
+    log_action("AssignTests", "section", sid, f"{len(ids)} tests")
+    return jsonify(ok=True, moved=len(ids))
+
+
+@app.route("/api/tests/<int:test_id>/meta", methods=["POST"])
+@login_required
+def api_test_meta(test_id):
+    """تعديل اسم الفحص واختصاره (short_name) وقسمه."""
+    db = get_db()
+    t = db.execute("SELECT id FROM test_definitions WHERE id=?", (test_id,)).fetchone()
+    if not t:
+        return jsonify({"ok": False, "error": "غير موجود"}), 404
+    d = request.get_json(silent=True) or {}
+    name = str(d.get("name") or "").strip()[:120]
+    if not name:
+        return jsonify({"ok": False, "error": "اسم الفحص إلزامي"}), 400
+    db.execute("UPDATE test_definitions SET name=?, short_name=? WHERE id=?",
+               (name, str(d.get("short_name") or "").strip()[:30], test_id))
+    sid = d.get("section_id")
+    if isinstance(sid, int):
+        sec = db.execute("SELECT * FROM sections WHERE id=?", (sid,)).fetchone()
+        if sec:
+            db.execute("UPDATE test_definitions SET section_id=?, department=? WHERE id=?",
+                       (sid, (sec["dept_name"] or "").strip() or sec["name"], test_id))
+    db.commit()
+    log_action("TestMeta", "test_definition", test_id, name)
+    return jsonify(ok=True)
 
 # إضافة تحليل غير موجود بالقائمة مباشرة من قسم "الطلبات" بشاشة "زيارة
 # جديدة" — متاحة لأي مستخدم مسجّل دخول (وليس فقط admin/supervisor مثل
@@ -12991,6 +13933,95 @@ def dashboard_look():
                            active_tab=request.args.get("tab", "reception"))
 
 
+
+
+# ====================== ملاحظات منسّقة لأي تقرير (lab_rich) ======================
+import lab_rich
+from markupsafe import Markup as _RichMarkup
+
+
+def _rich_note(ot_id, key, fallback="", conclusion=False, style="", hide_empty=False, bullets=False):
+    db = get_db()
+    fb_html = render_conclusion_filter(fallback) if conclusion else None
+    return _RichMarkup(lab_rich.render(db, ot_id, key, fallback=fallback, fallback_html=fb_html, style=style, hide_empty=hide_empty, bullets=bullets))
+
+
+app.jinja_env.globals["rich_note"] = _rich_note
+
+
+@app.route("/api/order-tests/<int:order_test_id>/rich", methods=["POST"])
+@login_required
+def api_ot_rich(order_test_id):
+    db = get_db()
+    if not db.execute("SELECT 1 FROM order_tests WHERE id=?", (order_test_id,)).fetchone():
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    body = request.get_json(silent=True) or {}
+    ok, res = lab_rich.save(db, order_test_id, str(body.get("key") or ""), body.get("html") or "")
+    if not ok:
+        return jsonify({"ok": False, "error": res}), 400
+    return jsonify({"ok": True, "html": res})
+
+# ====================== فحص سلامة التقارير + إرجاع CBC ======================
+import lab_integrity
+from database import DB_PATH
+
+
+@app.route("/management/report-integrity", methods=["GET", "POST"])
+@roles_required("admin")
+def report_integrity():
+    db = get_db()
+    result = None
+    if request.method == "POST":
+        try:
+            lab_integrity.auto_backup(DB_PATH, min_interval_h=0)   # نسخة قبل أي إصلاح
+            result = lab_integrity.repair_cbc(db)
+            log_action("RepairCBC", "test_definitions", 0, "%d renamed, %d added" % (len(result["renamed"]), len(result["added"])))
+        except Exception as exc:
+            flash("تعذّر الإصلاح: %s" % exc)
+    return render_template("management/report_integrity.html", scan=lab_integrity.scan(db), result=result)
+
+
+# ====================== أسماء الشريط الجانبي (قابلة للتعديل من الإعدادات) ======================
+def _nav_labels(db):
+    """{'groups': {data-group: اسم}, 'links': {مسار الرابط: اسم}} — فارغ = الأسماء الأصلية بقالب base.html."""
+    try:
+        d = json.loads(get_setting(db, "nav_labels", "") or "{}")
+    except Exception:
+        d = {}
+    return {"groups": {str(k): str(v) for k, v in (d.get("groups") or {}).items() if str(v).strip()},
+            "links": {str(k): str(v) for k, v in (d.get("links") or {}).items() if str(v).strip()}}
+
+
+@app.context_processor
+def inject_nav_labels():
+    try:
+        raw = json.dumps(_nav_labels(get_db()), ensure_ascii=False).replace("</", "<\\/")
+    except Exception:
+        raw = '{"groups":{},"links":{}}'
+    return {"nav_labels_json": raw}
+
+
+@app.route("/api/nav-labels", methods=["POST"])
+@roles_required("admin")
+def api_nav_labels():
+    """حفظ أسماء الشريط الجانبي. يُرسل فقط ما تغيّر عن الاسم الأصلي؛ فارغ/غير موجود = رجوع للاسم الأصلي."""
+    body = request.get_json(silent=True) or {}
+    clean = {"groups": {}, "links": {}}
+    for k, v in (body.get("groups") or {}).items():
+        k, v = str(k).strip(), str(v).strip()[:80]
+        if v and re.fullmatch(r"[a-z_]{2,40}", k):
+            clean["groups"][k] = v
+    for k, v in (body.get("links") or {}).items():
+        k, v = str(k).strip()[:160], str(v).strip()[:80]
+        if v and k.startswith("/"):
+            clean["links"][k] = v
+    db = get_db()
+    set_setting(db, "nav_labels", json.dumps(clean, ensure_ascii=False))
+    db.commit()
+    log_action("NavLabels", "settings", 0, "%d groups, %d links" % (len(clean["groups"]), len(clean["links"])))
+    return jsonify(ok=True)
+
+
 @app.route("/management/settings", methods=["GET", "POST"])
 @roles_required("admin")
 def app_settings():
@@ -13009,6 +14040,8 @@ def app_settings():
         lab_phone_raw = request.form.get("lab_phone", "").strip()
         if lab_phone_raw:
             set_setting(db, "lab_phone", lab_phone_raw)
+        if "lab_email" in request.form:
+            set_setting(db, "lab_email", request.form.get("lab_email", "").strip()[:120])
 
         file = request.files.get("logo")
         if file and file.filename:
@@ -13506,6 +14539,7 @@ def app_settings():
         "app_name_ar": get_setting(db, "app_name_ar", ""),
         "lab_address": get_setting(db, "lab_address", ""),
         "lab_phone": get_setting(db, "lab_phone", ""),
+        "lab_email": get_setting(db, "lab_email", ""),
         "logo_path": get_setting(db, "logo_path", ""),
         "dashboard_bg_path": get_setting(db, "dashboard_bg_path", ""),
         "dashboard_bg_overlay_opacity": get_setting(db, "dashboard_bg_overlay_opacity", "62"),
@@ -14692,13 +15726,18 @@ def _preview_report_design_impl(test_definition_id):
     macro_params, micro_params = _build_exam_sections(test["code"], parameters, report_layout)
 
     auto_flag_color_enabled, show_result_flag, flag_color_map = get_report_flag_settings(db)
+    _pv_date = None
+    if request.args.get("rs"):      # معاينة ستايلات lab_styles بقيم نموذجية (بما فيها نتيجة سابقة)
+        params, cbc_groups, _pv_date = app.config["LAB_STYLES"]["preview_fill"](test["code"], params, cbc_groups, CBC_ROW_GROUPS)
+        if _pv_date:
+            show_prev_values = True
     return render_template(
         template_name,
         ot={"test_name": test["name"], "test_code": test["code"]}, params=params, ranges=ranges, units=units_by_name, cbc_groups=cbc_groups,
         custom_rows=custom_rows, custom_heading=custom_heading,
         custom_heading_align=custom_heading_align, custom_rows_align=custom_rows_align,
         layout_view=_coag_view(build_layout_view(db, style_override=request.args.get("style")), _coag_table), note_visit_id=None,
-        show_prev_values=show_prev_values, previous_visit_date=None, previous_values={},
+        show_prev_values=show_prev_values, previous_visit_date=_pv_date, previous_values={},
         repeat_header_on_print=department_shows_previous_values(test["department"]),
         logo_url=logo_url, from_other_lab=False, font_size=14 if test["code"] == "CBC" else 16,
         show_exam_signature=False,
@@ -16886,6 +17925,258 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
             raise _AIErr("الخدمة امتنعت عن الرد على هذا الطلب." if fb else "جاء ردّ فارغ من الخدمة. أعد المحاولة.")
         raise _AIErr("تعذّر الاتصال بالموديل.")
 
+    # ------------------------------------------------ قراءة القيم من صورة جهاز (CBC...)
+    def _pick_groq_vision_model(key):
+        j = _get("https://api.groq.com/openai/v1/models", {"Authorization": "Bearer " + key})
+        ids = [m.get("id") or "" for m in (j or {}).get("data", []) if m.get("active", True)]
+        for pref in ("meta-llama/llama-4-scout", "meta-llama/llama-4-maverick"):
+            for n in ids:
+                if n.startswith(pref):
+                    return n
+        return ""
+
+    def _call_ai_vision(cfg, prompt, img_b64, mime="image/jpeg"):
+        key = cfg["key"]
+        if not key:
+            raise _AIErr("NO_KEY")
+        if cfg["provider"] == "anthropic":
+            body = {"model": cfg["model"] or "claude-haiku-5-5", "max_tokens": 2048,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": mime, "data": img_b64}},
+                        {"type": "text", "text": prompt}]}]}
+            j = _post("https://api.anthropic.com/v1/messages", {"x-api-key": key, "anthropic-version": "2023-06-01"}, body, 90)
+            txt = "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text").strip()
+            if txt:
+                return txt
+            raise _AIErr("جاء ردّ غير مفهوم من الخدمة.")
+        if cfg["provider"] == "groq":
+            model = _pick_groq_vision_model(key)
+            if not model:
+                raise _AIErr("حساب Groq ما فيه موديل يقرأ الصور. استخدم Gemini (مجاني) من إعدادات الذكاء.")
+            body = {"model": model, "temperature": 0, "max_tokens": 2048,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": "data:%s;base64,%s" % (mime, img_b64)}}]}]}
+            j = _post("https://api.groq.com/openai/v1/chat/completions", {"Authorization": "Bearer " + key}, body, 90)
+            try:
+                return j["choices"][0]["message"]["content"].strip()
+            except Exception:
+                raise _AIErr("جاء ردّ غير مفهوم من الخدمة.")
+        model = _pick_gemini_model(key, cfg["model"])
+        body = {"contents": [{"role": "user", "parts": [{"inlineData": {"mimeType": mime, "data": img_b64}}, {"text": prompt}]}],
+                "generationConfig": {"temperature": 0, "maxOutputTokens": 4096, "thinkingConfig": {"thinkingBudget": 0}}}
+        try:
+            j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
+                      {"x-goog-api-key": key}, body, 90)
+        except _AIErr as e400:
+            if "(400)" not in str(e400):
+                raise
+            body["generationConfig"].pop("thinkingConfig", None)
+            j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
+                      {"x-goog-api-key": key}, body, 90)
+        try:
+            txt = "".join(p_.get("text", "") for p_ in j["candidates"][0]["content"]["parts"]).strip()
+            if txt:
+                return txt
+        except Exception:
+            pass
+        raise _AIErr("جاء ردّ فارغ من الخدمة. أعد المحاولة.")
+
+    @bp.route("/ai/api/extract-image", methods=["POST"])
+    def ai_extract_image():
+        """يقرأ قيم الباراميترات من صورة نتيجة محفوظة بالتحليل ويرجّعها كاقتراح (ما يحفظ شي — العميل يراجع ويحفظ)."""
+        if not _allowed() and not session.get("user_id"):
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        cfg = _cfg()
+        if not cfg["enabled"]:
+            return jsonify(ok=False, error="المساعد متوقف من الإعدادات."), 403
+        if not cfg["key"]:
+            return jsonify(ok=False, error="أدخل مفتاح الذكاء الصناعي أولاً من إعدادات الذكاء."), 200
+        d = request.get_json(silent=True) or {}
+        try:
+            ot_id, img_id = int(d.get("order_test_id")), int(d.get("image_id"))
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error="طلب غير صالح."), 400
+        db = get_db()
+        row = db.execute("SELECT filename FROM lis_result_images WHERE id=? AND order_test_id=?", (img_id, ot_id)).fetchone()
+        if not row:
+            return jsonify(ok=False, error="الصورة غير موجودة."), 404
+        params = db.execute("SELECT tp.id, tp.name FROM test_parameters tp JOIN order_tests ot "
+                            "ON ot.test_definition_id=tp.test_definition_id WHERE ot.id=? AND tp.result_type!='Text' "
+                            "ORDER BY tp.sort_order, tp.id", (ot_id,)).fetchall()
+        if not params:
+            return jsonify(ok=False, error="هذا التحليل ما فيه حقول رقمية."), 400
+        try:
+            from PIL import Image
+            import io, base64
+            path = os.path.join(UPLOAD_DIR, "result_images", row["filename"])
+            im = Image.open(path).convert("RGB")
+            im.thumbnail((1600, 1600))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=88)
+            b64 = base64.b64encode(buf.getvalue()).decode()
+        except Exception as exc:
+            return jsonify(ok=False, error="تعذّر قراءة ملف الصورة: %s" % exc), 500
+        names = [p_["name"] for p_ in params]
+        prompt = ("هذه صورة نتيجة جهاز تحليل مختبري. استخرج القيم الرقمية الظاهرة بوضوح فقط. "
+                  "أسماء الحقول المطلوبة بالضبط: " + json.dumps(names, ensure_ascii=False) + ". "
+                  "أرجع JSON فقط بالشكل {\"اسم الحقل\": \"القيمة\"} بنفس أسماء الحقول أعلاه، القيمة رقم كما يظهر بالصورة بدون وحدة. "
+                  "لا تخمّن ولا تحسب: لو القيمة غير ظاهرة أو غير واضحة اتركها خارج JSON. لا تكتب أي شرح.")
+        try:
+            txt = _call_ai_vision(cfg, prompt, b64)
+        except _AIErr as e:
+            return jsonify(ok=False, error=str(e))
+        m = re.search(r"\{.*\}", txt, re.S)
+        try:
+            data = json.loads(m.group(0)) if m else {}
+        except Exception:
+            data = {}
+        norm = lambda x: re.sub(r"[^a-z0-9%#]", "", str(x).lower())
+        by_name = {norm(p_["name"]): p_["id"] for p_ in params}
+        values = {}
+        for k, v in data.items():
+            pid = by_name.get(norm(k))
+            if not pid:   # WBC ↔ WBCs وما يشابهها
+                nk = norm(k)
+                pid = by_name.get(nk + "s") or (by_name.get(nk[:-1]) if nk.endswith("s") else None)
+            vs = str(v).replace(",", ".").strip()
+            if pid and re.fullmatch(r"-?\d+(\.\d+)?", vs):
+                values[str(pid)] = vs
+        if not values:
+            return jsonify(ok=False, error="ما قدرت أقرأ قيم واضحة من هذه الصورة. جرّب صورة أوضح أو أدخلها يدوياً.")
+        return jsonify(ok=True, values=values, count=len(values))
+
+    @bp.route("/ai/api/crop-image", methods=["POST"])
+    def ai_crop_image():
+        """قص تلقائي: الذكاء الصناعي يحدد مستطيل المنحنى (Chromatogram) داخل صورة الجهاز، والبرنامج يقصه
+        (يبقي أرقام المحاور وأسماء القمم) ويستبدل الصورة المحفوظة. الأصل يبقى بنفس المجلد باسم _orig."""
+        if not _allowed() and not session.get("user_id"):
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        cfg = _cfg()
+        if not cfg["enabled"]:
+            return jsonify(ok=False, error="المساعد متوقف من الإعدادات."), 403
+        if not cfg["key"]:
+            return jsonify(ok=False, error="أدخل مفتاح الذكاء الصناعي أولاً من إعدادات الذكاء."), 200
+        d = request.get_json(silent=True) or {}
+        try:
+            ot_id, img_id = int(d.get("order_test_id")), int(d.get("image_id"))
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error="طلب غير صالح."), 400
+        db = get_db()
+        row = db.execute("SELECT i.filename, ot.status FROM lis_result_images i JOIN order_tests ot "
+                         "ON ot.id=i.order_test_id WHERE i.id=? AND i.order_test_id=?", (img_id, ot_id)).fetchone()
+        if not row:
+            return jsonify(ok=False, error="الصورة غير موجودة."), 404
+        if row["status"] == "Verified":
+            return jsonify(ok=False, error="النتيجة معتمدة — افتحها للتعديل أولاً."), 400
+        try:
+            from PIL import Image
+            import io, base64
+            path = os.path.join(UPLOAD_DIR, "result_images", row["filename"])
+            full = Image.open(path).convert("RGB")
+            small = full.copy()
+            small.thumbnail((1600, 1600))
+            buf = io.BytesIO()
+            small.save(buf, "JPEG", quality=88)
+            b64 = base64.b64encode(buf.getvalue()).decode()
+        except Exception as exc:
+            return jsonify(ok=False, error="تعذّر قراءة ملف الصورة: %s" % exc), 500
+        prompt = ("This is a photo or screenshot of a laboratory instrument screen/printout (hemoglobin electrophoresis, "
+                  "protein electrophoresis, HPLC or similar), possibly photographed at an angle. Find the tightest "
+                  "quadrilateral that contains the chromatogram/curve plot with its axes and peak labels TOGETHER WITH the "
+                  "numeric results table (fractions / peaks / percentages) if there is one. Exclude menus, toolbars, "
+                  "buttons, desk, monitor frame and any background. Give the 4 corners of that region exactly as it appears "
+                  "in the photo (it may be tilted), as x,y normalized 0-1000 with the origin at the top-left. "
+                  "Reply with JSON only: {\"tl\":[x,y],\"tr\":[x,y],\"br\":[x,y],\"bl\":[x,y]}. If there is no plot, reply {}.")
+        try:
+            txt = _call_ai_vision(cfg, prompt, b64)
+        except _AIErr as e:
+            return jsonify(ok=False, error=str(e))
+        m = re.search(r"\{.*\}", txt, re.S)
+        try:
+            bb = json.loads(m.group(0)) if m else {}
+            quad = [(float(bb[k][0]), float(bb[k][1])) for k in ("tl", "tr", "br", "bl")]
+        except Exception:
+            return jsonify(ok=False, error="ما قدرت أحدد منطقة المنحنى بهذي الصورة. جرّب صورة أوضح.")
+        xs, ys = [p[0] for p in quad], [p[1] for p in quad]
+        if min(xs + ys) < -20 or max(xs + ys) > 1020:
+            return jsonify(ok=False, error="المنطقة الي حدّدها الذكاء غير منطقية. جرّب صورة أوضح أو اتركها كاملة.")
+        # مساحة المضلع (Shoelace) لازم تكون معقولة
+        area = abs(sum(quad[k][0] * quad[(k + 1) % 4][1] - quad[(k + 1) % 4][0] * quad[k][1] for k in range(4))) / 2.0
+        if area < 0.06 * 1000 * 1000:
+            return jsonify(ok=False, error="المنطقة الي حدّدها الذكاء صغيرة جداً. جرّب صورة أوضح أو اتركها كاملة.")
+        # هامش صغير للخارج حتى ما ينقص رقم من المحاور
+        cx, cy = sum(xs) / 4.0, sum(ys) / 4.0
+        quad = [(max(0, min(1000, cx + (x - cx) * 1.02)), max(0, min(1000, cy + (y - cy) * 1.02))) for x, y in quad]
+        out_dir = os.path.join(UPLOAD_DIR, "result_images")
+        base, _ext = os.path.splitext(row["filename"])
+        new_name = base.split("_crop")[0] + "_crop%s.png" % uuid.uuid4().hex[:5]
+        try:
+            import lab_media
+            lab_media.rectify_and_clean(path, os.path.join(out_dir, new_name), quad)
+        except Exception as exc:
+            return jsonify(ok=False, error="تعذّر معالجة الصورة: %s" % exc), 500
+        db.execute("UPDATE lis_result_images SET filename=? WHERE id=?", (new_name, img_id))
+        db.commit()
+        return jsonify(ok=True, url=url_for("static", filename="uploads/result_images/" + new_name))
+
+    @bp.route("/ai/api/hb-extract", methods=["POST"])
+    def ai_hb_extract():
+        """يقرأ جدول القمم من صورة Hb Electrophoresis ويرجّعه كاقتراح للمراجعة (ما يحفظ شي).
+        الأرقام تُنسخ كما هي مطبوعة؛ أي حقل غير ظاهر يبقى فارغاً."""
+        if not _allowed() and not session.get("user_id"):
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        cfg = _cfg()
+        if not cfg["enabled"]:
+            return jsonify(ok=False, error="المساعد متوقف من الإعدادات."), 403
+        if not cfg["key"]:
+            return jsonify(ok=False, error="أدخل مفتاح الذكاء الصناعي أولاً من إعدادات الذكاء (أو أدخل الجدول يدوياً)."), 200
+        d = request.get_json(silent=True) or {}
+        try:
+            ot_id, img_id = int(d.get("order_test_id")), int(d.get("image_id"))
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error="طلب غير صالح."), 400
+        db = get_db()
+        row = db.execute("SELECT filename FROM lis_result_images WHERE id=? AND order_test_id=?", (img_id, ot_id)).fetchone()
+        if not row:
+            return jsonify(ok=False, error="الصورة غير موجودة."), 404
+        try:
+            from PIL import Image
+            import io, base64
+            im = Image.open(os.path.join(UPLOAD_DIR, "result_images", row["filename"])).convert("RGB")
+            im.thumbnail((1800, 1800))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=90)
+            b64 = base64.b64encode(buf.getvalue()).decode()
+        except Exception as exc:
+            return jsonify(ok=False, error="تعذّر قراءة ملف الصورة: %s" % exc), 500
+        prompt = (
+            "This is a photo/screenshot of a hemoglobin electrophoresis/HPLC result from a laboratory instrument. "
+            "Classify it as one of: \"printout\" (thermal printout with columns Peak/Time/ABS/Area/Result), "
+            "\"hplc\" (screen table with Peak Name/RT/Area/Area%/Concentration), "
+            "\"capillary\" (capillary electrophoresis screen with fraction values such as Hb A, Hb D or Hb S, Hb A2). "
+            "Copy the numbers EXACTLY as printed (keep marks like 0.1*). Never calculate, correct or guess: "
+            "a value that is not clearly visible must be an empty string. Do not interpret the result. "
+            "Reply with JSON only: {\"source\":\"printout|hplc|capillary\","
+            "\"device_line\":\"short device info that is visible, e.g. Run Number / Inj # / Rack / Column temp / Instr. N\","
+            "\"peaks\":[{\"name\":\"\",\"rt\":\"\",\"abs\":\"\",\"area\":\"\",\"pct\":\"\",\"conc\":\"\"}],"
+            "\"total_area\":\"\"}. "
+            "Field meaning: printout -> rt=Time, pct=Result; hplc -> pct=Area %, conc=Concentration; "
+            "capillary -> pct=the fraction percentage (rt only if a migration position is printed).")
+        try:
+            txt = _call_ai_vision(cfg, prompt, b64)
+        except _AIErr as e:
+            return jsonify(ok=False, error=str(e))
+        m = re.search(r"\{.*\}", txt, re.S)
+        try:
+            import lab_hbcurve as hbc
+            data = hbc.normalize(json.loads(m.group(0)) if m else {})
+        except Exception:
+            data = None
+        if not data or not data["peaks"]:
+            return jsonify(ok=False, error="ما قدرت أقرأ جدول القمم من هذه الصورة. جرّب صورة أوضح أو أدخل الجدول يدوياً.")
+        return jsonify(ok=True, data=data, svg=hbc.curve_svg(data))
+
     # ---------------------------------------------------------------- context
     def _age_years(age, unit):
         try:
@@ -18640,9 +19931,46 @@ except Exception as _ai_e:   # الذكاء الصناعي ميزة إضافية
     print("AI assistant not loaded:", _ai_e)
 
 
+def ensure_blank_report_test():
+    """يضيف تحاليل النظام الخاصة (Blank Report + Culture & Sensitivity) مرة وحدة إذا مو موجودة."""
+    specs = [("BLANK", "Blank Report", "Special", "Comment"),
+             ("CULTURE", "Culture & Sensitivity", "Microbiology", "Culture Result")]
+    specs += [(_c, _m["name"], _m["dept"], "Result") for _c, _m in STRUCT_META.items()]
+    try:
+        _db = get_db()
+        for _code, _name, _dept, _param in specs:
+            if _db.execute("SELECT 1 FROM test_definitions WHERE code=?", (_code,)).fetchone():
+                continue
+            _db.execute("INSERT INTO test_definitions (code, name, department, sample_type, price, is_active) "
+                        "VALUES (?, ?, ?, '', 0, 1)", (_code, _name, _dept))
+            _tid = _db.execute("SELECT id FROM test_definitions WHERE code=?", (_code,)).fetchone()["id"]
+            _db.execute("INSERT INTO test_parameters (test_definition_id, name, unit, result_type) "
+                        "VALUES (?, ?, '', 'Text')", (_tid, _param))
+            _db.commit()
+        try:
+            sync_test_sections(_db)
+            _db.commit()
+        except Exception:
+            pass
+        _db.close()
+    except Exception as _e:
+        print("ensure_blank_report_test:", _e)
+
+
+# ستايلات التقارير بتبويبات (CBC / Blood film / BMA / BM Biopsy + التخثر وGUE وجدول النتائج) — راجع lab_styles.py
+import lab_styles
+lab_styles.register(app, get_db=get_db, get_setting=get_setting, set_setting=set_setting,
+                    roles_required=roles_required, log_action=lambda *a, **k: log_action(*a, **k))
+
+
 if __name__ == "__main__":
     _startup_mark("انتهى تحميل كل الوحدات، بدء init_db")
+    try:
+        lab_integrity.auto_backup(DB_PATH)   # نسخة احتياطية آمنة قبل أي تعديل بنية
+    except Exception:
+        pass
     init_db()
+    ensure_blank_report_test()
     _startup_mark("انتهى init_db")
     write_pending_preset_logo(UPLOAD_DIR)   # شعار العميل القادم من portal_preset.json (إن وُجد)
     cloud_sync.start_worker()

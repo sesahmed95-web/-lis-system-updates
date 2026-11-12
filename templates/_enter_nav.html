@@ -1,0 +1,28 @@
+{# التنقل بزر Enter بين الحقول (مع بقاء النقر والاختيار بالماوس). يُضمَّن في الصفحات التي تحتاجه فقط.
+   Enter = الحقل التالي. آخر حقل بالصف/النموذج: يحفظ النموذج، أو ينتقل لأول حقل بالصف التالي، أو يضغط
+   زراً عليه data-enter-click. لا يؤثر على الـtextarea (Enter فيها سطر جديد) ولا على الأزرار. #}
+<script>
+(function () {
+  if (window.__lisEnterNav) return; window.__lisEnterNav = true;
+  function ok(el) { return el && !el.disabled && el.type !== 'hidden' && el.type !== 'file' && !el.readOnly && el.offsetParent !== null; }
+  function fields(scope) { return Array.prototype.filter.call(scope.querySelectorAll('input, select'), function (el) { return ok(el) && !/^(submit|button|reset|image)$/.test(el.type); }); }
+  function focusEl(n) { n.focus(); if (n.select && /^(text|number|search|email|tel|url|password)$/.test(n.type)) n.select(); }
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.isComposing || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+    var el = e.target;
+    if (!el || !el.matches || !el.matches('.content input, .content select') || /^(submit|button|reset|image)$/.test(el.type)) return;
+    var row = el.closest('tr'), anc = el.closest('form');
+    var scope = row || anc || el.closest('.card') || document.body;
+    var list = fields(scope), i = list.indexOf(el);
+    if (i >= 0 && i < list.length - 1) { e.preventDefault(); focusEl(list[i + 1]); return; }
+    var btn = scope.querySelector('[data-enter-click]') || (el.closest('.card') || document).querySelector('[data-enter-click]');
+    if (btn && !row) { e.preventDefault(); btn.click(); return; }
+    if (row && el.form && !anc) { e.preventDefault(); (el.form.requestSubmit ? el.form.requestSubmit() : el.form.submit()); return; }   // نموذج الصف مربوط بـform=
+    if (row) {
+      var nx = row.nextElementSibling;
+      while (nx) { var fl = fields(nx); if (fl.length) { e.preventDefault(); focusEl(fl[0]); return; } nx = nx.nextElementSibling; }
+    }
+    if (el.form) { e.preventDefault(); (el.form.requestSubmit ? el.form.requestSubmit() : el.form.submit()); }
+  }, true);
+})();
+</script>

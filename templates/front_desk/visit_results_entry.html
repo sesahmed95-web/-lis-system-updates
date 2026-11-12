@@ -810,6 +810,7 @@
         </div>
       </div>
       <p class="muted" style="margin:4px 0 10px;">{{ t('barcode') }}: <span class="mono">{{ ot['barcode'] }}</span></p>
+      <span class="lis-tc" data-ot="{{ ot['id'] }}" data-code="{{ ot['test_code'] }}" style="display:none"></span>
       {% if ot['test_code'] in ('GUE', 'GSE', 'SFA') %}
       {# تدقيق إملائي/كتابة مرة وحدة لكل التقرير بدل كل باراميتر لحاله #}
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 10px; padding:8px 10px; background:#F1F5F9; border-radius:8px;">
@@ -823,8 +824,9 @@
 
       <div class="form-field" style="max-width:260px; margin-bottom:10px;">
         <label style="font-size:0.85em;">الجهاز (Analyzer) — اختياري</label>
-        <input type="text" name="ot{{ ot['id'] }}_analyzer" value="{{ ot['analyzer'] if 'analyzer' in ot.keys() and ot['analyzer'] else '' }}"
-               placeholder="مثال: E411 / Pure" dir="ltr" style="width:100%;">
+        <input type="text" name="ot{{ ot['id'] }}_analyzer" value="{{ ot['analyzer'] if 'analyzer' in ot.keys() and ot['analyzer'] else (ot['forwarded_lab_name'] if 'forwarded_lab_name' in ot.keys() and ot['forwarded_lab_name'] else '') }}"
+               placeholder="مثال: E411 / Pure — أو اسم المختبر الثاني" dir="ltr" style="width:100%;">
+        {% if 'forwarded_lab_name' in ot.keys() and ot['forwarded_lab_name'] %}<div class="muted" style="font-size:11.5px;margin-top:2px;">📤 تحليل مرسل إلى «{{ ot['forwarded_lab_name'] }}» — النسب الطبيعية تُحفظ باسم هذا المختبر.</div>{% endif %}
       </div>
 
       {% if ot['status'] == 'Verified' %}
@@ -856,7 +858,7 @@
             <td class="muted lis-ed lis-unit" data-kind="unit">{{ p['unit'] or '' }}</td>
             <td class="muted lis-ed lis-range" data-kind="range">
               {% if rng %}
-                {% if rng['range_text'] %}{{ rng['range_text'] }}
+                {% if rng['range_text'] %}<span style="white-space:pre-line">{{ normalize_range_text(rng['range_text']) }}</span>
                 {% elif rng['low'] is not none and rng['high'] is not none %}{{ rng['low'] }} - {{ rng['high'] }}{% endif %}
               {% endif %}
             </td>
@@ -1689,7 +1691,7 @@
     <div class="muted" style="font-size:12px; margin-bottom:10px;" id="lisEdTest"></div>
     <div id="lisEdStep1">
       <div class="row"><label class="l">الوحدة</label><input type="text" id="lisEdUnit" dir="ltr"></div>
-      <div class="row"><label class="l">النسبة الطبيعية</label><input type="text" id="lisEdRange" dir="ltr" placeholder="مثال: 4.0 - 10.0  أو  &lt; 5  أو  Negative"></div>
+      <div class="row"><label class="l">النسبة الطبيعية</label><textarea id="lisEdRange" dir="ltr" rows="4" style="width:100%;resize:vertical;" placeholder="مثال: 4.0 - 10.0  أو  &lt; 5  أو  Negative&#10;عدة حالات: اكتب كل حالة بسطر (Enter) بالشكل:&#10;Normal: Less than 100&#10;Pre-diabetic: 100 - 125"></textarea></div>
       <div id="lisEdMsg" style="color:#B91C1C; font-size:12.5px; min-height:16px;"></div>
       <div style="display:flex; gap:8px; justify-content:flex-end;">
         <button type="button" class="btn secondary" onclick="lisEdClose()">إلغاء</button>
@@ -1701,6 +1703,7 @@
       <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
         <button type="button" class="btn secondary" onclick="lisEdBack()">رجوع</button>
         <button type="button" class="btn secondary" onclick="lisEdSave('patient')">لا — لهذا المريض فقط</button>
+        <button type="button" class="btn secondary" id="lisEdLabBtn" onclick="lisEdSave('lab')">🏥 لهذا الجهاز/المختبر فقط (لكل مرضاه)</button>
         <button type="button" class="btn" onclick="lisEdSave('all')">نعم — على جميع المرضى</button>
       </div>
     </div>
@@ -1750,6 +1753,12 @@
     };
     window.lisEdSave = function (scope) {
       var body = { param_id: +cur.pid, scope: scope };
+      var _an = document.querySelector('input[name="ot' + cur.ot + '_analyzer"]');
+      if (scope === 'lab') {
+        if (!_an || !_an.value.trim()) { lisEdBack(); $('lisEdMsg').textContent = 'اكتب اسم الجهاز أو المختبر الثاني بخانة «الجهاز» أولاً.'; return; }
+        body.analyzer = _an.value.trim();
+        if (!cur.rc) { lisEdBack(); $('lisEdMsg').textContent = 'عدّل النسبة الطبيعية أولاً.'; return; }
+      }
       if (cur.uc) body.unit = cur.u;
       if (cur.rc) body.range = cur.r;
       fetch('/api/order-tests/' + cur.ot + '/param-edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -1885,4 +1894,618 @@
 </script>
 
 {% include "_delete_js.html" %}
+
+<script>
+/* ===== 🧬 Hb Curve: قراءة جدول القمم من الصورة + إعادة رسم المنحنى + تعليق منسّق (حجم خط ورموز) ===== */
+(function () {
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  var COLS = {
+    printout: [['name', 'Peak'], ['rt', 'Time (s)'], ['abs', 'ABS'], ['area', 'Area'], ['pct', 'Result %']],
+    hplc: [['name', 'Peak Name'], ['rt', 'RT (min)'], ['area', 'Area'], ['pct', 'Area %'], ['conc', 'Conc. %']],
+    capillary: [['name', 'Fraction'], ['pct', '%'], ['rt', 'Position (optional)']]
+  };
+  var SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40];
+  var SYMS = ['➢', '➤', '●', '○', '■', '✓', '✔', '✘', '→', '←', '↑', '↓', '±', '≥', '≤', '%', 'µ', '°', '‰', '•', '⚠', '★'];
+
+  window.__hbAuto = function (id) { var f = (window.__hbAutoMap || {})[id]; if (f) f(); };   // يُستدعى بعد رفع صورة: يقرأ الجدول تلقائياً
+  window.__hbInit = function (box, id, card) {
+    if (!card) return;
+    var _h = card.querySelector('h4');
+    if (!/electroph/i.test(((_h && _h.textContent) || '') + ' ' + (card.getAttribute('data-code') || ''))) return;
+    var sec = document.createElement('div');
+    sec.style.cssText = 'margin-top:12px;border-top:1px dashed #8fb5b0;padding-top:8px;';
+    sec.innerHTML =
+      '<div style="font-weight:700;">🧬 Hb Curve <span class="muted" style="font-weight:400;font-size:12px;">— الأرقام تُراجع ثم يُرسم المنحنى نظيفاً بدل صورة الموبايل</span></div>' +
+      '<div style="margin:6px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+        '<button type="button" class="btn small hb-ai" title="الذكاء الصناعي يقرأ الجدول من آخر صورة مرفوعة — يعرضه للمراجعة ولا يحفظ">🤖 قراءة الجدول من الصورة</button>' +
+        '<button type="button" class="btn small secondary hb-manual">✍ إدخال يدوي</button>' +
+        '<span class="hb-msg" style="font-size:12px;"></span></div>' +
+      '<div class="hb-form" style="display:none;"></div>' +
+      '<div class="hb-prev" style="text-align:center;margin:6px 0;"></div>' +
+      '<div class="muted" style="font-size:12px;">👆 اضغط على أي رقم أو كلمة داخل المنحنى لحذفها <button type="button" class="btn small secondary hb-restore">↩ استرجاع المحذوف</button></div>' +
+      '<div style="margin-top:10px;font-weight:700;">Comments</div>' +
+      '<div class="hb-tb" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:4px 0;"></div>' +
+      '<div class="hb-ed" contenteditable="true" dir="ltr" spellcheck="false" style="min-height:110px;border:1px solid #9bb;border-radius:6px;padding:8px;background:#fff;font-size:16px;line-height:1.6;text-align:left;white-space:pre-wrap;tab-size:4;"></div>' +
+      '<button type="button" class="btn small hb-save-c" style="margin-top:4px;">💾 حفظ التعليق</button>';
+    box.appendChild(sec);
+    var q = function (c) { return sec.querySelector(c); };
+    var msg = function (t, bad) { var e = q('.hb-msg'); e.textContent = t || ''; e.style.color = bad ? '#b00020' : '#0a7a3b'; };
+    var state = null, curPx = 16, rendered = 'hplc';
+
+    /* ---------- جدول القمم ---------- */
+    function collect() {
+      var f = q('.hb-form'); if (!state) return null;
+      var src = f.querySelector('.hb-src').value, cols = COLS[rendered], peaks = [];
+      f.querySelectorAll('tr[data-r]').forEach(function (tr) {
+        var p = {}; cols.forEach(function (c, i) { p[c[0]] = tr.querySelectorAll('input')[i].value.trim(); });
+        if (p.name) peaks.push(p);
+      });
+      var key = [];
+      f.querySelector('.hb-key').value.split('\n').forEach(function (l) {
+        var m = l.split('='); if (m.length === 2 && m[0].trim()) key.push([m[0].trim(), m[1].trim()]);
+      });
+      return { source: src, device_line: f.querySelector('.hb-dev').value.trim(), peaks: peaks,
+               total_area: f.querySelector('.hb-tot').value.trim(), key: key };
+    }
+    function renderForm(keepRows) {
+      var f = q('.hb-form'); f.style.display = '';
+      var cols = COLS[state.source]; rendered = state.source;
+      var h = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:6px;">' +
+        '<label style="font-size:12px;">نوع الجهاز/الصورة<br><select class="hb-src">' +
+        '<option value="printout">طباعة الجهاز (Peak/Time/ABS)</option><option value="hplc">شاشة HPLC (RT/Area)</option><option value="capillary">Capillary (Hb A / D / S / A2)</option></select></label>' +
+        '<label style="font-size:12px;flex:1;min-width:220px;">سطر بيانات الجهاز (يظهر تحت العنوان)<br><input class="hb-dev" dir="ltr" style="width:100%;" value="' + esc(state.device_line) + '"></label>' +
+        '<label style="font-size:12px;">Total area<br><input class="hb-tot" dir="ltr" style="width:130px;" value="' + esc(state.total_area) + '"></label></div>';
+      h += '<table style="border-collapse:collapse;" dir="ltr"><tr>' + cols.map(function (c) { return '<th style="font-size:12px;padding:2px 4px;">' + esc(c[1]) + '</th>'; }).join('') + '<th></th></tr>';
+      state.peaks.forEach(function (p, i) {
+        h += '<tr data-r="' + i + '">' + cols.map(function (c) {
+          return '<td><input dir="ltr" style="width:' + (c[0] === 'name' ? 120 : 86) + 'px;" value="' + esc(p[c[0]]) + '"></td>'; }).join('') +
+          '<td><button type="button" class="btn small secondary" data-rm="' + i + '">✕</button></td></tr>';
+      });
+      h += '</table><button type="button" class="btn small secondary hb-add" style="margin:4px 0;">＋ سطر</button>' +
+        '<label style="font-size:12px;display:block;">النتائج الرئيسية الكبيرة (اختياري، سطر لكل نتيجة بالشكل <code>HbF = 35.7 %</code>) — إن تُركت فارغة تُؤخذ من الجدول<br>' +
+        '<textarea class="hb-key" rows="3" dir="ltr" style="width:100%;max-width:420px;">' + esc((state.key || []).map(function (k) { return k[0] + ' = ' + k[1]; }).join('\n')) + '</textarea></label>' +
+        '<div style="margin-top:6px;"><button type="button" class="btn small hb-save">💾 حفظ ورسم المنحنى</button> ' +
+        '<span class="muted" style="font-size:12px;">راجع الأرقام على الصورة الأصلية قبل الحفظ.</span></div>';
+      f.innerHTML = h; f.querySelector('.hb-src').value = state.source;
+    }
+    q('.hb-form').addEventListener('change', function (e) {
+      if (e.target.classList.contains('hb-src')) { var d = collect(); d.source = e.target.value; state = d; renderForm(); }
+    });
+    q('.hb-form').addEventListener('click', function (e) {
+      var rm = e.target.closest('[data-rm]'), add = e.target.closest('.hb-add'), sv = e.target.closest('.hb-save');
+      if (rm) { var d = collect(); d.peaks.splice(+rm.dataset.rm, 1); state = d; renderForm(); }
+      else if (add) { var d2 = collect(); d2.peaks.push({ name: '' }); state = d2; renderForm(); }
+      else if (sv) {
+        var data = collect();
+        if (!data.peaks.length) { msg('أضف قمة واحدة على الأقل.', true); return; }
+        msg('جاري الحفظ…');
+        post({ data: data }).then(function (d) {
+          if (!d.ok) { msg(d.error || 'فشل الحفظ', true); return; }
+          q('.hb-prev').innerHTML = d.svg ? d.svg : '<span class="muted">ما كفت البيانات لرسم المنحنى (تحتاج RT أو Time مع Area/ABS).</span>';
+          msg('تم الحفظ ✓ — المنحنى سينطبع بالتقرير');
+        });
+      }
+    });
+    var hbHidden = [];
+    (function () { var st = document.createElement('style'); st.textContent = '.hb-prev svg text.hbt{cursor:pointer}.hb-prev svg text.hbt:hover{fill:#d00;text-decoration:line-through}'; document.head.appendChild(st); })();
+    q('.hb-prev').addEventListener('click', function (e) {
+      var t = e.target.closest && e.target.closest('text.hbt'); if (!t) return;
+      var n = +t.getAttribute('data-t'); if (hbHidden.indexOf(n) < 0) hbHidden.push(n);
+      post({ hidden: hbHidden }).then(function (d) { if (d.ok && d.svg) { q('.hb-prev').innerHTML = d.svg; msg('حُذف من المنحنى ✓'); } else msg(d.error || 'احفظ المنحنى أولاً', true); });
+    });
+    q('.hb-restore').onclick = function () {
+      hbHidden = [];
+      post({ hidden: [] }).then(function (d) { if (d.ok && d.svg) { q('.hb-prev').innerHTML = d.svg; msg('رجع كل المحذوف ✓'); } else msg(d.error || 'احفظ المنحنى أولاً', true); });
+    };
+    function post(body) {
+      return fetch('/api/order-tests/' + id + '/hb-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json(); }).catch(function () { return { ok: false, error: 'تعذر الاتصال بالبرنامج' }; });
+    }
+    q('.hb-manual').onclick = function () {
+      if (!state) state = { source: 'hplc', device_line: '', peaks: [{ name: '' }], total_area: '', key: [] };
+      renderForm();
+    };
+    function runAI(auto) {
+      fetch('/api/order-tests/' + id + '/media').then(function (r) { return r.json(); }).then(function (m) {
+        if (!m.ok || !m.images.length) { msg('ارفع صورة أولاً.', true); return; }
+        var okKey = 'lis-hb-ai-ok';
+        var allowed = false; try { allowed = localStorage.getItem(okKey) === '1'; } catch (e) {}
+        if (!allowed) {
+          if (!confirm('ستُرسل الصورة لخدمة الذكاء الاصطناعي لقراءة الجدول (قد يظهر فيها اسم المريض). النتيجة تُعرض للمراجعة ولا تُحفظ تلقائياً. السماح؟ (يُسأل مرة واحدة على هذا الجهاز)')) { if (auto) msg('لم تُقرأ الصورة — اضغط «قراءة الجدول من الصورة» أو أدخل الجدول يدوياً.', true); return; }
+          try { localStorage.setItem(okKey, '1'); } catch (e) {}
+        }
+        msg('جاري قراءة الجدول وإعادة رسم المنحنى…'); box.open = true;
+        fetch('/ai/api/hb-extract', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_test_id: +id, image_id: m.images[m.images.length - 1].id }) })
+          .then(function (r) { return r.json(); }).then(function (d) {
+            if (!d.ok) { msg((d.error || 'فشلت القراءة') + ' — يمكنك الإدخال اليدوي.', true); return; }
+            state = d.data; renderForm(); q('.hb-prev').innerHTML = d.svg || '';
+            msg('قُرئ الجدول — راجعه على الصورة ثم اضغط «حفظ ورسم المنحنى». لن يُعتمد قبل مراجعتك.');
+            try { sec.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+          }).catch(function () { msg('تعذر الاتصال بالبرنامج', true); });
+      });
+    }
+    q('.hb-ai').onclick = function () { runAI(false); };
+    window.__hbAutoMap = window.__hbAutoMap || {}; window.__hbAutoMap[id] = function () { runAI(true); };
+
+    /* ---------- تعليق منسّق: حجم خط + رموز ---------- */
+    var ed = q('.hb-ed'), tb = q('.hb-tb');
+    tb.innerHTML =
+      '<select class="hb-size" title="حجم الخط">' + SIZES.map(function (s) { return '<option value="' + s + '"' + (s === 16 ? ' selected' : '') + '>' + s + ' px</option>'; }).join('') + '</select>' +
+      '<button type="button" class="btn small secondary" data-sz="-1" title="تصغير الخط">A−</button>' +
+      '<button type="button" class="btn small secondary" data-sz="1" title="تكبير الخط">A+</button>' +
+      '<button type="button" class="btn small secondary" data-cmd="bold"><b>B</b></button>' +
+      '<button type="button" class="btn small secondary" data-cmd="italic"><i>I</i></button>' +
+      '<button type="button" class="btn small secondary" data-cmd="underline"><u>U</u></button>' +
+      '<span style="width:8px;"></span>' +
+      '<button type="button" class="btn small secondary" data-cmd="justifyLeft" title="محاذاة لليسار (Ctrl+L)">⇤</button>' +
+      '<button type="button" class="btn small secondary" data-cmd="justifyCenter" title="توسيط (Ctrl+E)">↔</button>' +
+      '<button type="button" class="btn small secondary" data-cmd="justifyRight" title="محاذاة لليمين (Ctrl+R)">⇥</button>' +
+      '<button type="button" class="btn small secondary" data-cmd="justifyFull" title="ضبط (Ctrl+J)">☰</button>' +
+      '<button type="button" class="btn small secondary" data-cmd="outdent" title="تقليل المسافة البادئة (Shift+Tab)">◀ إزاحة</button>' +
+      '<button type="button" class="btn small secondary" data-cmd="indent" title="زيادة المسافة البادئة (Tab)">إزاحة ▶</button>' +
+      '<span style="width:8px;"></span>' +
+      '<button type="button" class="btn small secondary" data-cmd="insertUnorderedList" title="قائمة نقطية (➢ مثل الوورد) — Enter سطر جديد بنفس العلامة">☰ قائمة</button>' +
+      '<button type="button" class="btn small secondary" data-cmd="insertOrderedList" title="قائمة مرقّمة">1. ترقيم</button>' +
+      '<span style="width:8px;"></span>' + SYMS.map(function (s) { return '<button type="button" class="btn small secondary" data-sym="' + s + '" style="min-width:30px;">' + s + '</button>'; }).join('') +
+      '<input class="hb-sym" maxlength="4" placeholder="رمز…" title="اكتب أو الصق أي رمز ثم اضغط إدراج" style="width:60px;" dir="ltr">' +
+      '<button type="button" class="btn small secondary" data-sym-in="1">إدراج</button>';
+    function fixFonts() {
+      ed.querySelectorAll('font[size]').forEach(function (f) {
+        var s = document.createElement('span'); s.style.fontSize = curPx + 'px';
+        while (f.firstChild) s.appendChild(f.firstChild); f.parentNode.replaceChild(s, f);
+      });
+    }
+    function applySize(px) {
+      curPx = Math.max(8, Math.min(72, px)); ed.focus();
+      document.execCommand('fontSize', false, '7'); fixFonts();
+      var sel = tb.querySelector('.hb-size'); if (SIZES.indexOf(curPx) >= 0) sel.value = curPx;
+    }
+    tb.addEventListener('mousedown', function (e) { if (e.target.closest('button')) e.preventDefault(); });   // لا نفقد التحديد
+    tb.addEventListener('change', function (e) { if (e.target.classList.contains('hb-size')) applySize(+e.target.value); });
+    tb.addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.sz) applySize(curPx + (+b.dataset.sz) * (curPx >= 24 ? 4 : 2));
+      else if (b.dataset.cmd) { ed.focus(); document.execCommand(b.dataset.cmd); }
+      else if (b.dataset.sym) { ed.focus(); document.execCommand('insertText', false, b.dataset.sym); }
+      else if (b.dataset.symIn) { var i = tb.querySelector('.hb-sym'); if (i.value) { ed.focus(); document.execCommand('insertText', false, i.value); i.value = ''; } }
+    });
+    ed.addEventListener('input', fixFonts);
+    ed.addEventListener('keydown', function (e) {   /* Tab = 4 مسافات، Shift+Tab يرجّعها */
+      if (e.key !== 'Tab') return; e.preventDefault();
+      if (!e.shiftKey) { document.execCommand('insertText', false, '    '); return; }
+      var s = window.getSelection();
+      for (var i = 0; i < 4; i++) { var n = s && s.anchorNode, o = s ? s.anchorOffset : 0; if (n && n.nodeType === 3 && o > 0 && /[ \u00a0]/.test(n.data.charAt(o - 1))) document.execCommand('delete'); else break; }
+    });
+    /* اختصارات مثل الوورد: Tab/Shift+Tab للإزاحة، Ctrl+L/E/R/J للمحاذاة */
+    ed.addEventListener('keydown', function (e) {
+      if (e.key === 'Tab') { e.preventDefault(); document.execCommand(e.shiftKey ? 'outdent' : 'indent'); return; }
+      if (e.ctrlKey || e.metaKey) {
+        var m = { l: 'justifyLeft', e: 'justifyCenter', r: 'justifyRight', j: 'justifyFull' }[(e.key || '').toLowerCase()];
+        if (m) { e.preventDefault(); document.execCommand(m); }
+      }
+    });
+    q('.hb-save-c').onclick = function () {
+      fixFonts(); msg('جاري حفظ التعليق…');
+      post({ comment_html: ed.innerHTML }).then(function (d) { msg(d.ok ? 'تم حفظ التعليق ✓' : (d.error || 'فشل'), !d.ok); if (d.ok) ed.innerHTML = d.comment_html; });
+    };
+
+    /* ---------- تحميل المحفوظ ---------- */
+    fetch('/api/order-tests/' + id + '/hb-data').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) return;
+      if (d.data && d.data.peaks && d.data.peaks.length) { state = d.data; hbHidden = d.data.hidden || []; renderForm(); q('.hb-prev').innerHTML = d.svg || ''; box.open = true; }
+      if (d.comment_html) { ed.innerHTML = d.comment_html; box.open = true; }
+    });
+  };
+})();
+</script>
+
+<script>
+/* ===== 📎 صورة/لقطة نتيجة الجهاز + ملاحظة التقرير (Hb Electrophoresis، CBC...) ===== */
+(function () {
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  document.querySelectorAll('input[name$="_analyzer"]').forEach(function (inp) {
+    var m = inp.name.match(/^ot(\d+)_analyzer$/);
+    if (!m) return;
+    var id = m[1];
+    var host = inp.closest('.form-field') || inp.parentElement;
+    var box = document.createElement('details');
+    box.style.cssText = 'margin:8px 0;border:1px dashed #8fb5b0;border-radius:8px;padding:6px 10px;background:rgba(15,118,110,.05);max-width:780px;';
+    box.innerHTML =
+      '<summary style="cursor:pointer;font-size:0.9em;">📎 صورة نتيجة الجهاز / ملاحظة التقرير <span class="lm-count muted"></span></summary>' +
+      '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
+        '<select class="lm-mode"><option value="paper">ورقة / وصل مطبوع من الجهاز (تنظيف + قص)</option><option value="screen">لقطة شاشة الجهاز</option></select>' +
+        '<input type="file" class="lm-file" accept="image/*">' +
+        '<button type="button" class="btn small lm-up">⬆ رفع</button>' +
+        '<button type="button" class="btn small secondary lm-ai" style="display:none;" title="يقرأ القيم من الصورة ويعبّيها للمراجعة — ما يحفظ شي">🤖 قراءة القيم من الصورة</button>' +
+        '<span class="lm-msg" style="font-size:12px;"></span>' +
+      '</div>' +
+      '<div class="lm-thumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>' +
+      '<div style="margin-top:8px;"><label style="font-size:0.85em;">ملاحظة التقرير (Comment) — تنطبع تحت الصورة</label>' +
+      '<textarea class="lm-note" rows="6" maxlength="3000" dir="ltr" style="width:100%;text-align:left;" placeholder="Comment..."></textarea>' +
+      '<button type="button" class="btn small lm-save-note" style="margin-top:4px;">💾 حفظ الملاحظة</button></div>';
+    host.parentNode.insertBefore(box, host.nextSibling);
+    var q = function (c) { return box.querySelector(c); };
+    var msg = function (t, bad) { var e = q('.lm-msg'); e.textContent = t || ''; e.style.color = bad ? '#b00020' : '#0a7a3b'; };
+    var firstImg = null;
+    function render(d) {
+      var th = q('.lm-thumbs'); th.innerHTML = '';
+      firstImg = d.images.length ? d.images[d.images.length - 1].id : null;
+      d.images.forEach(function (im) {
+        var w = document.createElement('div');
+        w.style.cssText = 'border:1px solid #cdd;border-radius:6px;padding:4px;background:#fff;text-align:center;';
+        w.innerHTML = '<a href="' + esc(im.url) + '" target="_blank"><img src="' + esc(im.url) + '" style="max-height:140px;max-width:220px;display:block;"></a>' +
+                      '<button type="button" class="btn small secondary" style="margin-top:3px;" data-crop="' + im.id + '" title="الذكاء الصناعي يحدد المنحنى ويقص الصورة تلقائيًا (يحتاج مفتاح الذكاء + إنترنت)">✂ قص تلقائي</button> ' +
+                      '<button type="button" class="btn small secondary" style="margin-top:3px;" data-del="' + im.id + '">🗑 حذف</button>';
+        th.appendChild(w);
+      });
+      q('.lm-count').textContent = d.images.length ? '(' + d.images.length + ' صورة)' : '';
+      q('.lm-ai').style.display = d.images.length ? '' : 'none';
+      if (document.activeElement !== q('.lm-note')) q('.lm-note').value = d.comment || '';
+      if (d.images.length || d.comment) box.open = true;
+    }
+    function load() {
+      fetch('/api/order-tests/' + id + '/media').then(function (r) { return r.json(); }).then(function (d) { if (d.ok) render(d); });
+    }
+    q('.lm-up').onclick = function () {
+      var f = q('.lm-file').files[0];
+      if (!f) { msg('اختر صورة أولاً.', true); return; }
+      var fd = new FormData(); fd.append('file', f); fd.append('mode', q('.lm-mode').value);
+      msg('جاري الرفع والتنظيف…');
+      fetch('/api/order-tests/' + id + '/media', { method: 'POST', body: fd }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.ok) { msg(d.error || 'فشل الرفع', true); return; }
+        q('.lm-file').value = ''; msg('تم ✓'); load(); if (window.__hbAuto) window.__hbAuto(id);
+        /* غير Hb: اقرأ القيم تلقائياً وعبّها أمام كل باراميتر (للمراجعة، لا يحفظ) */
+        if (!(window.__hbAutoMap && window.__hbAutoMap[id]) && document.querySelector('[name^="ot' + id + '_param_"]')) {
+          setTimeout(function () { try { if (q('.lm-ai').style.display !== 'none') q('.lm-ai').click(); } catch (e) {} }, 900);
+        }
+      }).catch(function () { msg('تعذر الاتصال بالبرنامج', true); });
+    };
+    q('.lm-thumbs').onclick = function (e) {
+      var cb = e.target.closest('[data-crop]');
+      if (cb) {
+        if (!confirm('ستُرسل الصورة لخدمة الذكاء الاصطناعي لتحديد منطقة المنحنى وقصها (قد يظهر فيها اسم المريض). متابعة؟')) return;
+        msg('جاري القص التلقائي…');
+        fetch('/ai/api/crop-image', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_test_id: +id, image_id: +cb.dataset.crop }) }).then(function (r) { return r.json(); })
+          .then(function (d) { if (!d.ok) msg(d.error || 'فشل القص', true); else { msg('تم القص ✓'); load(); } })
+          .catch(function () { msg('تعذر الاتصال بالبرنامج', true); });
+        return;
+      }
+      var b = e.target.closest('[data-del]'); if (!b) return;
+      if (!confirm('حذف هذه الصورة؟')) return;
+      fetch('/api/order-tests/' + id + '/media/' + b.dataset.del, { method: 'DELETE' }).then(function (r) { return r.json(); })
+        .then(function (d) { if (!d.ok) msg(d.error || 'فشل الحذف', true); else load(); });
+    };
+    q('.lm-save-note').onclick = function () {
+      fetch('/api/order-tests/' + id + '/media-comment', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment: q('.lm-note').value }) }).then(function (r) { return r.json(); })
+        .then(function (d) { msg(d.ok ? 'تم حفظ الملاحظة ✓' : (d.error || 'فشل'), !d.ok); });
+    };
+    q('.lm-ai').onclick = function () {
+      if (!firstImg) return;
+      if (!confirm('ستُرسل الصورة لخدمة الذكاء الاصطناعي لقراءة القيم (قد يظهر فيها اسم المريض). متابعة؟')) return;
+      msg('جاري قراءة الصورة…');
+      fetch('/ai/api/extract-image', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_test_id: +id, image_id: firstImg }) }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.ok) { msg(d.error || 'فشلت القراءة', true); return; }
+        var n = 0;
+        Object.keys(d.values).forEach(function (pid) {
+          var el = document.querySelector('[name="ot' + id + '_param_' + pid + '"]');
+          if (el && !el.value) {
+            el.value = d.values[pid]; el.style.background = '#fff8c5'; el.title = 'قيمة مقترحة من الصورة — راجعها قبل الحفظ';
+            el.dispatchEvent(new Event('input', { bubbles: true })); n++;
+          }
+        });
+        msg('عُبّئت ' + n + ' قيمة (مظلّلة بالأصفر). راجعها ثم اضغط Save.');
+      }).catch(function () { msg('تعذر الاتصال بالبرنامج', true); });
+    };
+    load();
+    if (window.__hbInit) window.__hbInit(box, id, (document.querySelector('.lis-tc[data-ot="' + id + '"]') || {}).parentNode);
+  });
+})();
+</script>
+
+<script>
+/* ===== 🧫 محرر الزرع والحساسية (Culture & Sensitivity) — يظهر فقط لتحليل CULTURE ===== */
+(function () {
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  var SPEC = ['Urine', 'Stool', 'Blood', 'Wound swab', 'Sputum', 'Throat swab', 'Vaginal swab', 'Ear swab', 'Semen', 'CSF', 'Pus'];
+  document.querySelectorAll('.lis-tc[data-code="CULTURE"]').forEach(function (mk) {
+    var id = mk.dataset.ot, card = mk.closest('.rb-box') || mk.parentNode;
+    var box = document.createElement('div');
+    box.style.cssText = 'margin:8px 0;border:1px solid #8fb5b0;border-radius:8px;padding:10px;background:rgba(15,118,110,.05);';
+    card.insertBefore(box, mk.nextSibling);
+    var state = null, abx = [];
+    function save(done) {
+      fetch('/api/order-tests/' + id + '/culture', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(state) })
+        .then(function (r) { return r.json(); }).then(function (d) {
+          var m = box.querySelector('.cs-msg');
+          if (!d.ok) { m.textContent = d.error || 'فشل'; m.style.color = '#b00020'; return; }
+          m.textContent = 'تم الحفظ ✓'; m.style.color = '#0a7a3b';
+          // عبّي حقل النتيجة النصي بالملخّص حتى يُحتسب التحليل مكتملاً عند Save العام
+          var inp = card.querySelector('[name^="ot' + id + '_param_"]');
+          if (inp && !inp.value) { inp.value = d.summary; inp.dispatchEvent(new Event('input', {bubbles: true})); }
+        }).catch(function () { var m = box.querySelector('.cs-msg'); m.textContent = 'تعذر الاتصال'; m.style.color = '#b00020'; });
+    }
+    function render() {
+      var h = '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">' +
+        '<label style="font-size:13px;">نوع العينة<br><input list="csSpec" class="cs-spec" value="' + esc(state.specimen) + '" style="width:190px;" dir="ltr"></label>' +
+        '<datalist id="csSpec">' + SPEC.map(function (x) { return '<option value="' + x + '">'; }).join('') + '</datalist>' +
+        '<label style="font-size:13px;"><input type="radio" name="csg' + id + '" value="growth"' + (state.growth === 'growth' ? ' checked' : '') + '> يوجد نمو</label>' +
+        '<label style="font-size:13px;"><input type="radio" name="csg' + id + '" value="no_growth"' + (state.growth === 'no_growth' ? ' checked' : '') + '> لا يوجد نمو</label></div>';
+      if (state.growth === 'no_growth') {
+        h += '<label style="font-size:13px;display:block;margin-top:8px;">النص المطبوع<br><input class="cs-ng" value="' + esc(state.no_growth_text) + '" style="width:100%;" dir="ltr"></label>';
+      } else {
+        state.organisms.forEach(function (o, oi) {
+          h += '<div style="border:1px solid #cdd;border-radius:8px;padding:8px;margin-top:10px;background:#fff;">' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">' +
+            '<label style="font-size:13px;">اسم البكتيريا<br><input class="cs-on" data-o="' + oi + '" value="' + esc(o.name) + '" style="width:260px;" dir="ltr" placeholder="Escherichia coli"></label>' +
+            '<label style="font-size:13px;">العدد / الكمية<br><input class="cs-oc" data-o="' + oi + '" value="' + esc(o.count) + '" style="width:170px;" dir="ltr" placeholder="> 10^5 CFU/mL"></label>' +
+            '<button type="button" class="btn small secondary cs-del" data-o="' + oi + '">🗑 حذف البكتيريا</button></div>' +
+            '<table style="margin-top:8px;font-size:13px;border-collapse:collapse;"><tbody>';
+          abx.forEach(function (a) {
+            var cur = (o.results.filter(function (x) { return x.name === a; })[0] || {}).r || '';
+            h += '<tr><td style="padding:2px 10px 2px 0;" dir="ltr">' + esc(a) + '</td><td>' +
+              ['S', 'I', 'R'].map(function (k) {
+                var col = {S: '#15803d', I: '#b45309', R: '#b91c1c'}[k];
+                return '<label style="margin-inline-end:8px;color:' + col + ';font-weight:700;"><input type="radio" class="cs-r" name="csr' + id + '_' + oi + '_' + esc(a) + '" data-o="' + oi + '" data-a="' + esc(a) + '" value="' + k + '"' + (cur === k ? ' checked' : '') + '> ' + k + '</label>';
+              }).join('') +
+              '<a href="#" class="cs-clr" data-o="' + oi + '" data-a="' + esc(a) + '" style="font-size:11px;">مسح</a></td></tr>';
+          });
+          h += '</tbody></table></div>';
+        });
+        h += '<button type="button" class="btn small secondary cs-add" style="margin-top:10px;">➕ إضافة بكتيريا</button>';
+      }
+      h += '<label style="font-size:13px;display:block;margin-top:10px;">ملاحظة (تُطبع بآخر التقرير)<br><textarea class="cs-note" rows="2" style="width:100%;" dir="ltr">' + esc(state.note) + '</textarea></label>' +
+        '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><button type="button" class="btn small cs-save">💾 حفظ الزرع</button>' +
+        '<button type="button" class="btn small secondary cs-abx">✏️ تعديل قائمة المضادات</button><span class="cs-msg" style="font-size:12px;"></span></div>';
+      box.innerHTML = '<b>🧫 الزرع والحساسية</b>' + h;
+    }
+    function sync() {   // اقرأ الحقول للحالة قبل أي إعادة رسم
+      var sp = box.querySelector('.cs-spec'); if (sp) state.specimen = sp.value;
+      var ng = box.querySelector('.cs-ng'); if (ng) state.no_growth_text = ng.value;
+      var nt = box.querySelector('.cs-note'); if (nt) state.note = nt.value;
+      box.querySelectorAll('.cs-on').forEach(function (e) { state.organisms[+e.dataset.o].name = e.value; });
+      box.querySelectorAll('.cs-oc').forEach(function (e) { state.organisms[+e.dataset.o].count = e.value; });
+      box.querySelectorAll('.cs-r:checked').forEach(function (e) {
+        var o = state.organisms[+e.dataset.o];
+        o.results = o.results.filter(function (x) { return x.name !== e.dataset.a; });
+        o.results.push({name: e.dataset.a, r: e.value});
+      });
+    }
+    box.addEventListener('click', function (e) {
+      var t = e.target;
+      if (t.classList.contains('cs-save')) { sync(); save(); }
+      else if (t.classList.contains('cs-add')) { sync(); state.organisms.push({name: '', count: '', results: []}); render(); }
+      else if (t.classList.contains('cs-del')) { sync(); state.organisms.splice(+t.dataset.o, 1); render(); }
+      else if (t.classList.contains('cs-clr')) {
+        e.preventDefault(); sync(); var o = state.organisms[+t.dataset.o];
+        o.results = o.results.filter(function (x) { return x.name !== t.dataset.a; }); render();
+      }
+      if (t.name && t.name.indexOf('csg' + id) === 0) { sync(); state.growth = t.value; if (state.growth === 'growth' && !state.organisms.length) state.organisms.push({name: '', count: '', results: []}); render(); }
+    });
+    box.addEventListener('click', function (e) {
+      if (!e.target.classList.contains('cs-abx')) return;
+      var w = document.createElement('div');
+      w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:10001;display:flex;align-items:center;justify-content:center;';
+      w.innerHTML = '<div style="background:#fff;padding:14px;border-radius:10px;width:min(480px,92vw);"><b>قائمة المضادات الحيوية</b><p class="muted" style="font-size:12px;">اسم واحد بكل سطر. تنطبق على كل تقارير الزرع.</p>' +
+        '<textarea style="width:100%;height:280px;" dir="ltr">' + esc(abx.join('\n')) + '</textarea>' +
+        '<div style="margin-top:8px;display:flex;gap:8px;"><button type="button" class="btn small ok">حفظ</button><button type="button" class="btn small secondary no">إلغاء</button></div></div>';
+      document.body.appendChild(w);
+      w.querySelector('.no').onclick = function () { w.remove(); };
+      w.querySelector('.ok').onclick = function () {
+        fetch('/api/culture/antibiotics', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({list: w.querySelector('textarea').value}) })
+          .then(function (r) { return r.json(); }).then(function (d) { if (d.ok) { sync(); abx = d.antibiotics; w.remove(); render(); } });
+      };
+    });
+    fetch('/api/order-tests/' + id + '/culture').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) return;
+      state = d.data; abx = d.antibiotics;
+      state.organisms = (state.organisms || []).map(function (o) { return {name: o.name, count: o.count, results: o.results || []}; });
+      if (state.growth === 'growth' && !state.organisms.length) state.organisms.push({name: '', count: '', results: []});
+      render();
+    });
+  });
+})();
+</script>
+<script>
+/* ===== 📋 محرر التقارير المنظّمة: صبغات / ELISA / IFAT / ANA / حساسية / أنسجة — يظهر فقط لهذي التحاليل ===== */
+(function () {
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  var KINDS = {GRAMSTAIN:'fields', AFB:'fields', SKINSCRAP:'fields', FOODPROF:'panel', DRUGPROF:'panel', ELISA:'panel',
+               IFAT:'panel', ANAPANEL:'panel', GADAB:'panel', HISTO:'histo', HISTOCD:'histo'};
+  var IN = 'width:100%;';
+  document.querySelectorAll('.lis-tc').forEach(function (mk) {
+    var code = mk.dataset.code, kind = KINDS[code]; if (!kind) return;
+    var id = mk.dataset.ot, card = mk.closest('.rb-box') || mk.parentNode;
+    var box = document.createElement('div');
+    box.style.cssText = 'margin:8px 0;border:1px solid #8fb5b0;border-radius:8px;padding:10px;background:rgba(15,118,110,.05);';
+    card.insertBefore(box, mk.nextSibling);
+    var st = null, tpls = [];
+    function J(url, opt) { return fetch(url, opt).then(function (r) { return r.json(); }); }
+    function msg(t, bad) { var m = box.querySelector('.st-msg'); if (m) { m.textContent = t || ''; m.style.color = bad ? '#b00020' : '#0a7a3b'; } }
+    function q(c) { return box.querySelector(c); }
+    function qa(c) { return box.querySelectorAll(c); }
+    function ensureRows() {
+      if (kind === 'fields' && !st.rows.length) st.rows.push({k: '', v: ''});
+      if (kind === 'panel' && !st.rows.length) st.rows.push(st.cols.map(function () { return ''; }));
+      if (kind === 'histo') { if (!st.sections.length) st.sections.push({h: '', t: ''}); if (!st.ihc_rows.length) st.ihc_rows.push({m: '', r: ''}); }
+    }
+    function sync() {
+      var v = function (c) { var e = q(c); return e ? e.value : null; };
+      var t = v('.st-title'); if (t !== null) st.title = t;
+      var n = v('.st-note'); if (n !== null) st.note = n;
+      if (kind === 'fields') {
+        qa('.st-k').forEach(function (e) { st.rows[+e.dataset.i].k = e.value; });
+        qa('.st-v').forEach(function (e) { st.rows[+e.dataset.i].v = e.value; });
+      } else if (kind === 'panel') {
+        var m = v('.st-method'); if (m !== null) st.method = m;
+        qa('.st-cn').forEach(function (e) { st.cols[+e.dataset.c] = e.value; });
+        qa('.st-c').forEach(function (e) { st.rows[+e.dataset.r][+e.dataset.c] = e.value; });
+      } else {
+        var rn = v('.st-rep'); if (rn !== null) st.rep_no = rn;
+        var fo = v('.st-font'); if (fo !== null) st.font = fo;
+        var ft = v('.st-foot'); if (ft !== null) st.footer = ft;
+        var it = v('.st-ihct'); if (it !== null) st.ihc_title = it;
+        var ic = q('.st-ihc'); if (ic) st.ihc = ic.checked;
+        qa('.st-sh').forEach(function (e) { st.sections[+e.dataset.i].h = e.value; });
+        qa('.st-stx').forEach(function (e) { st.sections[+e.dataset.i].t = e.value; });
+        qa('.st-im').forEach(function (e) { st.ihc_rows[+e.dataset.i].m = e.value; });
+        qa('.st-ir').forEach(function (e) { st.ihc_rows[+e.dataset.i].r = e.value; });
+      }
+    }
+    function tplBar() {
+      return '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+        '<select class="st-tpl"><option value="">— قوالب محفوظة —</option>' +
+        tpls.map(function (t) { return '<option value="' + t.id + '">' + esc(t.name) + '</option>'; }).join('') + '</select>' +
+        '<button type="button" class="btn small secondary st-tsave">⭐ حفظ كقالب</button>' +
+        '<button type="button" class="btn small secondary st-tdel">🗑 حذف القالب</button></div>';
+    }
+    function render() {
+      ensureRows();
+      var h = '<b>📋 ' + esc(st.title || code) + '</b>' + tplBar() +
+        '<label style="font-size:13px;display:block;">عنوان التقرير (يُطبع)<br><input class="st-title" style="' + IN + '" dir="ltr" value="' + esc(st.title) + '"></label>';
+      if (kind === 'fields') {
+        h += '<table style="width:100%;margin-top:8px;border-collapse:collapse;"><tbody>';
+        st.rows.forEach(function (r, i) {
+          h += '<tr><td style="width:32%;padding:2px 4px 2px 0;"><input class="st-k" data-i="' + i + '" style="' + IN + '" dir="ltr" value="' + esc(r.k) + '" placeholder="الحقل"></td>' +
+               '<td style="padding:2px 4px;"><textarea class="st-v" data-i="' + i + '" rows="1" style="' + IN + '" dir="ltr" placeholder="النتيجة">' + esc(r.v) + '</textarea></td>' +
+               '<td style="width:34px;"><button type="button" class="btn small secondary st-rdel" data-i="' + i + '">✕</button></td></tr>';
+        });
+        h += '</tbody></table><button type="button" class="btn small secondary st-radd" style="margin-top:6px;">➕ حقل</button>';
+        h += '<label style="font-size:13px;display:block;margin-top:8px;">ملاحظة (Comment)<br><textarea class="st-note" rows="2" style="' + IN + '" dir="ltr">' + esc(st.note) + '</textarea></label>';
+      } else if (kind === 'panel') {
+        h += '<label style="font-size:13px;display:block;margin-top:6px;">سطر الطريقة / الجهاز (اختياري)<br><input class="st-method" style="' + IN + '" dir="ltr" value="' + esc(st.method) + '"></label>';
+        h += '<div style="overflow:auto;max-height:420px;margin-top:8px;"><table style="width:100%;border-collapse:collapse;"><thead><tr>';
+        st.cols.forEach(function (c, i) {
+          h += '<th style="padding:2px;"><input class="st-cn" data-c="' + i + '" style="' + IN + 'font-weight:700;" dir="ltr" value="' + esc(c) + '">' +
+               (st.cols.length > 2 ? '<a href="#" class="st-cdel" data-c="' + i + '" style="font-size:11px;">حذف العمود</a>' : '') + '</th>';
+        });
+        h += '<th></th></tr></thead><tbody>';
+        st.rows.forEach(function (r, ri) {
+          var grp = (r[0] || '').charAt(0) === '#';
+          h += '<tr>' + st.cols.map(function (c, ci) {
+            return '<td style="padding:2px;"><input class="st-c" data-r="' + ri + '" data-c="' + ci + '" style="' + IN + (grp ? 'background:#e2e8f0;font-weight:700;' : '') + '" dir="ltr" value="' + esc(r[ci]) + '"></td>';
+          }).join('') + '<td style="width:34px;"><button type="button" class="btn small secondary st-rdel" data-i="' + ri + '">✕</button></td></tr>';
+        });
+        h += '</tbody></table></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' +
+             '<button type="button" class="btn small secondary st-radd">➕ صف</button>' +
+             '<button type="button" class="btn small secondary st-gadd" title="صف يبدأ بـ # يُطبع كعنوان مجموعة (مثل Dairy / Meat)">➕ عنوان مجموعة</button>' +
+             '<button type="button" class="btn small secondary st-cadd"' + (st.cols.length >= 6 ? ' disabled' : '') + '>➕ عمود</button>' +
+             '<button type="button" class="btn small secondary st-paste">📋 لصق قائمة</button></div>';
+        h += '<small class="muted" style="display:block;margin-top:4px;">الأعمدة والصفوف التي لا نتيجة فيها لا تُطبع تلقائيًا. صف يبدأ بـ # = عنوان مجموعة.</small>';
+        h += '<label style="font-size:13px;display:block;margin-top:8px;">ملاحظة (Comment)<br><textarea class="st-note" rows="2" style="' + IN + '" dir="ltr">' + esc(st.note) + '</textarea></label>';
+      } else {
+        h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">' +
+             '<label style="font-size:13px;">Rep. No.<br><input class="st-rep" style="width:150px;" dir="ltr" value="' + esc(st.rep_no) + '"></label>' +
+             '<label style="font-size:13px;">الخط<br><select class="st-font"><option value="serif"' + (st.font === 'serif' ? ' selected' : '') + '>Serif</option><option value="mono"' + (st.font === 'mono' ? ' selected' : '') + '>Typewriter</option><option value="sans"' + (st.font === 'sans' ? ' selected' : '') + '>Sans</option></select></label>' +
+             '<label style="font-size:13px;align-self:end;"><input type="checkbox" class="st-ihc"' + (st.ihc ? ' checked' : '') + '> يتضمّن جزء الصبغات المناعية (CD / IHC)</label></div>';
+        st.sections.forEach(function (s, i) {
+          h += '<div style="border:1px solid #cdd;border-radius:8px;padding:6px;margin-top:8px;background:#fff;">' +
+               '<div style="display:flex;gap:6px;"><input class="st-sh" data-i="' + i + '" style="flex:1;font-weight:700;" dir="ltr" value="' + esc(s.h) + '" placeholder="عنوان القسم (مثل Gross)">' +
+               '<button type="button" class="btn small secondary st-sup" data-i="' + i + '">▲</button><button type="button" class="btn small secondary st-sdn" data-i="' + i + '">▼</button>' +
+               '<button type="button" class="btn small secondary st-sdel" data-i="' + i + '">✕</button></div>' +
+               '<textarea class="st-stx" data-i="' + i + '" rows="4" style="' + IN + 'margin-top:4px;" dir="ltr">' + esc(s.t) + '</textarea></div>';
+        });
+        h += '<button type="button" class="btn small secondary st-sadd" style="margin-top:6px;">➕ قسم نصي</button>';
+        if (st.ihc) {
+          h += '<div style="border:1px solid #cdd;border-radius:8px;padding:6px;margin-top:8px;background:#fff;">' +
+               '<input class="st-ihct" style="' + IN + 'font-weight:700;" dir="ltr" value="' + esc(st.ihc_title) + '"><small class="muted">يُطبع قبل آخر قسم (الخلاصة).</small>' +
+               '<table style="width:100%;margin-top:4px;"><tbody>';
+          st.ihc_rows.forEach(function (r, i) {
+            h += '<tr><td style="width:24%;padding:2px;"><input class="st-im" data-i="' + i + '" style="' + IN + '" dir="ltr" placeholder="CD3" value="' + esc(r.m) + '"></td>' +
+                 '<td style="padding:2px;"><input class="st-ir" data-i="' + i + '" style="' + IN + '" dir="ltr" placeholder="Positive in..." value="' + esc(r.r) + '"></td>' +
+                 '<td style="width:34px;"><button type="button" class="btn small secondary st-idel" data-i="' + i + '">✕</button></td></tr>';
+          });
+          h += '</tbody></table><button type="button" class="btn small secondary st-iadd">➕ ماركر</button></div>';
+        }
+        h += '<label style="font-size:13px;display:block;margin-top:8px;">سطر أسفل التقرير (اختياري)<br><textarea class="st-foot" rows="2" style="' + IN + '" dir="ltr">' + esc(st.footer) + '</textarea></label>';
+      }
+      h += '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;"><button type="button" class="btn small st-save">💾 حفظ التقرير</button><span class="st-msg" style="font-size:12px;"></span></div>';
+      box.innerHTML = h;
+    }
+    function save() {
+      sync();
+      J('/api/order-tests/' + id + '/struct', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(st)}).then(function (d) {
+        if (!d.ok) { msg(d.error || 'فشل', true); return; }
+        msg('تم الحفظ ✓');
+        var inp = card.querySelector('[name^="ot' + id + '_param_"]');
+        if (inp && !inp.value) { inp.value = d.summary; inp.dispatchEvent(new Event('input', {bubbles: true})); }
+      }).catch(function () { msg('تعذر الاتصال', true); });
+    }
+    function loadTpls() { return J('/api/struct-templates?code=' + code).then(function (d) { tpls = d.templates || []; }); }
+    function strip(d) {   // تفريغ النتائج عند حفظ قالب
+      var c = JSON.parse(JSON.stringify(d));
+      if (kind === 'fields') c.rows.forEach(function (r) { r.v = ''; });
+      if (kind === 'panel') c.rows.forEach(function (r) { if ((r[0] || '').charAt(0) !== '#') for (var i = 1; i < r.length; i++) r[i] = ''; });
+      return c;
+    }
+    function pasteDialog() {
+      var w = document.createElement('div');
+      w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:10001;display:flex;align-items:center;justify-content:center;';
+      w.innerHTML = '<div style="background:#fff;padding:14px;border-radius:10px;width:min(560px,94vw);"><b>لصق قائمة</b>' +
+        '<p class="muted" style="font-size:12px;">سطر لكل صف. افصل الأعمدة بـ Tab (لصق من Excel) أو بـ |. سطر يبدأ بـ # = عنوان مجموعة.</p>' +
+        '<textarea style="width:100%;height:260px;" dir="ltr"></textarea>' +
+        '<div style="margin-top:8px;display:flex;gap:8px;"><button type="button" class="btn small ok">إضافة</button><button type="button" class="btn small secondary no">إلغاء</button></div></div>';
+      document.body.appendChild(w);
+      w.querySelector('.no').onclick = function () { w.remove(); };
+      w.querySelector('.ok').onclick = function () {
+        sync();
+        var empty = st.rows.length === 1 && st.rows[0].every(function (c) { return !c; });
+        if (empty) st.rows = [];
+        w.querySelector('textarea').value.split(/\r?\n/).forEach(function (ln) {
+          if (!ln.trim()) return;
+          var cells = ln.indexOf('\t') >= 0 ? ln.split('\t') : ln.split('|');
+          cells = cells.map(function (c) { return c.trim(); }).slice(0, st.cols.length);
+          while (cells.length < st.cols.length) cells.push('');
+          st.rows.push(cells);
+        });
+        w.remove(); render();
+      };
+    }
+    box.addEventListener('click', function (e) {
+      var t = e.target, c = t.classList; if (!c) return;
+      var i = t.dataset ? +t.dataset.i : 0;
+      if (c.contains('st-save')) save();
+      else if (c.contains('st-radd')) { sync(); if (kind === 'fields') st.rows.push({k: '', v: ''}); else st.rows.push(st.cols.map(function () { return ''; })); render(); }
+      else if (c.contains('st-gadd')) { sync(); var g = st.cols.map(function () { return ''; }); g[0] = '# '; st.rows.push(g); render(); }
+      else if (c.contains('st-rdel')) { sync(); st.rows.splice(i, 1); render(); }
+      else if (c.contains('st-cadd')) { sync(); st.cols.push('Column ' + (st.cols.length + 1)); st.rows.forEach(function (r) { r.push(''); }); render(); }
+      else if (c.contains('st-cdel')) { e.preventDefault(); sync(); var ci = +t.dataset.c; st.cols.splice(ci, 1); st.rows.forEach(function (r) { r.splice(ci, 1); }); render(); }
+      else if (c.contains('st-paste')) pasteDialog();
+      else if (c.contains('st-sadd')) { sync(); st.sections.push({h: '', t: ''}); render(); }
+      else if (c.contains('st-sdel')) { sync(); st.sections.splice(i, 1); render(); }
+      else if (c.contains('st-sup') && i > 0) { sync(); st.sections.splice(i - 1, 0, st.sections.splice(i, 1)[0]); render(); }
+      else if (c.contains('st-sdn') && i < st.sections.length - 1) { sync(); st.sections.splice(i + 1, 0, st.sections.splice(i, 1)[0]); render(); }
+      else if (c.contains('st-iadd')) { sync(); st.ihc_rows.push({m: '', r: ''}); render(); }
+      else if (c.contains('st-idel')) { sync(); st.ihc_rows.splice(i, 1); render(); }
+      else if (c.contains('st-tsave')) {
+        sync();
+        var name = prompt('اسم القالب (مثل: Food Profile 90 / ANA / تقرير ورم):'); if (!name) return;
+        var data = st;
+        if (kind !== 'histo' && confirm('حفظ القالب بدون النتائج؟\nموافق = تُفرَّغ النتائج وتبقى أسماء الفحوصات.\nإلغاء = تُحفظ كما هي.')) data = strip(st);
+        J('/api/struct-templates', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code: code, name: name, data: data})})
+          .then(function (d) { if (!d.ok) { msg(d.error || 'فشل', true); return; } tpls = d.templates; var keep = st; render(); msg('تم حفظ القالب ✓'); });
+      }
+      else if (c.contains('st-tdel')) {
+        var sel = q('.st-tpl'); if (!sel.value) { msg('اختر قالبًا أولاً', true); return; }
+        if (!confirm('حذف هذا القالب؟')) return;
+        J('/api/struct-templates/' + sel.value, {method: 'DELETE'}).then(function () { return loadTpls(); }).then(function () { sync(); render(); msg('تم الحذف'); });
+      }
+      if (c.contains('st-ihc') ) { sync(); render(); }
+    });
+    box.addEventListener('change', function (e) {
+      if (e.target.classList.contains('st-tpl') && e.target.value) {
+        var t = tpls.filter(function (x) { return String(x.id) === e.target.value; })[0]; if (!t) return;
+        if (!confirm('استبدال محتوى التقرير الحالي بالقالب «' + t.name + '»؟')) { e.target.value = ''; return; }
+        st = JSON.parse(JSON.stringify(t.data)); render();
+      }
+    });
+    Promise.all([J('/api/order-tests/' + id + '/struct'), loadTpls()]).then(function (r) {
+      if (!r[0].ok) return; st = r[0].data; render();
+    });
+  });
+})();
+</script>
 {% endblock %}

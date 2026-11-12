@@ -533,6 +533,14 @@
         <label style="font-size:12px;">السعر</label>
         <input type="number" id="customTestPrice" step="any" min="0" placeholder="0">
       </div>
+      <div class="form-field" style="flex:1; min-width:190px;">
+        <label style="font-size:12px;">القسم (يُحفظ للفحوصات القادمة)</label>
+        <select id="customTestSection"><option value="">— اختر القسم —</option></select>
+      </div>
+      <div class="form-field" id="customTestNewSecWrap" style="display:none; flex:1; min-width:170px;">
+        <label style="font-size:12px;">اسم القسم الجديد</label>
+        <input type="text" id="customTestNewSec" placeholder="مثلاً: Allergy" autocomplete="off">
+      </div>
       <button type="button" class="btn small" onclick="addCustomTest()">+ إضافة وتحديد</button>
     </div>
     <small class="muted" id="customTestError" style="display:none; color:#DC2626; display:none;"></small>
@@ -1684,7 +1692,17 @@
     errEl.style.display = 'none';
     if (!name) { errEl.textContent = 'اكتب اسم التحليل أولاً.'; errEl.style.display = 'block'; return; }
     if (isNaN(price) || price < 0) { errEl.textContent = 'أدخل سعرًا صحيحًا (رقم موجب).'; errEl.style.display = 'block'; return; }
+    const secSel = document.getElementById('customTestSection');
+    const newSecInput = document.getElementById('customTestNewSec');
+    if (!secSel.value) { errEl.textContent = 'اختر القسم الذي يتبع له هذا الفحص، أو اختر «قسم جديد» واكتب اسمه.'; errEl.style.display = 'block'; return; }
     const body = new URLSearchParams({ name: name, price: String(price) });
+    if (secSel.value === '__new__') {
+      const ns = newSecInput.value.trim();
+      if (!ns) { errEl.textContent = 'اكتب اسم القسم الجديد.'; errEl.style.display = 'block'; return; }
+      body.set('new_section', ns);
+    } else {
+      body.set('section_id', secSel.value);
+    }
     fetch('/api/tests/quick-add-with-price', { method: 'POST', body: body })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -1693,7 +1711,8 @@
         DEFAULT_PRICES[idStr] = data.price;
         let checkbox = document.getElementById('test_' + idStr);
         if (!checkbox) {
-          const grid = document.querySelector('.nv-checkbox-grid');
+          const secGrid = data.section_id ? document.querySelector('details.nv-sec[data-sec="' + data.section_id + '"] .nv-sec-grid') : null;
+          const grid = secGrid || document.querySelector('.nv-checkbox-grid');
           const wrap = document.createElement('span');
           wrap.className = 'checkbox-item-wrap';
           wrap.id = 'test_item_' + idStr;
@@ -1709,6 +1728,8 @@
         checkbox.checked = true;
         nameInput.value = '';
         priceInput.value = '';
+        newSecInput.value = '';
+        window.nvLoadSections && window.nvLoadSections(true, data.section_id);   // يحدّث القائمة (قسم جديد يظهر للفحوصات التالية)
         refreshPrices();
       })
       .catch(function () {
@@ -1716,6 +1737,31 @@
         errEl.style.display = 'block';
       });
   };
+
+  // قائمة الأقسام لسؤال "هذا الفحص تابع لأي قسم؟" — تُحمَّل عند فتح "تحليل غير موجود بالقائمة؟"
+  (function () {
+    var loaded = false;
+    window.nvLoadSections = function (force, selectId) {
+      if (loaded && !force) return;
+      fetch('/api/sections/list').then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.ok) return; loaded = true;
+        var sel = document.getElementById('customTestSection'); if (!sel) return;
+        var keep = selectId ? String(selectId) : sel.value;
+        sel.innerHTML = '<option value="">— اختر القسم —</option>' +
+          d.sections.map(function (s) {
+            return '<option value="' + s.id + '">' + new Array(s.depth + 1).join('— ') + String(s.name).replace(/</g, '&lt;') + ' (' + s.count + ')</option>';
+          }).join('') + '<option value="__new__">➕ قسم جديد (أكتب اسمه)</option>';
+        sel.value = keep || '';
+        sel.dispatchEvent(new Event('change'));
+      });
+    };
+    var det = document.querySelector('details.nv-custom');
+    if (det) det.addEventListener('toggle', function () { if (det.open) window.nvLoadSections(); });
+    var sel = document.getElementById('customTestSection');
+    if (sel) sel.addEventListener('change', function () {
+      document.getElementById('customTestNewSecWrap').style.display = sel.value === '__new__' ? '' : 'none';
+    });
+  })();
 
   // ------------------------------------------------------------------
   // إرسال الفورم بـ AJAX (بدل التحويل المباشر للصفحة) حتى نقدر، بعد

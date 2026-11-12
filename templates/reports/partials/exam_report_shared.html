@@ -494,7 +494,7 @@
      data-raw-text="{{ note_info.text }}" data-raw-label="{{ note_info.label }}"
      data-visible="{{ '1' if note_info.visible else '0' }}"
      style="{{ '' if (note_info.text and note_info.visible) else 'display:none;' }}">
-  {% if note_info.text %}{% if note_info.label %}<b>{{ note_info.label }}:</b> {% endif %}{{ note_info.text }}{% endif %}
+  {% if note_info.text %}{% if note_info.label %}<b>{{ note_info.label }}:</b> {% endif %}{{ rich_note(order_test_id, 'pnote-' ~ param['id'], note_info.text, style='display:inline-block; vertical-align:top; min-width:30%;') }}{% endif %}
 </div>
 {% endmacro %}
 
@@ -833,8 +833,17 @@ function docsSave() {
 <script>
 // ============== ملاحظة/تعليق حر تحت باراميتر — نص + تسمية اختيارية،
 // والإظهار بالتقرير المطبوع خطوة منفصلة عن الكتابة (زر 👁/🙈 لحاله) ==========
+var __examOtId = {{ (order_test_id or 0)|int }};
 function examRenderNoteBox(box, text, label, visible) {
-  box.innerHTML = text ? ((label ? '<b>' + label + ':</b> ' : '') + text) : '';
+  /* نص الملاحظة صار بلوك منسّق (ينضغط عليه لتحريكه/تنسيقه مثل الوورد) — بدون إدخال HTML خام */
+  var body = '';
+  if (text) {
+    var esc = examEscapeHtml(text).replace(/\n/g, '<br>');
+    body = __examOtId
+      ? '<div class="rich-note" dir="ltr" data-ot="' + __examOtId + '" data-rich="pnote-' + box.id.replace('exam-note-', '') + '" style="display:inline-block; vertical-align:top; min-width:30%;">' + esc + '</div>'
+      : esc;
+  }
+  box.innerHTML = text ? ((label ? '<b>' + examEscapeHtml(label) + ':</b> ' : '') + body) : '';
   box.style.display = (text && visible) ? 'block' : 'none';
 }
 
@@ -866,6 +875,10 @@ function examEditNote(paramId, orderTestId) {
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: 'test_parameter_id=' + encodeURIComponent(paramId) + '&note=' + encodeURIComponent(note) + '&note_label=' + encodeURIComponent(label)
     });
+    if (note !== currentText && __examOtId) {   // النص تغيّر → ألغِ التنسيق القديم المحفوظ لهذي الملاحظة
+      fetch('/api/order-tests/' + orderTestId + '/rich', { method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ key: 'pnote-' + paramId, html: '' }) });
+    }
     box.dataset.editing = '0';
     box.dataset.rawText = note;
     box.dataset.rawLabel = label;
@@ -888,7 +901,7 @@ function examToggleNoteVisible(paramId, orderTestId, btn) {
     body: 'test_parameter_id=' + encodeURIComponent(paramId) + '&visible=' + (newVisible ? '1' : '0')
   });
   box.dataset.visible = newVisible ? '1' : '0';
-  examRenderNoteBox(box, box.dataset.rawText || '', box.dataset.rawLabel || '', newVisible);
+  box.style.display = newVisible ? 'block' : 'none';
   btn.textContent = newVisible ? '🙈 إخفاء الملاحظة' : '👁 إظهار الملاحظة';
 }
 

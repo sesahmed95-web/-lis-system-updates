@@ -1,5 +1,67 @@
 {% extends "reports/base_report.html" %}
 {% block report_body %}
+{% set rs = report_style('cbc') %}
+{% if rs.id == 'lab_table' %}
+{# ===== ستايل «جدول المختبر» (Investigation / Result / Reference Range according to age / Previous Result) ===== #}
+{% set o = rs.opts %}
+{% set show_prev_col = (o.show_prev and show_prev_values and previous_visit_date) %}
+<style>
+  .lt-cbc { width:100%; border-collapse:collapse; direction:ltr; font-family:Arial, Helvetica, sans-serif; font-size:{{ o.font }}px; color:#000; }
+  .lt-cbc thead th { border-top:2px solid {{ o.line }}; border-bottom:2px solid {{ o.line }}; padding:6px 8px; text-align:center; font-weight:700;
+                     font-family:"Times New Roman", serif; text-decoration:underline; font-size:1.02em; }
+  .lt-cbc thead th.c-name { text-align:left; }
+  .lt-cbc thead th small { font-weight:400; text-decoration:none; font-size:.78em; margin-inline-start:4px; }
+  .lt-cbc td { padding:3px 8px; text-align:center; }
+  .lt-cbc td.c-name { text-align:left; font-weight:700; }
+  .lt-cbc td.c-res { font-weight:600; }
+  .lt-cbc td.c-res .u { font-weight:400; font-size:.82em; color:#555; margin-inline-start:4px; }
+  .lt-cbc td.c-ref { font-family:"Times New Roman", serif; color:#1F2A5A; }
+  .lt-cbc td.c-prev { font-family:"Times New Roman", serif; color:#555; }
+  .lt-cbc tr.hl td { background:#FFF59D; }
+  .lt-cbc .abn { color:{{ o.abn }}; font-weight:800; }
+  .lt-cbc tr.sec td { text-align:left; padding:8px 8px 2px; }
+  .lt-cbc .sec-h { font-size:1.35em; font-weight:700; color:{{ o.section }}; text-decoration:underline; }
+  .lt-cbc .sec-t { font-size:1.05em; font-weight:800; }
+  .lt-cbc tfoot td { border-top:2px solid {{ o.line }}; padding:0; }
+  .lt-prevnote { direction:rtl; text-align:right; margin-top:10px; font-size:.95em; color:#334155; }
+  .lt-prevnote b { color:#14213D; }
+</style>
+{% set ncols = 3 + (1 if show_prev_col else 0) %}
+<table class="lt-cbc">
+  <thead>
+    <tr>
+      <th class="c-name">Investigation</th><th>Result</th>
+      <th>Reference Range{% if o.range_note %} <small>({{ o.range_note }})</small>{% endif %}</th>
+      {% if show_prev_col %}<th>{{ o.prev_title or 'Previous Result' }}</th>{% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="sec"><td colspan="{{ ncols }}"><div class="sec-h">Hematology</div><div class="sec-t">Complete Blood Count CBC</div></td></tr>
+    {% for group in cbc_groups %}{% for row in group %}
+    {% set rv = row.result|string|trim %}
+    {% set rvn = rv|float(none) %}
+    {% set lo = row.low if row.low not in ('', none) else none %}
+    {% set hi = row.high if row.high not in ('', none) else none %}
+    {% set abn = (row.flag and row.flag != 'Normal') or (rvn is not none and ((lo is not none and rvn < lo) or (hi is not none and rvn > hi))) %}
+    <tr{% if row.highlight %} class="hl"{% endif %}>
+      <td class="c-name">{{ row.name }}</td>
+      <td class="c-res"><span{% if abn %} class="abn"{% endif %}>{{ row.result }}</span>{% if o.show_unit and row.unit and rv %}<span class="u">{{ row.unit }}</span>{% endif %}</td>
+      <td class="c-ref">{% if lo is not none and hi is not none %}{{ '%g'|format(lo) }}-{{ '%g'|format(hi) }}{% elif lo is not none %}&gt; {{ '%g'|format(lo) }}{% elif hi is not none %}&lt; {{ '%g'|format(hi) }}{% endif %}</td>
+      {% if show_prev_col %}<td class="c-prev">{{ row.previous }}</td>{% endif %}
+    </tr>
+    {% endfor %}{% endfor %}
+  </tbody>
+  <tfoot><tr><td colspan="{{ ncols }}"></td></tr></tfoot>
+</table>
+{% if show_prev_col %}
+<div class="lt-prevnote">نتائج زيارة سابقة بتاريخ: <b>{{ previous_visit_date }}</b></div>
+{% endif %}
+{% set cbc_comment_lt = rich_note(order_test_id, 'Comment', params.get('Comment', ''), style='flex:1', hide_empty=True) %}
+{% if cbc_comment_lt %}
+<div class="box-field box-field-lg" style="margin-top:10px; display:flex; gap:6px;"><b>Comment:</b>{{ cbc_comment_lt }}</div>
+{% endif %}
+
+{% else %}
 <div class="report-heading" style="margin-bottom:16px;">Complete Blood Count (CBC)</div>
 
 <style>
@@ -39,7 +101,9 @@
   {% endfor %}
 </table>
 
-{% if params.get('Comment') %}
-<div class="box-field box-field-lg" style="margin-top:10px;"><b>Comment:</b> {{ params.get('Comment', '') }}</div>
+{% set cbc_comment = rich_note(order_test_id, 'Comment', params.get('Comment', ''), style='flex:1', hide_empty=True) %}
+{% if cbc_comment %}
+<div class="box-field box-field-lg" style="margin-top:10px; display:flex; gap:6px;"><b>Comment:</b>{{ cbc_comment }}</div>
+{% endif %}
 {% endif %}
 {% endblock %}

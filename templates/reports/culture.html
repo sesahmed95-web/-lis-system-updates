@@ -1,0 +1,39 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+{# Culture & Sensitivity: العينة + النتيجة + لكل بكتيريا جدول مضادات (Sensitive / Intermediate / Resistant). #}
+{% set cu = ot_culture(ot['id'] or 0) %}
+<style>
+  .cs-h { direction:ltr; text-align:left; margin:6px 0; font-size:16px; }
+  .cs-org { margin:14px 0 4px; font-size:17px; font-weight:700; direction:ltr; text-align:left; }
+  .cs-org i { font-style:italic; }
+  .cs-tbl { width:100%; border-collapse:collapse; direction:ltr; font-size:15px; margin-top:6px; table-layout:fixed; }
+  .cs-tbl th { padding:6px 8px; border:1px solid #000; color:#fff; font-size:15px; }
+  .cs-tbl td { padding:6px 10px; border:1px solid #000; vertical-align:top; }
+  .cs-tbl .s { background:#15803d; } .cs-tbl .i { background:#b45309; } .cs-tbl .r { background:#b91c1c; }
+  .cs-tbl li { margin:0 0 3px 0; }
+  .cs-tbl ul { margin:0; padding-left:16px; }
+  .cs-note { direction:ltr; text-align:left; white-space:pre-wrap; margin-top:12px; font-size:15px; }
+  @media print { .cs-tbl th { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+</style>
+<div class="report-heading" data-keep="1" style="font-style:italic; text-decoration:underline;">Culture &amp; Sensitivity</div>
+<div class="cs-h"><b>Specimen:</b> {{ cu.specimen or '—' }}</div>
+{% if cu.growth == 'no_growth' %}
+  <div class="cs-h"><b>Result:</b> {{ cu.no_growth_text }}</div>
+{% else %}
+  <div class="cs-h"><b>Culture:</b> Growth of</div>
+  {% for o in cu.organisms %}
+    <div class="cs-org"><i>{{ o.name }}</i>{% if o.count %} &nbsp;<span style="font-weight:400;">— {{ o.count }}</span>{% endif %}</div>
+    {% if o.results %}
+    <table class="cs-tbl">
+      <tr><th class="s">Sensitive (S)</th>{% if o.I %}<th class="i">Intermediate (I)</th>{% endif %}<th class="r">Resistant (R)</th></tr>
+      <tr>
+        <td><ul>{% for x in o.S %}<li>{{ x }}</li>{% endfor %}</ul></td>
+        {% if o.I %}<td><ul>{% for x in o.I %}<li>{{ x }}</li>{% endfor %}</ul></td>{% endif %}
+        <td><ul>{% for x in o.R %}<li>{{ x }}</li>{% endfor %}</ul></td>
+      </tr>
+    </table>
+    {% endif %}
+  {% endfor %}
+{% endif %}
+{% if cu.note %}<div class="cs-note" style="display:flex; gap:6px; white-space:normal;"><b>Comment:</b>{{ rich_note(ot['id'] or 0, 'cs-note', cu.note, style='flex:1') }}</div>{% endif %}
+{% endblock %}

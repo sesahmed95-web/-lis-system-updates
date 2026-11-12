@@ -1907,7 +1907,7 @@ _PRESET_KEYS = {
     "portal_default_hours", "portal_ready_when", "portal_retention_days",
     # --- تصميم التقارير وترتيبها (يُنسخ من برنامجك للعميل): أسلوب الجدول + تنسيق العناوين (result_layout_json)،
     #     ترتيب أقسام اللوحة المجمّعة وترتيب التحاليل بشاشة النتائج، خطوط/ألوان/مسافات التقرير والترويسة.
-    "result_layout_json", "combined_panel_group_order", "results_entry_test_order",
+    "result_layout_json", "rs_active_cbc", "rs_active_bf", "rs_active_bma", "rs_active_bmb", "rs_tabs", "rs_custom", "rs_opts", "report_design_coag", "report_design_exam", "combined_panel_group_order", "results_entry_test_order",
     "logo_width", "logo_position", "letterhead_font_size", "letterhead_font_family",
     "report_underline_style", "report_row_pad", "report_col_pad",
     "test_name_font_size", "result_value_font_size", "show_result_flag",
@@ -3021,7 +3021,7 @@ RESULT_LAYOUT_DEFAULTS = {
     "theme": "default",         # default | green (ألوان الصور المخصصة) | custom (ألواني اليدوية)
     "prev_order": "desc",       # desc = الأحدث أولاً ، asc = الأقدم أولاً
     "dept_headings": "auto",    # auto (A نعم / B لا) | show | hide
-    "merged_title": "تقرير الكيمياء الحيوية والهرمونات والفيتامينات",
+    "merged_title": "Biochemistry, Hormones & Vitamins Report",
     "merged_exclude": "",       # فاضي = القائمة الافتراضية (MERGED_EXCLUDE_DEFAULT)
     # المسافة (بالبكسل) بين قيمة النتيجة ووحدتها -- إعداد مستقل عن الثيم (مو لون)
     # فينطبق بكل الأحوال على الأساليب الأربعة سوا.
@@ -3049,6 +3049,10 @@ def get_result_layout(db):
                       "dept_headings", "merged_title", "merged_exclude", "unit_gap", "row_gap", "line_gap"):
                 if k in saved:
                     cfg[k] = saved[k]
+            # العنوان العربي القديم (كان الافتراضي السابق) يُستبدل تلقائيًا بالإنكليزي؛
+            # أي عنوان آخر كتبته أنت بنفسك من "تصميم التقارير" يبقى كما هو.
+            if (cfg.get("merged_title") or "").strip() == "تقرير الكيمياء الحيوية والهرمونات والفيتامينات":
+                cfg["merged_title"] = RESULT_LAYOUT_DEFAULTS["merged_title"]
             cfg["title_style"] = sanitize_text_style(saved.get("title_style"))
             cfg["head_style"] = sanitize_text_style(saved.get("head_style"))
             _ds = saved.get("dept_styles")

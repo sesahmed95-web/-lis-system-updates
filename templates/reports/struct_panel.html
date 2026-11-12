@@ -1,0 +1,30 @@
+{% extends "reports/base_report.html" %}
+{% block report_body %}
+{# لوحات ELISA / IFAT / ANA / حساسية غذائية ودوائية: جدول بأعمدة حرة. الأعمدة والصفوف الفاضية تُخفى، وصف يبدأ بـ # عنوان مجموعة. #}
+{% set sd = ot_struct(ot['id'] or 0, ot['test_code']) %}
+<style>
+  .sp-tbl { width:100%; direction:ltr; border-collapse:collapse; margin-top:8px; font-size:16px; }
+  .sp-tbl th { border:1px solid #000; padding:6px 10px; text-align:left; font-style:italic; text-decoration:underline; background:#f1f5f9; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .sp-tbl td { border:1px solid #000; padding:5px 10px; vertical-align:top; }
+  .sp-tbl tr { page-break-inside:avoid; }
+  .sp-tbl .grp td { background:#e2e8f0; font-weight:700; text-align:left; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .sp-tbl .b { font-weight:700; }
+</style>
+<div class="report-heading" data-keep="1" style="font-style:italic; text-decoration:underline;">{{ sd.title or ot['test_name'] }}</div>
+{% if sd.method %}<div style="direction:ltr; text-align:left; margin:4px 0; font-size:15px;">{{ sd.method }}</div>{% endif %}
+<table class="sp-tbl">
+  <thead><tr>{% for c in sd.vcols %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for r in sd.vrows %}
+    {% if r.group is defined %}
+      <tr class="grp"><td colspan="{{ sd.vcols|length }}">{{ r.group }}</td></tr>
+    {% else %}
+      <tr>{% for c in r.cells %}<td class="{{ 'b' if c.b }}" style="{{ 'white-space:pre-wrap;' }}">{{ c.t }}</td>{% endfor %}</tr>
+    {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+{% if sd.note %}
+<div style="direction:ltr; text-align:left; margin-top:14px; font-size:15px; display:flex; gap:6px;"><b><u>Comment:</u></b>{{ rich_note(ot['id'] or 0, 'sd-note', sd.note, style='flex:1') }}</div>
+{% endif %}
+{% endblock %}

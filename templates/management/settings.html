@@ -23,6 +23,11 @@
     </div>
 
     <div class="form-field">
+      <label>إيميل المختبر (يظهر أسفل تقارير Hb Electrophoresis والبلانك)</label>
+      <input type="text" name="lab_email" value="{{ current.lab_email }}" placeholder="example@yahoo.com" dir="ltr">
+    </div>
+
+    <div class="form-field">
       <label>{{ t('current_logo') }}</label>
       {% if logo_url %}
         <img src="{{ logo_url }}" alt="logo" style="max-height:70px; max-width:200px; object-fit:contain; border:1px solid var(--border); border-radius:8px; padding:6px; background:#fff;">
@@ -667,4 +672,165 @@
     <button class="btn" type="submit">{{ t('save_settings') }}</button>
   </form>
 </div>
+
+<div class="card" id="navLabelsCard" style="max-width:640px;">
+  <h3>🧭 أسماء الشريط الجانبي</h3>
+  <p class="muted">غيّري اسم أي قسم أو رابط بالشريط الجانبي (يمكنك إبقاء الإيموجي أو حذفه). الحقل الفارغ أو المساوي للاسم الأصلي = يبقى الاسم الأصلي. التغيير يشمل كل الصفحات، ولا يغيّر عمل الروابط. زر Enter ينقلك للحقل التالي.</p>
+  <div id="navLabelsBody"></div>
+  <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <button type="button" class="btn" id="navLabelsSave" data-enter-click>💾 حفظ الأسماء</button>
+    <button type="button" class="btn secondary" id="navLabelsReset">↩️ الأسماء الأصلية</button>
+    <span id="navLabelsMsg" class="muted"></span>
+  </div>
+</div>
+<script>
+(function () {
+  var body = document.getElementById('navLabelsBody'), msg = document.getElementById('navLabelsMsg');
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function build() {
+    var seen = {}, h = '';
+    document.querySelectorAll('.sidebar .nav-group').forEach(function (g) {
+      var t = g.querySelector('.nav-group-toggle'), links = g.querySelectorAll('a.nav-link');
+      h += '<div style="margin:10px 0 4px;padding:8px;border:1px solid var(--border,#ddd);border-radius:8px;">';
+      if (t) {
+        var s = t.querySelector('span'), def = s.dataset.default || s.textContent.trim();
+        h += '<label style="font-weight:700;font-size:13px;">القسم: <span class="muted">' + esc(def) + '</span></label><br>' +
+             '<input type="text" data-kind="groups" data-key="' + esc(t.dataset.group) + '" data-def="' + esc(def) + '" value="' + esc(s.textContent.trim() === def ? '' : s.textContent.trim()) + '" placeholder="' + esc(def) + '" style="width:100%;max-width:420px;margin-bottom:6px;">';
+      }
+      links.forEach(function (a) {
+        var p = a.getAttribute('href') || ''; if (!p || seen[p]) return; seen[p] = 1;
+        var def = a.dataset.default || a.textContent.replace(/\s+/g, ' ').trim(), cur = a.textContent.replace(/\s+/g, ' ').trim();
+        h += '<div style="display:flex;gap:8px;align-items:center;margin:3px 0 3px 18px;"><span class="muted" style="min-width:170px;font-size:12px;">' + esc(def) + '</span>' +
+             '<input type="text" data-kind="links" data-key="' + esc(p) + '" data-def="' + esc(def) + '" value="' + esc(cur === def ? '' : cur) + '" placeholder="' + esc(def) + '" style="flex:1;max-width:320px;"></div>';
+      });
+      h += '</div>';
+    });
+    body.innerHTML = h;
+  }
+  function collect() {
+    var m = { groups: {}, links: {} };
+    body.querySelectorAll('input[data-kind]').forEach(function (i) {
+      var v = i.value.trim(); if (v && v !== i.dataset.def) m[i.dataset.kind][i.dataset.key] = v;
+    });
+    return m;
+  }
+  function save(m, done) {
+    msg.textContent = 'جاري الحفظ…';
+    fetch('/api/nav-labels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(m) })
+      .then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.ok) { msg.style.color = '#b00020'; msg.textContent = d.error || 'فشل الحفظ'; return; }
+        window.lisApplyNavLabels(m); msg.style.color = '#0a7a3b'; msg.textContent = 'تم الحفظ ✓'; if (done) done();
+      }).catch(function () { msg.style.color = '#b00020'; msg.textContent = 'تعذر الاتصال بالبرنامج'; });
+  }
+  document.getElementById('navLabelsSave').onclick = function () { save(collect()); };
+  document.getElementById('navLabelsReset').onclick = function () {
+    if (!confirm('الرجوع لكل الأسماء الأصلية للشريط الجانبي؟')) return;
+    save({ groups: {}, links: {} }, build);
+  };
+  // الشريط الجانبي تُطبَّق عليه الأسماء المحفوظة بسكربت base.html (بنهاية الصفحة) — ننتظر تحميل الصفحة قبل بناء القائمة
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build); else build();
+})();
+</script>
+
+{# ===== تبويبات الإعدادات: تقلّل التمرير الطويل. الكروت نفسها ونماذجها ما تغيّرت — فقط تُعرض مجموعة وحدة كل مرة ===== #}
+<style>
+  .st-grid { display:grid; grid-template-columns:280px minmax(0,1fr); gap:18px; align-items:start; }
+  .st-side { position:sticky; top:8px; background:var(--card-bg,#fff); border:1px solid var(--border,#e2e8f0); border-radius:14px; padding:12px; }
+  .st-side input[type=search] { width:100%; margin-bottom:8px; box-sizing:border-box; }
+  .st-side button.st-item { display:flex; width:100%; align-items:center; gap:8px; text-align:start; padding:10px 12px; margin:2px 0; border:0; border-radius:10px; background:transparent; cursor:pointer; font:inherit; color:inherit; }
+  .st-side button.st-item:hover { background:rgba(32,80,114,.08); }
+  .st-side button.st-item.on { background:var(--primary,#205072); color:#fff; }
+  .st-side .st-dot { margin-inline-start:auto; width:9px; height:9px; border-radius:50%; background:#f59e0b; display:none; }
+  .st-side .st-item.dirty .st-dot { display:inline-block; }
+  .st-panel > .card { max-width:none !important; width:auto !important; }
+  .st-panel .card .form-field { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .st-panel .card .form-field > label { min-width:230px; margin:0; }
+  .st-panel .card .form-field > .muted, .st-panel .card .form-field > textarea { flex-basis:100%; }
+  .st-panel.st-grouped form > button[type=submit], .st-panel.st-grouped form > .btn[type=submit] { display:none; }
+  .st-foot { position:sticky; bottom:0; z-index:40; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
+             background:var(--card-bg,#fff); border-top:1px solid var(--border,#e2e8f0); padding:10px 14px; border-radius:12px; margin-top:10px; }
+  .st-foot .st-state { color:#64748b; font-size:13px; } .st-foot .st-state.bad { color:#b45309; font-weight:700; } .st-foot .st-state.ok { color:#166534; font-weight:700; }
+  @media (max-width:900px) { .st-grid { grid-template-columns:1fr; } .st-side { position:static; } }
+</style>
+<script>
+(function () {
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.content > .card'));
+  if (cards.length < 4) return;
+  var TABS = [
+    ['identity', '🏢', 'الهوية والمختبر'], ['layout', '🖨️', 'شكل التقارير المطبوعة'], ['screens', '📋', 'شاشات العمل والترتيب'],
+    ['msg', '📱', 'الواتساب والأرشيف والبوابة'], ['security', '🔐', 'كلمات المرور والصلاحيات'], ['free', '🆓', 'التحاليل المجانية والأجور'],
+    ['translit', '🔤', 'الترجمة وترقيم العينات'], ['home', '🏠', 'الشاشة الرئيسية'], ['nav', '🧭', 'أسماء الشريط الجانبي'], ['other', '…', 'أخرى']];
+  function groupOf(c) {
+    var t = ((c.querySelector('h3') || {}).textContent || '');
+    if (c.id === 'navLabelsCard') return 'nav';
+    if (/مجاني/.test(t)) return 'free';
+    if (/كلمة مرور|كلمات مرور/.test(t)) return 'security';
+    if (/الشاشة الرئيسية/.test(t)) return 'home';
+    if (/بوابة|واتساب|أرشيف/.test(t)) return 'msg';
+    if (/ترتيب/.test(t)) return 'screens';
+    if (/ترجمة|رقم العينة/.test(t)) return 'translit';
+    if (/تنسيق|حجم|تباعد|نمط الخط/.test(t)) return 'layout';
+    if (c.querySelector('[name="app_name"]') || /الفاحص|الدكاترة|ترويسة/.test(t)) return 'identity';
+    return 'other';
+  }
+  cards.forEach(function (c) { c.dataset.tabGroup = groupOf(c); });
+  var present = TABS.filter(function (t) { return cards.some(function (c) { return c.dataset.tabGroup === t[0]; }); });
+  var grid = document.createElement('div'); grid.className = 'st-grid';
+  var side = document.createElement('div'); side.className = 'st-side';
+  var panel = document.createElement('div'); panel.className = 'st-panel st-grouped';
+  side.innerHTML = '<input type="search" id="stSearch" placeholder="🔎 بحث بالإعدادات…" autocomplete="off">' +
+    present.map(function (t) { return '<button type="button" class="st-item" data-tab="' + t[0] + '"><span>' + t[1] + '</span><span>' + t[2] + '</span><i class="st-dot"></i></button>'; }).join('');
+  cards[0].parentNode.insertBefore(grid, cards[0]);
+  grid.appendChild(side); grid.appendChild(panel);
+  cards.forEach(function (c) { panel.appendChild(c); });
+  var foot = document.createElement('div'); foot.className = 'st-foot';
+  foot.innerHTML = '<button type="button" class="btn" id="stSave"></button><span class="st-state" id="stState"></span>';
+  panel.appendChild(foot);
+  var cur = 'identity', saving = false;
+  function nameOf(tab) { var t = present.filter(function (x) { return x[0] === tab; })[0]; return t ? t[2] : ''; }
+  function formsOf(tab) { var out = []; cards.forEach(function (c) { if (c.dataset.tabGroup === tab) c.querySelectorAll('form').forEach(function (f) { out.push(f); }); }); return out; }
+  function dirtyOf(tab) { return formsOf(tab).filter(function (f) { return f.dataset.dirty === '1'; }); }
+  function refresh() {
+    present.forEach(function (t) { var b = side.querySelector('[data-tab="' + t[0] + '"]'); b.classList.toggle('dirty', dirtyOf(t[0]).length > 0); });
+    var has = formsOf(cur).length > 0, d = dirtyOf(cur).length, st = document.getElementById('stState'), sv = document.getElementById('stSave');
+    foot.style.display = has ? '' : 'none';
+    sv.textContent = '💾 حفظ إعدادات «' + nameOf(cur) + '»';
+    st.className = 'st-state' + (d ? ' bad' : ''); if (!saving) st.textContent = d ? 'التعديلات الحالية بهذا القسم غير محفوظة' : 'لا توجد تعديلات غير محفوظة';
+  }
+  function show(tab, q) {
+    q = (q || '').trim().toLowerCase(); cur = tab;
+    cards.forEach(function (c) { var inTab = c.dataset.tabGroup === tab; c.style.display = (q ? c.textContent.toLowerCase().indexOf(q) !== -1 : inTab) ? '' : 'none'; });
+    side.querySelectorAll('[data-tab]').forEach(function (b) { b.classList.toggle('on', !q && b.dataset.tab === tab); });
+    try { localStorage.setItem('lis-settings-tab', tab); } catch (e) {}
+    refresh();
+  }
+  panel.addEventListener('input', function (e) { var f = e.target.closest && e.target.closest('form'); if (f) { f.dataset.dirty = '1'; refresh(); } });
+  panel.addEventListener('change', function (e) { var f = e.target.closest && e.target.closest('form'); if (f) { f.dataset.dirty = '1'; refresh(); } });
+  document.getElementById('stSave').addEventListener('click', function () {
+    var list = dirtyOf(cur), st = document.getElementById('stState');
+    if (!list.length) { st.className = 'st-state'; st.textContent = 'لا توجد تعديلات لحفظها'; return; }
+    saving = true; st.className = 'st-state'; st.textContent = 'جاري الحفظ…';
+    var chain = Promise.resolve(), bad = 0;
+    list.forEach(function (f) {
+      chain = chain.then(function () {
+        return fetch(f.getAttribute('action') || location.href, { method: 'POST', body: new FormData(f), credentials: 'same-origin' })
+          .then(function (r) { if (!r.ok) bad++; else f.dataset.dirty = ''; }).catch(function () { bad++; });
+      });
+    });
+    chain.then(function () {
+      saving = false;
+      refresh();
+      if (bad) { st.className = 'st-state bad'; st.textContent = 'تعذّر حفظ ' + bad + ' من التعديلات — حاول مرة ثانية'; return; }
+      st.className = 'st-state ok'; st.textContent = 'تم الحفظ ✓';
+      setTimeout(function () { location.reload(); }, 700);
+    });
+  });
+  var saved = 'identity'; try { saved = localStorage.getItem('lis-settings-tab') || saved; } catch (e) {}
+  if (!present.some(function (t) { return t[0] === saved; })) saved = present[0][0];
+  side.addEventListener('click', function (e) { var b = e.target.closest('[data-tab]'); if (b) { document.getElementById('stSearch').value = ''; saved = b.dataset.tab; show(saved, ''); } });
+  document.getElementById('stSearch').addEventListener('input', function () { show(saved, this.value); });
+  show(saved, '');
+})();
+</script>
+{% include "_enter_nav.html" ignore missing %}
 {% endblock %}

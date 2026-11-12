@@ -1,5 +1,31 @@
 {% extends "reports/base_report.html" %}
 {% block report_body %}
+{% set rs = report_style('bmb') %}
+{% if rs.id == 'blue' %}
+{# ===== ستايل أشرطة زرقاء (حسب الصورة) ===== #}
+{% set o = rs.opts %}
+<style>
+  .bm-blue { direction:ltr; text-align:left; border:1.5px solid {{ o.border }}; font-size:{{ o.font }}px; color:#111; margin-top:6px; }
+  .bm-blue .bm-bar { background:{{ o.head_bg }}; border-bottom:1.5px solid {{ o.border }}; padding:7px 16px; font-weight:700; }
+  .bm-blue .bm-bar + .bm-bar { border-top:0; }
+  .bm-blue .bm-body { padding:10px 18px 12px; border-bottom:1.5px solid {{ o.border }}; min-height:70px; }
+  .bm-blue .bm-body:last-child { border-bottom:0; }
+  .bm-blue .bm-notes ul { margin:2px 0; padding-inline-start:20px; }
+  .bm-blue .bm-notes li { margin:5px 0; line-height:1.45; }
+  .bm-blue .bm-notes li::marker { content:"{{ (o.bullet or '■')|replace('"','')|replace('\\','') }}  "; }
+  .bm-blue .bm-concl { padding-inline-start:26px; }
+  .bm-blue .bm-concl ul { margin:2px 0; padding-inline-start:18px; }
+  .bm-blue .bm-concl li::marker { content:"• "; }
+</style>
+<div class="bm-blue">
+  <div class="bm-bar">{{ o.no_label or 'BM biopsy No.:' }} {{ sample_no or '' }}</div>
+  <div class="bm-bar">Bone Marrow Biopsy Examination Report:</div>
+  <div class="bm-body bm-notes">{{ rich_note(order_test_id, 'Clinical notes', params.get('Clinical notes', ''), bullets=True, style='min-height:60px;') }}</div>
+  <div class="bm-bar">Conclusion:</div>
+  <div class="bm-body bm-concl">{{ rich_note(order_test_id, 'Conclusion', params.get('Conclusion', ''), bullets=True, style='min-height:50px;') }}</div>
+</div>
+
+{% else %}
 {# تقرير خزعة نقي العظم (Bone marrow biopsy): Biopsy No. = رقم عينة الزيارة، والملاحظات السريرية نقاط (سطر = نقطة). #}
 <div class="report-heading" style="text-decoration:underline; font-style:italic;">Bone marrow biopsy report</div>
 <div style="direction:ltr; text-align:left; margin:2px 0 8px; font-weight:bold;">Biopsy No.: <span style="font-weight:600;">{{ sample_no or '' }}</span></div>
@@ -8,13 +34,12 @@
   <div style="border:1.5px solid #000; padding:8px 14px;">
     {% set notes_txt = (params.get('Clinical notes', '') or '')|string %}
     {% set note_lines = notes_txt.splitlines()|select|list %}
-    <ul style="margin:4px 0 10px 18px; padding:0; min-height:40px;">
-      {% for ln in note_lines %}<li style="margin:5px 0; white-space:pre-wrap;">{{ ln }}</li>{% endfor %}
-    </ul>
+    {{ rich_note(order_test_id, 'Clinical notes', notes_txt, bullets=True, style='min-height:40px; margin:4px 0 10px 0;') }}
     <div style="margin-top:12px;">
       <b style="color:#1F3A7A; font-style:italic; text-decoration:underline;">Conclusion:</b>
-      <div style="white-space:pre-wrap; margin-top:3px; min-height:60px;">{{ params.get('Conclusion', '') | render_conclusion }}</div>
+      {{ rich_note(order_test_id, 'Conclusion', params.get('Conclusion', ''), conclusion=True, style='margin-top:3px; min-height:60px;') }}
     </div>
   </div>
 </div>
+{% endif %}
 {% endblock %}

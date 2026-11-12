@@ -1,5 +1,57 @@
 {% extends "reports/base_report.html" %}
 {% block report_body %}
+{% set rs = report_style('bf') %}
+{% if rs.id == 'boxed' %}
+{# ===== ستايل جدول مؤطّر (حسب الصورة): قيم CBC + ديفرنشل + ريتك + وصف + خلاصة ===== #}
+{% set o = rs.opts %}
+{% set cv = lab_cbc_vals(ot) if o.show_cbc else {} %}
+{% set wbc = params.get('WBC count') or cv.get('wbc', '') %}
+{% set hb = params.get('Hb') or cv.get('hb', '') %}
+{% set plt = params.get('Platelet count') or cv.get('plt', '') %}
+{% set hct = params.get('HCT') or cv.get('hct', '') %}
+{% set left = [('Neutrophils', 'Neutrophils'), ('Lymphocytes', 'Lymphocytes'), ('Monocytes', 'Monocytes'), ('Eosinophils', 'Eosinophils'), ('Basophils', 'Basophils')] %}
+{% set left_extra = [('Band', 'Band'), ('Metamyelocytes', 'Metamyelocytes'), ('Myelocytes', 'Myelocytes'), ('Promyelocytes', 'Promyelocytes'), ('Reactive lymphocytes', 'Reactive lymphocytes'), ('Atypical lymphocytes', 'Atypical lymphocytes'), ('Blast', 'Blast')] %}
+{% set rows_l = [] %}
+{% for lbl, key in left %}{% set _ = rows_l.append((lbl, key)) %}{% endfor %}
+{% for lbl, key in left_extra %}{% if params.get(key) %}{% set _ = rows_l.append((lbl, key)) %}{% endif %}{% endfor %}
+{% set rows_r = [("Retic count :", params.get('Reticulocyte count', ''), units.get('Reticulocyte count') or '%'),
+                 ("Corrected retic count:", params.get('Corrected Retic count', ''), units.get('Corrected Retic count') or '%'),
+                 ("Coomb's test :", params.get("Coomb's test", ''), ''),
+                 ("NRBCs:", params.get('NRBC', ''), units.get('NRBC') or '/100wbc')] %}
+{% set nrows = [rows_l|length, rows_r|length]|max %}
+<style>
+  .bf-box { width:100%; border-collapse:collapse; direction:ltr; font-size:{{ o.font }}px; color:#111; }
+  .bf-box td { border:1.5px solid {{ o.border }}; padding:6px 9px; vertical-align:middle; }
+  .bf-box td.l { font-weight:700; background:{{ o.label_bg }}; }
+  .bf-box td.v { text-align:center; }
+  .bf-box td.u { text-align:center; font-weight:700; width:11%; }
+  .bf-box td.sec { font-weight:700; background:{{ o.label_bg }}; text-decoration:underline; font-family:"Times New Roman", serif; }
+  .bf-box td.cap { font-weight:700; background:{{ o.label_bg }}; width:14%; }
+  .bf-box tr.concl td { background:{{ o.concl_bg }}; font-weight:700; }
+  .bf-box .rich-note { display:block; }
+</style>
+<table class="bf-box">
+  <tr><td class="l" style="width:23%">WBC Count:</td><td class="v" style="width:15%">{{ wbc }}</td><td class="u">X 10<sup>9</sup>/L</td>
+      <td class="l" style="width:14%">Hb:</td><td class="v" style="width:13%">{{ hb }}</td><td class="u">g/dl</td></tr>
+  <tr><td class="l">Platelet count:</td><td class="v">{{ plt }}</td><td class="u">X 10<sup>9</sup>/L</td>
+      <td class="l">HCT:</td><td class="v">{{ hct }}</td><td class="u">%</td></tr>
+  <tr><td class="sec" colspan="6">Differential Leucocyte Count:</td></tr>
+  {% for i in range(nrows) %}
+  <tr>
+    {% if i < rows_l|length %}<td class="l">{{ rows_l[i][0] }} :</td><td class="v">{{ params.get(rows_l[i][1], '') }}</td><td class="u">{{ units.get(rows_l[i][1]) or '%' }}</td>
+    {% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
+    {% if i < rows_r|length %}<td class="l" colspan="1">{{ rows_r[i][0] }}</td><td class="v">{{ rows_r[i][1] }}</td><td class="u">{% if rows_r[i][1] != '' %}{{ rows_r[i][2] }}{% endif %}</td>
+    {% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
+  </tr>
+  {% endfor %}
+  <tr><td class="cap">RBC:</td><td colspan="5">{{ rich_note(order_test_id, 'RBC_desc', params.get('RBC_desc', ''), style='flex:1') }}</td></tr>
+  <tr><td class="cap">WBC:</td><td colspan="5">{{ rich_note(order_test_id, 'WBC_desc', params.get('WBC_desc', ''), style='flex:1') }}</td></tr>
+  <tr><td class="cap">Platelet:</td><td colspan="5">{{ rich_note(order_test_id, 'Platelets_desc', params.get('Platelets_desc', ''), style='flex:1') }}</td></tr>
+  <tr class="concl"><td class="cap" style="background:transparent">Conclusion:</td><td colspan="5">{{ rich_note(order_test_id, 'Conclusion', params.get('Conclusion', ''), conclusion=True, style='flex:1') }}</td></tr>
+  {% if params.get('Other Notes') %}<tr><td class="cap">Other Notes:</td><td colspan="5" style="font-weight:700;">{{ rich_note(order_test_id, 'Other Notes', params.get('Other Notes', ''), style='flex:1') }}</td></tr>{% endif %}
+</table>
+
+{% else %}
 <div class="report-heading">Blood film and Morphology</div>
 <table class="data-table" style="direction:ltr;">
   <tr>
@@ -35,10 +87,10 @@
   </tr>
 </table>
 
-<div class="box-field"><b>RBC:</b> {{ params.get('RBC_desc', '') }}</div>
-<div class="box-field"><b>WBC:</b> {{ params.get('WBC_desc', '') }}</div>
-<div class="box-field"><b>Platelets:</b> {{ params.get('Platelets_desc', '') }}</div>
-<div class="box-field"><b>Conclusion:</b> {{ params.get('Conclusion', '') | render_conclusion }}</div>
+<div class="box-field" style="display:flex;gap:6px;"><b>RBC:</b>{{ rich_note(order_test_id, 'RBC_desc', params.get('RBC_desc', ''), style='flex:1') }}</div>
+<div class="box-field" style="display:flex;gap:6px;"><b>WBC:</b>{{ rich_note(order_test_id, 'WBC_desc', params.get('WBC_desc', ''), style='flex:1') }}</div>
+<div class="box-field" style="display:flex;gap:6px;"><b>Platelets:</b>{{ rich_note(order_test_id, 'Platelets_desc', params.get('Platelets_desc', ''), style='flex:1') }}</div>
+<div class="box-field" style="display:flex;gap:6px;"><b>Conclusion:</b>{{ rich_note(order_test_id, 'Conclusion', params.get('Conclusion', ''), conclusion=True, style='flex:1') }}</div>
 
 {#
   المطلوب 7: إخفاء تلقائي فقط لـReticulocyte count/Corrected Retic count
@@ -60,5 +112,6 @@
     {% endif %}
   </tr>
 </table>
+{% endif %}
 {% endif %}
 {% endblock %}

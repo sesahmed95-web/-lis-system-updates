@@ -65,7 +65,7 @@
 
 {# ====================== أسلوب جدول النتائج (عام لكل التقارير) ====================== #}
 {% set rl = result_layout %}
-<div class="card" style="margin-bottom:18px;"><h3>🏷️ تصميم الباركودات</h3><p class="muted" style="font-size:0.85em;">ملصق الأنبوب (T1) وملصق الطلب (R1) والقياسات بالمليمتر.</p><a class="btn" href="{{ url_for('label_designer_page') }}">فتح صفحة تصميم الباركودات</a></div>
+<div class="card" id="barcodeCard" style="margin-bottom:18px;"><h3>🏷️ تصميم الباركودات</h3><p class="muted" style="font-size:0.85em;">ملصق الأنبوب (T1) وملصق الطلب (R1) والقياسات بالمليمتر.</p><a class="btn" href="{{ url_for('label_designer_page') }}">فتح صفحة تصميم الباركودات</a></div>
 <div class="card" id="resultStyleCard" style="margin-bottom:18px;">
   <h3>🧾 أسلوب جدول النتائج — يُطبَّق على كل التقارير</h3>
   <p class="muted" style="font-size:0.85em;">
@@ -677,7 +677,7 @@
 </div>
 {% endif %}
 
-<div class="card">
+<div class="card" id="noDesignCard">
   <h3>تحاليل بدون تصميم طباعة بعد</h3>
   <p class="muted">
     كل تحليل غير مذكور هنا (CBC, Blood film, WBCs differential, Fluid examination) ما إله شكل طباعة جاهز.
@@ -773,5 +773,132 @@
   }
 </script>
 {% endif %}
+
+{# ====== واجهة الأقسام: شريط أقسام جانبي + بطاقات التقارير + تبويبات. كل الأقسام القديمة تبقى كما هي وتُعرض عند اختيارها ====== #}
+{% set rdx = namespace(items=[]) %}
+{% for row in tests_status %}
+  {% set rdx.items = rdx.items + [ {'id': row.test['id'], 'code': row.test['code'], 'name': row.test['name'], 'dept': (row.test['department'] or 'Other'),
+      'st': ('builtin' if row.has_builtin else ('custom' if row.has_custom else ('auto' if row.auto_ok else 'need'))),
+      'edit': url_for('report_designer', test_definition_id=row.test['id']) ~ '#designCard',
+      'prev': url_for('preview_report_design', test_definition_id=row.test['id'])} ] %}
+{% endfor %}
+<style>
+  .rdx-grid { display:grid; grid-template-columns:290px minmax(0,1fr); gap:18px; align-items:start; }
+  .rdx-side { position:sticky; top:8px; background:var(--card-bg,#fff); border:1px solid var(--border,#E2E8F0); border-radius:14px; padding:12px; max-height:calc(100vh - 20px); overflow:auto; }
+  .rdx-side h5 { margin:8px 6px 4px; color:#64748b; font-size:13px; }
+  .rdx-side button.rdx-it { display:flex; width:100%; align-items:center; gap:8px; text-align:start; padding:9px 12px; margin:2px 0; border:0; border-radius:10px; background:transparent; cursor:pointer; font:inherit; color:inherit; }
+  .rdx-side button.rdx-it:hover { background:rgba(32,80,114,.08); }
+  .rdx-side button.rdx-it.on { background:var(--primary,#205072); color:#fff; }
+  .rdx-side .rdx-n { margin-inline-start:auto; font-size:12px; opacity:.75; }
+  .rdx-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; background:var(--card-bg,#fff); border:1px solid var(--border,#E2E8F0); border-radius:14px; padding:14px 18px; margin-bottom:12px; }
+  .rdx-head h2 { margin:0; font-size:1.25em; } .rdx-head small { color:#64748b; }
+  .rdx-tabs { display:flex; gap:6px; flex-wrap:wrap; border-bottom:3px solid #E2E8F0; margin-bottom:12px; }
+  .rdx-tab { border:0; background:transparent; padding:10px 16px; font:inherit; cursor:pointer; border-radius:10px 10px 0 0; margin-bottom:-3px; border-bottom:3px solid transparent; }
+  .rdx-tab.on { border-bottom-color:var(--primary,#205072); font-weight:700; color:var(--primary,#205072); }
+  .rdx-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; margin-bottom:14px; }
+  .rdx-card { background:var(--card-bg,#fff); border:1px solid var(--border,#E2E8F0); border-radius:14px; padding:14px; }
+  .rdx-card.sel { border-color:var(--primary,#205072); box-shadow:0 0 0 3px rgba(32,80,114,.15); }
+  .rdx-card b { display:block; font-size:1.05em; } .rdx-card small { color:#64748b; display:block; margin-bottom:10px; direction:ltr; text-align:start; }
+  .rdx-card .rdx-act { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .rdx-badge { font-size:12px; padding:2px 8px; border-radius:8px; } .rdx-b-ok { background:#dcfce7; color:#166534; } .rdx-b-need { background:#fef3c7; color:#92400e; }
+  @media (max-width:900px) { .rdx-grid { grid-template-columns:1fr; } .rdx-side { position:static; max-height:none; } }
+</style>
+<script>
+(function () {
+  var ITEMS = {{ rdx.items|tojson }};
+  var SEL = {{ (selected_test['id'] if selected_test else 0)|tojson }};
+  var content = document.querySelector('.content'); if (!content) return;
+  var $ = function (id) { return document.getElementById(id); };
+  var designs = $('designs'), barcode = $('barcodeCard'), style = $('resultStyleCard'), designCard = $('designCard'), noDesign = $('noDesignCard');
+  var anchor = designs || barcode || style; if (!anchor || !ITEMS.length) return;
+  var depts = [], byDept = {};
+  ITEMS.forEach(function (t) { if (!byDept[t.dept]) { byDept[t.dept] = []; depts.push(t.dept); } byDept[t.dept].push(t); });
+  depts.sort(function (a, b) { return a.localeCompare(b); });
+  var grid = document.createElement('div'); grid.className = 'rdx-grid';
+  var side = document.createElement('aside'); side.className = 'rdx-side';
+  var main = document.createElement('div');
+  var deptBox = document.createElement('div'); deptBox.id = 'rdxDept';
+  grid.appendChild(side); grid.appendChild(main);
+  content.insertBefore(grid, content.firstChild);
+  [designs, barcode, style].forEach(function (x) { if (x) main.appendChild(x); });
+  main.insertBefore(deptBox, main.firstChild);
+  if (designCard) main.insertBefore(designCard, deptBox.nextSibling);
+  if (noDesign) main.appendChild(noDesign);
+  function el(tag, cls, txt) { var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+  function item(key, label, n) {
+    var b = el('button', 'rdx-it'); b.type = 'button'; b.dataset.k = key;
+    b.appendChild(el('span', '', label)); if (n != null) b.appendChild(el('span', 'rdx-n', n)); return b;
+  }
+  side.appendChild(el('h5', '', 'الأقسام'));
+  depts.forEach(function (d) { side.appendChild(item('d:' + d, d, byDept[d].length + ' فحص')); });
+  side.appendChild(el('h5', '', 'إعدادات عامة'));
+  side.appendChild(item('style', '🧾 أسلوب جدول النتائج (والتقرير الشامل)'));
+  side.appendChild(item('prints', '🎨 ستايلات الطباعة (تخثر / GUE·GSE·SFA)'));
+  side.appendChild(item('rsstyles', '🗂️ ستايلات التقارير بتبويبات (CBC · Blood film · BMA · BMB)'));
+  side.appendChild(item('barcode', '🏷️ الباركودات'));
+  side.appendChild(item('all', '📋 كل التحاليل (جدول)'));
+  var STXT = { builtin: ['✅ قالب جاهز', 'ok'], custom: ['🟢 مصمَّم', 'ok'], auto: ['🟢 تلقائي', 'ok'], need: ['⚠️ يحتاج تصميم', 'need'] };
+  function renderDept(d) {
+    deptBox.innerHTML = '';
+    var list = byDept[d] || [], need = list.filter(function (t) { return t.st === 'need'; });
+    var head = el('div', 'rdx-head'), h = el('div'); h.appendChild(el('h2', '', d)); h.appendChild(el('small', '', list.length + ' فحص · ' + (list.length - need.length) + ' بتصميم طباعة'));
+    head.appendChild(h);
+    var q = el('input'); q.type = 'search'; q.placeholder = '🔎 بحث بالقسم…'; q.style.minWidth = '200px'; head.appendChild(q);
+    deptBox.appendChild(head);
+    var tabs = el('div', 'rdx-tabs'), t1 = el('button', 'rdx-tab on', '📑 التقارير'), t2 = el('button', 'rdx-tab', '🧪 الفحوصات والنسب الطبيعية'), t3 = el('button', 'rdx-tab', '🎛️ شكل التقارير');
+    [t1, t2, t3].forEach(function (t) { t.type = 'button'; tabs.appendChild(t); }); deptBox.appendChild(tabs);
+    var p1 = el('div'), p2 = el('div'), p3 = el('div');
+    var cards = el('div', 'rdx-cards');
+    function draw(filter) {
+      cards.innerHTML = '';
+      list.forEach(function (t) {
+        if (filter && (t.name + ' ' + t.code).toLowerCase().indexOf(filter) === -1) return;
+        var c = el('div', 'rdx-card' + (t.id === SEL ? ' sel' : ''));
+        c.appendChild(el('b', '', t.name)); c.appendChild(el('small', '', t.code));
+        var act = el('div', 'rdx-act'), s = STXT[t.st]; act.appendChild(el('span', 'rdx-badge rdx-b-' + s[1], s[0]));
+        var e = el('a', 'btn small secondary', 'تعديل'); e.href = t.edit; act.appendChild(e);
+        if (t.st !== 'need') { var v = el('a', 'btn small secondary', 'معاينة'); v.href = t.prev; v.target = '_blank'; act.appendChild(v); }
+        c.appendChild(act); cards.appendChild(c);
+      });
+    }
+    draw(''); p1.appendChild(cards);
+    if (need.length) {
+      var w = el('div', 'card'); w.appendChild(el('h3', '', '⚠️ فحوصات بالقسم بلا تصميم طباعة (' + need.length + ')'));
+      need.forEach(function (t) { var r = el('div'); r.style.cssText = 'display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px dashed #E2E8F0;'; r.appendChild(el('span', '', t.name)); var a = el('a', 'btn small secondary', 'اختر قالب'); a.href = t.edit; a.style.marginInlineStart = 'auto'; r.appendChild(a); w.appendChild(r); });
+      p1.appendChild(w);
+    }
+    var cat = el('div', 'card'); cat.appendChild(el('p', 'muted', 'أسماء الفحوصات واختصاراتها والنسب الطبيعية (Reference ranges) تُعدَّل من كتالوج الفحوصات.'));
+    var a1 = el('a', 'btn', '🧪 فتح كتالوج الفحوصات'); a1.href = '/master/test-catalog'; cat.appendChild(a1);
+    var a2 = el('a', 'btn secondary', '🗂️ تجميع الفحوصات بالأقسام'); a2.href = '/master/sections'; a2.style.marginInlineStart = '8px'; cat.appendChild(a2); p2.appendChild(cat);
+    var sh = el('div', 'card'); sh.appendChild(el('p', 'muted', 'شكل الطباعة العام لكل التقارير (جدول النتائج، الألوان، الأعمدة) وستايلات التخثر وGUE/GSE/SFA.'));
+    var b1 = el('button', 'btn', '🧾 أسلوب جدول النتائج'); b1.type = 'button'; b1.onclick = function () { go('style'); };
+    var b2 = el('button', 'btn secondary', '🎨 ستايلات الطباعة'); b2.type = 'button'; b2.style.marginInlineStart = '8px'; b2.onclick = function () { go('prints'); };
+    var b3 = el('a', 'btn', '🗂️ ستايلات التقارير بتبويبات'); b3.href = {{ url_for('report_styles_page')|tojson }}; b3.style.marginInlineStart = '8px'; sh.appendChild(b1); sh.appendChild(b2); sh.appendChild(b3); p3.appendChild(sh);
+    [p1, p2, p3].forEach(function (p) { deptBox.appendChild(p); });
+    [t1, t2, t3].forEach(function (t, i) { t.onclick = function () { [t1, t2, t3].forEach(function (x) { x.classList.toggle('on', x === t); }); [p1, p2, p3].forEach(function (p, j) { p.style.display = j === i ? '' : 'none'; }); }; });
+    p2.style.display = 'none'; p3.style.display = 'none';
+    q.oninput = function () { draw(this.value.trim().toLowerCase()); };
+  }
+  var sections = { style: style, prints: designs, barcode: barcode, all: noDesign };
+  function go(k) {
+    side.querySelectorAll('.rdx-it').forEach(function (b) { b.classList.toggle('on', b.dataset.k === k); });
+    var isDept = k.indexOf('d:') === 0;
+    deptBox.style.display = isDept ? '' : 'none';
+    if (designCard) designCard.style.display = isDept ? '' : 'none';
+    Object.keys(sections).forEach(function (n) { if (sections[n]) sections[n].style.display = (n === k) ? '' : 'none'; });
+    if (k === 'prints' && designs) designs.open = true;
+    if (isDept) renderDept(k.slice(2));
+    try { localStorage.setItem('lis-rd-view', k); } catch (e) {}
+  }
+  side.addEventListener('click', function (e) { var b = e.target.closest('.rdx-it'); if (!b) return; if (b.dataset.k === 'rsstyles') { location.href = {{ url_for('report_styles_page')|tojson }}; return; } go(b.dataset.k); });
+  var start = null;
+  if (location.hash === '#designs') start = 'prints';
+  else if (SEL) { var st = ITEMS.filter(function (t) { return t.id === SEL; })[0]; if (st) start = 'd:' + st.dept; }
+  if (!start) { try { start = localStorage.getItem('lis-rd-view'); } catch (e) {} }
+  var ok = false; side.querySelectorAll('.rdx-it').forEach(function (b) { if (b.dataset.k === start) ok = true; });
+  if (!start || !ok) start = 'd:' + depts[0];
+  go(start);
+})();
+</script>
 
 {% endblock %}
