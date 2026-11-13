@@ -2167,6 +2167,17 @@
       '<button type="button" class="btn small lm-save-note" style="margin-top:4px;">💾 حفظ الملاحظة</button></div>';
     host.parentNode.insertBefore(box, host.nextSibling);
     var q = function (c) { return box.querySelector(c); };
+    /* v27: أيقونة 📷 ظاهرة برأس بطاقة التحليل (CBC / Hb Electrophoresis وغيرها) — تفتح قسم الصورة وتشغّل اختيار الملف مباشرة */
+    (function () {
+      var card = document.getElementById('rbox_' + id); if (!card) return;
+      var bar = card.querySelector('button[onclick^="lisPrintOne"]'); bar = bar ? bar.parentNode : null; if (!bar || bar.querySelector('.lm-open')) return;
+      var code = (card.getAttribute('data-code') || '').toUpperCase(), nm = ((card.querySelector('h4') || {}).textContent || '').toLowerCase();
+      var key = code === 'CBC' || /electroph|cbc|hb ?curve/.test(nm + ' ' + code.toLowerCase());
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'btn small ' + (key ? '' : 'secondary') + ' lm-open';
+      b.textContent = key ? '📷 رفع صورة الجهاز' : '📷'; b.title = 'رفع صورة/لقطة نتيجة الجهاز لهذا التحليل (تُقص وتُنظَّف، ويقدر الذكاء يقرأ منها القيم)';
+      b.onclick = function () { box.open = true; box.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(function () { var f = q('.lm-file'); if (f) f.click(); }, 250); };
+      bar.insertBefore(b, bar.firstChild);
+    })();
     var msg = function (t, bad) { var e = q('.lm-msg'); e.textContent = t || ''; e.style.color = bad ? '#b00020' : '#0a7a3b'; };
     var firstImg = null;
     function render(d) {

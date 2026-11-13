@@ -5,6 +5,7 @@
    2) وإلا: نفس السلوك القديم (صورة نتيجة الجهاز أو جدول الباراميترات).
    التعليق: نص منسّق (حجم خط + رموز) بدون أي خط تحت كلمة Comments. عنوان التقرير إنجليزي دائماً. #}
 {% set media = ot_media(ot['id'] or 0) %}
+{% set rs = report_style('hbe') %}
 {% set hb = ot_hb(ot['id'] or 0) %}
 {% set comment_text = media.comment or params.get('Comment', '') or '' %}
 <style>
@@ -37,9 +38,18 @@
   .el-hint { text-align:center; font-size:11px; color:#64748b; direction:rtl; margin:2px 0; }
   @media print { .el-c:hover { outline:none; } .el-hint { display:none !important; } }
 </style>
-<div class="report-heading" data-keep="1" style="font-style:italic; text-decoration:underline; direction:ltr;">{{ hb_title(ot['test_name'], hb.source) }}</div>
+<div class="report-heading" data-keep="1" style="font-style:italic; text-decoration:underline; direction:ltr;">{{ (rs.opts.title|default('')) or hb_title(ot['test_name'], hb.source) }}</div>
+{% if rs.id == 'image' %}<style>.el-c { font-size:{{ rs.opts.com_font|default(16) }}px !important; }</style>{% endif %}
 
-{% if hb.has_data %}
+{% if rs.id == 'image' and (media.images or is_design_preview) %}
+  {# v27: ستايل «صورة الجهاز مباشرة» — يطبع الصورة المرفوعة من إدخال النتائج بدون قراءة القمم #}
+  {% set _imgs = (media.images if rs.opts.all_images|default(0) else (media.images[-1:] if media.images else [])) %}
+  {% if rs.opts.show_dev|default(1) and hb.device_line %}<div class="el-dev">{{ hb.device_line }}</div>{% endif %}
+  <div style="text-align:center; margin:10px 0;">
+    {% for im in _imgs %}<img src="{{ im.url }}" alt="" style="max-width:{{ rs.opts.img_w|default(100) }}%; max-height:{{ rs.opts.img_h|default(165) }}mm; height:auto; display:block; margin:0 auto 8px;">
+    {% else %}<div style="border:2px dashed #94A3B8; color:#64748B; padding:70px 10px; max-height:{{ rs.opts.img_h|default(165) }}mm; direction:rtl;">مكان صورة الجهاز (تُرفع من إدخال النتائج ← 📷)</div>{% endfor %}
+  </div>
+{% elif hb.has_data %}
   {% if hb.device_line %}<div class="el-dev">{{ hb.device_line }}</div>{% endif %}
   {% if hb.svg %}
     <div class="el-curve">{{ hb.svg|safe }}</div>

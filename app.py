@@ -1463,6 +1463,10 @@ def inject_globals():
     # قوالب reports/* (وbase_report.html) دون تمريرها يدويًا من كل route.
     test_name_font_size = get_setting(db, "test_name_font_size", "16")
     result_value_font_size = get_setting(db, "result_value_font_size", "16")
+    # v26: مقياس خط كل نتائج التقرير (نسبة %) + ملاءمة تلقائية لصفحة A4 واحدة
+    results_font_scale = get_setting(db, "results_font_scale", "100")
+    results_autofit_a4 = get_setting(db, "results_autofit_a4", "0")
+    results_autofit_min = get_setting(db, "results_autofit_min", "70")
     # موضع/حجم الشعار بترويسة كل تقرير مطبوع — إعدادان عامان محقونان هنا
     # مرة وحدة، بنفس أسلوب باقي إعدادات التقرير.
     logo_position = get_setting(db, "logo_position", "right")
@@ -1568,6 +1572,8 @@ def inject_globals():
                 letterhead_font_family=letterhead_font_family,
                 test_name_font_size=test_name_font_size,
                 result_value_font_size=result_value_font_size,
+                results_font_scale=results_font_scale, results_autofit_a4=results_autofit_a4,
+                results_autofit_min=results_autofit_min,
                 logo_position=logo_position,
                 report_header_style=report_header_style, report_header_accent=report_header_accent,
                 report_header_subtitle=report_header_subtitle, lab_name_ar=lab_name_ar,
@@ -14300,6 +14306,17 @@ def app_settings():
                 set_setting(db, "test_name_font_size", str(tn_size))
             except ValueError:
                 pass
+        # v26: مقياس خط كل النتائج (60–150%) + الملاءمة التلقائية لـ A4 (حدها الأدنى 50–100%)
+        if request.form.get("results_scale_present"):
+            try:
+                set_setting(db, "results_font_scale", str(max(60, min(150, int(request.form.get("results_font_scale", "100").strip() or 100)))))
+            except ValueError:
+                pass
+            set_setting(db, "results_autofit_a4", "1" if request.form.get("results_autofit_a4") else "0")
+            try:
+                set_setting(db, "results_autofit_min", str(max(50, min(100, int(request.form.get("results_autofit_min", "70").strip() or 70)))))
+            except ValueError:
+                pass
         rv_size_raw = request.form.get("result_value_font_size", "").strip()
         if rv_size_raw:
             try:
@@ -14602,6 +14619,10 @@ def app_settings():
         "letterhead_font_family": get_setting(db, "letterhead_font_family", "Segoe UI, Tahoma, Arial, sans-serif"),
         "test_name_font_size": get_setting(db, "test_name_font_size", "16"),
         "result_value_font_size": get_setting(db, "result_value_font_size", "16"),
+        "results_font_scale": get_setting(db, "results_font_scale", "100"),
+        "results_autofit_a4": get_setting(db, "results_autofit_a4", "0"),
+        "results_autofit_min": get_setting(db, "results_autofit_min", "70"),
+        "report_row_pad_cur": get_setting(db, "report_row_pad", "5"),
         "logo_position": get_setting(db, "logo_position", "right"),
         "report_header_style": get_setting(db, "report_header_style", "default"),
         "report_header_accent": get_setting(db, "report_header_accent", "") or "#4FB6E8",
@@ -15595,6 +15616,8 @@ def _preview_report_design_impl(test_definition_id):
         return "Not found", 404
 
     template_name = REPORT_TEMPLATE_MAP.get(test["code"])
+    if not template_name and _is_electrophoresis(test["code"], test["name"]) and not get_report_template(db, test_definition_id):
+        template_name = "reports/electrophoresis.html"   # v27: معاينة Hb Electrophoresis (كانت تُعرف بالطباعة فقط)
     _coag_table = (test["code"] == "COAG" and _coag_table_mode(db))
     if _coag_table:
         template_name = None
@@ -19998,6 +20021,27 @@ def ensure_blank_report_test():
 
 # ستايلات التقارير بتبويبات (CBC / Blood film / BMA / BM Biopsy + التخثر وGUE وجدول النتائج) — راجع lab_styles.py
 import lab_styles
+@app.route("/api/settings/results-scale", methods=["POST"])
+@roles_required("admin")
+def api_save_results_scale():
+    """v26: حفظ مقياس خط النتائج من شريط المعاينة (اجعله افتراضياً)."""
+    d = request.get_json(silent=True) or {}
+    db = get_db()
+    try:
+        if "scale" in d:
+            try:
+                sc = max(60, min(150, int(float(d["scale"]))))
+            except (TypeError, ValueError):
+                return jsonify({"error": "قيمة غير صالحة"}), 400
+            set_setting(db, "results_font_scale", str(sc))
+        if "autofit" in d:
+            set_setting(db, "results_autofit_a4", "1" if d["autofit"] else "0")
+        db.commit()
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
 lab_styles.register(app, get_db=get_db, get_setting=get_setting, set_setting=set_setting,
                     roles_required=roles_required, log_action=lambda *a, **k: log_action(*a, **k))
 

@@ -22,11 +22,12 @@ FAMILIES = {
     "bma": ("BMA — شفط نقي العظم", "BMA", "heme"),
     "bmb": ("BM Biopsy — خزعة نقي العظم", "BMBIOPSY", "heme"),
     "culture": ("Culture & Sensitivity / Vitek", "CULTURE", "micro"),
+    "hbe": ("Hb / Protein Electrophoresis", "HBE", "heme"),
     "coag": ("التخثر", "COAG", "coag"),
     "exam": ("GUE / GSE / SFA", "GUE", "urine"),
     "result": ("جدول النتائج (كيمياء/هرمونات/فيتامينات/فايروسات…)", None, "chem"),
 }
-NEW_FAMILIES = ("cbc", "bf", "bma", "bmb", "culture")          # عائلات تقبل النسخ والتعديل الكامل
+NEW_FAMILIES = ("cbc", "bf", "bma", "bmb", "culture", "hbe")          # عائلات تقبل النسخ والتعديل الكامل
 EXTERNAL = ("coag", "exam", "result")               # مخزنها القديم محفوظ كما هو
 
 # حقول التعديل لكل ستايل: (مفتاح, عنوان, نوع, افتراضي)
@@ -40,12 +41,25 @@ OPT_SPECS = {
         ("prev_title", "عنوان عمود النتيجة السابقة", "text", "Previous Result"),
         ("show_unit", "إظهار الوحدات", "bool", 1), ("show_prev", "عمود النتيجة السابقة (زيارة واحدة + تاريخها)", "bool", 1),
         ("show_all", "إظهار كل بارامترات CBC الموجودة (حتى غير المرتبة بالمجموعات)", "bool", 1),
+        ("hide", "صفوف مخفية (أسماؤها مفصولة بفاصلة) — أو اضغط ✕ على الصف بالمعاينة", "list", []),
+    ],
+    "cbc:lab_plain": [
+        ("line", "لون الخطوط", _C, "#000000"), ("section", "لون عنوان القسم (Hematology)", _C, "#1D4ED8"),
+        ("abn", "لون القيم غير الطبيعية", _C, "#C00000"), ("font", "حجم الخط (px)", "num", 14),
+        ("range_note", "نص بجانب Reference Range", "text", "according to age"),
+        ("show_unit", "إظهار الوحدات", "bool", 1),
+        ("show_all", "إظهار كل بارامترات CBC الموجودة (حتى غير المرتبة بالمجموعات)", "bool", 1),
+        ("hide", "صفوف مخفية (أسماؤها مفصولة بفاصلة) — أو اضغط ✕ على الصف بالمعاينة", "list", []),
     ],
     "bf:classic": [],
     "bf:boxed": [
         ("border", "لون الإطار", _C, "#222222"), ("label_bg", "خلفية العناوين", _C, "#EEF4FB"),
         ("concl_bg", "خلفية Conclusion", _C, "#DCE9F7"), ("font", "حجم الخط (px)", "num", 15),
         ("show_cbc", "إظهار WBC / Hb / Platelet / HCT من CBC نفس الزيارة", "bool", 1),
+        ("autofit", "ضغط الخط تلقائيًا لتبقى النتيجة بصفحة واحدة (لو RBC/WBC/Platelet طويلة)", "bool", 1),
+        ("hide", "صفوف مخفية (أسماؤها مفصولة بفاصلة) — أو اضغط ✕ على الصف بالمعاينة", "list", []),
+        ("extra", "باراميترات مضافة (الاسم|الوحدة|L أو R) — أو استخدم ➕ بالمعاينة", "list", []),
+        ("shift", "إزاحة العناوين يمين/يسار (الاسم|بكسل) — أو استخدم ◀ ▶ بالمعاينة", "list", []),
     ],
     "bma:classic": [],
     "bma:blue": [
@@ -61,6 +75,14 @@ OPT_SPECS = {
         ("show_status", "إظهار Status: Final", "bool", 1), ("show_header", "إظهار Selected Organism / Source / Collected", "bool", 1),
         ("footer", "تعليق ثابت بآخر التقرير (اختياري)", "text", ""),
     ],
+    "hbe:classic": [],
+    "hbe:image": [
+        ("img_h", "أقصى ارتفاع للصورة (mm)", "num", 165), ("img_w", "عرض الصورة (% من عرض الورقة)", "num", 100),
+        ("all_images", "طباعة كل الصور المرفوعة (بدل آخر صورة فقط)", "bool", 0),
+        ("show_dev", "إظهار سطر الجهاز/المريض فوق الصورة", "bool", 1),
+        ("title", "عنوان التقرير (فاضي = اسم التحليل)", "text", ""),
+        ("com_font", "حجم خط Comments (px)", "num", 16),
+    ],
     "bmb:classic": [],
     "bmb:blue": [
         ("head_bg", "لون أشرطة العناوين", _C, "#B8D0EC"), ("border", "لون الإطار", _C, "#1F3A7A"),
@@ -74,6 +96,8 @@ BASE_STYLES = [
     ("cbc", "classic", "الكلاسيكي (الحالي)", "الجدول الحالي: Test / result / units / Normal Range"),
     ("cbc", "lab_table", "جدول المختبر (Investigation / Result / Previous)",
      "حسب الصورة: ترويسة بخطوط، Hematology، أرقام غير طبيعية بالأحمر، ونتيجة زيارة سابقة واحدة بتاريخها تحت الجدول"),
+    ("cbc", "lab_plain", "جدول المختبر بدون نتيجة سابقة",
+     "نفس ستايل جدول المختبر (Investigation / Result / Reference Range) لكن بدون عمود النتيجة السابقة ولا تاريخ الزيارة السابقة"),
     ("bf", "classic", "الكلاسيكي (الحالي)", "جدول الديفرنشل + RBC/WBC/Platelets + Conclusion"),
     ("bf", "boxed", "جدول مؤطّر (CBC + Differential + Retic)",
      "حسب الصورة: جدول بإطار واحد يجمع قيم CBC والديفرنشل والريتك وحقول الوصف والخلاصة"),
@@ -81,6 +105,8 @@ BASE_STYLES = [
     ("bma", "blue", "أشرطة زرقاء (BM aspirate)", "حسب الصورة: شريط رقم العينة + شريط العنوان + قائمة نقاط + شريط Conclusion"),
     ("culture", "classic", "الكلاسيكي (الحالي)", "جدول Sensitive / Intermediate / Resistant لكل بكتيريا"),
     ("culture", "vitek", "Vitek — Susceptibility Information", "حسب الصورة: Selected Organism + Source، وجدول Antimicrobial / MIC / Interpretation بعمودين، وStatus: Final"),
+    ("hbe", "classic", "الكلاسيكي (الحالي) — منحنى معاد الرسم + جدول", "يطبع المنحنى والجدول بعد قراءة القمم (📎 ← 🧬 Hb Curve)، أو جدول الباراميترات"),
+    ("hbe", "image", "صورة الجهاز مباشرة + Comments", "يطبع صورة الورقة/الشاشة المرفوعة من إدخال النتائج (بعد القص) بدون الحاجة لقراءة القمم، وتحتها Comments"),
     ("bmb", "classic", "الكلاسيكي (الحالي)", "Clinical notes + Conclusion"),
     ("bmb", "blue", "أشرطة زرقاء (BM biopsy)", "حسب الصورة: شريط رقم الخزعة + شريط العنوان + نقاط مربعة + Conclusion"),
     ("coag", "table", "جدول النتائج (مثل الكيمياء)", "يتبع أسلوب جدول النتائج العام"),
@@ -193,6 +219,8 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
         out = {}
         for name, _label, typ, dflt in spec:
             v = saved.get(name, dflt)
+            if typ == "list":
+                v = [str(x) for x in v] if isinstance(v, list) else []
             out[name] = v
         return out
 
@@ -231,7 +259,7 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
 
     def cbc_wants_extra():
         st = report_style("cbc")
-        return st["id"] == "lab_table" and bool(st["opts"].get("show_all", 1))
+        return st["id"] in ("lab_table", "lab_plain") and bool(st["opts"].get("show_all", 1))
 
     def rs_hide_prev_footer(ot):
         """سطر «زيارة سابقة بتاريخ» الافتراضي أسفل الصفحة يتكرر مع سطر ستايل جدول المختبر → نخفيه هناك."""
@@ -239,7 +267,12 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
             code = ot["test_code"]
         except (KeyError, IndexError, TypeError):
             return False
-        return code == "CBC" and report_style("cbc")["id"] == "lab_table" and bool(report_style("cbc")["opts"].get("show_prev", 1))
+        if code != "CBC":
+            return False
+        st = report_style("cbc")
+        if st["id"] == "lab_plain":
+            return True        # بدون نتيجة سابقة: لا يظهر حتى سطر «زيارة سابقة بتاريخ»
+        return st["id"] == "lab_table" and bool(st["opts"].get("show_prev", 1))
 
     _CBC_NAMES = {"wbc": ["WBCs", "WBC", "WBC count", "WBC Count"], "hb": ["HGB", "Hb", "HB", "Hemoglobin"],
                   "plt": ["PLT", "Platelet count", "Platelets"], "hct": ["HCT", "PCV"]}
@@ -249,7 +282,7 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
         try:
             visit_id = ot["visit_id"]
         except (KeyError, IndexError, TypeError):
-            return {"wbc": "8.76", "hb": "8.1", "plt": "978", "hct": "25.8"}
+            return {"wbc": "", "hb": "", "plt": "", "hct": ""}
         db = get_db()
         try:
             rows = db.execute(
@@ -271,22 +304,14 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
         return {k: next((by[n] for n in names if n in by), "") for k, names in _CBC_NAMES.items()}
 
     def preview_fill(code, params, cbc_groups, row_groups):
-        """بيانات نموذجية لمعاينة الستايلات (تُستعمل فقط بصفحة المعاينة). ترجع (params, cbc_groups, prev_date)."""
+        """معاينة الستايلات: هيكل التقرير فقط، كل الحقول فاضية (بلا أرقام نموذجية). ترجع (params, cbc_groups, prev_date)."""
         pdate = None
+        params = {k: "" for k in params}
         if code == "CBC" and cbc_groups:
-            pdate = "14/9/2026"
-            for g, names in zip(cbc_groups, row_groups):
-                for r, nm in zip(g, names):
-                    if nm in SAMPLE_CBC:
-                        res, lo, hi, prev = SAMPLE_CBC[nm]
-                        r["result"], r["low"], r["high"], r["previous"] = res, lo, hi, prev
-                        try:
-                            r["flag"] = "High" if float(res) > hi else ("Low" if float(res) < lo else "Normal")
-                        except ValueError:
-                            r["flag"] = None
-        sample = {"BF": SAMPLE_BF, "BFRETIC": SAMPLE_BF, "BMA": SAMPLE_BMA, "BMBIOPSY": SAMPLE_BMB}.get(code)
-        if sample:
-            params = {**params, **sample}
+            pdate = "__ / __ / ____"      # حتى يظهر عمود النتيجة السابقة بالمعاينة
+            for g in cbc_groups:
+                for r in g:
+                    r["result"], r["previous"], r["flag"] = "", "", None
         return params, cbc_groups, pdate
 
     app.jinja_env.globals.update(report_style=report_style, rs_hide_prev_footer=rs_hide_prev_footer, lab_cbc_vals=lab_cbc_vals)
@@ -299,6 +324,8 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
         if fam == "result":
             return url_for("result_style_preview") + f"?style={sid}"
         row = db.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
+        if not row and fam == "hbe":
+            row = db.execute("SELECT id FROM test_definitions WHERE UPPER(code) LIKE '%ELECTRO%' OR UPPER(name) LIKE '%ELECTRO%' ORDER BY id LIMIT 1").fetchone()
         if not row and fam == "culture":
             row = db.execute("SELECT id FROM test_definitions WHERE UPPER(code) LIKE '%CULTURE%' OR UPPER(name) LIKE '%CULTURE%' ORDER BY id LIMIT 1").fetchone()
         if not row:
@@ -329,6 +356,93 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
 
     def _back(tab=""):
         return redirect(url_for("report_styles_page", tab=tab))
+
+    @app.route("/management/report-styles/hide-row", methods=["POST"])
+    @roles_required("admin")
+    def report_styles_hide_row():
+        """زر ✕ على صف بمعاينة الستايل: يخفيه (أو يرجّعه mode=show) لكل التقارير بهذا الستايل."""
+        db = get_db()
+        try:
+            key, row = request.form.get("key", ""), (request.form.get("row") or "").strip()[:40]
+            styles = _all_styles(db)
+            s = styles.get(key)
+            spec = OPT_SPECS.get(f"{s['family']}:{s['id']}", []) if s else []
+            if not s or not row or not any(n == "hide" for n, _l, _t, _d in spec):
+                return jsonify({"ok": False}), 400
+            oa = _json(db, "rs_opts", {})
+            cur = _opts_for(db, key, styles)
+            hide = [x for x in cur.get("hide", []) if x != row]
+            if request.form.get("mode") != "show":
+                hide.append(row)
+            oa[key] = {**oa.get(key, {}), "hide": hide[:60]}
+            set_setting(db, "rs_opts", json.dumps(oa, ensure_ascii=False))
+            db.commit()
+            return jsonify({"ok": True, "hide": hide})
+        finally:
+            db.close()
+
+    @app.route("/management/report-styles/extra-row", methods=["POST"])
+    @roles_required("admin")
+    def report_styles_extra_row():
+        """إضافة/حذف باراميتر جديد بستايل (extra): الاسم|الوحدة|L/R."""
+        db = get_db()
+        try:
+            key = request.form.get("key", "")
+            name = (request.form.get("name") or "").replace("|", " ").strip()[:40]
+            unit = (request.form.get("unit") or "").replace("|", " ").strip()[:15]
+            side = "R" if request.form.get("side") == "R" else "L"
+            styles = _all_styles(db)
+            s = styles.get(key)
+            spec = OPT_SPECS.get(f"{s['family']}:{s['id']}", []) if s else []
+            if not s or not name or not any(n == "extra" for n, _l, _t, _d in spec):
+                return jsonify({"ok": False}), 400
+            oa = _json(db, "rs_opts", {})
+            cur = _opts_for(db, key, styles)
+            lst = [x for x in cur.get("extra", []) if x.split("|")[0] != name]
+            if request.form.get("mode") != "remove":
+                lst.append(f"{name}|{unit}|{side}")
+            oa[key] = {**oa.get(key, {}), "extra": lst[:40]}
+            set_setting(db, "rs_opts", json.dumps(oa, ensure_ascii=False))
+            db.commit()
+            return jsonify({"ok": True, "extra": lst})
+        finally:
+            db.close()
+
+    @app.route("/management/report-styles/shift-row", methods=["POST"])
+    @roles_required("admin")
+    def report_styles_shift_row():
+        """أزرار ◀ ▶ على عنوان/باراميتر بمعاينة الستايل: يحرّكه يمين/يسار (dx بالبكسل)."""
+        db = get_db()
+        try:
+            key, row = request.form.get("key", ""), (request.form.get("row") or "").strip()[:40]
+            try:
+                dx = int(request.form.get("dx", "0"))
+            except ValueError:
+                dx = 0
+            styles = _all_styles(db)
+            s = styles.get(key)
+            spec = OPT_SPECS.get(f"{s['family']}:{s['id']}", []) if s else []
+            if not s or not row or "|" in row or not any(n == "shift" for n, _l, _t, _d in spec):
+                return jsonify({"ok": False}), 400
+            oa = _json(db, "rs_opts", {})
+            cur = _opts_for(db, key, styles)
+            m = {}
+            for it in cur.get("shift", []):
+                a, _, b = it.rpartition("|")
+                try:
+                    m[a] = int(b)
+                except ValueError:
+                    pass
+            m[row] = max(-400, min(400, m.get(row, 0) + dx))
+            if m[row] == 0:
+                del m[row]
+            lst = [f"{a}|{b}" for a, b in m.items()][:60]
+            oa[key] = {**oa.get(key, {}), "shift": lst}
+            set_setting(db, "rs_opts", json.dumps(oa, ensure_ascii=False))
+            db.commit()
+            return jsonify({"ok": True, "shift": lst})
+        finally:
+            db.close()
 
     @app.route("/management/report-styles/act", methods=["POST"])
     @roles_required("admin")
@@ -440,6 +554,8 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                             new[name] = 1 if raw else 0
                         elif typ == "color":
                             new[name] = raw if raw and re.fullmatch(r"#[0-9A-Fa-f]{6}", raw) else dflt
+                        elif typ == "list":
+                            new[name] = [x.strip()[:40] for x in re.split(r"[,\n،]", raw or "") if x.strip()][:60]
                         elif typ == "num":
                             try:
                                 new[name] = max(9, min(26, int(raw)))
@@ -521,6 +637,8 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                 rr = db.execute("SELECT * FROM reference_ranges WHERE test_parameter_id=? ORDER BY id", (p["id"],)).fetchall()
                 rows.append({"p": p, "ranges": rr})
             fam = _FAM_BY_CODE.get((t["code"] or "").upper(), "")
+            if not fam and "electroph" in ((t["code"] or "") + " " + (t["name"] or "")).lower():
+                fam = "hbe"
             styles = _all_styles(db)
             fam_styles = []
             if fam:
@@ -530,7 +648,7 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                         pv = _preview_url(db, {**st, "key": k})
                         fam_styles.append({**st, "key": k, "active": k == act, "preview": pv})
             sections = db.execute("SELECT id, name FROM sections ORDER BY sort_order, id").fetchall()
-            return render_template("management/test_panel.html", t=t, rows=rows, fam=fam, fam_title=FAMILIES[fam][0] if fam else "",
+            return render_template("management/test_panel.html", test=t, rows=rows, fam=fam, fam_title=FAMILIES[fam][0] if fam else "",
                                    fam_styles=fam_styles, sections=sections, tab=request.args.get("tab", "report"))
         finally:
             db.close()

@@ -338,6 +338,12 @@
     background: #F3F6F8; color: #26529C; border: 1px solid #E2E8F0;
   }
 
+  .rs-ctl { display:inline-flex; align-items:center; gap:4px; font-family:"Segoe UI", Tahoma, Arial, sans-serif; font-size:13px; background:#F3F6F8; border:1px solid #E2E8F0; border-radius:8px; padding:3px 6px; }
+  .rs-ctl button { border:1px solid #CBD5E1; background:#fff; color:#26529C; border-radius:6px; padding:4px 9px; font-size:12px; font-weight:bold; cursor:pointer; }
+  .rs-ctl button.on { background:#26529C; color:#fff; border-color:#26529C; }
+  .rs-ctl b { min-width:44px; text-align:center; }
+  /* مقياس خط كل النتائج (إعداد عام results_font_scale) — يُطبَّق على جسم التقرير فقط (الترويسة وبيانات المريض ما تتأثر) */
+  #rptResults { zoom: {{ ((results_font_scale|default(100))|float / 100)|round(2) }}; }
   .no-print { text-align: center; margin: 14px 0; }
   @media print { .preview-bar, .no-print { display: none; } }
 </style>
@@ -346,6 +352,14 @@
 <body>
 
 <div class="preview-bar">
+  {# v26: حجم خط كل النتائج + ملاءمة A4 (للمعاينة، وتقدر تحفظه افتراضي من الإعدادات أو من هنا) #}
+  <span class="rs-ctl no-print" title="حجم خط كل نتائج التقرير">
+    <button type="button" id="rsMinus" title="تصغير النتائج 5%">A−</button>
+    <b id="rsPct">100%</b>
+    <button type="button" id="rsPlus" title="تكبير النتائج 5%">A+</button>
+    <button type="button" id="rsA4" title="ملاءمة النتائج تلقائياً لصفحة A4 واحدة">📄 ملاءمة A4</button>
+    {% if session.get('role') == 'admin' %}<button type="button" id="rsSave" title="اجعل هذا الحجم افتراضياً لكل التقارير">💾 افتراضي</button>{% endif %}
+  </span>
   {% if is_design_preview %}
   <span style="margin-left:auto; color:#C0392B; font-size:12px; font-weight:bold;">⚠️ معاينة تصميم فقط — بيانات وهمية للتوضيح، ليست لمريض حقيقي</span>
   <a class="btn-back" href="{{ url_for('report_designer', test_definition_id=preview_test_id) }}">⬅ رجوع لتصميم التقرير</a>
@@ -501,7 +515,7 @@
       {% if repeat_header_on_print %}</thead>{% else %}</tbody>{% endif %}
       <tbody>
         <tr><td>
-          {% block report_body %}{% endblock %}
+          <div id="rptResults">{% block report_body %}{% endblock %}</div>
 
           {# v63: عنوان اسم التحليل (مثل A1c / T3) فوق جدول النتائج ما له داعي — الاسم موجود بالجدول. نخفيه لو نصه يطابق اسم/رمز التحليل، بكل الستايلات. #}
           <script>
@@ -770,7 +784,9 @@
   <button data-c="justifyLeft" title="يسار (Ctrl+L)">⇤</button><button data-c="justifyCenter" title="وسط (Ctrl+E)">↔</button><button data-c="justifyRight" title="يمين (Ctrl+R)">⇥</button><button data-c="justifyFull" title="ضبط (Ctrl+J)">☰</button>
   <button data-c="outdent" title="Shift+Tab">◀</button><button data-c="indent" title="Tab">▶</button>
   <span class="sep"></span>
-  <button data-c="fontSize:5" title="تكبير">A+</button><button data-c="fontSize:3" title="عادي">A</button><button data-c="fontSize:2" title="تصغير">A-</button>
+  <button id="rnPxDn" title="تصغير 1px">A-</button>
+  <select id="rnPx" title="حجم الخط (px) — بدون تحديد = كل الخانة"><option value="">حجم…</option>{% for n in [8,9,10,11,12,13,14,15,16,18,20,22,24,28,32] %}<option value="{{ n }}">{{ n }}</option>{% endfor %}</select>
+  <button id="rnPxUp" title="تكبير 1px">A+</button>
   <span class="sep"></span>
   <select id="rnSym" title="رموز"><option value="">رمز…</option><option>➢</option><option>➤</option><option>●</option><option>○</option><option>■</option><option>✓</option><option>✔</option><option>✘</option><option>←</option><option>→</option><option>↑</option><option>↓</option><option>±</option><option>≥</option><option>≤</option><option>°</option><option>µ</option></select>
   <span class="sep"></span>
@@ -803,9 +819,29 @@ window.lisTabSpaces = function (back) {
     var px = { '1': 10, '2': 13, '3': 16, '4': 18, '5': 24, '6': 32, '7': 48 };
     el.querySelectorAll('font[size]').forEach(function (f) { var s = document.createElement('span'); s.style.fontSize = px[f.getAttribute('size')] + 'px'; while (f.firstChild) s.appendChild(f.firstChild); f.replaceWith(s); });
   }
+  /* حجم الخط بالبكسل: على النص المحدد، وبدون تحديد = كل الخانة */
+  var lastR = null;
+  document.addEventListener('selectionchange', function () {
+    var s = window.getSelection();
+    if (cur && s.rangeCount && cur.contains(s.anchorNode)) lastR = s.getRangeAt(0).cloneRange();
+  });
+  function curPx() {
+    var s = window.getSelection(), n = s && s.anchorNode; if (n && n.nodeType === 3) n = n.parentNode;
+    return n && cur && cur.contains(n) ? parseFloat(getComputedStyle(n).fontSize) || 14 : parseFloat(getComputedStyle(cur).fontSize) || 14;
+  }
+  function setPx(px) {
+    if (!cur) return; px = Math.max(8, Math.min(72, Math.round(px)));
+    cur.focus();
+    var s = window.getSelection();
+    if (lastR && cur.contains(lastR.commonAncestorContainer)) { s.removeAllRanges(); s.addRange(lastR); }
+    if (!s.rangeCount || s.isCollapsed || !cur.contains(s.anchorNode)) document.execCommand('selectAll');
+    document.execCommand('fontSize', false, '7');
+    cur.querySelectorAll('font[size="7"]').forEach(function (f) { var sp = document.createElement('span'); sp.style.fontSize = px + 'px'; while (f.firstChild) sp.appendChild(f.firstChild); f.replaceWith(sp); });
+    dirty = true; fixFonts(cur);
+  }
   function open(el) {
     if (cur === el) return; if (cur) close(true);
-    cur = el; dirty = false; el.contentEditable = 'true'; el.classList.add('rn-edit'); bar.style.display = 'flex'; el.focus();
+    cur = el; dirty = false; lastR = null; el.contentEditable = 'true'; el.classList.add('rn-edit'); bar.style.display = 'flex'; el.focus();
   }
   function close(keep) {
     if (!cur) return; var el = cur; fixFonts(el);
@@ -829,17 +865,60 @@ window.lisTabSpaces = function (back) {
       if (m) { e.preventDefault(); document.execCommand(m); dirty = true; }
     }
   });
-  bar.addEventListener('mousedown', function (e) { if (e.target.id !== 'rnSym') e.preventDefault(); });
+  bar.addEventListener('mousedown', function (e) { if (e.target.id !== 'rnSym' && e.target.id !== 'rnPx') e.preventDefault(); });
   bar.addEventListener('click', function (e) {
     var b = e.target.closest('button'); if (!b || !cur) return;
     if (b.id === 'rnDone') { close(); return; }
+    if (b.id === 'rnPxUp' || b.id === 'rnPxDn') return;
     if (b.id === 'rnReset') { var el = cur; cur = el; dirty = false; save('').then(function () { location.reload(); }); return; }
     var c = b.dataset.c || ''; var p = c.split(':');
     document.execCommand(p[0], false, p[1] || null); dirty = true; fixFonts(cur);
   });
+  document.getElementById('rnPx').addEventListener('change', function () { if (this.value) setPx(+this.value); this.value = ''; });
+  document.getElementById('rnPxUp').addEventListener('click', function () { setPx(curPx() + 1); });
+  document.getElementById('rnPxDn').addEventListener('click', function () { setPx(curPx() - 1); });
   document.getElementById('rnSym').addEventListener('change', function () {
     if (this.value && cur) { cur.focus(); document.execCommand('insertText', false, this.value + ' '); dirty = true; } this.value = '';
   });
+})();
+</script>
+<script>
+// v26: حجم خط كل النتائج مع مراعاة A4 — الملاءمة التلقائية تصغّر النتائج (حتى حدّ أدنى) لتبقى بصفحة A4 واحدة
+(function () {
+  var wrap = document.getElementById('rptResults'); if (!wrap) return;
+  var BASE = {{ (results_font_scale|default(100))|float }}, cur = BASE, MIN = {{ (results_autofit_min|default(70))|float }};
+  var auto = {{ 'true' if (results_autofit_a4|default('0')) == '1' else 'false' }}, shown = BASE;
+  var pct = document.getElementById('rsPct'), bA4 = document.getElementById('rsA4');
+  var PX = 96 / 25.4, USABLE = (297 - 10 - 22) * PX;      // ارتفاع المحتوى المتاح بصفحة A4 مطبوعة (هوامش 10mm أعلى / 22mm أسفل)
+  function apply(p) { shown = p; wrap.style.zoom = (p / 100); if (pct) pct.textContent = Math.round(p) + '%' + (auto && p < cur - 0.5 ? ' ↘' : ''); }
+  function fit() {
+    if (bA4) bA4.classList.toggle('on', auto);
+    apply(cur);
+    if (!auto) return;
+    var sheet = wrap.closest('.sheet'); if (!sheet) return;
+    for (var i = 0; i < 5; i++) {
+      var hr = wrap.getBoundingClientRect().height, hs = sheet.getBoundingClientRect().height;
+      var other = Math.max(0, hs - hr - 26);               // ترويسة + بيانات المريض + حواشي الشاشة
+      var target = USABLE - other, need = hr * 1.05;       // 5% أمان لاختلاف عرض الطباعة عن الشاشة
+      if (target <= 0 || hr <= 0) break;
+      var f = target / need, np = Math.max(MIN, Math.min(cur, shown * Math.min(1, f)));
+      if (Math.abs(np - shown) < 0.4) break;
+      apply(np);
+    }
+  }
+  function step(d) { cur = Math.max(60, Math.min(150, cur + d)); fit(); }
+  var m = document.getElementById('rsMinus'), p = document.getElementById('rsPlus'), sv = document.getElementById('rsSave');
+  if (m) m.onclick = function () { step(-5); };
+  if (p) p.onclick = function () { step(5); };
+  if (bA4) bA4.onclick = function () { auto = !auto; fit(); };
+  if (sv) sv.onclick = function () {
+    fetch('/api/settings/results-scale', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: cur, autofit: auto }) })
+      .then(function (r) { return r.json(); }).then(function (j) { sv.textContent = j.ok ? '✅ انحفظ' : '❌'; setTimeout(function () { sv.textContent = '💾 افتراضي'; }, 1800); })
+      .catch(function () { sv.textContent = '❌'; });
+  };
+  window.addEventListener('load', function () { setTimeout(fit, 60); });
+  window.addEventListener('beforeprint', fit);
+  fit();
 })();
 </script>
 </body>

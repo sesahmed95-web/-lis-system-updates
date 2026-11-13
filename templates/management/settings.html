@@ -200,6 +200,77 @@
   </form>
 </div>
 
+<div class="card" style="max-width:900px;" id="resultsScaleCard">
+  <h3>📄 حجم خط كل النتائج (مع مراعاة ورقة A4)</h3>
+  <p class="muted">
+    مقياس واحد يكبّر/يصغّر <b>كل نتائج التقرير</b> (اسم التحليل، القيمة، الوحدة، المدى الطبيعي، الملاحظات) دفعة وحدة وفوق حجمي الخط أعلاه،
+    بدون ما تتأثر الترويسة وبيانات المريض. المعاينة على اليمين ترسم صفحة A4 حقيقية النسبة وتخبرك كم صف نتائج يكفي.
+    الملاءمة التلقائية تصغّر النتائج لحد أدنى تختاره لتبقى بصفحة A4 واحدة، ولا تكبّر أبداً فوق المقياس.
+  </p>
+  <div style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start;">
+    <form method="POST" style="flex:1 1 320px; min-width:280px;">
+      <input type="hidden" name="results_scale_present" value="1">
+      <div class="form-field">
+        <label>مقياس خط النتائج (%) — الافتراضي 100</label>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <input type="range" id="rsRange" min="60" max="150" step="5" value="{{ current.results_font_scale }}" style="flex:1;">
+          <input type="number" id="rsNum" name="results_font_scale" min="60" max="150" value="{{ current.results_font_scale }}" style="width:90px;">
+        </div>
+      </div>
+      <div class="form-field">
+        <label style="display:flex; gap:8px; align-items:center; cursor:pointer;">
+          <input type="checkbox" id="rsAuto" name="results_autofit_a4" value="1" {{ 'checked' if current.results_autofit_a4 == '1' }}>
+          ملاءمة تلقائية لصفحة A4 واحدة (تصغير النتائج عند الحاجة)
+        </label>
+      </div>
+      <div class="form-field">
+        <label>أقل حد للتصغير التلقائي (%) — الافتراضي 70</label>
+        <input type="number" name="results_autofit_min" min="50" max="100" value="{{ current.results_autofit_min }}" style="width:120px;">
+      </div>
+      <button class="btn" type="submit">{{ t('save_settings') }}</button>
+      <p class="muted" style="font-size:.82em; margin-top:10px;">
+        تقدر تجرّب الحجم مباشرة من شريط معاينة أي تقرير (A− / A+ و«📄 ملاءمة A4») ثم «💾 افتراضي».
+      </p>
+    </form>
+    <div style="flex:0 0 auto; text-align:center;">
+      <div id="rsA4Box" style="position:relative; width:300px; height:424px; background:#fff; border:1px solid #94A3B8; box-shadow:0 2px 10px rgba(0,0,0,.18); overflow:hidden; direction:ltr;">
+        <div style="position:absolute; left:0; right:0; top:0; height:98px; background:repeating-linear-gradient(45deg,#F1F5F9,#F1F5F9 6px,#E2E8F0 6px,#E2E8F0 12px); color:#64748B; font:11px Tahoma; display:flex; align-items:center; justify-content:center;">الترويسة + بيانات المريض</div>
+        <div id="rsRows" style="position:absolute; left:11px; right:11px; top:98px; bottom:34px; overflow:hidden;"></div>
+        <div style="position:absolute; left:0; right:0; bottom:0; height:34px; background:#F1F5F9; color:#64748B; font:11px Tahoma; display:flex; align-items:center; justify-content:center;">العنوان / التذييل</div>
+      </div>
+      <div id="rsInfo" style="margin-top:8px; font-weight:bold; color:#26529C;"></div>
+      <div class="muted" style="font-size:.8em;">تقدير تقريبي لصف نتائج واحد السطر</div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    var rng = document.getElementById('rsRange'), num = document.getElementById('rsNum'), box = document.getElementById('rsRows'), info = document.getElementById('rsInfo');
+    function val(name, d) { var e = document.querySelector('[name="' + name + '"]'); var v = e ? parseFloat(e.value) : NaN; return isNaN(v) ? d : v; }
+    function draw() {
+      var sc = Math.max(60, Math.min(150, parseFloat(num.value) || 100)) / 100;
+      var font = val('result_value_font_size', 16), pad = val('report_row_pad', 7);
+      var rowPx = (font * 1.3 + pad * 2 + 1) * sc;                 // ارتفاع الصف الحقيقي بالبكسل (96dpi)
+      var K = 300 / (210 / 25.4 * 96);                              // معامل تصغير الصفحة الحقيقية لعرض 300px
+      var availPx = (297 - 10 - 22) * 96 / 25.4 - 98 / K - 34 / K;  // ارتفاع منطقة النتائج بالصفحة الحقيقية
+      var n = Math.floor(availPx / rowPx), total = Math.ceil(box.clientHeight / (rowPx * K)) + 1;
+      box.innerHTML = '';
+      for (var i = 0; i < total; i++) {
+        var r = document.createElement('div');
+        r.style.cssText = 'height:' + (rowPx * K) + 'px; border-bottom:1px solid #CBD5E1; display:flex; align-items:center; gap:4px;';
+        var a = document.createElement('i'); a.style.cssText = 'flex:2; height:' + Math.max(2, font * sc * K * .7) + 'px; background:#1F3B7A; opacity:.75; border-radius:2px;';
+        var b = document.createElement('i'); b.style.cssText = 'flex:1; height:' + Math.max(2, font * sc * K * .7) + 'px; background:#0F766E; opacity:.75; border-radius:2px;';
+        r.appendChild(a); r.appendChild(b); box.appendChild(r);
+      }
+      info.textContent = '≈ ' + n + ' صف نتائج بصفحة A4' + (sc !== 1 ? ' (عند ' + Math.round(sc * 100) + '%)' : '');
+    }
+    rng.addEventListener('input', function () { num.value = rng.value; draw(); });
+    num.addEventListener('input', function () { rng.value = num.value; draw(); });
+    ['result_value_font_size', 'report_row_pad'].forEach(function (n) { var e = document.querySelector('[name="' + n + '"]'); if (e) e.addEventListener('input', draw); });
+    draw();
+  })();
+  </script>
+</div>
+
 <div class="card" style="max-width:640px;">
   <h3>حجم جدول النتائج بالتقارير المطبوعة</h3>
   <p class="muted">
