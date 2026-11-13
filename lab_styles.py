@@ -55,7 +55,7 @@ OPT_SPECS = {
     "bf:boxed": [
         ("border", "لون الإطار", _C, "#222222"), ("label_bg", "خلفية العناوين", _C, "#EEF4FB"),
         ("concl_bg", "خلفية Conclusion", _C, "#DCE9F7"), ("font", "حجم الخط (px)", "num", 15),
-        ("show_cbc", "إظهار WBC / Hb / Platelet / HCT من CBC نفس الزيارة", "bool", 1),
+        ("show_cbc", "ملء WBC / Hb / Platelet / HCT تلقائياً من CBC نفس الزيارة (بالتقرير وبشاشة الإدخال) — إلغاء التأشير = ما تنملأ", "bool", 1),
         ("autofit", "ضغط الخط تلقائيًا لتبقى النتيجة بصفحة واحدة (لو RBC/WBC/Platelet طويلة)", "bool", 1),
         ("hide", "صفوف مخفية (أسماؤها مفصولة بفاصلة) — أو اضغط ✕ على الصف بالمعاينة", "list", []),
         ("extra", "باراميترات مضافة (الاسم|الوحدة|L أو R) — أو استخدم ➕ بالمعاينة", "list", []),
@@ -691,7 +691,28 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                         pv = _preview_url(db, {**st, "key": k})
                         fam_styles.append({**st, "key": k, "active": k == act, "preview": pv})
             sections = db.execute("SELECT id, name FROM sections ORDER BY sort_order, id").fetchall()
-            return render_template("management/test_panel.html", test=t, rows=rows, fam=fam, fam_title=FAMILIES[fam][0] if fam else "",
+            # v29: قالب test_panel.html يقرأ بيانات الفحص من المتغيّر t (t['id']...) بينما base.html يستخدم t('...') للترجمة.
+            # نمرّر كائناً يجمع الاثنين: يُستدعى كدالة ترجمة ويُقرأ كصف بيانات، فيشتغل القالب الحالي بدون تعديله.
+            _ctx = {}
+            app.update_template_context(_ctx)
+            _tr = _ctx.get("t")
+
+            class _TRow:
+                def __init__(self, row, fn): self._row, self._fn = row, fn
+                def __call__(self, *a, **k): return self._fn(*a, **k) if self._fn else (a[0] if a else "")
+                def __getitem__(self, k): return self._row[k]
+                def __getattr__(self, k):
+                    try: return self._row[k]
+                    except (IndexError, KeyError): raise AttributeError(k)
+                def __iter__(self): return iter(self._row)
+                def keys(self): return self._row.keys()
+                def get(self, k, d=None):
+                    try: return self._row[k]
+                    except (IndexError, KeyError): return d
+                def __bool__(self): return True
+            _tobj = _TRow(t, _tr)
+            return render_template("management/test_panel.html", test=_tobj, t=_tobj, rows=rows, fam=fam,
+                                   fam_title=FAMILIES[fam][0] if fam else "",
                                    fam_styles=fam_styles, sections=sections, tab=request.args.get("tab", "report"))
         finally:
             db.close()

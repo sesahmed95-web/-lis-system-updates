@@ -386,6 +386,60 @@ def _is_electrophoresis(code, name):
     return "electroph" in (((code or "") + " " + (name or "")).lower())
 
 
+
+_BF_CBC_ALIASES = {
+    "wbc": ("wbcs", "wbc", "wbc count", "wbc count:", "tlc"),
+    "hb": ("hgb", "hb", "hemoglobin", "haemoglobin", "hb:"),
+    "plt": ("plt", "platelet count", "platelet count:", "platelets", "platelet"),
+    "hct": ("hct", "pcv", "hct:"),
+}
+
+
+def _bf_autofill_enabled():
+    """مفتاح الملء التلقائي لتقرير Blood film (ستايل bf المؤطّر: خيار show_cbc، الافتراضي مفعّل)."""
+    try:
+        st = app.jinja_env.globals["report_style"]("bf")
+        if st.get("id") == "boxed":
+            return bool(st["opts"].get("show_cbc", 1))     # نفس مفتاح «ملء ... تلقائياً» بستايل Blood film المؤطّر
+        return False                                        # الكلاسيكي لا يطبع هذي الباراميترات الأربعة
+    except Exception:
+        pass
+    return True
+
+
+def _cbc_values_for_order(db, order_id):
+    """قيم CBC (WBC/Hb/PLT/HCT) لنفس زيارة هذا الطلب: {'wbc':..,'hb':..,'plt':..,'hct':..}"""
+    rows = db.execute(
+        "SELECT tp.name AS n, r.value_text AS t, r.value_numeric AS v FROM orders o0 "
+        "JOIN orders o2 ON o2.visit_id = o0.visit_id "
+        "JOIN order_tests ot2 ON ot2.order_id = o2.id "
+        "JOIN test_definitions td ON td.id = ot2.test_definition_id "
+        "JOIN results r ON r.order_test_id = ot2.id JOIN test_parameters tp ON tp.id = r.test_parameter_id "
+        "WHERE o0.id = ? AND td.code = 'CBC'", (order_id,)).fetchall()
+    by = {}
+    for r in rows:
+        v = r["t"] if r["t"] not in (None, "") else r["v"]
+        if isinstance(v, float) and v == int(v):
+            v = int(v)
+        if v not in (None, ""):
+            by[(r["n"] or "").strip().lower()] = v
+    out = {}
+    for k, names in _BF_CBC_ALIASES.items():
+        out[k] = next((by[n] for n in names if n in by), "")
+    return out
+
+
+def _bf_fill_from_cbc(db, ot, parameters, params):
+    vals = _cbc_values_for_order(db, ot["order_id"])
+    for p in parameters:
+        nm = (p["name"] or "").strip().lower().rstrip(":").strip()
+        for k, names in _BF_CBC_ALIASES.items():
+            if nm in {n.rstrip(":") for n in names}:
+                if params.get(p["name"]) in ("", None) and vals.get(k) not in ("", None):
+                    params[p["name"]] = vals[k]
+                break
+
+
 REPORT_TEMPLATE_MAP = {
     "CBC": "reports/cbc.html",
     "BF": "reports/blood_film.html",
@@ -9485,6 +9539,33 @@ def visit_results_entry(visit_id):
             "hidden_params": _hidden_params,
         })
 
+    # v29: شاشة الإدخال — خانات Blood film الأربعة (WBC / Hb / Platelet / HCT) تنعرض معبّأة من CBC نفس الزيارة
+    # (الخانة المكتوب فيها قيمة ما تُمَس). تُحفظ كنتيجة BF عند ضغط حفظ. تُلغى من: ستايلات التقارير ← Blood film.
+    try:
+        if any(b["ot"]["test_code"] in ("BF", "BFRETIC") for b in boxes) and _bf_autofill_enabled():
+            for b in boxes:
+                if b["ot"]["test_code"] not in ("BF", "BFRETIC"):
+                    continue
+                _vals = _cbc_values_for_order(db, b["ot"]["order_id"])
+                for _p in b["parameters"]:
+                    _nm = (_p["name"] or "").strip().lower().rstrip(":").strip()
+                    for _k, _names in _BF_CBC_ALIASES.items():
+                        if _nm in {n.rstrip(":") for n in _names}:
+                            _cur = b["results_by_param"].get(_p["id"])
+                            _empty = _cur is None or (_cur["value_text"] in (None, "") and _cur["value_numeric"] in (None, ""))
+                            if _empty and _vals.get(_k) not in ("", None):
+                                _fr = {"id": None, "order_test_id": b["ot"]["id"], "test_parameter_id": _p["id"],
+                                       "value_text": None, "value_numeric": None, "note": None, "flag": None,
+                                       "param_name": _p["name"]}
+                                if isinstance(_vals[_k], (int, float)):
+                                    _fr["value_numeric"] = _vals[_k]
+                                else:
+                                    _fr["value_text"] = _vals[_k]
+                                b["results_by_param"][_p["id"]] = _fr
+                            break
+    except Exception:
+        app.logger.exception("bf entry autofill from CBC failed")
+
     boxes = _v80_adjust_entry_boxes(db, visit_id, boxes)   # v80
     _pv_cfg = get_result_layout(db)
     _pv_has_merge = bool(get_visit_previous_merges(db, visit_id))
@@ -10363,6 +10444,15 @@ def _print_report_impl_v79(order_test_id):
         ranges[p["name"]] = find_reference_range(db, p["id"], ot["gender"], ot["age"], ot["age_unit"],
                                                   patient_id=ot["patient_id"],
                                                   analyzer=ot["analyzer"] if "analyzer" in ot.keys() else None)
+
+    # v29: Blood film — الباراميترات الأربعة (WBC / Hb / Platelet / HCT) تُملأ تلقائياً من نتائج CBC لنفس الزيارة
+    # (سواء انكتبت يدوياً أو جاءت من الجهاز أو قُرئت من صورة الشاشة، لأنها كلها محفوظة كنتائج CBC).
+    # لا تكتب فوق قيمة مكتوبة يدوياً بالـBF. تُلغى من: الإدارة ← ستايلات التقارير ← Blood film ← (إلغاء «ملء ... تلقائياً»).
+    try:
+        if ot["test_code"] in ("BF", "BFRETIC") and _bf_autofill_enabled():
+            _bf_fill_from_cbc(db, ot, parameters, params)
+    except Exception:
+        app.logger.exception("bf autofill from CBC failed")
 
     logo_path = get_setting(db, "logo_path", "")
     logo_url = url_for("static", filename=logo_path) if logo_path else None
