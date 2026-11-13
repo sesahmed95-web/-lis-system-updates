@@ -2,6 +2,72 @@
 {% block report_body %}
 {# Culture & Sensitivity: العينة + النتيجة + لكل بكتيريا جدول مضادات (Sensitive / Intermediate / Resistant). #}
 {% set cu = ot_culture(ot['id'] or 0) %}
+{% set rs = report_style('culture') %}
+{# معاينة الستايلات: بيانات نموذجية لو ما في بيانات حقيقية #}
+{% if is_design_preview|default(false) and not cu.organisms %}
+  {% set cu = {'specimen': 'Urine', 'growth': 'growth', 'no_growth_text': '', 'source': 'Urine', 'collected': '04-Oct-2026', 'note': '',
+     'organisms': [{'name': 'Staphylococcus haemolyticus', 'count': '>10^5 CFU/ml', 'results': [
+        {'name': 'Cefoxitin Screen', 'r': 'R', 'mic': 'POS'}, {'name': 'Benzylpenicillin', 'r': 'R', 'mic': '>=0.5'}, {'name': 'Oxacillin', 'r': 'R', 'mic': '>=4'},
+        {'name': 'Gentamicin', 'r': 'S', 'mic': '<=0.5'}, {'name': 'Tobramycin', 'r': 'R', 'mic': '4'}, {'name': 'Levofloxacin', 'r': 'R', 'mic': '4'},
+        {'name': 'Clindamycin', 'r': 'R', 'mic': '<=0.25'}, {'name': 'Linezolid', 'r': 'S', 'mic': '1'}, {'name': 'Vancomycin', 'r': 'S', 'mic': '1'},
+        {'name': 'Tetracycline', 'r': 'S', 'mic': '4'}, {'name': 'Nitrofurantoin', 'r': 'S', 'mic': '<=16'}, {'name': 'Rifampicin', 'r': 'S', 'mic': '<=0.5'}]}]} %}
+  {% for o in cu.organisms %}{% set _ = o.update({'S': o.results|selectattr('r','equalto','S')|map(attribute='name')|list, 'I': [], 'R': o.results|selectattr('r','equalto','R')|map(attribute='name')|list}) %}{% endfor %}
+{% endif %}
+{% if rs.id == 'vitek' %}
+<style>
+  .vk { direction:ltr; text-align:left; font-size:{{ rs.opts.font|default(14) }}px; color:#000; }
+  .vk-t { font-size:1.25em; font-weight:700; margin:6px 0 4px; }
+  .vk-hd { margin:4px 0 10px; line-height:1.55; } .vk-hd b { display:inline-block; min-width:140px; }
+  .vk-sub { display:flex; align-items:baseline; justify-content:space-between; border:1px solid {{ rs.opts.line|default('#000') }}; border-bottom:0; padding:3px 8px; font-weight:700; }
+  .vk-sub span { font-weight:400; }
+  .vk-tbl { width:100%; border-collapse:collapse; border:1px solid {{ rs.opts.line|default('#000') }}; }
+  .vk-tbl th { background:{{ rs.opts.head_bg|default('#fff') }}; border:1px solid {{ rs.opts.line|default('#000') }}; padding:4px 8px; text-align:center; }
+  .vk-tbl td { border:1px solid {{ rs.opts.line|default('#000') }}; padding:3px 8px; }
+  .vk-tbl td.c { text-align:center; } .vk-tbl td.r { font-weight:700; text-align:center; }
+  .vk-tbl td.gap { border-top:0; border-bottom:0; width:8px; padding:0; }
+  .vk-ft { margin-top:8px; white-space:pre-wrap; }
+  @media print { .vk-tbl th { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+</style>
+<div class="vk">
+  <div class="vk-t" data-keep="1">Microbiology Chart Report</div>
+  {% if cu.growth == 'no_growth' %}
+    <div class="vk-hd"><b>Specimen:</b> {{ cu.specimen or cu.source or '—' }}<br><b>Result:</b> {{ cu.no_growth_text }}</div>
+  {% else %}
+  {% for o in cu.organisms %}
+    {% if rs.opts.show_header|default(1) %}
+    <div class="vk-hd">
+      <b>Selected Organism :</b> <span style="font-weight:700;"><i>{{ o.name }}</i></span><br>
+      <b>Organism Quantity:</b> {{ o.count or '' }}<br>
+      <b>Source:</b> {{ cu.source or cu.specimen or '' }}{% if cu.collected %} &nbsp;&nbsp; <b style="min-width:0;">Collected:</b> {{ cu.collected }}{% endif %}
+    </div>
+    {% endif %}
+    {% set mic_on = rs.opts.show_mic|default(1) %}
+    <div class="vk-sub">{{ rs.opts.title|default('Susceptibility Information') }}{% if rs.opts.show_status|default(1) %}<span>Status: Final</span>{% endif %}</div>
+    {% set rows = o.results or [] %}
+    {% set two = rs.opts.two_cols|default(1) %}
+    {% set half = ((rows|length + 1) // 2) if two else rows|length %}
+    <table class="vk-tbl">
+      <tr>
+        <th>Antimicrobial</th>{% if mic_on %}<th style="width:70px;">MIC</th>{% endif %}<th style="width:110px;">Interpretation</th>
+        {% if two and rows|length > 1 %}<th class="gap" style="background:#fff;"></th><th>Antimicrobial</th>{% if mic_on %}<th style="width:70px;">MIC</th>{% endif %}<th style="width:110px;">Interpretation</th>{% endif %}
+      </tr>
+      {% for i in range(half) %}
+      {% set a = rows[i] %}{% set b = rows[i + half] if (two and (i + half) < rows|length) else none %}
+      <tr>
+        <td>{{ a.name }}</td>{% if mic_on %}<td class="c">{{ a.mic or '' }}</td>{% endif %}<td class="r">{{ a.r }}</td>
+        {% if two and rows|length > 1 %}<td class="gap"></td>
+          {% if b %}<td>{{ b.name }}</td>{% if mic_on %}<td class="c">{{ b.mic or '' }}</td>{% endif %}<td class="r">{{ b.r }}</td>
+          {% else %}<td></td>{% if mic_on %}<td></td>{% endif %}<td></td>{% endif %}
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </table>
+    <div style="font-size:.85em;margin-top:3px;">S = Sensitive &nbsp; I = Intermediate &nbsp; R = Resistant</div>
+  {% endfor %}
+  {% endif %}
+  {% if cu.note or rs.opts.footer %}<div class="vk-ft"><b>Comment:</b> {{ cu.note }}{% if cu.note and rs.opts.footer %}<br>{% endif %}{{ rs.opts.footer }}</div>{% endif %}
+</div>
+{% else %}
 <style>
   .cs-h { direction:ltr; text-align:left; margin:6px 0; font-size:16px; }
   .cs-org { margin:14px 0 4px; font-size:17px; font-weight:700; direction:ltr; text-align:left; }
@@ -36,4 +102,5 @@
   {% endfor %}
 {% endif %}
 {% if cu.note %}<div class="cs-note" style="display:flex; gap:6px; white-space:normal;"><b>Comment:</b>{{ rich_note(ot['id'] or 0, 'cs-note', cu.note, style='flex:1') }}</div>{% endif %}
+{% endif %}
 {% endblock %}

@@ -1620,6 +1620,190 @@ def sync_test_sections(db):
     db.commit()
 
 
+def ensure_heme_tests_in_hematology_once(conn):
+    """v17: لمرة وحدة (علم بجدول settings) — تحاليل أمراض الدم الأساسية (CBC / Blood film / Retic / BMA / BM biopsy)
+    اللي قسمها فاضي أو «Other/Others» تُنقل لقسم Hematology (يُنشأ إن لم يوجد). ما تلمس أي تحليل أنت وزّعته بقسم ثاني،
+    وما تحذف شيئًا. بعدها أي تغيير تسويه بنفسك من «تجميع الفحوصات بالأقسام» يبقى."""
+    FLAG = "v17_heme_section_done"
+    try:
+        if conn.execute("SELECT 1 FROM settings WHERE key=?", (FLAG,)).fetchone():
+            return
+        rows = conn.execute(
+            "SELECT td.id, td.code, td.department, td.section_id, sc.name AS sec_name FROM test_definitions td "
+            "LEFT JOIN sections sc ON sc.id = td.section_id "
+            "WHERE UPPER(td.code) IN ('CBC','BF','RETIC','BMA','BMBIOPSY','BM_BIOPSY')").fetchall()
+        if not rows:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, '0')", (FLAG,))
+            conn.commit()
+            return
+        weak = {"", "other", "others"}
+        todo = []
+        for r in rows:
+            dep = (r["department"] or "").strip().lower()
+            sec = (r["sec_name"] or "").strip().lower()
+            if (r["section_id"] is None and dep in weak) or sec in ("other", "others") or (r["section_id"] is None and dep in weak):
+                todo.append(r["id"])
+        if todo:
+            hs = conn.execute(
+                "SELECT id FROM sections WHERE LOWER(TRIM(name))='hematology' OR LOWER(TRIM(COALESCE(dept_name,'')))='hematology' "
+                "ORDER BY id LIMIT 1").fetchone()
+            if hs:
+                hid = hs["id"]
+            else:
+                nxt = conn.execute("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM sections").fetchone()["n"]
+                hid = conn.execute("INSERT INTO sections (name, parent_id, dept_name, sort_order) VALUES ('Hematology', NULL, 'Hematology', ?)",
+                                   (nxt,)).lastrowid
+            for tid in todo:
+                conn.execute("UPDATE test_definitions SET department='Hematology', section_id=? WHERE id=?", (hid, tid))
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (FLAG, "1:%d" % len(todo)))
+        conn.commit()
+        print("v17: moved %d hematology tests to Hematology" % len(todo))
+    except Exception as _e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("v17 heme section skipped:", type(_e).__name__, _e)
+
+
+# باراميترات CBC كما تظهر على جهاز Beckman Coulter DXH 520 (الاسم بالبرنامج، الوحدة، low، high).
+DXH520_CBC_PARAMS = [
+    ("WBCs", "X10^9/L", 4.0, 10.0, ("wbc", "wbcs")), ("Ly", "%", 20, 40, ("ly", "lym", "lymph")),
+    ("MO", "%", 2.0, 10.0, ("mo", "mono")), ("NE", "%", 40, 80, ("ne", "neut")),
+    ("EO", "%", 1.0, 6.0, ("eo", "eos")), ("BA", "%", 0.0, 2.0, ("ba", "baso")),
+    ("LY#", "X10^9/uL", 1.0, 3.0, ("ly#", "lym#")), ("MO#", "X10^9/uL", 0.2, 1.0, ("mo#", "mono#")),
+    ("NE#", "X10^9/uL", 2.0, 7.0, ("ne#", "neut#")), ("EO#", "X10^9/uL", 0.02, 0.5, ("eo#", "eos#")),
+    ("BA#", "X10^9/uL", 0.01, 0.1, ("ba#", "baso#")), ("RBC", "X10^12/uL", 4.5, 5.5, ("rbc", "rbcs")),
+    ("HGB", "g/dl", 13.0, 17.0, ("hgb", "hb", "hemoglobin")), ("HCT", "%", 40.0, 50.0, ("hct", "pcv")),
+    ("MCV", "fL", 83.0, 101, ("mcv",)), ("MCH", "pg", 27.0, 32.0, ("mch",)), ("MCHC", "g/dL", 31.5, 34.5, ("mchc",)),
+    ("RDW", "%", 11.6, 14.0, ("rdw", "rdw-cv")), ("RDW-SD", "fL", 39.0, 46, ("rdw-sd", "rdwsd")),
+    ("PLT", "X10^9/uL", 150, 400, ("plt", "platelet", "platelets", "platelet count")), ("MPV", "fL", 7.0, 10.0, ("mpv",)),
+]
+
+
+def ensure_dxh520_cbc_parameters_once(conn):
+    """v17: يتأكد أن CBC فيه كل باراميترات جهاز DXH 520 (21 باراميتر) — يضيف الناقص فقط (مطابقة بالاسم/المرادف)
+    قبل حقل Comment، بدون حذف أو تغيير أي باراميتر موجود."""
+    FLAG = "v17_dxh520_params_done"
+    try:
+        if conn.execute("SELECT 1 FROM settings WHERE key=?", (FLAG,)).fetchone():
+            return
+        t = conn.execute("SELECT id FROM test_definitions WHERE UPPER(code)='CBC' ORDER BY id LIMIT 1").fetchone()
+        if not t:
+            return
+        tp_cols = [r[1] for r in conn.execute("PRAGMA table_info(test_parameters)")]
+        have = {(r["name"] or "").strip().lower() for r in
+                conn.execute("SELECT name FROM test_parameters WHERE test_definition_id=?", (t["id"],))}
+        has_sort = "sort_order" in tp_cols
+        mx = conn.execute("SELECT COALESCE(MAX(sort_order),0) AS m FROM test_parameters WHERE test_definition_id=?",
+                          (t["id"],)).fetchone()["m"] if has_sort else 0
+        added = 0
+        for name, unit, lo, hi, aliases in DXH520_CBC_PARAMS:
+            if have & ({name.lower()} | set(aliases)):
+                continue
+            mx += 1
+            cols, vals = ["test_definition_id", "name", "unit", "result_type"], [t["id"], name, unit, "Numeric"]
+            if has_sort:
+                cols.append("sort_order"); vals.append(mx)
+            pid = conn.execute("INSERT INTO test_parameters (%s) VALUES (%s)" % (",".join(cols), ",".join("?" * len(cols))),
+                               tuple(vals)).lastrowid
+            conn.execute("INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high) "
+                         "VALUES (?, 'Both', 0, 'Years', 120, 'Years', ?, ?)", (pid, lo, hi))
+            added += 1
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (FLAG, "1:%d" % added))
+        conn.commit()
+        if added:
+            print("v17: added %d missing DXH520 CBC parameters" % added)
+    except Exception as _e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("v17 DXH520 params skipped:", type(_e).__name__, _e)
+
+
+# نسب CBC حسب العمر (من جداول المختبر المصوّرة): (من يوم، إلى يوم، {باراميتر: (low, high)}) — كلها بالأيام.
+# Hb وMCHC حُوّلت من g/L إلى g/dL (÷10). المطلق (NE#,LY#,MO#,EO#) بوحدة x10^9/L.
+_PED_BANDS = [
+    (0, 2, {"HGB": (14.0, 22.0), "MCV": (100, 120), "MCH": (31, 37), "MCHC": (30, 36), "WBCs": (10, 26), "NE#": (4, 14), "LY#": (3, 8), "MO#": (0.5, 2.0), "EO#": (0.1, 1.0), "PLT": (100, 450)}, {"HCT": "60 (mean)"}),
+    (3, 6, {"HGB": (15.0, 21.0), "MCV": (92, 118), "MCH": (31, 37), "MCHC": (29, 37), "WBCs": (7, 23), "NE#": (3, 5), "LY#": (2, 8), "MO#": (0.5, 1.0), "EO#": (0.1, 2.0), "PLT": (210, 500)}, {"HCT": "56 (mean)"}),
+    (7, 13, {"HGB": (17.1, 17.9), "MCV": (88, 126), "MCH": (31, 37), "MCHC": (28, 38), "WBCs": (6, 22), "NE#": (3, 6), "LY#": (3, 9), "MO#": (0.1, 1.7), "EO#": (0.1, 0.8), "PLT": (160, 500)}, {"HCT": "54 (mean)"}),
+    (14, 29, {"HGB": (16.1, 16.9), "MCV": (86, 124), "MCH": (31, 37), "MCHC": (28, 38), "WBCs": (6, 22), "NE#": (3, 7), "LY#": (3, 9), "MO#": (0.1, 1.7), "EO#": (0.1, 0.9), "PLT": (170, 500)}, {"HCT": "51 (mean)"}),
+    (30, 59, {"HGB": (11.5, 16.5), "MCV": (92, 116), "MCH": (30, 36), "MCHC": (29, 37), "WBCs": (5, 19), "NE#": (3, 9), "LY#": (3, 16), "MO#": (0.3, 1.0), "EO#": (0.2, 1.0), "PLT": (200, 500)}, {"HCT": "43 (mean)"}),
+    (60, 89, {"HGB": (9.4, 13.0), "MCV": (87, 103), "MCH": (27, 33), "MCHC": (28.5, 35.5), "WBCs": (5, 15), "NE#": (1, 5), "LY#": (4, 10), "MO#": (0.4, 1.2), "EO#": (0.1, 1.0), "PLT": (210, 650)}, {"HCT": "35 (mean)"}),
+    (90, 364, {"HGB": (11.1, 14.1), "MCV": (68, 84), "MCH": (24, 30), "MCHC": (30, 36), "WBCs": (6, 18), "NE#": (1, 6), "LY#": (4, 12), "MO#": (0.2, 1.2), "EO#": (0.1, 1.0), "PLT": (200, 550)}, {"HCT": "35 (mean)"}),
+    (365, 729, {"HGB": (11.1, 14.1), "MCV": (72, 84), "MCH": (25, 29), "MCHC": (32, 36), "WBCs": (6, 16), "NE#": (1, 7), "LY#": (3.5, 11), "MO#": (0.2, 1.0), "EO#": (0.1, 1.0), "PLT": (200, 550)}, {"HCT": "34 (mean)"}),
+    (730, 2189, {"HGB": (11.0, 14.0), "MCV": (75, 87), "MCH": (24, 30), "MCHC": (31, 37), "WBCs": (5, 15), "NE#": (1.5, 8), "LY#": (6, 9), "MO#": (0.2, 1.0), "EO#": (0.1, 1.0), "PLT": (200, 490)}, {"HCT": "37 (mean)"}),
+    (2190, 4379, {"HGB": (11.5, 15.5), "MCV": (77, 95), "MCH": (25, 33), "MCHC": (31, 37), "WBCs": (5, 13), "NE#": (2, 8), "LY#": (1, 5), "MO#": (0.2, 1.0), "EO#": (0.1, 1.0), "PLT": (170, 450)}, {"HCT": "40 (mean)"}),
+]
+_PED_BLANK = ("Ly", "MO", "NE", "EO", "BA", "HCT")    # نسب % (والـHCT) ما تتوفر للأطفال بالجداول → بلا مدى بدل ما يظهر مدى بالغين خاطئ
+
+
+def ensure_cbc_age_ranges_once(conn):
+    """v18: لمرة وحدة — يضيف نسب CBC الطبيعية حسب العمر (حديث الولادة ← 12 سنة) من جداول المختبر،
+    ويجعل مدى البالغين يبدأ من 12 سنة، ويضيف مدى Hb وHct للبالغين حسب الجنس (Dacie).
+    ما يمس أي مدى مخصص لجهاز/مريض، ويتخطى أي باراميتر عنده أصلاً مدى أطفال."""
+    FLAG = "v18_cbc_age_ranges_done"
+    try:
+        if conn.execute("SELECT 1 FROM settings WHERE key=?", (FLAG,)).fetchone():
+            return
+        t = conn.execute("SELECT id FROM test_definitions WHERE UPPER(code)='CBC' ORDER BY id LIMIT 1").fetchone()
+        if not t:
+            return
+        pm = {}
+        for r in conn.execute("SELECT id, name FROM test_parameters WHERE test_definition_id=?", (t["id"],)):
+            pm[(r["name"] or "").strip()] = r["id"]
+        alias = {"WBCs": ("WBCs", "WBC"), "HGB": ("HGB", "Hb"), "PLT": ("PLT", "Platelets"), "LY#": ("LY#", "Ly#"), "Ly": ("Ly", "LY")}
+        def pid(n):
+            for a in alias.get(n, (n,)):
+                if a in pm:
+                    return pm[a]
+            return None
+        rcols = [r[1] for r in conn.execute("PRAGMA table_info(reference_ranges)")]
+        added = 0
+        ADULT_START = 12 * 365
+        for name in {n for b in _PED_BANDS for n in b[2]} | set(_PED_BLANK):
+            p = pid(name)
+            if not p:
+                continue
+            if conn.execute("SELECT 1 FROM reference_ranges WHERE test_parameter_id=? AND age_to_unit='Days' AND age_to<4380 "
+                            "AND patient_id IS NULL AND analyzer IS NULL LIMIT 1", (p,)).fetchone() if "analyzer" in rcols and "patient_id" in rcols else False:
+                continue
+            # مدى البالغين العام يبدأ من 12 سنة (حتى ما يتقدّم على صفوف الأطفال)
+            conn.execute("UPDATE reference_ranges SET age_from=12, age_from_unit='Years' WHERE test_parameter_id=? AND COALESCE(gender,'Both')='Both' "
+                         "AND COALESCE(age_from,0)=0 AND COALESCE(age_to,120)>=100 AND patient_id IS NULL AND analyzer IS NULL", (p,))
+            for lo_d, hi_d, vals, texts in _PED_BANDS:
+                if name in vals:
+                    lo, hi, txt = vals[name][0], vals[name][1], None
+                elif name in texts:
+                    lo, hi, txt = None, None, texts[name]
+                elif name in _PED_BLANK:
+                    lo, hi, txt = None, None, None
+                else:
+                    continue
+                conn.execute("INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text) "
+                             "VALUES (?, 'Both', ?, 'Days', ?, 'Days', ?, ?, ?)", (p, lo_d, hi_d, lo, hi, txt))
+                added += 1
+        # بالغين حسب الجنس (Dacie): Hb وHct
+        for name, male, female in (("HGB", (13.0, 17.0), (12.0, 15.0)), ("HCT", (40.0, 52.0), (36.0, 48.0))):
+            p = pid(name)
+            if not p or conn.execute("SELECT 1 FROM reference_ranges WHERE test_parameter_id=? AND gender IN ('Male','Female') LIMIT 1", (p,)).fetchone():
+                continue
+            for g, (lo, hi) in (("Male", male), ("Female", female)):
+                conn.execute("INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high) "
+                             "VALUES (?, ?, 12, 'Years', 120, 'Years', ?, ?)", (p, g, lo, hi))
+                added += 1
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (FLAG, "1:%d" % added))
+        conn.commit()
+        print("v18: added %d CBC age-based reference ranges" % added)
+    except Exception as _e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("v18 CBC age ranges skipped:", type(_e).__name__, _e)
+
+
 def ensure_sections_schema(conn):
     """v54: شجرة الأقسام + أسعار المختبرات المُرسِلة + رموز بديلة + شرط ارتباط التحاليل (BF -> CBC)."""
     conn.executescript(
@@ -1890,11 +2074,14 @@ def init_db():
     ensure_reactive_lymphocytes_parameter(conn)
     ensure_basophils_after_eosinophils_order(conn)
     ensure_cbc_comment_parameter(conn)
+    ensure_dxh520_cbc_parameters_once(conn)
+    ensure_cbc_age_ranges_once(conn)
     ensure_coag_parameters(conn)
     ensure_vldl_parameter(conn)
     apply_client_preset(conn)
     try:
         sync_test_sections(conn)   # التحاليل المزروعة/المستوردة أعلاه تُربط بأقسامها
+        ensure_heme_tests_in_hematology_once(conn)
     except Exception as _e:
         print('sync_test_sections skipped:', _e)
     conn.close()
@@ -1907,7 +2094,7 @@ _PRESET_KEYS = {
     "portal_default_hours", "portal_ready_when", "portal_retention_days",
     # --- تصميم التقارير وترتيبها (يُنسخ من برنامجك للعميل): أسلوب الجدول + تنسيق العناوين (result_layout_json)،
     #     ترتيب أقسام اللوحة المجمّعة وترتيب التحاليل بشاشة النتائج، خطوط/ألوان/مسافات التقرير والترويسة.
-    "result_layout_json", "rs_active_cbc", "rs_active_bf", "rs_active_bma", "rs_active_bmb", "rs_tabs", "rs_custom", "rs_opts", "report_design_coag", "report_design_exam", "combined_panel_group_order", "results_entry_test_order",
+    "result_layout_json", "rs_active_cbc", "rs_active_bf", "rs_active_bma", "rs_active_bmb", "rs_active_culture", "rs_tabs", "rs_custom", "rs_opts", "report_design_coag", "report_design_exam", "combined_panel_group_order", "results_entry_test_order",
     "logo_width", "logo_position", "letterhead_font_size", "letterhead_font_family",
     "report_underline_style", "report_row_pad", "report_col_pad",
     "test_name_font_size", "result_value_font_size", "show_result_flag",

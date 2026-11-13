@@ -942,7 +942,7 @@ def report_design(family):
     (الإدارة ← تصاميم التقارير)، وغيره 1 = التصميم الكلاسيكي الحالي."""
     try:
         q = request.args.get("design")
-        if q in ("1", "2", "3", "4"):
+        if q in ("1", "2", "3", "4") or (family == "exam" and q in ("5", "6")):
             return q
     except RuntimeError:
         pass
@@ -952,7 +952,7 @@ def report_design(family):
         _db.close()
     except Exception:
         v = "1"
-    return v if v in ("1", "2", "3", "4") else "1"
+    return v if (v in ("1", "2", "3", "4") or (family == "exam" and v in ("5", "6"))) else "1"
 
 
 app.jinja_env.globals["report_design"] = report_design
@@ -7478,6 +7478,7 @@ def culture_for(db, order_test_id):
         res = o.get("results") or []
         for k in ("S", "I", "R"):
             o[k] = [x["name"] for x in res if x.get("r") == k]
+        o["mics"] = {x["name"]: x.get("mic", "") for x in res}
     return d
 
 
@@ -7487,6 +7488,8 @@ def _culture_clean(d):
     out["growth"] = "no_growth" if d.get("growth") == "no_growth" else "growth"
     out["no_growth_text"] = str(d.get("no_growth_text") or out["no_growth_text"])[:300]
     out["note"] = str(d.get("note") or "").replace("\r\n", "\n")[:2000]
+    out["source"] = str(d.get("source") or "")[:80]
+    out["collected"] = str(d.get("collected") or "")[:40]
     orgs = []
     for o in (d.get("organisms") or [])[:6]:
         name = str(o.get("name") or "").strip()[:120]
@@ -7496,7 +7499,7 @@ def _culture_clean(d):
         for x in (o.get("results") or [])[:60]:
             an = str(x.get("name") or "").strip()[:80]
             if an and x.get("r") in ("S", "I", "R"):
-                res.append({"name": an, "r": x["r"]})
+                res.append({"name": an, "r": x["r"], "mic": str(x.get("mic") or "").strip()[:16]})
         orgs.append({"name": name, "count": str(o.get("count") or "")[:80], "results": res})
     out["organisms"] = orgs
     return out
@@ -10135,7 +10138,7 @@ def _coag_table_mode(db):
         q = request.args.get("design")
         if q == "table":
             return True
-        if q in ("1", "2", "3", "4"):
+        if q in ("1", "2", "3", "4", "5", "6"):
             return False
     except RuntimeError:
         pass
@@ -13548,6 +13551,8 @@ def api_quick_add_test():
     department = (request.form.get("department") or "").strip()
     if not name:
         return jsonify({"error": "الاسم مطلوب"}), 400
+    if not department:
+        return jsonify({"error": "اختر القسم الذي يتبع له هذا الفحص (مثلاً Hematology)."}), 400
     code = unique_test_code(db, name)
     cur = db.execute(
         "INSERT INTO test_definitions (code, name, department, sample_type, price, is_active, is_examining_test) "
@@ -13555,6 +13560,10 @@ def api_quick_add_test():
         (code, name, department),
     )
     db.commit()
+    try:
+        sync_test_sections(db)   # يربطه فورًا بالقسم (يُنشأ إن لم يوجد)
+    except Exception:
+        pass
     log_action("QuickAddTest", "test_definition", cur.lastrowid, name)
     return jsonify({"id": cur.lastrowid, "name": name, "department": department, "code": code})
 
@@ -13815,7 +13824,7 @@ def report_designs():
     if request.method == "POST":
         for fam in ("coag", "exam"):
             v = request.form.get(fam, "")
-            if v in ("1", "2", "3", "4") or (fam == "coag" and v == "table"):
+            if v in ("1", "2", "3", "4") or (fam == "coag" and v == "table") or (fam == "exam" and v in ("5", "6")):
                 set_setting(db, f"report_design_{fam}", v)
         if "exam_abnormal_present" in request.form:
             set_setting(db, "exam_abnormal_red", "1" if request.form.get("exam_abnormal_red") else "0")
@@ -15455,7 +15464,9 @@ def report_designer():
         return redirect(url_for("report_designer", test_definition_id=test_id))
 
     all_tests = db.execute(
-        "SELECT * FROM test_definitions WHERE is_active=1 ORDER BY department, name"
+        "SELECT td.*, COALESCE(sc.name, NULLIF(TRIM(td.department),''), 'Other') AS sec_label "
+        "FROM test_definitions td LEFT JOIN sections sc ON sc.id = td.section_id "
+        "WHERE td.is_active=1 ORDER BY sec_label, td.name"
     ).fetchall()
     tests_status = []
     for test in all_tests:
@@ -18021,7 +18032,8 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         prompt = ("هذه صورة نتيجة جهاز تحليل مختبري. استخرج القيم الرقمية الظاهرة بوضوح فقط. "
                   "أسماء الحقول المطلوبة بالضبط: " + json.dumps(names, ensure_ascii=False) + ". "
                   "أرجع JSON فقط بالشكل {\"اسم الحقل\": \"القيمة\"} بنفس أسماء الحقول أعلاه، القيمة رقم كما يظهر بالصورة بدون وحدة. "
-                  "لا تخمّن ولا تحسب: لو القيمة غير ظاهرة أو غير واضحة اتركها خارج JSON. لا تكتب أي شرح.")
+                  "لا تخمّن ولا تحسب: لو القيمة غير ظاهرة أو غير واضحة اتركها خارج JSON. لا تكتب أي شرح. "
+                  "وأضف مفتاحًا إضافيًا \"__patient_name\" فيه اسم المريض المكتوب على الشاشة (Last Name ثم First Name) كما يظهر بالضبط، أو \"\" لو غير ظاهر.")
         try:
             txt = _call_ai_vision(cfg, prompt, b64)
         except _AIErr as e:
@@ -18034,6 +18046,20 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         norm = lambda x: re.sub(r"[^a-z0-9%#]", "", str(x).lower())
         by_name = {norm(p_["name"]): p_["id"] for p_ in params}
         values = {}
+        device_name = str(data.pop("__patient_name", "") or "").strip()[:80]
+        # مطابقة اسم المريض على شاشة الجهاز مع اسمه (الإنكليزي) بالزيارة — للتأكد أن الصورة لنفس المريض
+        expected, name_match = "", None
+        try:
+            pr = db.execute("SELECT p.full_name, p.full_name_en FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+                            "JOIN visits v ON v.id=o.visit_id JOIN patients p ON p.id=v.patient_id WHERE ot.id=?", (ot_id,)).fetchone()
+            if pr:
+                expected = (pr["full_name_en"] or "").strip() or ((pr["full_name"] or "").strip() if re.search(r"[A-Za-z]", pr["full_name"] or "") else "")
+            toks = lambda x: {t for t in re.findall(r"[a-z]+", str(x).lower()) if len(t) > 1}
+            a, b = toks(device_name), toks(expected)
+            if a and b:
+                name_match = len(a & b) >= min(2, len(a), len(b))
+        except Exception:
+            pass
         for k, v in data.items():
             pid = by_name.get(norm(k))
             if not pid:   # WBC ↔ WBCs وما يشابهها
@@ -18044,7 +18070,20 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 values[str(pid)] = vs
         if not values:
             return jsonify(ok=False, error="ما قدرت أقرأ قيم واضحة من هذه الصورة. جرّب صورة أوضح أو أدخلها يدوياً.")
-        return jsonify(ok=True, values=values, count=len(values))
+        return jsonify(ok=True, values=values, count=len(values), device_name=device_name, expected_name=expected, name_match=name_match)
+
+    @bp.route("/api/order-tests/<int:ot_id>/device-info")
+    def ot_device_info(ot_id):
+        """الاسم الإنكليزي والعمر للمريض — يُكتبان بجهاز الـCBC (الجهاز يحسب النسب الطبيعية حسب العمر)."""
+        if not session.get("user_id"):
+            return jsonify(ok=False), 401
+        db = get_db()
+        r = db.execute("SELECT p.full_name, p.full_name_en, p.age, p.age_unit, p.gender FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+                       "JOIN visits v ON v.id=o.visit_id JOIN patients p ON p.id=v.patient_id WHERE ot.id=?", (ot_id,)).fetchone()
+        if not r:
+            return jsonify(ok=False), 404
+        return jsonify(ok=True, name_en=(r["full_name_en"] or "").strip(), name=(r["full_name"] or "").strip(),
+                       age=r["age"], age_unit=r["age_unit"] or "Years", gender=r["gender"] or "")
 
     @bp.route("/ai/api/crop-image", methods=["POST"])
     def ai_crop_image():

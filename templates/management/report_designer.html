@@ -777,10 +777,11 @@
 {# ====== واجهة الأقسام: شريط أقسام جانبي + بطاقات التقارير + تبويبات. كل الأقسام القديمة تبقى كما هي وتُعرض عند اختيارها ====== #}
 {% set rdx = namespace(items=[]) %}
 {% for row in tests_status %}
-  {% set rdx.items = rdx.items + [ {'id': row.test['id'], 'code': row.test['code'], 'name': row.test['name'], 'dept': (row.test['department'] or 'Other'),
+  {% set rdx.items = rdx.items + [ {'id': row.test['id'], 'code': row.test['code'], 'name': row.test['name'], 'dept': (row.test['sec_label'] or row.test['department'] or 'Other'),
       'st': ('builtin' if row.has_builtin else ('custom' if row.has_custom else ('auto' if row.auto_ok else 'need'))),
       'edit': url_for('report_designer', test_definition_id=row.test['id']) ~ '#designCard',
-      'prev': url_for('preview_report_design', test_definition_id=row.test['id'])} ] %}
+      'prev': url_for('report_design_view', test_id=row.test['id'], back=url_for('report_designer')),
+      'panel': url_for('test_panel', test_id=row.test['id'])} ] %}
 {% endfor %}
 <style>
   .rdx-grid { display:grid; grid-template-columns:290px minmax(0,1fr); gap:18px; align-items:start; }
@@ -846,6 +847,7 @@
     var q = el('input'); q.type = 'search'; q.placeholder = '🔎 بحث بالقسم…'; q.style.minWidth = '200px'; head.appendChild(q);
     deptBox.appendChild(head);
     var tabs = el('div', 'rdx-tabs'), t1 = el('button', 'rdx-tab on', '📑 التقارير'), t2 = el('button', 'rdx-tab', '🧪 الفحوصات والنسب الطبيعية'), t3 = el('button', 'rdx-tab', '🎛️ شكل التقارير');
+    t2.title = t3.title = 'خاصة بكل فحص: افتح الفحص من بطاقته واختر الزر';
     [t1, t2, t3].forEach(function (t) { t.type = 'button'; tabs.appendChild(t); }); deptBox.appendChild(tabs);
     var p1 = el('div'), p2 = el('div'), p3 = el('div');
     var cards = el('div', 'rdx-cards');
@@ -857,8 +859,12 @@
         c.appendChild(el('b', '', t.name)); c.appendChild(el('small', '', t.code));
         var act = el('div', 'rdx-act'), s = STXT[t.st]; act.appendChild(el('span', 'rdx-badge rdx-b-' + s[1], s[0]));
         var e = el('a', 'btn small secondary', 'تعديل'); e.href = t.edit; act.appendChild(e);
-        if (t.st !== 'need') { var v = el('a', 'btn small secondary', 'معاينة'); v.href = t.prev; v.target = '_blank'; act.appendChild(v); }
-        c.appendChild(act); cards.appendChild(c);
+        if (t.st !== 'need') { var v = el('a', 'btn small secondary', 'معاينة'); v.href = t.prev; act.appendChild(v); }
+        c.appendChild(act);
+        var act2 = el('div', 'rdx-act'); act2.style.marginTop = '6px';
+        var r1 = el('a', 'btn small', '🧪 النسب الطبيعية'); r1.href = t.panel + '?tab=ranges'; act2.appendChild(r1);
+        var r2 = el('a', 'btn small', '🎛️ شكل التقرير'); r2.href = t.panel + '?tab=style'; act2.appendChild(r2);
+        c.appendChild(act2); cards.appendChild(c);
       });
     }
     draw(''); p1.appendChild(cards);
@@ -867,13 +873,12 @@
       need.forEach(function (t) { var r = el('div'); r.style.cssText = 'display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px dashed #E2E8F0;'; r.appendChild(el('span', '', t.name)); var a = el('a', 'btn small secondary', 'اختر قالب'); a.href = t.edit; a.style.marginInlineStart = 'auto'; r.appendChild(a); w.appendChild(r); });
       p1.appendChild(w);
     }
-    var cat = el('div', 'card'); cat.appendChild(el('p', 'muted', 'أسماء الفحوصات واختصاراتها والنسب الطبيعية (Reference ranges) تُعدَّل من كتالوج الفحوصات.'));
-    var a1 = el('a', 'btn', '🧪 فتح كتالوج الفحوصات'); a1.href = '/master/test-catalog'; cat.appendChild(a1);
-    var a2 = el('a', 'btn secondary', '🗂️ تجميع الفحوصات بالأقسام'); a2.href = '/master/sections'; a2.style.marginInlineStart = '8px'; cat.appendChild(a2); p2.appendChild(cat);
-    var sh = el('div', 'card'); sh.appendChild(el('p', 'muted', 'شكل الطباعة العام لكل التقارير (جدول النتائج، الألوان، الأعمدة) وستايلات التخثر وGUE/GSE/SFA.'));
+    var cat = el('div', 'card'); cat.appendChild(el('p', 'muted', 'النسب الطبيعية (Reference ranges) خاصة بكل فحص: اضغط «🧪 النسب الطبيعية» على بطاقة الفحص المطلوب لتعديل نسبه ووحداته وقسمه.'));
+    var a2 = el('a', 'btn secondary', '🗂️ تجميع الفحوصات بالأقسام'); a2.href = '/master/sections'; cat.appendChild(a2); p2.appendChild(cat);
+    var sh = el('div', 'card'); sh.appendChild(el('p', 'muted', 'شكل التقرير خاص بكل فحص: اضغط «🎛️ شكل التقرير» على بطاقة الفحص (CBC مثلاً) لترى ستايلاته وتعاينها داخل البرنامج وتثبّت المناسب. الإعدادات العامة لكل التقارير:'));
     var b1 = el('button', 'btn', '🧾 أسلوب جدول النتائج'); b1.type = 'button'; b1.onclick = function () { go('style'); };
     var b2 = el('button', 'btn secondary', '🎨 ستايلات الطباعة'); b2.type = 'button'; b2.style.marginInlineStart = '8px'; b2.onclick = function () { go('prints'); };
-    var b3 = el('a', 'btn', '🗂️ ستايلات التقارير بتبويبات'); b3.href = {{ url_for('report_styles_page')|tojson }}; b3.style.marginInlineStart = '8px'; sh.appendChild(b1); sh.appendChild(b2); sh.appendChild(b3); p3.appendChild(sh);
+    var b3 = el('a', 'btn', '🗂️ كل ستايلات التقارير'); b3.href = {{ url_for('report_styles_page')|tojson }}; b3.style.marginInlineStart = '8px'; sh.appendChild(b1); sh.appendChild(b2); sh.appendChild(b3); p3.appendChild(sh);
     [p1, p2, p3].forEach(function (p) { deptBox.appendChild(p); });
     [t1, t2, t3].forEach(function (t, i) { t.onclick = function () { [t1, t2, t3].forEach(function (x) { x.classList.toggle('on', x === t); }); [p1, p2, p3].forEach(function (p, j) { p.style.display = j === i ? '' : 'none'; }); }; });
     p2.style.display = 'none'; p3.style.display = 'none';

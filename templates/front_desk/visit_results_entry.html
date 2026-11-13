@@ -439,6 +439,46 @@
 
 <script>
   // ------------------------------------------------------------------
+  // معادلات CBC الإضافية عند الإدخال اليدوي (تعمل مع MCH/MCHC/HCT الموجودة أصلاً):
+  //   X# (LY#,MO#,NE#,EO#,BA#) = WBC × X% ÷ 100        (x10^9/L)
+  //   MCV = HCT ÷ RBC × 10   (فقط لو MCV فاضي وHCT وRBC مكتوبين)
+  // الحقل المحسوب يتظلل بالأخضر، وبمجرد ما تكتب فيه يدويًا يتوقف التحديث التلقائي له.
+  // ------------------------------------------------------------------
+  document.addEventListener('DOMContentLoaded', function () {
+    function find(box, names) {
+      for (var i = 0; i < names.length; i++) { var e = box.querySelector('[data-param-name="' + names[i] + '"]'); if (e) return e; }
+      return null;
+    }
+    function val(el) { if (!el) return null; var v = parseFloat(String(el.value).replace(',', '.')); return isNaN(v) ? null : v; }
+    var PAIRS = [['LY#', ['Ly', 'LY', 'Lym']], ['MO#', ['MO', 'Mono']], ['NE#', ['NE', 'Neut']], ['EO#', ['EO', 'Eos']], ['BA#', ['BA', 'Baso']]];
+    document.querySelectorAll('.rb-box').forEach(function (box) {
+      var wbc = find(box, ['WBCs', 'WBC']), rbc = find(box, ['RBC']), hct = find(box, ['HCT']), mcv = find(box, ['MCV']);
+      var pairs = PAIRS.map(function (p) { return { abs: find(box, [p[0]]), pct: find(box, p[1]) }; }).filter(function (p) { return p.abs && p.pct; });
+      if (!wbc || (!pairs.length && !(mcv && hct && rbc))) return;
+      function put(el, v) { el.value = v; el.style.backgroundColor = '#ECFDF5'; el.title = 'محسوب تلقائيًا — اكتب قيمة لتغييره'; }
+      function recalc() {
+        var w = val(wbc);
+        pairs.forEach(function (p) {
+          if (p.abs.dataset.userEdited === '1') return;
+          var x = val(p.pct);
+          if (w !== null && x !== null) put(p.abs, ((w * x) / 100).toFixed(2));
+          else if (p.abs.style.backgroundColor) { p.abs.value = ''; p.abs.style.backgroundColor = ''; }
+        });
+        if (mcv && hct && rbc && mcv.dataset.userEdited !== '1' && (mcv.value === '' || mcv.style.backgroundColor)) {
+          var h = val(hct), r = val(rbc);
+          if (h !== null && r) put(mcv, ((h / r) * 10).toFixed(1));
+        }
+      }
+      var watch = [wbc, rbc, hct].concat(pairs.map(function (p) { return p.pct; }));
+      watch.forEach(function (el) { if (el) el.addEventListener('input', recalc); });
+      pairs.forEach(function (p) { p.abs.addEventListener('input', function (e) { if (e.isTrusted) { p.abs.dataset.userEdited = '1'; p.abs.style.backgroundColor = ''; } }); });
+      if (mcv) mcv.addEventListener('input', function (e) { if (e.isTrusted) { mcv.dataset.userEdited = '1'; mcv.style.backgroundColor = ''; } });
+    });
+  });
+</script>
+
+<script>
+  // ------------------------------------------------------------------
   // تعبئة "PT Control" و"PTT Control" تلقائيًا من نتيجة PT / PTT لنفس
   // صندوق تحليل Coagulation Tests — نفس فلسفة MCH/MCHC فوق بالضبط: تعبئة
   // تلقائية بمجرد كتابة النتيجة، تتوقف بمجرد ما المستخدم يكتب بحقل
@@ -2113,6 +2153,7 @@
     box.style.cssText = 'margin:8px 0;border:1px dashed #8fb5b0;border-radius:8px;padding:6px 10px;background:rgba(15,118,110,.05);max-width:780px;';
     box.innerHTML =
       '<summary style="cursor:pointer;font-size:0.9em;">📎 صورة نتيجة الجهاز / ملاحظة التقرير <span class="lm-count muted"></span></summary>' +
+      '<div class="lm-dev muted" style="margin-top:6px;font-size:.9em;"></div>' +
       '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
         '<select class="lm-mode"><option value="paper">ورقة / وصل مطبوع من الجهاز (تنظيف + قص)</option><option value="screen">لقطة شاشة الجهاز</option></select>' +
         '<input type="file" class="lm-file" accept="image/*">' +
@@ -2147,6 +2188,10 @@
     function load() {
       fetch('/api/order-tests/' + id + '/media').then(function (r) { return r.json(); }).then(function (d) { if (d.ok) render(d); });
     }
+    fetch('/api/order-tests/' + id + '/device-info').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) return;
+      q('.lm-dev').innerHTML = 'للكتابة بالجهاز: <b dir="ltr">' + esc(d.name_en || '(لا يوجد اسم إنكليزي — أضفه بملف المريض)') + '</b> · العمر: <b>' + esc(d.age == null ? '—' : d.age + ' ' + d.age_unit) + '</b>';
+    }).catch(function () {});
     q('.lm-up').onclick = function () {
       var f = q('.lm-file').files[0];
       if (!f) { msg('اختر صورة أولاً.', true); return; }
@@ -2189,6 +2234,7 @@
       fetch('/ai/api/extract-image', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order_test_id: +id, image_id: firstImg }) }).then(function (r) { return r.json(); }).then(function (d) {
         if (!d.ok) { msg(d.error || 'فشلت القراءة', true); return; }
+        if (d.name_match === false && !confirm('⚠️ الاسم على شاشة الجهاز (' + d.device_name + ') لا يطابق اسم المريض (' + d.expected_name + ').\nقد تكون الصورة لمريض آخر. تعبئة القيم رغم ذلك؟')) { msg('أُلغيت التعبئة: اسم الصورة لا يطابق المريض.', true); return; }
         var n = 0;
         Object.keys(d.values).forEach(function (pid) {
           var el = document.querySelector('[name="ot' + id + '_param_' + pid + '"]');
@@ -2197,7 +2243,7 @@
             el.dispatchEvent(new Event('input', { bubbles: true })); n++;
           }
         });
-        msg('عُبّئت ' + n + ' قيمة (مظلّلة بالأصفر). راجعها ثم اضغط Save.');
+        msg('عُبّئت ' + n + ' قيمة (مظلّلة بالأصفر). ' + (d.name_match === true ? '✓ اسم المريض على الصورة مطابق (' + d.device_name + '). ' : (d.device_name ? 'الاسم على الصورة: ' + d.device_name + '. ' : '')) + 'راجعها ثم اضغط Save.');
       }).catch(function () { msg('تعذر الاتصال بالبرنامج', true); });
     };
     load();
@@ -2251,6 +2297,7 @@
                 var col = {S: '#15803d', I: '#b45309', R: '#b91c1c'}[k];
                 return '<label style="margin-inline-end:8px;color:' + col + ';font-weight:700;"><input type="radio" class="cs-r" name="csr' + id + '_' + oi + '_' + esc(a) + '" data-o="' + oi + '" data-a="' + esc(a) + '" value="' + k + '"' + (cur === k ? ' checked' : '') + '> ' + k + '</label>';
               }).join('') +
+              '<input class="cs-mic" data-o="' + oi + '" data-a="' + esc(a) + '" value="' + esc((o.results.filter(function (x) { return x.name === a; })[0] || {}).mic || '') + '" placeholder="MIC" title="MIC (اختياري — يظهر بستايل Vitek)" style="width:62px;font-size:12px;margin-inline-end:6px;" dir="ltr">' +
               '<a href="#" class="cs-clr" data-o="' + oi + '" data-a="' + esc(a) + '" style="font-size:11px;">مسح</a></td></tr>';
           });
           h += '</tbody></table></div>';
@@ -2271,7 +2318,8 @@
       box.querySelectorAll('.cs-r:checked').forEach(function (e) {
         var o = state.organisms[+e.dataset.o];
         o.results = o.results.filter(function (x) { return x.name !== e.dataset.a; });
-        o.results.push({name: e.dataset.a, r: e.value});
+        var mi = [].filter.call(box.querySelectorAll('.cs-mic'), function (m) { return m.dataset.o === e.dataset.o && m.dataset.a === e.dataset.a; })[0];
+        o.results.push({name: e.dataset.a, r: e.value, mic: mi ? mi.value : ''});
       });
     }
     box.addEventListener('click', function (e) {

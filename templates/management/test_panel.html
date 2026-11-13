@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t['name'] }} — إعدادات الفحص{% endblock %}
+{% block content %}
+{% set here = url_for('test_panel', test_id=t['id'], tab='style') %}
+<style>
+  .tp-tabs { display:flex; gap:6px; flex-wrap:wrap; border-bottom:3px solid #E2E8F0; margin:12px 0; }
+  .tp-tab { border:0; background:transparent; padding:10px 18px; font:inherit; cursor:pointer; border-radius:10px 10px 0 0; margin-bottom:-3px; border-bottom:3px solid transparent; }
+  .tp-tab.on { border-bottom-color:var(--primary,#205072); font-weight:700; color:var(--primary,#205072); }
+  .tp-pane { display:none; } .tp-pane.on { display:block; }
+  .tp-tbl { width:100%; border-collapse:collapse; }
+  .tp-tbl th, .tp-tbl td { border-bottom:1px solid #E2E8F0; padding:6px 8px; text-align:start; vertical-align:middle; }
+  .tp-tbl input[type=text] { width:100%; box-sizing:border-box; }
+  .tp-tbl input.n { width:90px; direction:ltr; }
+  .tp-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:14px; }
+  .tp-card { border:2px solid #E2E8F0; border-radius:12px; padding:10px; background:#fff; display:flex; flex-direction:column; gap:6px; }
+  .tp-card.act { border-color:#16A34A; box-shadow:0 0 0 3px rgba(22,163,74,.15); }
+  .tp-wrap { direction:ltr; height:228px; overflow:hidden; border:1px solid #E2E8F0; border-radius:6px; background:#fff; position:relative; }
+  .tp-frame { width:800px; height:540px; border:0; transform:scale(.42); transform-origin:0 0; pointer-events:none; }
+  .tp-badge { display:inline-block; background:#16A34A; color:#fff; border-radius:10px; padding:1px 10px; font-weight:700; font-size:.85em; }
+  .tp-acts { display:flex; gap:6px; flex-wrap:wrap; align-items:center; } .tp-acts form { margin:0; display:inline; }
+</style>
+<div class="card">
+  <div style="margin-bottom:6px;"><a class="btn small secondary" href="{{ url_for('report_designer') }}">↩ رجوع لمصمم التقارير</a></div>
+  <h2 style="margin:0;">{{ t['name'] }} <small class="muted" dir="ltr">{{ t['code'] }}</small></h2>
+  <div class="muted">القسم: <b>{{ t['sec_label'] }}</b></div>
+
+  <div class="tp-tabs">
+    <button type="button" class="tp-tab" data-tab="report">📑 التقرير</button>
+    <button type="button" class="tp-tab" data-tab="ranges">🧪 الفحوصات والنسب الطبيعية</button>
+    <button type="button" class="tp-tab" data-tab="style">🎛️ شكل التقرير</button>
+  </div>
+
+  <div class="tp-pane" data-pane="report">
+    <p class="muted">تصميم طباعة هذا الفحص (ترتيب الباراميترات، الأعمدة، الختم والتوقيع…).</p>
+    <div class="tp-acts">
+      <a class="btn" href="{{ url_for('report_designer', test_definition_id=t['id']) }}#designCard">✏️ تعديل تصميم التقرير</a>
+      <a class="btn secondary" href="{{ url_for('report_design_view', test_id=t['id'], back=url_for('test_panel', test_id=t['id'])) }}">👁 معاينة</a>
+    </div>
+  </div>
+
+  <div class="tp-pane" data-pane="ranges">
+    <form method="POST" action="{{ url_for('test_panel_save_ranges', test_id=t['id']) }}">
+      <p class="muted">النسب الطبيعية والوحدات <b>خاصة بهذا الفحص فقط</b> ({{ t['name'] }}). عدّل ثم احفظ. لإضافة مدى حسب العمر/الجنس استخدم «كتالوج المديات».</p>
+      <div style="margin:8px 0;">
+        <label>قسم هذا الفحص:
+          <select name="section_id">
+            {% for sc in sections %}<option value="{{ sc['id'] }}" {{ 'selected' if sc['id'] == t['section_id'] }}>{{ sc['name'] }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <div style="overflow-x:auto;">
+      <table class="tp-tbl">
+        <thead><tr><th>الباراميتر</th><th>الوحدة</th><th>الجنس / العمر</th><th>Low</th><th>High</th><th>نص المدى (اختياري)</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+          {% set p = r.p %}
+          {% if r.ranges %}
+            {% for rr in r.ranges %}
+            <tr>
+              {% if loop.first %}<td rowspan="{{ r.ranges|length }}"><b dir="ltr">{{ p['name'] }}</b></td>
+              <td rowspan="{{ r.ranges|length }}"><input type="text" name="unit_{{ p['id'] }}" value="{{ p['unit'] or '' }}" style="width:110px;" dir="ltr"></td>{% endif %}
+              <td class="muted" style="font-size:.85em;">{{ rr['gender'] or 'Both' }} · {{ rr['age_from'] }}–{{ rr['age_to'] }} {{ rr['age_to_unit'] or 'Years' }}</td>
+              <td><input class="n" type="text" name="rr_low_{{ rr['id'] }}" value="{{ '' if rr['low'] is none else rr['low'] }}"></td>
+              <td><input class="n" type="text" name="rr_high_{{ rr['id'] }}" value="{{ '' if rr['high'] is none else rr['high'] }}"></td>
+              <td><input type="text" name="rr_text_{{ rr['id'] }}" value="{{ rr['range_text'] or '' }}"></td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td><b dir="ltr">{{ p['name'] }}</b></td><td><input type="text" name="unit_{{ p['id'] }}" value="{{ p['unit'] or '' }}" style="width:110px;" dir="ltr"></td>
+              <td colspan="4" class="muted">لا يوجد مدى طبيعي — أضفه من «كتالوج المديات».</td></tr>
+          {% endif %}
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      <div class="tp-acts" style="margin-top:12px;">
+        <button class="btn" type="submit">💾 حفظ</button>
+        <a class="btn secondary" href="/master/reference-ranges">➕ كتالوج المديات (حسب العمر/الجنس)</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="tp-pane" data-pane="style">
+    {% if not fam %}
+      <p class="muted">هذا الفحص يتبع <b>أسلوب جدول النتائج العام</b> (أو تصميمه الخاص). تغيير الشكل من:</p>
+      <div class="tp-acts">
+        <a class="btn" href="{{ url_for('report_designer') }}#resultStyleCard">🧾 أسلوب جدول النتائج</a>
+        <a class="btn secondary" href="{{ url_for('report_styles_page') }}">🗂️ كل ستايلات التقارير</a>
+        <a class="btn secondary" href="{{ url_for('report_design_view', test_id=t['id'], back=url_for('test_panel', test_id=t['id'], tab='style')) }}">👁 معاينة الشكل الحالي</a>
+      </div>
+    {% else %}
+      <p class="muted">ستايلات <b>{{ fam_title }}</b>. اضغط «معاينة» لرؤية الستايل كاملاً داخل البرنامج، ومن هناك «📌 تثبيت هذا الستايل»، أو ثبّته مباشرة من هنا.</p>
+      <div class="tp-grid">
+        {% for st in fam_styles %}
+        <div class="tp-card{{ ' act' if st.active }}">
+          <div style="display:flex;justify-content:space-between;gap:6px;"><b>{{ st.title }}</b>{% if st.active %}<span class="tp-badge">✅ المعتمد</span>{% endif %}</div>
+          {% if st.desc %}<div class="muted" style="font-size:.85em;">{{ st.desc }}</div>{% endif %}
+          <div class="tp-wrap">{% if st.preview %}<iframe class="tp-frame" loading="lazy" src="{{ st.preview }}"></iframe>{% endif %}</div>
+          <div class="tp-acts">
+            {% if not st.active %}
+            <form method="POST" action="{{ url_for('report_styles_act') }}">
+              <input type="hidden" name="act" value="activate"><input type="hidden" name="key" value="{{ st.key }}"><input type="hidden" name="next" value="{{ here }}">
+              <button class="btn small" type="submit">📌 تثبيت هذا الستايل</button></form>
+            {% endif %}
+            <a class="btn small secondary" href="{{ url_for('report_style_view', key=st.key, back=here) }}">👁 معاينة</a>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+<script>
+(function () {
+  var tabs = [].slice.call(document.querySelectorAll('.tp-tab')), panes = [].slice.call(document.querySelectorAll('.tp-pane'));
+  function show(id) { tabs.forEach(function (b) { b.classList.toggle('on', b.dataset.tab === id); }); panes.forEach(function (p) { p.classList.toggle('on', p.dataset.pane === id); }); }
+  tabs.forEach(function (b) { b.onclick = function () { show(b.dataset.tab); }; });
+  show({{ tab|tojson }});
+})();
+</script>
+{% endblock %}

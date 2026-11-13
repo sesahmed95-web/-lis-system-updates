@@ -21,11 +21,12 @@ FAMILIES = {
     "bf": ("Blood film / Retic count", "BF", "heme"),
     "bma": ("BMA — شفط نقي العظم", "BMA", "heme"),
     "bmb": ("BM Biopsy — خزعة نقي العظم", "BMBIOPSY", "heme"),
+    "culture": ("Culture & Sensitivity / Vitek", "CULTURE", "micro"),
     "coag": ("التخثر", "COAG", "coag"),
     "exam": ("GUE / GSE / SFA", "GUE", "urine"),
     "result": ("جدول النتائج (كيمياء/هرمونات/فيتامينات/فايروسات…)", None, "chem"),
 }
-NEW_FAMILIES = ("cbc", "bf", "bma", "bmb")          # عائلات تقبل النسخ والتعديل الكامل
+NEW_FAMILIES = ("cbc", "bf", "bma", "bmb", "culture")          # عائلات تقبل النسخ والتعديل الكامل
 EXTERNAL = ("coag", "exam", "result")               # مخزنها القديم محفوظ كما هو
 
 # حقول التعديل لكل ستايل: (مفتاح, عنوان, نوع, افتراضي)
@@ -52,6 +53,14 @@ OPT_SPECS = {
         ("font", "حجم الخط (px)", "num", 15), ("bullet", "رمز النقطة", "text", "•"),
         ("no_label", "عنوان رقم العينة", "text", "BM aspirate No.:"),
     ],
+    "culture:classic": [],
+    "culture:vitek": [
+        ("line", "لون الخطوط", _C, "#000000"), ("head_bg", "خلفية عناوين الأعمدة", _C, "#FFFFFF"),
+        ("title", "عنوان الجدول", "text", "Susceptibility Information"), ("font", "حجم الخط (px)", "num", 14),
+        ("show_mic", "إظهار عمود MIC", "bool", 1), ("two_cols", "عمودان من المضادات (مثل التقرير الأصلي)", "bool", 1),
+        ("show_status", "إظهار Status: Final", "bool", 1), ("show_header", "إظهار Selected Organism / Source / Collected", "bool", 1),
+        ("footer", "تعليق ثابت بآخر التقرير (اختياري)", "text", ""),
+    ],
     "bmb:classic": [],
     "bmb:blue": [
         ("head_bg", "لون أشرطة العناوين", _C, "#B8D0EC"), ("border", "لون الإطار", _C, "#1F3A7A"),
@@ -70,12 +79,16 @@ BASE_STYLES = [
      "حسب الصورة: جدول بإطار واحد يجمع قيم CBC والديفرنشل والريتك وحقول الوصف والخلاصة"),
     ("bma", "classic", "الكلاسيكي (الحالي)", "إطار واحد: Cellularity … Conclusion"),
     ("bma", "blue", "أشرطة زرقاء (BM aspirate)", "حسب الصورة: شريط رقم العينة + شريط العنوان + قائمة نقاط + شريط Conclusion"),
+    ("culture", "classic", "الكلاسيكي (الحالي)", "جدول Sensitive / Intermediate / Resistant لكل بكتيريا"),
+    ("culture", "vitek", "Vitek — Susceptibility Information", "حسب الصورة: Selected Organism + Source، وجدول Antimicrobial / MIC / Interpretation بعمودين، وStatus: Final"),
     ("bmb", "classic", "الكلاسيكي (الحالي)", "Clinical notes + Conclusion"),
     ("bmb", "blue", "أشرطة زرقاء (BM biopsy)", "حسب الصورة: شريط رقم الخزعة + شريط العنوان + نقاط مربعة + Conclusion"),
     ("coag", "table", "جدول النتائج (مثل الكيمياء)", "يتبع أسلوب جدول النتائج العام"),
     ("coag", "1", "تصميم 1 — الكلاسيكي", ""), ("coag", "2", "تصميم 2", ""), ("coag", "3", "تصميم 3", ""), ("coag", "4", "تصميم 4", ""),
     ("exam", "1", "تصميم 1 — الكلاسيكي", ""), ("exam", "2", "تصميم 2 — جدول رسمي", ""),
     ("exam", "3", "تصميم 3 — إطار", ""), ("exam", "4", "تصميم 4 — إكلينيكي ملوّن", ""),
+    ("exam", "5", "تصميم 5 — Macro/Micro (حسب الصورة)", "عناوين Macroscopic / Microscopic بخط تحتها، الاسم : النتيجة، والمدى الطبيعي على اليمين (مثل 0-2 /HPF)"),
+    ("exam", "6", "تصميم 6 — جدول بخطوط فاصلة", "نفس ترتيب تصميم 5 لكن بصفوف مفصولة بخطوط رفيعة وعناوين بشريط خفيف"),
     ("result", "a1", "Style A — Labels Set 1", ""), ("result", "a2", "Style A — Labels Set 2", ""),
     ("result", "b_grid", "Style B — Matching Image 1", ""), ("result", "b_compact", "Style B — Compact", ""),
     ("result", "r1", "Style R1 — شريط ملوّن + المدى تحت الاسم", ""), ("result", "r2", "Style R2 — أعمدة كلاسيكية", ""),
@@ -88,6 +101,7 @@ DEFAULT_TABS = [
     {"id": "chem", "name": "الكيمياء والتحاليل الرقمية"},
     {"id": "heme", "name": "أمراض الدم"},
     {"id": "urine", "name": "الإدرار والخروج والحيامن"},
+    {"id": "micro", "name": "الزرع والحساسية (Culture / Vitek)"},
     {"id": "other", "name": "باقي الفحوصات"},
 ]
 
@@ -285,6 +299,8 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
         if fam == "result":
             return url_for("result_style_preview") + f"?style={sid}"
         row = db.execute("SELECT id FROM test_definitions WHERE code=?", (code,)).fetchone()
+        if not row and fam == "culture":
+            row = db.execute("SELECT id FROM test_definitions WHERE UPPER(code) LIKE '%CULTURE%' OR UPPER(name) LIKE '%CULTURE%' ORDER BY id LIMIT 1").fetchone()
         if not row:
             return ""
         base = url_for("preview_report_design", test_definition_id=row["id"])
@@ -444,4 +460,117 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                     pass
         finally:
             db.close()
+        nxt = f.get("next", "")
+        if nxt.startswith("/management/") and "//" not in nxt:   # رجوع لصفحة المعاينة الداخلية بعد التثبيت
+            return redirect(nxt)
         return _back(tab)
+
+    # ------------------------------------------------------------ معاينة داخل البرنامج (بدون فتح المتصفح)
+    @app.route("/management/report-styles/view")
+    @roles_required("admin")
+    def report_style_view():
+        """معاينة كاملة داخل نفس البرنامج: زر رجوع + زر «تثبيت هذا الستايل» (يعتمده لكل الزيارات)."""
+        db = get_db()
+        try:
+            styles = _all_styles(db)
+            key = request.args.get("key", "")
+            back = request.args.get("back", "") or url_for("report_styles_page")
+            if not back.startswith("/") or back.startswith("//"):
+                back = url_for("report_styles_page")
+            if key not in styles:
+                flash("الستايل غير موجود.")
+                return redirect(back)
+            s = styles[key]
+            s["preview"] = _preview_url(db, s)
+            active = _active_key(db, s["family"]) == key
+            here = url_for("report_style_view", key=key, back=back)
+            return render_template("management/report_style_view.html", s=s, family_title=FAMILIES[s["family"]][0],
+                                   active=active, back=back, here=here)
+        finally:
+            db.close()
+
+    @app.route("/management/report-designer/view/<int:test_id>")
+    @roles_required("admin")
+    def report_design_view(test_id):
+        """معاينة تصميم تحليل معيّن داخل البرنامج مع زر رجوع."""
+        back = request.args.get("back", "") or url_for("test_panel", test_id=test_id)
+        if not back.startswith("/") or back.startswith("//"):
+            back = url_for("test_panel", test_id=test_id)
+        return render_template("management/report_style_view.html", s={"title": "معاينة التقرير", "desc": "", "key": "",
+                               "preview": url_for("preview_report_design", test_definition_id=test_id)},
+                               family_title="", active=False, back=back, here="", no_pin=True)
+
+    # ------------------------------------------------------------ صفحة «الفحص» بتبويبات: التقرير / النسب الطبيعية / شكل التقرير
+    _FAM_BY_CODE = {"CBC": "cbc", "BF": "bf", "BFRETIC": "bf", "BMA": "bma", "BMBIOPSY": "bmb", "COAG": "coag",
+                    "GUE": "exam", "GSE": "exam", "SFA": "exam", "CULTURE": "culture"}
+
+    @app.route("/management/test-panel/<int:test_id>")
+    @roles_required("admin")
+    def test_panel(test_id):
+        db = get_db()
+        try:
+            t = db.execute("SELECT td.*, COALESCE(sc.name, NULLIF(TRIM(td.department),''), 'Other') AS sec_label "
+                           "FROM test_definitions td LEFT JOIN sections sc ON sc.id = td.section_id WHERE td.id=?",
+                           (test_id,)).fetchone()
+            if not t:
+                flash("الفحص غير موجود.")
+                return redirect(url_for("report_designer"))
+            params = db.execute("SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id", (test_id,)).fetchall()
+            rows = []
+            for p in params:
+                rr = db.execute("SELECT * FROM reference_ranges WHERE test_parameter_id=? ORDER BY id", (p["id"],)).fetchall()
+                rows.append({"p": p, "ranges": rr})
+            fam = _FAM_BY_CODE.get((t["code"] or "").upper(), "")
+            styles = _all_styles(db)
+            fam_styles = []
+            if fam:
+                act = _active_key(db, fam)
+                for k, st in styles.items():
+                    if st["family"] == fam:
+                        pv = _preview_url(db, {**st, "key": k})
+                        fam_styles.append({**st, "key": k, "active": k == act, "preview": pv})
+            sections = db.execute("SELECT id, name FROM sections ORDER BY sort_order, id").fetchall()
+            return render_template("management/test_panel.html", t=t, rows=rows, fam=fam, fam_title=FAMILIES[fam][0] if fam else "",
+                                   fam_styles=fam_styles, sections=sections, tab=request.args.get("tab", "report"))
+        finally:
+            db.close()
+
+    @app.route("/management/test-panel/<int:test_id>/save-ranges", methods=["POST"])
+    @roles_required("admin")
+    def test_panel_save_ranges(test_id):
+        db = get_db()
+        f = request.form
+        try:
+            ok = {r["id"] for r in db.execute("SELECT id FROM test_parameters WHERE test_definition_id=?", (test_id,)).fetchall()}
+
+            def num(v):
+                v = (v or "").strip().replace(",", ".")
+                try:
+                    return float(v) if v != "" else None
+                except ValueError:
+                    return None
+            n = 0
+            for key in f:
+                if not key.startswith("rr_low_"):
+                    continue
+                rid = int(key[7:]) if key[7:].isdigit() else 0
+                row = db.execute("SELECT test_parameter_id FROM reference_ranges WHERE id=?", (rid,)).fetchone()
+                if not row or row["test_parameter_id"] not in ok:
+                    continue
+                db.execute("UPDATE reference_ranges SET low=?, high=?, range_text=? WHERE id=?",
+                           (num(f.get("rr_low_%d" % rid)), num(f.get("rr_high_%d" % rid)), (f.get("rr_text_%d" % rid) or "").strip() or None, rid))
+                n += 1
+            for key in f:
+                if key.startswith("unit_") and key[5:].isdigit() and int(key[5:]) in ok:
+                    db.execute("UPDATE test_parameters SET unit=? WHERE id=?", ((f.get(key) or "").strip(), int(key[5:])))
+            sec = f.get("section_id", type=int)
+            if sec:
+                sr = db.execute("SELECT id, name, dept_name FROM sections WHERE id=?", (sec,)).fetchone()
+                if sr:
+                    db.execute("UPDATE test_definitions SET section_id=?, department=? WHERE id=?",
+                               (sr["id"], (sr["dept_name"] or "").strip() or sr["name"], test_id))
+            db.commit()
+            flash("تم حفظ النسب الطبيعية والوحدات للفحص (%d صف)." % n)
+        finally:
+            db.close()
+        return redirect(url_for("test_panel", test_id=test_id, tab="ranges"))

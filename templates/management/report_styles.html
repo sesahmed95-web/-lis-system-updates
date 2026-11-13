@@ -79,7 +79,7 @@
           <form method="POST" action="{{ url_for('report_styles_act') }}"><input type="hidden" name="act" value="activate"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="tab" value="{{ t.id }}">
             <button class="btn small" type="submit">✅ اعتماد لكل الزيارات</button></form>
           {% endif %}
-          {% if s.preview %}<a class="btn small secondary" target="_blank" href="{{ s.preview }}">👁 معاينة كاملة</a>{% endif %}
+          {% if s.preview %}<a class="btn small secondary" href="{{ url_for('report_style_view', key=key, back=url_for('report_styles_page', tab=t.id)) }}">👁 معاينة كاملة</a>{% endif %}
           {% if s.editable %}
           <button type="button" class="btn small secondary" onclick="var e=document.getElementById('ed-{{ key|replace(':','-') }}'); e.style.display = e.style.display=='none' ? 'block' : 'none';">✏️ تعديل</button>
           <form method="POST" action="{{ url_for('report_styles_act') }}"><input type="hidden" name="act" value="clone"><input type="hidden" name="key" value="{{ key }}">

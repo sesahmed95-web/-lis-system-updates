@@ -731,7 +731,7 @@
         </div>
         <div class="form-field" style="flex:1; margin-bottom:0;">
           <label>القسم</label>
-          <input type="text" id="tm_new_department" list="tmDepartmentsList" placeholder="Department">
+          <input type="text" id="tm_new_department" list="tmDepartmentsList" placeholder="Department (مطلوب)" required>
           <datalist id="tmDepartmentsList">
             {% for dep in tests|map(attribute='department')|unique %}
             {% if dep %}<option value="{{ dep }}">{% endif %}
@@ -2224,6 +2224,7 @@
     const department = document.getElementById('tm_new_department').value.trim();
     tmAddError.style.display = 'none';
     if (!name) { tmAddError.textContent = 'الاسم مطلوب.'; tmAddError.style.display = 'block'; return; }
+    if (!department) { tmAddError.textContent = 'اختر القسم الذي يتبع له الفحص (مثلاً Hematology).'; tmAddError.style.display = 'block'; return; }
     const body = new URLSearchParams({ name: name, department: department });
     fetch('/api/tests/quick-add', { method: 'POST', body: body })
       .then(function (r) { return r.json(); })

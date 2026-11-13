@@ -178,6 +178,22 @@
   .exam-design-4 .result-row .rname { font-weight:700; color:#0F172A; }
   .exam-design-4 .result-row .rval { color:#0F766E; font-size:1.1em; font-weight:700; }
   .exam-design-4 .result-row .rnorm { color:#475569; font-weight:500; font-style:italic; }
+
+  /* ===== تصميم 5 (GUE/GSE/SFA حسب الصورة): عنوان القسم بخط تحته · الاسم : النتيجة · المدى الطبيعي يمين ===== */
+  .exam-design-5 .section-title { border-top:none; padding-top:0; margin-top:18px; margin-bottom:6px; font-size:1.05em; font-weight:700; text-decoration:underline; text-underline-offset:3px; color:#000; }
+  .exam-design-5 .report-page .result-row, .exam-design-5 .result-row { padding:3px 0; }
+  .report-page:not(.exam-editing) .exam-design-5 .result-row { grid-template-columns:200px 18px minmax(120px,1fr) 190px auto; }
+  .exam-design-5 .result-row .rname { font-weight:600; color:#000; }
+  .exam-design-5 .result-row .rval { color:#000; font-weight:400; }
+  .exam-design-5 .result-row .rnorm { color:#000; text-align:right; font-weight:500; }
+  .exam-design-5 .exam-section:last-of-type { border-bottom:1px solid #000; padding-bottom:6px; }
+
+  /* ===== تصميم 6: نفس تصميم 5 بصفوف مفصولة وشريط عنوان خفيف ===== */
+  .exam-design-6 .section-title { border-top:none; background:#EEF2F7; color:#0F172A; padding:5px 10px; margin-top:14px; border-radius:3px; border-inline-start:4px solid #1F3A7A; }
+  .exam-design-6 .result-row { border-bottom:1px solid #E2E8F0; padding:4px 8px; }
+  .report-page:not(.exam-editing) .exam-design-6 .result-row { grid-template-columns:200px 18px minmax(120px,1fr) 190px auto; }
+  .exam-design-6 .result-row .rname { font-weight:600; }
+  .exam-design-6 .result-row .rnorm { text-align:right; }
   .row-tools { display: flex; gap: 2px; justify-self: end; }
   .row-tools button {
     opacity: 0; border: none; background: none; cursor: pointer; font-size: 12px; padding: 2px;
