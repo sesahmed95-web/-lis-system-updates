@@ -620,9 +620,52 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
     _FAM_BY_CODE = {"CBC": "cbc", "BF": "bf", "BFRETIC": "bf", "BMA": "bma", "BMBIOPSY": "bmb", "COAG": "coag",
                     "GUE": "exam", "GSE": "exam", "SFA": "exam", "CULTURE": "culture"}
 
+    def _log_path():
+        import os
+        return os.path.join(app.root_path, "error_log.txt")
+
+    def _show_error(where, exc):
+        import traceback, datetime
+        from markupsafe import escape
+        tb = traceback.format_exc()
+        try:
+            with open(_log_path(), "a", encoding="utf-8") as f:
+                f.write("\n[%s] %s — %s: %s\n%s\n" % (datetime.datetime.now().isoformat(timespec="seconds"), where, type(exc).__name__, exc, tb))
+        except Exception:
+            pass
+        tail = "\n".join(tb.strip().splitlines()[-14:])
+        body = ("<html dir='rtl'><head><meta charset='utf-8'><title>خطأ</title></head><body style='font-family:Tahoma,Arial;margin:30px;max-width:900px'>"
+                "<h2>⚠️ تعذّر فتح: %s</h2><p><b>سبب الخطأ:</b> <code dir='ltr'>%s: %s</code></p>"
+                "<p>انسخ النص التالي (أو صوّر الشاشة) وأرسله للمبرمج — وانكتب أيضاً بملف error_log.txt:</p>"
+                "<pre dir='ltr' style='background:#f1f5f9;padding:12px;border-radius:8px;overflow:auto;white-space:pre-wrap'>%s</pre>"
+                "<p><a href='javascript:history.back()'>↩ رجوع</a> · <a href='/management/error-log'>📜 عرض سجل الأخطاء</a></p></body></html>"
+                % (escape(where), escape(type(exc).__name__), escape(str(exc)), escape(tail)))
+        return body, 500
+
+    @app.route("/management/error-log")
+    @roles_required("admin")
+    def v28_error_log():
+        """آخر أسطر error_log.txt داخل البرنامج (للتشخيص بدون البحث عن الملف)."""
+        from markupsafe import escape
+        try:
+            with open(_log_path(), "r", encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()[-150:]
+            txt = "\n".join(lines) or "(السجل فاضي)"
+        except FileNotFoundError:
+            txt = "(ما في ملف error_log.txt بعد — ما صار أي خطأ مسجّل)"
+        return ("<html dir='rtl'><head><meta charset='utf-8'><title>سجل الأخطاء</title></head><body style='font-family:Tahoma,Arial;margin:24px'>"
+                "<h2>📜 آخر 150 سطر من error_log.txt</h2><p><a href='javascript:history.back()'>↩ رجوع</a></p>"
+                "<pre dir='ltr' style='background:#f1f5f9;padding:12px;border-radius:8px;overflow:auto;white-space:pre-wrap;font-size:12px'>%s</pre></body></html>" % escape(txt))
+
     @app.route("/management/test-panel/<int:test_id>")
     @roles_required("admin")
     def test_panel(test_id):
+        try:
+            return _test_panel_impl(test_id)
+        except Exception as _e:       # v28: بدل صفحة 500 العامة، اعرض سبب الخطأ واكتبه بسجل الأخطاء
+            return _show_error("صفحة الفحص (النسب الطبيعية / شكل التقرير)", _e)
+
+    def _test_panel_impl(test_id):
         db = get_db()
         try:
             t = db.execute("SELECT td.*, COALESCE(sc.name, NULLIF(TRIM(td.department),''), 'Other') AS sec_label "

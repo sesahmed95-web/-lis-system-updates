@@ -15491,7 +15491,8 @@ def report_designer():
     ).fetchall()
     tests_status = []
     for test in all_tests:
-        has_builtin = test["code"] in hardcoded_codes
+        # v29: Hb/Protein Electrophoresis له قالب جاهز (reports/electrophoresis.html + ستايلات hbe) حتى لو كوده مو بـ REPORT_TEMPLATE_MAP
+        has_builtin = test["code"] in hardcoded_codes or _is_electrophoresis(test["code"], test["name"])
         custom = get_report_template(db, test["id"])
         tests_status.append({
             "test": test,
