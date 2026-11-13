@@ -695,7 +695,7 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
             # نمرّر كائناً يجمع الاثنين: يُستدعى كدالة ترجمة ويُقرأ كصف بيانات، فيشتغل القالب الحالي بدون تعديله.
             _ctx = {}
             app.update_template_context(_ctx)
-            _tr = _ctx.get("t")
+            _tr = _ctx.get("t") or app.jinja_env.globals.get("t")   # v30: احتياط لو الترجمة مسجّلة كـ global بدل context processor
 
             class _TRow:
                 def __init__(self, row, fn): self._row, self._fn = row, fn
@@ -711,7 +711,9 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                     except (IndexError, KeyError): return d
                 def __bool__(self): return True
             _tobj = _TRow(t, _tr)
-            return render_template("management/test_panel.html", test=_tobj, t=_tobj, rows=rows, fam=fam,
+            # v30: السبب الجذري = القالب كان يسمّي صف الفحص t فيطمس دالة الترجمة t() بـbase.html.
+            # القالب الجديد يقرأ من test (صف عادي، بدون تعارض). t=_tobj يبقى فقط لو أحد استعمل نسخة قديمة من القالب.
+            return render_template("management/test_panel.html", test=t, t=_tobj, rows=rows, fam=fam,
                                    fam_title=FAMILIES[fam][0] if fam else "",
                                    fam_styles=fam_styles, sections=sections, tab=request.args.get("tab", "report"))
         finally:

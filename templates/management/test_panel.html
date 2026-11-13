@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block page_title %}{{ t['name'] }} — إعدادات الفحص{% endblock %}
+{% block page_title %}{{ test['name'] }} — إعدادات الفحص{% endblock %}
 {% block content %}
-{% set here = url_for('test_panel', test_id=t['id'], tab='style') %}
+{% set here = url_for('test_panel', test_id=test['id'], tab='style') %}
 <style>
   .tp-tabs { display:flex; gap:6px; flex-wrap:wrap; border-bottom:3px solid #E2E8F0; margin:12px 0; }
   .tp-tab { border:0; background:transparent; padding:10px 18px; font:inherit; cursor:pointer; border-radius:10px 10px 0 0; margin-bottom:-3px; border-bottom:3px solid transparent; }
@@ -21,8 +21,8 @@
 </style>
 <div class="card">
   <div style="margin-bottom:6px;"><a class="btn small secondary" href="{{ url_for('report_designer') }}">↩ رجوع لمصمم التقارير</a></div>
-  <h2 style="margin:0;">{{ t['name'] }} <small class="muted" dir="ltr">{{ t['code'] }}</small></h2>
-  <div class="muted">القسم: <b>{{ t['sec_label'] }}</b></div>
+  <h2 style="margin:0;">{{ test['name'] }} <small class="muted" dir="ltr">{{ test['code'] }}</small></h2>
+  <div class="muted">القسم: <b>{{ test['sec_label'] }}</b></div>
 
   <div class="tp-tabs">
     <button type="button" class="tp-tab" data-tab="report">📑 التقرير</button>
@@ -33,18 +33,18 @@
   <div class="tp-pane" data-pane="report">
     <p class="muted">تصميم طباعة هذا الفحص (ترتيب الباراميترات، الأعمدة، الختم والتوقيع…).</p>
     <div class="tp-acts">
-      <a class="btn" href="{{ url_for('report_designer', test_definition_id=t['id']) }}#designCard">✏️ تعديل تصميم التقرير</a>
-      <a class="btn secondary" href="{{ url_for('report_design_view', test_id=t['id'], back=url_for('test_panel', test_id=t['id'])) }}">👁 معاينة</a>
+      <a class="btn" href="{{ url_for('report_designer', test_definition_id=test['id']) }}#designCard">✏️ تعديل تصميم التقرير</a>
+      <a class="btn secondary" href="{{ url_for('report_design_view', test_id=test['id'], back=url_for('test_panel', test_id=test['id'])) }}">👁 معاينة</a>
     </div>
   </div>
 
   <div class="tp-pane" data-pane="ranges">
-    <form method="POST" action="{{ url_for('test_panel_save_ranges', test_id=t['id']) }}">
-      <p class="muted">النسب الطبيعية والوحدات <b>خاصة بهذا الفحص فقط</b> ({{ t['name'] }}). عدّل ثم احفظ. لإضافة مدى حسب العمر/الجنس استخدم «كتالوج المديات».</p>
+    <form method="POST" action="{{ url_for('test_panel_save_ranges', test_id=test['id']) }}">
+      <p class="muted">النسب الطبيعية والوحدات <b>خاصة بهذا الفحص فقط</b> ({{ test['name'] }}). عدّل ثم احفظ. لإضافة مدى حسب العمر/الجنس استخدم «كتالوج المديات».</p>
       <div style="margin:8px 0;">
         <label>قسم هذا الفحص:
           <select name="section_id">
-            {% for sc in sections %}<option value="{{ sc['id'] }}" {{ 'selected' if sc['id'] == t['section_id'] }}>{{ sc['name'] }}</option>{% endfor %}
+            {% for sc in sections %}<option value="{{ sc['id'] }}" {{ 'selected' if sc['id'] == test['section_id'] }}>{{ sc['name'] }}</option>{% endfor %}
           </select>
         </label>
       </div>
@@ -86,7 +86,7 @@
       <div class="tp-acts">
         <a class="btn" href="{{ url_for('report_designer') }}#resultStyleCard">🧾 أسلوب جدول النتائج</a>
         <a class="btn secondary" href="{{ url_for('report_styles_page') }}">🗂️ كل ستايلات التقارير</a>
-        <a class="btn secondary" href="{{ url_for('report_design_view', test_id=t['id'], back=url_for('test_panel', test_id=t['id'], tab='style')) }}">👁 معاينة الشكل الحالي</a>
+        <a class="btn secondary" href="{{ url_for('report_design_view', test_id=test['id'], back=url_for('test_panel', test_id=test['id'], tab='style')) }}">👁 معاينة الشكل الحالي</a>
       </div>
     {% else %}
       <p class="muted">ستايلات <b>{{ fam_title }}</b>. اضغط «معاينة» لرؤية الستايل كاملاً داخل البرنامج، ومن هناك «📌 تثبيت هذا الستايل»، أو ثبّته مباشرة من هنا.</p>

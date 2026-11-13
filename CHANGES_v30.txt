@@ -1,0 +1,6 @@
+v30 (فوق v29)
+- إصلاح جذري لخطأ زرّي «شكل التقرير» و«النسب الطبيعية» (صفحة /management/test-panel/<id>):
+  السبب: قالب test_panel.html كان يسمّي بيانات الفحص t، وهو نفس اسم دالة الترجمة t('...') المستعملة بـ base.html،
+  فكل تمرير لـ t=صف الفحص يطمس الترجمة (خطأ 'sqlite3.Row' object is not callable أو 'function object' has no attribute 'id').
+  الحل: القالب صار يقرأ من المتغيّر test (t[...] → test[...])، وlab_styles.py يمرّر test=صف الفحص ويبقي t كدالة ترجمة سليمة.
+ملفات معدّلة: lab_styles.py · templates/management/test_panel.html
