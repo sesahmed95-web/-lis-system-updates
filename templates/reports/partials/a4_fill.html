@@ -1,0 +1,55 @@
+{# v32: تعبئة ورقة A4 — إذا النتائج قليلة وتترك فراغ بالورقة، تُكبَّر وتتباعد أسطرها تلقائياً لتملأ الصفحة (بحد أقصى)،
+   وإذا كثيرة تبقى كما هي (التصغير يتولاه «ملاءمة A4» بـ base_report). الاستعمال بالقالب:
+     <div id="a4fill"> ... محتوى النتائج ... </div>  {% include 'reports/partials/a4_fill.html' %}
+   تعطيل لمرة: أضف ?fill=0 للرابط. الإعداد العام: results_a4_fill (1/0) و results_a4_fill_zoom (حد التكبير %). #}
+<style>
+  #a4fill.a4on td, #a4fill.a4on th { line-height: var(--a4lh, 1.25); }
+</style>
+<script>
+(function () {
+  var wrap = document.getElementById('a4fill'); if (!wrap) return;
+  var sheet = wrap.closest('.sheet'); if (!sheet) return;
+  var ON = {{ 'true' if (results_a4_fill|default('1')) == '1' else 'false' }};
+  var ZMAX = {{ ((results_a4_fill_zoom|default(140))|float / 100)|round(2) }};
+  if (/[?&]fill=0\b/.test(location.search) || window.__NOFILL) ON = false;
+  var PX = 96 / 25.4, PAGE = 297 * PX, PT = 10 * PX, PB = 22 * PX, SAFE = 0.93, LH0 = 1.25, LH1 = 2.0;
+  var state = { t: 0 };
+  function setT(t) {
+    state.t = t;
+    if (t <= 0.001) { wrap.classList.remove('a4on'); wrap.style.zoom = ''; wrap.style.removeProperty('--a4lh'); return; }
+    wrap.classList.add('a4on'); wrap.style.zoom = (1 + t * (ZMAX - 1)).toFixed(3); wrap.style.setProperty('--a4lh', (LH0 + t * (LH1 - LH0)).toFixed(3));
+  }
+  function h() { return wrap.getBoundingClientRect().height; }
+  function fill() {
+    if (!ON) { setT(0); return; }
+    setT(0);
+    var cs = getComputedStyle(sheet), headerH = (wrap.getBoundingClientRect().top - sheet.getBoundingClientRect().top) - (parseFloat(cs.paddingTop) || 0);
+    var target = (PAGE - PT - PB - Math.max(0, headerH)) * SAFE;
+    if (target <= 0 || h() <= 0 || h() > target) { return; }       // المحتوى أصلاً أطول من الصفحة → لا نكبّر
+    var lo = 0, hi = 1;
+    for (var i = 0; i < 9; i++) { var mid = (lo + hi) / 2; setT(mid); if (h() <= target) lo = mid; else hi = mid; }
+    setT(lo);
+    syncBar();
+  }
+  // مفتاح بشريط المعاينة (للشاشة فقط)
+  var bar = document.querySelector('.preview-bar'), cb = null;
+  function syncBar() { if (cb) cb.checked = ON; }
+  if (bar && !document.getElementById('a4fillToggle')) {
+    var lab = document.createElement('label'); lab.className = 'no-print'; lab.style.cssText = 'font:13px Tahoma,Arial;display:inline-flex;gap:4px;align-items:center;margin:0 8px;cursor:pointer;';
+    lab.title = 'تكبير/تباعد النتائج تلقائياً لتملأ ورقة A4 بدل ترك فراغ';
+    cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'a4fillToggle'; cb.checked = ON;
+    lab.appendChild(cb); lab.appendChild(document.createTextNode('📐 تعبئة A4')); bar.insertBefore(lab, bar.firstChild);
+    cb.addEventListener('change', function () { ON = cb.checked; fill(); save({ fill: ON ? 1 : 0 }); });
+    var sel = document.createElement('select'); sel.className = 'no-print'; sel.title = 'أقصى تكبير للنتائج عند تعبئة الصفحة'; sel.style.cssText = 'font:12px Tahoma,Arial;margin:0 4px;';
+    [110, 125, 140, 160, 180].forEach(function (v) { var o = document.createElement('option'); o.value = v; o.textContent = 'حد التكبير ' + v + '%'; if (Math.abs(v - ZMAX * 100) < 2) o.selected = true; sel.appendChild(o); });
+    bar.insertBefore(sel, lab.nextSibling);
+    sel.addEventListener('change', function () { ZMAX = parseInt(sel.value, 10) / 100; fill(); save({ fill_zoom: parseInt(sel.value, 10) }); });
+  }
+  function save(o) {   // يحفظ كإعداد افتراضي (للأدمن فقط؛ غيره يبقى مؤقتاً لهذي المعاينة)
+    try { fetch('/api/settings/results-scale', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) }); } catch (e) {}
+  }
+  window.addEventListener('load', function () { setTimeout(fill, 150); });
+  window.addEventListener('beforeprint', fill);
+  setTimeout(fill, 60);
+})();
+</script>

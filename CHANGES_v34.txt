@@ -5,3 +5,4 @@ v34 (فوق v33) — ملفات: app.py · lab_styles.py · templates/reports/bl
 2) CBC: ESR (لو عند المريض بنفس الزيارة) ينزل تلقائياً تحت الجدول داخل نفس الورقة، وتُفعَّل «ملاءمة A4» حتى تبقى CBC+ESR بورقة A4 واحدة. (app.py: دالة cbc_esr_html)
 3) CBC ستايل «بدون نتيجة سابقة» (lab_plain): قالبه كان ناقص بـ v33 — أضفته + زر ✕ لإخفاء صف بالمعاينة.
 4) شريط تحرير الملاحظات (كل التقارير): قائمة حجم الخط px + A+/A- (تُحقن تلقائياً بدون تعديل base_report).
+v35 = v34 + الملفات الناقصة من v33: templates/reports/partials/a4_fill.html و templates/reports/combined_panel.html (سبب خطأ TemplateNotFound a4_fill.html بمعاينة CBC)

@@ -1,6 +1,7 @@
 {% extends "reports/base_report.html" %}
 {% from "reports/partials/result_styles.html" import styles, render_results, note_script with context %}
 {% block report_body %}
+<div id="a4fill">
 {# الجدول صار يُرسم عبر القالب المشترك result_styles.html (نفس شكل معاينة المصمم بالضبط) #}
 {{ styles(layout_view) }}
 <style>
@@ -29,4 +30,6 @@
 <p class="muted" style="text-align:center;">لا توجد نتائج مكتملة بعد لأي تحليل ضمن هذي اللوحة.</p>
 {% endif %}
 {{ note_script() }}
+</div>
+{% include 'reports/partials/a4_fill.html' %}
 {% endblock %}
