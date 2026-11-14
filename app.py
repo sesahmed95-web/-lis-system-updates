@@ -1521,6 +1521,9 @@ def inject_globals():
     results_font_scale = get_setting(db, "results_font_scale", "100")
     results_autofit_a4 = get_setting(db, "results_autofit_a4", "0")
     results_autofit_min = get_setting(db, "results_autofit_min", "70")
+    # v32: تعبئة صفحة A4 تلقائياً (تكبير/تباعد النتائج القليلة لتملأ الورقة بدل ترك فراغ)
+    results_a4_fill = get_setting(db, "results_a4_fill", "1")
+    results_a4_fill_zoom = get_setting(db, "results_a4_fill_zoom", "140")
     # موضع/حجم الشعار بترويسة كل تقرير مطبوع — إعدادان عامان محقونان هنا
     # مرة وحدة، بنفس أسلوب باقي إعدادات التقرير.
     logo_position = get_setting(db, "logo_position", "right")
@@ -1628,6 +1631,7 @@ def inject_globals():
                 result_value_font_size=result_value_font_size,
                 results_font_scale=results_font_scale, results_autofit_a4=results_autofit_a4,
                 results_autofit_min=results_autofit_min,
+                results_a4_fill=results_a4_fill, results_a4_fill_zoom=results_a4_fill_zoom,
                 logo_position=logo_position,
                 report_header_style=report_header_style, report_header_accent=report_header_accent,
                 report_header_subtitle=report_header_subtitle, lab_name_ar=lab_name_ar,
@@ -16911,6 +16915,21 @@ def _v80_insert_after_cbc_table(html, block):
     return (html[:i] + block + html[i:]) if i >= 0 else (html + block)
 
 
+def _lab_cbc_esr_html(order_test_id):
+    """v34: سطر ESR جاهز لقوالب CBC (تُدخله داخل #a4fill فيدخل بحساب ملاءمة الورقة). فاضي لو ما عنده ESR."""
+    try:
+        if not order_test_id:
+            return ""
+        from markupsafe import Markup as _EsrMk
+        return _EsrMk(_v80_esr_html(get_db(), int(order_test_id)) or "")
+    except Exception:
+        _v74_log_exc("v34 ESR block for CBC template failed (order_test %s)" % order_test_id)
+        return ""
+
+
+app.jinja_env.globals["cbc_esr_html"] = _lab_cbc_esr_html
+
+
 def _print_report_impl(order_test_id):
     """v80: نفس تقرير v79 + سطر ESR أسفل جدول CBC لو عند المريض ESR بنفس الزيارة."""
     res = _print_report_impl_v79(order_test_id)
@@ -17856,16 +17875,31 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     def _allowed():
         return bool(session.get("designer_id") or ("interface" in session))
 
+    def _file_defaults():
+        """v31: ai_defaults.json بجانب البرنامج — يسافر مع ملف التحديث للعميل. يُستعمل فقط للحقول الفاضية بإعدادات العميل
+        (ما يكتب فوق شي ضبطه العميل بنفسه). تصديره من صفحة «إعدادات الذكاء» ← «تصدير للتحديثات»."""
+        try:
+            with open(os.path.join(_base_dir(), "ai_defaults.json"), encoding="utf-8") as fh:
+                d = json.load(fh)
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
     def _cfg(force=False):
         if not force and _cfg_cache["v"] and time.time() - _cfg_cache["t"] < 20:
             return _cfg_cache["v"]
+        fd = _file_defaults()
         db = get_db()
         try:
             c = {
-                "enabled": get_setting(db, "ai_enabled", "1") != "0",
-                "provider": (get_setting(db, "ai_provider", "gemini") or "gemini").strip().lower(),
-                "key": (get_setting(db, "ai_api_key", "") or "").strip(),
-                "model": (get_setting(db, "ai_model", "") or "").strip(),
+                "enabled": get_setting(db, "ai_enabled", "") != "0" if get_setting(db, "ai_enabled", "") != "" else str(fd.get("enabled", "1")) != "0",
+                "provider": ((get_setting(db, "ai_provider", "") or fd.get("provider") or "gemini") or "gemini").strip().lower(),
+                "key": (get_setting(db, "ai_api_key", "") or fd.get("key") or "").strip(),
+                "model": (get_setting(db, "ai_model", "") or fd.get("model") or "").strip(),
+                # قراءة الصور: مزوّد/مفتاح مستقل (مثلاً الدردشة Groq والصور Gemini) — فاضي = نفس المزوّد الرئيسي
+                "vprovider": (get_setting(db, "ai_vision_provider", "") or fd.get("vision_provider") or "gemini").strip().lower(),
+                "vkey": (get_setting(db, "ai_vision_key", "") or fd.get("vision_key") or "").strip(),
+                "vmodel": (get_setting(db, "ai_vision_model", "") or fd.get("vision_model") or "").strip(),
             }
             if c["model"].lower() in ("auto", "none", "default"):
                 c["model"] = ""
@@ -18061,6 +18095,8 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         return ""
 
     def _call_ai_vision(cfg, prompt, img_b64, mime="image/jpeg"):
+        if cfg.get("vkey"):      # v31: مزوّد قراءة الصور المستقل (يتجاوز مزوّد الدردشة لو ما يدعم الصور)
+            cfg = {**cfg, "provider": cfg.get("vprovider") or "gemini", "key": cfg["vkey"], "model": cfg.get("vmodel") or ""}
         key = cfg["key"]
         if not key:
             raise _AIErr("NO_KEY")
@@ -18077,7 +18113,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         if cfg["provider"] == "groq":
             model = _pick_groq_vision_model(key)
             if not model:
-                raise _AIErr("حساب Groq ما فيه موديل يقرأ الصور. استخدم Gemini (مجاني) من إعدادات الذكاء.")
+                raise _AIErr("حساب Groq ما فيه موديل يقرأ الصور. ضع مفتاح Gemini (مجاني) بخانة «مزوّد قراءة الصور» في إعدادات الذكاء — تبقى الدردشة على Groq والصور تُقرأ تلقائياً بـGemini.")
             body = {"model": model, "temperature": 0, "max_tokens": 2048,
                     "messages": [{"role": "user", "content": [
                         {"type": "text", "text": prompt},
@@ -18555,6 +18591,14 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 set_setting(db, "ai_api_key", re.sub(r"\s", "", k)[:200])
             if d.get("clear_key"):
                 set_setting(db, "ai_api_key", "")
+            vp = d.get("vision_provider") if d.get("vision_provider") in ("gemini", "groq", "anthropic") else "gemini"
+            set_setting(db, "ai_vision_provider", vp)
+            set_setting(db, "ai_vision_model", re.sub(r"[^A-Za-z0-9._:-]", "", (d.get("vision_model") or ""))[:80])
+            vk = (d.get("vision_key") or "").strip()
+            if vk:
+                set_setting(db, "ai_vision_key", re.sub(r"\s", "", vk)[:200])
+            if d.get("clear_vision_key"):
+                set_setting(db, "ai_vision_key", "")
             db.commit()
         finally:
             try: db.close()
@@ -18562,6 +18606,17 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         _cfg_cache["t"] = 0
         _model_cache["t"] = 0
         return jsonify(ok=True)
+
+    @bp.route("/ai/api/export-defaults")
+    def ai_export_defaults():
+        """v31: ينزّل ai_defaults.json بكل إعدادات الذكاء الحالية (بما فيها المفاتيح) لتضعه ضمن ملف التحديث للعميل."""
+        if not _allowed():
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        c = _cfg(True)
+        out = {"provider": c["provider"], "model": c["model"], "key": c["key"], "enabled": "1" if c["enabled"] else "0",
+               "vision_provider": c["vprovider"], "vision_model": c["vmodel"], "vision_key": c["vkey"]}
+        return Response(json.dumps(out, ensure_ascii=False, indent=2), mimetype="application/json",
+                        headers={"Content-Disposition": "attachment; filename=ai_defaults.json"})
 
     @bp.route("/ai/api/test", methods=["POST"])
     def ai_test():
@@ -18586,7 +18641,9 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
             return Response("<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;padding:20px'>سجّل الدخول من الشاشة الرئيسية أولاً.</body>", 401, mimetype="text/html")
         c = _cfg(True)
         html = _SET_PAGE.replace("__PROV__", c["provider"]).replace("__EN__", "1" if c["enabled"] else "0") \
-            .replace("__HASKEY__", "1" if c["key"] else "0").replace("__MODEL__", re.sub(r"[^A-Za-z0-9._:-]", "", c["model"]))
+            .replace("__HASKEY__", "1" if c["key"] else "0").replace("__MODEL__", re.sub(r"[^A-Za-z0-9._:-]", "", c["model"])) \
+            .replace("__VPROV__", c["vprovider"]).replace("__VHASKEY__", "1" if c["vkey"] else "0") \
+            .replace("__VMODEL__", re.sub(r"[^A-Za-z0-9._:-]", "", c["vmodel"]))
         return Response(html, mimetype="text/html")
 
     # ---------------------------------------------------------------- floating button
@@ -20069,12 +20126,17 @@ button{margin-top:16px;padding:10px 18px;border:0;border-radius:9px;background:#
 <label>المزوّد</label><select id="pv"><option value="anthropic">Claude (مدفوع حسب الاستخدام — الأدق)</option><option value="gemini">Google Gemini (مجاني)</option><option value="groq">Groq (مجاني)</option></select>
 <label>مفتاح API <span id="hk" style="font-weight:400;color:#0f766e"></span></label><input id="key" type="password" placeholder="الصق المفتاح هنا (يُحفظ مرة وحدة)" autocomplete="off">
 <label>الموديل (اتركه فارغاً ليختار البرنامج تلقائياً)</label><input id="md" placeholder="auto">
-<div><button id="sv">حفظ</button><button class="s" id="ts">اختبار الاتصال</button></div><div id="r"></div>
+<div class="h" style="margin-top:18px"><b>📷 قراءة القيم من الصور (مزوّد مستقل)</b><br>لو مزوّد الدردشة ما يقرأ الصور (مثل Groq)، حط هنا مفتاح Gemini المجاني: الدردشة تبقى على مزوّدك والصور تُقرأ تلقائياً بهذا المزوّد بدون ما تغيّر شي. فاضي = نفس المزوّد أعلاه.</div>
+<label>مزوّد قراءة الصور</label><select id="vpv"><option value="gemini">Google Gemini (مجاني)</option><option value="anthropic">Claude</option><option value="groq">Groq</option></select>
+<label>مفتاح قراءة الصور <span id="vhk" style="font-weight:400;color:#0f766e"></span></label><input id="vkey" type="password" placeholder="مفتاح Gemini (يُحفظ مرة وحدة)" autocomplete="off">
+<label>موديل قراءة الصور (اختياري)</label><input id="vmd" placeholder="auto">
+<div><button id="sv">حفظ</button><button class="s" id="ts">اختبار الاتصال</button><button class="s" id="ex" title="ملف ai_defaults.json يُضاف لملف التحديث فيصل إعداداتك للعميل">📦 تصدير للتحديثات</button></div><div id="r"></div>
 <div class="h">للحصول على مفتاح Gemini مجاني: ادخل aistudio.google.com/app/apikey بحساب Google → Create API key. المفتاح المجاني بدون بطاقة، وله حد للطلبات بالدقيقة واليوم.<br>
 الخدمة تحتاج إنترنت. الحدّ المجاني قد يسمح لجوجل باستخدام المدخلات لتحسين نماذجها، لذلك البرنامج يرسل النتائج فقط بدون اسم المريض أو هاتفه.</div></div>
-<script>var $=function(i){return document.getElementById(i)};$("en").checked="__EN__"==="1";$("pv").value="__PROV__";$("md").value="__MODEL__";$("hk").textContent="__HASKEY__"==="1"?"(مفتاح محفوظ ✓)":"";
-function save(cb){fetch("/ai/api/save-settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:$("en").checked,provider:$("pv").value,key:$("key").value,model:$("md").value})}).then(function(r){return r.json()}).then(function(j){if(j.ok){$("key").value="";$("hk").textContent="(مفتاح محفوظ ✓)";cb&&cb()}else $("r").textContent=j.error})}
+<script>var $=function(i){return document.getElementById(i)};$("en").checked="__EN__"==="1";$("pv").value="__PROV__";$("md").value="__MODEL__";$("hk").textContent="__HASKEY__"==="1"?"(مفتاح محفوظ ✓)":"";$("vpv").value="__VPROV__";$("vmd").value="__VMODEL__";$("vhk").textContent="__VHASKEY__"==="1"?"(مفتاح محفوظ ✓)":"";
+function save(cb){fetch("/ai/api/save-settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:$("en").checked,provider:$("pv").value,key:$("key").value,model:$("md").value,vision_provider:$("vpv").value,vision_key:$("vkey").value,vision_model:$("vmd").value})}).then(function(r){return r.json()}).then(function(j){if(j.ok){if($("key").value)$("hk").textContent="(مفتاح محفوظ ✓)";if($("vkey").value)$("vhk").textContent="(مفتاح محفوظ ✓)";$("key").value="";$("vkey").value="";cb&&cb()}else $("r").textContent=j.error})}
 $("sv").onclick=function(){save(function(){$("r").textContent="تم الحفظ ✓"})};
+$("ex").onclick=function(){save(function(){location.href="/ai/api/export-defaults"})};
 $("ts").onclick=function(){$("r").textContent="جاري الاختبار…";save(function(){fetch("/ai/api/test",{method:"POST"}).then(function(r){return r.json()}).then(function(j){$("r").textContent=j.ok?"الاتصال شغّال ✓":j.error})})};</script></body></html>'''
 # ===== LIS-AI END =====
 
@@ -20127,6 +20189,13 @@ def api_save_results_scale():
             set_setting(db, "results_font_scale", str(sc))
         if "autofit" in d:
             set_setting(db, "results_autofit_a4", "1" if d["autofit"] else "0")
+        if "fill" in d:
+            set_setting(db, "results_a4_fill", "1" if d["fill"] else "0")
+        if "fill_zoom" in d:
+            try:
+                set_setting(db, "results_a4_fill_zoom", str(max(100, min(200, int(float(d["fill_zoom"]))))))
+            except (TypeError, ValueError):
+                return jsonify({"error": "قيمة غير صالحة"}), 400
         db.commit()
         return jsonify({"ok": True})
     finally:

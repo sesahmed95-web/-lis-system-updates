@@ -1,10 +1,14 @@
 {% extends "reports/base_report.html" %}
 {% block report_body %}
 {% set rs = report_style('cbc') %}
-{% if rs.id == 'lab_table' %}
+{% set esr_blk = cbc_esr_html(order_test_id) if cbc_esr_html is defined else '' %}
+<div id="a4fill">
+{% if rs.id in ('lab_table', 'lab_plain') %}
 {# ===== ستايل «جدول المختبر» (Investigation / Result / Reference Range according to age / Previous Result) ===== #}
 {% set o = rs.opts %}
-{% set show_prev_col = (o.show_prev and show_prev_values and previous_visit_date) %}
+{% set show_prev_col = (rs.id == 'lab_table' and o.show_prev and show_prev_values and previous_visit_date) %}
+{% set can_hide = is_design_preview|default(false) %}
+{% set hidden = o.hide or [] %}
 <style>
   .lt-cbc { width:100%; border-collapse:collapse; direction:ltr; font-family:Arial, Helvetica, sans-serif; font-size:{{ o.font }}px; color:#000; }
   .lt-cbc thead th { border-top:2px solid {{ o.line }}; border-bottom:2px solid {{ o.line }}; padding:6px 8px; text-align:center; font-weight:700;
@@ -19,10 +23,12 @@
   .lt-cbc td.c-prev { font-family:"Times New Roman", serif; color:#555; }
   .lt-cbc tr.hl td { background:#FFF59D; }
   .lt-cbc .abn { color:{{ o.abn }}; font-weight:800; }
-  .lt-cbc tr.sec td { text-align:left; padding:8px 8px 2px; }
-  .lt-cbc .sec-h { font-size:1.35em; font-weight:700; color:{{ o.section }}; text-decoration:underline; }
-  .lt-cbc .sec-t { font-size:1.05em; font-weight:800; }
+  .lt-cbc tr.sec td { text-align:center; padding:12px 8px 8px; }
+  .lt-cbc .sec-t { display:inline-block; font-size:1.25em; font-weight:800; color:{{ o.section }}; }
   .lt-cbc tfoot td { border-top:2px solid {{ o.line }}; padding:0; }
+  .lt-x { display:none; margin-inline-start:8px; border:1px solid #CBD5E1; background:#fff; color:#B91C1C; border-radius:50%; width:20px; height:20px; line-height:16px; padding:0; cursor:pointer; font-size:12px; }
+  .lt-cbc tr:hover .lt-x { display:inline-block; }
+  @media print { .lt-x { display:none !important; } }
   .lt-prevnote { direction:rtl; text-align:right; margin-top:10px; font-size:.95em; color:#334155; }
   .lt-prevnote b { color:#14213D; }
 </style>
@@ -36,25 +42,38 @@
     </tr>
   </thead>
   <tbody>
-    <tr class="sec"><td colspan="{{ ncols }}"><div class="sec-h">Hematology</div><div class="sec-t">Complete Blood Count CBC</div></td></tr>
+    <tr class="sec"><td colspan="{{ ncols }}"><div class="sec-t">Complete Blood Count CBC</div></td></tr>
     {% for group in cbc_groups %}{% for row in group %}
+    {% if row.name not in hidden %}
     {% set rv = row.result|string|trim %}
     {% set rvn = rv|float(none) %}
     {% set lo = row.low if row.low not in ('', none) else none %}
     {% set hi = row.high if row.high not in ('', none) else none %}
     {% set abn = (row.flag and row.flag != 'Normal') or (rvn is not none and ((lo is not none and rvn < lo) or (hi is not none and rvn > hi))) %}
     <tr{% if row.highlight %} class="hl"{% endif %}>
-      <td class="c-name">{{ row.name }}</td>
+      <td class="c-name">{{ row.name }}{% if can_hide %}<button type="button" class="lt-x" title="إخفاء هذا الصف" onclick="rsHide({{ rs.key|tojson }}, {{ row.name|tojson }})">✕</button>{% endif %}</td>
       <td class="c-res"><span{% if abn %} class="abn"{% endif %}>{{ row.result }}</span>{% if o.show_unit and row.unit and rv %}<span class="u">{{ row.unit }}</span>{% endif %}</td>
       <td class="c-ref">{% if lo is not none and hi is not none %}{{ '%g'|format(lo) }}-{{ '%g'|format(hi) }}{% elif lo is not none %}&gt; {{ '%g'|format(lo) }}{% elif hi is not none %}&lt; {{ '%g'|format(hi) }}{% endif %}</td>
       {% if show_prev_col %}<td class="c-prev">{{ row.previous }}</td>{% endif %}
     </tr>
+    {% endif %}
     {% endfor %}{% endfor %}
   </tbody>
   <tfoot><tr><td colspan="{{ ncols }}"></td></tr></tfoot>
 </table>
 {% if show_prev_col %}
 <div class="lt-prevnote">نتائج زيارة سابقة بتاريخ: <b>{{ previous_visit_date }}</b></div>
+{% endif %}
+{# ESR: لو عند المريض ESR بنفس الزيارة ينزل تلقائياً تحت جدول CBC (داخل نفس الورقة) #}
+{{ esr_blk }}
+{% if can_hide %}
+<script>
+function rsHide(key, row) {
+  var fd = new FormData(); fd.append('key', key); fd.append('row', row);
+  fetch({{ url_for('report_styles_hide_row')|tojson }}, { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function () { location.reload(); });
+}
+</script>
+{% if hidden %}<div class="no-print" style="margin-top:8px; font-size:.85em; color:#64748B;">صفوف مخفية: {{ hidden|join('، ') }} — ترجيعها من «تعديل» بصفحة الستايلات.</div>{% endif %}
 {% endif %}
 {% set cbc_comment_lt = rich_note(order_test_id, 'Comment', params.get('Comment', ''), style='flex:1', hide_empty=True) %}
 {% if cbc_comment_lt %}
@@ -100,10 +119,21 @@
     {% endfor %}
   {% endfor %}
 </table>
+{{ esr_blk }}
 
 {% set cbc_comment = rich_note(order_test_id, 'Comment', params.get('Comment', ''), style='flex:1', hide_empty=True) %}
 {% if cbc_comment %}
 <div class="box-field box-field-lg" style="margin-top:10px; display:flex; gap:6px;"><b>Comment:</b>{{ cbc_comment }}</div>
 {% endif %}
 {% endif %}
+</div>
+{% if esr_blk %}
+<script>
+/* ESR تحت CBC: نفعّل «ملاءمة A4» حتى تبقى CBC + ESR بورقة A4 واحدة (تصغير تلقائي فقط لو زادت عن الصفحة) */
+window.addEventListener('load', function () {
+  setTimeout(function () { var b = document.getElementById('rsA4'); if (b && !b.classList.contains('on')) b.click(); }, 300);
+});
+</script>
+{% endif %}
+{% include 'reports/partials/a4_fill.html' %}
 {% endblock %}

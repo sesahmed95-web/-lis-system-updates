@@ -64,6 +64,7 @@ OPT_SPECS = {
         ("hide", "صفوف مخفية (أسماؤها مفصولة بفاصلة) — أو اضغط ✕ على الصف بالمعاينة", "list", []),
         ("extra", "باراميترات مضافة (الاسم|الوحدة|L أو R) — أو استخدم ➕ بالمعاينة", "list", []),
         ("shift", "إزاحة العناوين يمين/يسار (الاسم|بكسل) — أو استخدم ◀ ▶ بالمعاينة", "list", []),
+        ("rename", "أسماء معدّلة (الاسم الأصلي|الاسم الجديد) — أو استخدم ✎ بالمعاينة", "list", []),
     ],
     "bf:framed": [],     # يُملأ أسفل (نسخة من bf:boxed مع افتراضيات الصورة)
     "bma:classic": [],
@@ -98,7 +99,7 @@ OPT_SPECS = {
 
 # v31: ستايل bf:framed = نفس خيارات bf:boxed، لكن الافتراضي: Coomb's test مخفي، وعنوان Hb مزاح 24px (مثل الصورة)
 OPT_SPECS["bf:framed"] = [
-    (n, l, t, ["Coomb's test"] if n == "hide" else (["Hb|24"] if n == "shift" else d))
+    (n, l, t, ["Coomb's test"] if n == "hide" else (["Hb|24"] if n == "shift" else (12 if n == "font" else d)))
     for n, l, t, d in OPT_SPECS["bf:boxed"]
 ]
 
@@ -106,7 +107,7 @@ OPT_SPECS["bf:framed"] = [
 BASE_STYLES = [
     ("cbc", "classic", "الكلاسيكي (الحالي)", "الجدول الحالي: Test / result / units / Normal Range"),
     ("cbc", "lab_table", "جدول المختبر (Investigation / Result / Previous)",
-     "حسب الصورة: ترويسة بخطوط، Hematology، أرقام غير طبيعية بالأحمر، ونتيجة زيارة سابقة واحدة بتاريخها تحت الجدول"),
+     "حسب الصورة: ترويسة بخطوط، عنوان Complete Blood Count CBC بالوسط، أرقام غير طبيعية بالأحمر، ونتيجة زيارة سابقة واحدة بتاريخها تحت الجدول"),
     ("cbc", "lab_plain", "جدول المختبر بدون نتيجة سابقة",
      "نفس ستايل جدول المختبر (Investigation / Result / Reference Range) لكن بدون عمود النتيجة السابقة ولا تاريخ الزيارة السابقة"),
     ("bf", "classic", "الكلاسيكي (الحالي)", "جدول الديفرنشل + RBC/WBC/Platelets + Conclusion"),
@@ -170,6 +171,50 @@ SAMPLE_BMB = {"Clinical notes": "A core of bone marrow trephine biopsy measuring
 
 def register(app, get_db, get_setting, set_setting, roles_required, log_action=None):
     from database import get_result_layout, save_result_layout, RESULT_STYLES
+
+    # ------------------------------------------------------------ v34: حجم الخط بشريط تحرير الملاحظات (كل التقارير)
+    _FS_JS = """<script id="rnFontPx">
+(function () {
+  var bar = document.getElementById('rnBar'); if (!bar || document.getElementById('rnPx')) return;
+  var lastR = null;
+  function cur() { return document.querySelector('.rich-note.rn-edit'); }
+  var sel = document.createElement('select'); sel.id = 'rnPx'; sel.title = 'حجم الخط (px) — بدون تحديد = كل الخانة';
+  sel.innerHTML = '<option value="">حجم…</option>' + [8,9,10,11,12,13,14,15,16,18,20,22,24,28,32].map(function (n) { return '<option>' + n + '</option>'; }).join('');
+  var dn = document.createElement('button'); dn.type = 'button'; dn.textContent = 'A-'; dn.title = 'تصغير 1px';
+  var up = document.createElement('button'); up.type = 'button'; up.textContent = 'A+'; up.title = 'تكبير 1px';
+  var anchor = bar.querySelector('[data-c^="fontSize"]'); var after = null;
+  if (anchor) { var all = bar.querySelectorAll('[data-c^="fontSize"]'); after = all[all.length - 1]; after.style.display = 'none'; for (var i = 0; i < all.length; i++) all[i].style.display = 'none'; bar.insertBefore(dn, after.nextSibling); }
+  else bar.appendChild(dn);
+  bar.insertBefore(sel, dn.nextSibling); bar.insertBefore(up, sel.nextSibling);
+  [sel, dn, up].forEach(function (el) { el.addEventListener('mousedown', function (e) { e.stopPropagation(); if (el !== sel) e.preventDefault(); }); el.addEventListener('click', function (e) { e.stopPropagation(); }); });
+  document.addEventListener('selectionchange', function () { var c = cur(), s = getSelection(); if (c && s.rangeCount && c.contains(s.anchorNode)) lastR = s.getRangeAt(0).cloneRange(); });
+  function curPx() { var c = cur(); if (!c) return 14; var s = getSelection(), n = s && s.anchorNode; if (n && n.nodeType === 3) n = n.parentNode; return parseFloat(getComputedStyle(n && c.contains(n) ? n : c).fontSize) || 14; }
+  function setPx(px) {
+    var c = cur(); if (!c) return; px = Math.max(8, Math.min(72, Math.round(px))); c.focus();
+    var s = getSelection();
+    if (lastR && c.contains(lastR.commonAncestorContainer)) { s.removeAllRanges(); s.addRange(lastR); }
+    if (!s.rangeCount || s.isCollapsed || !c.contains(s.anchorNode)) document.execCommand('selectAll');
+    document.execCommand('fontSize', false, '7');
+    c.querySelectorAll('font[size="7"]').forEach(function (f) { var sp = document.createElement('span'); sp.style.fontSize = px + 'px'; while (f.firstChild) sp.appendChild(f.firstChild); f.replaceWith(sp); });
+    c.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  sel.addEventListener('change', function () { if (sel.value) setPx(+sel.value); sel.value = ''; });
+  up.addEventListener('click', function () { setPx(curPx() + 1); });
+  dn.addEventListener('click', function () { setPx(curPx() - 1); });
+})();
+</script>"""
+
+    @app.after_request
+    def _inject_fontsize(resp):
+        try:
+            if resp.mimetype == "text/html" and not resp.direct_passthrough:
+                b = resp.get_data()
+                if b'id="rnBar"' in b and b'id="rnFontPx"' not in b and b"</body>" in b:
+                    i = b.rfind(b"</body>")
+                    resp.set_data(b[:i] + _FS_JS.encode("utf-8") + b[i:])
+        except Exception:
+            pass
+        return resp
 
     # ------------------------------------------------------------ تخزين
     def _json(db, key, default):
@@ -422,6 +467,7 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
             name = (request.form.get("name") or "").replace("|", " ").strip()[:40]
             unit = (request.form.get("unit") or "").replace("|", " ").strip()[:15]
             side = "R" if request.form.get("side") == "R" else "L"
+            after = (request.form.get("after") or "").replace("|", " ").strip()[:40]   # v34: موقع الباراميتر (بعد أي صف؛ __top__ = بالأعلى)
             styles = _all_styles(db)
             s = styles.get(key)
             spec = OPT_SPECS.get(f"{s['family']}:{s['id']}", []) if s else []
@@ -431,7 +477,7 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
             cur = _opts_for(db, key, styles)
             lst = [x for x in cur.get("extra", []) if x.split("|")[0] != name]
             if request.form.get("mode") != "remove":
-                lst.append(f"{name}|{unit}|{side}")
+                lst.append(f"{name}|{unit}|{side}|{after}" if after else f"{name}|{unit}|{side}")
             oa[key] = {**oa.get(key, {}), "extra": lst[:40]}
             set_setting(db, "rs_opts", json.dumps(oa, ensure_ascii=False))
             if request.form.get("mode") != "remove" and s["family"] == "bf":
@@ -446,6 +492,32 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                     pass
             db.commit()
             return jsonify({"ok": True, "extra": lst})
+        finally:
+            db.close()
+
+    @app.route("/management/report-styles/rename-row", methods=["POST"])
+    @roles_required("admin")
+    def report_styles_rename_row():
+        """v34: ✎ على اسم باراميتر بمعاينة الستايل: يغيّر الاسم المعروض بالتقرير (فاضي = رجوع للأصلي)."""
+        db = get_db()
+        try:
+            key = request.form.get("key", "")
+            row = (request.form.get("row") or "").replace(":", "").replace("|", " ").strip()[:40]
+            new = (request.form.get("new") or "").replace("|", " ").strip()[:40]
+            styles = _all_styles(db)
+            s = styles.get(key)
+            spec = OPT_SPECS.get(f"{s['family']}:{s['id']}", []) if s else []
+            if not s or not row or not any(n == "rename" for n, _l, _t, _d in spec):
+                return jsonify({"ok": False}), 400
+            oa = _json(db, "rs_opts", {})
+            cur = _opts_for(db, key, styles)
+            lst = [x for x in cur.get("rename", []) if x.split("|")[0].strip().lower() != row.lower()]
+            if new and new.lower() != row.lower():
+                lst.append(f"{row}|{new}")
+            oa[key] = {**oa.get(key, {}), "rename": lst[:60]}
+            set_setting(db, "rs_opts", json.dumps(oa, ensure_ascii=False))
+            db.commit()
+            return jsonify({"ok": True, "rename": lst})
         finally:
             db.close()
 
