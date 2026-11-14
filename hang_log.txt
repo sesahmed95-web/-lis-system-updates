@@ -431,3 +431,287 @@
 [2026-11-13T16:35:23] SLOW 2.8s POST /designer/update/check-now? (designer_update_check_now)
 [2026-11-13T16:35:23] SLOW 2.7s POST /designer/update/check-now? (designer_update_check_now)
 [2026-11-14T10:14:18] SLOW 2.2s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-14T12:43:48] SLOW 7.1s GET /management/report-designer/preview/12?design=4 (preview_report_design)
+[2026-11-14T12:43:49] SLOW 8.1s GET /management/report-designer/preview/12?design=3 (preview_report_design)
+[2026-11-14T12:43:49] SLOW 8.1s GET /management/report-designer/preview/12?design=2 (preview_report_design)
+[2026-11-14T12:43:49] SLOW 7.4s GET /management/report-designer/preview/12?design=4 (preview_report_design)
+[2026-11-14T12:43:50] SLOW 8.9s GET /management/report-designer/preview/12?design=1 (preview_report_design)
+[2026-11-14T12:43:51] SLOW 9.3s GET /management/report-designer/preview/12?design=1 (preview_report_design)
+[2026-11-14T12:43:51] SLOW 9.2s GET /management/report-designer/preview/12?design=table (preview_report_design)
+[2026-11-14T12:43:52] SLOW 10.2s GET /management/report-designer/preview/12?design=3 (preview_report_design)
+[2026-11-14T12:43:52] SLOW 10.3s GET /management/report-designer/preview/12?design=2 (preview_report_design)
+[2026-11-14T12:43:52] SLOW 11.0s GET /management/report-designer/preview/12?design=table (preview_report_design)
+[2026-11-14T12:43:52] SLOW 10.6s GET /management/report-designer/style-preview? (result_style_preview)
+[2026-11-14T12:43:52] HANG 7s+ /management/report-designer/preview/12?design=2 (preview_report_design)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1694, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 15661, in preview_report_design
+    return _preview_report_design_impl(test_definition_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 15863, in _preview_report_design_impl
+    return render_template(
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1293, in render
+    return self.environment.concat(self.root_render_func(ctx))  # type: ignore
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\coagulation.html", line 15, in root
+    {%- elif r and r['low'] is not none and r['high'] is not none -%}{{ '%g'|format(r['low']) }} - {{ '%g'|format(r['high']) }}
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 122, in root
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1016, in get_template
+    return self._load_template(name, globals)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 975, in _load_template
+    template = self.loader.load(self, name, self.make_globals(globals))
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\loaders.py", line 138, in load
+    code = environment.compile(source, name, filename)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 764, in compile
+    source = self._generate(source, name, filename, defer_init=defer_init)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 694, in _generate
+    return generate(  # type: ignore
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\compiler.py", line 117, in generate
+    generator.visit(node)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\visitor.py", line 40, in visit
+    return f(node, *args, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\compiler.py", line 892, in visit_Template
+    self.blockvisit(node.body, frame)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\compiler.py", line 449, in blockvisit
+    self.visit(node, frame)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\visitor.py", line 40, in visit
+    return f(node, *args, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\compiler.py", line 1342, in visit_Macro
+    macro_frame, macro_ref = self.macro_body(node, frame)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\compiler.py", line 664, in macro_body
+    frame.symbols.analyze_node(node)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\idtracking.py", line 51, in analyze_node
+    visitor.visit(node, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\visitor.py", line 40, in visit
+    return f(node, *args, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\idtracking.py", line 180, in _simple_visit
+    self.sym_visitor.visit(child)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\visitor.py", line 40, in visit
+    return f(node, *args, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\idtracking.py", line 265, in visit_If
+    body_symbols = inner_visit(node.body)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\idtracking.py", line 260, in inner_visit
+    self.visit(subnode, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\visitor.py", line 40, in visit
+    return f(node, *args, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\idtracking.py", line 266, in visit_If
+    elif_symbols = inner_visit(node.elif_)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\idtracking.py", line 260, in inner_visit
+    self.visit(subnode, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\visitor.py", line 40, in visit
+    return f(node, *args, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\idtracking.py", line 268, in visit_If
+    self.symbols.branch_update([body_symbols, elif_symbols, else_symbols])
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\idtracking.py", line 134, in branch_update
+    self.stores.update(sym.stores)
+
+[2026-11-14T12:43:53] SLOW 11.2s GET /management/report-designer/preview/1?design=4 (preview_report_design)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/1?design=3 (preview_report_design)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1694, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 15661, in preview_report_design
+    return _preview_report_design_impl(test_definition_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 15863, in _preview_report_design_impl
+    return render_template(
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 151, in render_template
+    return _render(app, template, context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\templating.py", line 132, in _render
+    rv = template.render(context)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\environment.py", line 1293, in render
+    return self.environment.concat(self.root_render_func(ctx))  # type: ignore
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 18, in root
+    {% block report_body %}
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\base_report.html", line 460, in root
+    .lh .lh-logo { width: {{ logo_width|default(100) }}px; height: auto; max-width: 100%; }
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\urine_exam.html", line 78, in block_report_body
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 303, in call
+    return __obj(*args, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 770, in __call__
+    return self._invoke(arguments, autoescape)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 898, in macro
+    box.dataset.editing = '0';
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 303, in call
+    return __obj(*args, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 770, in __call__
+    return self._invoke(arguments, autoescape)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 646, in macro
+    <button type="button" onclick="examShiftPage(-4)" title="ارفع التقرير لأعلى">▲</button>
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 303, in call
+    return __obj(*args, **kwargs)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 770, in __call__
+    return self._invoke(arguments, autoescape)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 784, in _invoke
+    rv = self._func(*arguments)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\templates\reports\partials\exam_report_shared.html", line 346, in macro
+    }
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\jinja2\runtime.py", line 303, in call
+    return __obj(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 827, in exam_abnormal_color
+    db = get_db()
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\database.py", line 43, in get_db
+    conn.execute("PRAGMA journal_mode=WAL")
+
+[2026-11-14T12:43:53] SLOW 11.3s GET /management/report-designer/preview/1?design=1 (preview_report_design)
+[2026-11-14T12:43:53] SLOW 11.3s GET /management/report-designer/preview/1?design=2 (preview_report_design)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/12?design=table (preview_report_design)
+(no frame)
+[2026-11-14T12:43:53] SLOW 11.7s GET /management/report-designer/preview/1?design=3 (preview_report_design)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/12?design=3 (preview_report_design)
+(no frame)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/12?design=1 (preview_report_design)
+(no frame)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/1?design=1 (preview_report_design)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1527, in wsgi_app
+    ctx.pop(error)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\ctx.py", line 420, in pop
+    self.app.do_teardown_request(exc)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1356, in do_teardown_request
+    self.ensure_sync(func)(exc)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1720, in _release_db_connections
+    close_request_connections()
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\database.py", line 79, in close_request_connections
+    c.close()
+
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/1?design=2 (preview_report_design)
+(no frame)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/1?design=4 (preview_report_design)
+(no frame)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/style-preview? (result_style_preview)
+(no frame)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/12?design=table (preview_report_design)
+(no frame)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/12?design=1 (preview_report_design)
+(no frame)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/12?design=2 (preview_report_design)
+(no frame)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/12?design=3 (preview_report_design)
+(no frame)
+[2026-11-14T12:43:53] SLOW 11.3s GET /management/report-designer/preview/1?design=1 (preview_report_design)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/12?design=4 (preview_report_design)
+(no frame)
+[2026-11-14T12:43:53] HANG 7s+ /management/report-designer/preview/1?design=1 (preview_report_design)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1527, in wsgi_app
+    ctx.pop(error)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\ctx.py", line 420, in pop
+    self.app.do_teardown_request(exc)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1356, in do_teardown_request
+    self.ensure_sync(func)(exc)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1759, in _track_request_end
+    _hang_log(f"[{datetime.now().isoformat(timespec='seconds')}] SLOW {time.time() - info['t']:.1f}s "
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1737, in _hang_log
+    with open(_HANG_LOG, "a", encoding="utf-8") as f:
+
