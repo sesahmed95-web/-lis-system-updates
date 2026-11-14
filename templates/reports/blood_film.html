@@ -1,55 +1,163 @@
 {% extends "reports/base_report.html" %}
 {% block report_body %}
 {% set rs = report_style('bf') %}
-{% if rs.id == 'boxed' %}
-{# ===== ستايل جدول مؤطّر (حسب الصورة): قيم CBC + ديفرنشل + ريتك + وصف + خلاصة ===== #}
+{% if rs.id in ('boxed', 'framed') %}
+{# ===== ستايل جدول مؤطّر (حسب الصورة) — v31: يدعم hide / extra / shift / autofit + أدوات تعديل حيّة بالمعاينة ===== #}
+{% set fr = (rs.id == 'framed') %}
 {% set o = rs.opts %}
+{% set edit = (is_design_preview is defined and is_design_preview) and request.args.get('rs') %}
 {% set cv = lab_cbc_vals(ot) if o.show_cbc else {} %}
 {% set wbc = params.get('WBC count') or cv.get('wbc', '') %}
 {% set hb = params.get('Hb') or cv.get('hb', '') %}
 {% set plt = params.get('Platelet count') or cv.get('plt', '') %}
 {% set hct = params.get('HCT') or cv.get('hct', '') %}
+{# --- قوائم الإخفاء والإزاحة (الأسماء تُطابَق بدون نقطتين/مسافات وبحروف صغيرة) --- #}
+{% set _hid = [] %}
+{% for h in (o.get('hide') or []) %}{% set _ = _hid.append(h|replace(':','')|trim|lower) %}{% endfor %}
+{% set sm = {} %}
+{% for it in (o.get('shift') or []) %}{% set pp = it.split('|') %}{% set _ = sm.update({ (pp[:-1]|join('|')|replace(':','')|trim|lower): (pp[-1]|int(0)) }) %}{% endfor %}
+
+{% macro un(u) -%}{%- set x = (u or '')|string|replace('^9','⁹')|replace('*9','⁹') -%}{%- if '⁹' in x -%}{{ x.split('⁹')[0] }}<sup>9</sup>{{ x.split('⁹')[1] }}{%- else -%}{{ x }}{%- endif -%}{%- endmacro %}
+{# --- وحدات خانات CBC الأربع: القيمة من CBC (ملء تلقائي) → وحدة CBC (حسب الجهاز)؛ القيمة اليدوية → وحدة باراميتر BF ثم الافتراضي من الستايل --- #}
+{% set _pw = params.get('WBC count') %}{% set _ph = params.get('Hb') %}{% set _pp = params.get('Platelet count') %}{% set _pc = params.get('HCT') %}
+{% set a_wbc = (cv.get('wbc', '') != '' and (_pw in ('', None) or _pw|string == cv.get('wbc')|string)) %}
+{% set a_hb = (cv.get('hb', '') != '' and (_ph in ('', None) or _ph|string == cv.get('hb')|string)) %}
+{% set a_plt = (cv.get('plt', '') != '' and (_pp in ('', None) or _pp|string == cv.get('plt')|string)) %}
+{% set a_hct = (cv.get('hct', '') != '' and (_pc in ('', None) or _pc|string == cv.get('hct')|string)) %}
+{% set u_wbc = ((cv.get('wbc_u') or units.get('WBC count') or o.get('unit_wbc') or 'X 10⁹/L') if a_wbc else (units.get('WBC count') or o.get('unit_wbc') or 'X 10⁹/L')) %}
+{% set u_hb = ((cv.get('hb_u') or units.get('Hb') or o.get('unit_hb') or 'g/dl') if a_hb else (units.get('Hb') or o.get('unit_hb') or 'g/dl')) %}
+{% set u_plt = ((cv.get('plt_u') or units.get('Platelet count') or o.get('unit_plt') or 'X 10⁹/L') if a_plt else (units.get('Platelet count') or o.get('unit_plt') or 'X 10⁹/L')) %}
+{% set u_hct = ((cv.get('hct_u') or units.get('HCT') or o.get('unit_hct') or '%') if a_hct else (units.get('HCT') or o.get('unit_hct') or '%')) %}
+
+{% macro labtd(label, sm, edit, ex=false, cls='l', style='', cs=1) -%}
+{%- set nm = label|replace(':','')|trim -%}
+{%- set px = sm.get(nm|lower, 0) -%}
+<td class="{{ cls }}"{% if cs > 1 %} colspan="{{ cs }}"{% endif %} data-nm="{{ nm }}" style="{{ style }}{% if px %};text-indent:{{ px }}px{% endif %}">{{ label }}{% if edit %}<span class="rs-t rs-np"><button type="button" data-rs="shift" data-row="{{ nm }}" data-dx="-8" title="&#1573;&#1586;&#1575;&#1581;&#1577; &#1610;&#1587;&#1575;&#1585;">&#9664;</button><button type="button" data-rs="shift" data-row="{{ nm }}" data-dx="8" title="&#1573;&#1586;&#1575;&#1581;&#1577; &#1610;&#1605;&#1610;&#1606;">&#9654;</button>{% if ex %}<button type="button" data-rs="rmextra" data-row="{{ nm }}" title="&#1581;&#1584;&#1601; &#1575;&#1604;&#1576;&#1575;&#1585;&#1575;&#1605;&#1610;&#1578;&#1585;">&#128465;</button>{% else %}<button type="button" data-rs="hide" data-row="{{ nm }}" title="&#1581;&#1584;&#1601; &#1607;&#1584;&#1575; &#1575;&#1604;&#1589;&#1601;">&#10005;</button>{% endif %}</span>{% endif %}</td>
+{%- endmacro %}
+
+{# --- الأعمدة الافتراضية --- #}
 {% set left = [('Neutrophils', 'Neutrophils'), ('Lymphocytes', 'Lymphocytes'), ('Monocytes', 'Monocytes'), ('Eosinophils', 'Eosinophils'), ('Basophils', 'Basophils')] %}
+{% if fr %}{% set left = left + [('NRBCs', 'NRBC')] %}{% endif %}
 {% set left_extra = [('Band', 'Band'), ('Metamyelocytes', 'Metamyelocytes'), ('Myelocytes', 'Myelocytes'), ('Promyelocytes', 'Promyelocytes'), ('Reactive lymphocytes', 'Reactive lymphocytes'), ('Atypical lymphocytes', 'Atypical lymphocytes'), ('Blast', 'Blast')] %}
-{% set rows_l = [] %}
-{% for lbl, key in left %}{% set _ = rows_l.append((lbl, key)) %}{% endfor %}
-{% for lbl, key in left_extra %}{% if params.get(key) %}{% set _ = rows_l.append((lbl, key)) %}{% endif %}{% endfor %}
-{% set rows_r = [("Retic count :", params.get('Reticulocyte count', ''), units.get('Reticulocyte count') or '%'),
-                 ("Corrected retic count:", params.get('Corrected Retic count', ''), units.get('Corrected Retic count') or '%'),
-                 ("Coomb's test :", params.get("Coomb's test", ''), ''),
-                 ("NRBCs:", params.get('NRBC', ''), units.get('NRBC') or '/100wbc')] %}
-{% set nrows = [rows_l|length, rows_r|length]|max %}
+{% set L = [] %}
+{% for lbl, key in left %}
+  {% set val = params.get(key, '') %}
+  {% if key == 'NRBC' %}{% set un = ((units.get(key) or '/100wbc') if val != '' else '') %}{% else %}{% set un = (units.get(key) or '%') %}{% endif %}
+  {% if (lbl|lower) not in _hid %}{% set _ = L.append({'label': lbl ~ ' :', 'val': val, 'unit': un, 'ex': false}) %}{% endif %}
+{% endfor %}
+{% for lbl, key in left_extra %}{% if params.get(key) and (lbl|lower) not in _hid %}{% set _ = L.append({'label': lbl ~ ' :', 'val': params.get(key), 'unit': (units.get(key) or '%'), 'ex': false}) %}{% endif %}{% endfor %}
+
+{% set rdef = [("Retic count :", 'Reticulocyte count', units.get('Reticulocyte count') or '%'),
+               ("Corrected retic count:", 'Corrected Retic count', units.get('Corrected Retic count') or '%'),
+               ("Coomb's test :", "Coomb's test", '')] %}
+{% if not fr %}{% set rdef = rdef + [("NRBCs:", 'NRBC', units.get('NRBC') or '/100wbc')] %}{% endif %}
+{% set R = [] %}
+{% for lbl, key, un in rdef %}
+  {% set val = params.get(key, '') %}
+  {% if (lbl|replace(':','')|trim|lower) not in _hid %}{% set _ = R.append({'label': lbl, 'val': val, 'unit': (un if val != '' else ''), 'ex': false}) %}{% endif %}
+{% endfor %}
+{# --- باراميترات مضافة: الاسم|الوحدة|L أو R --- #}
+{% for it in (o.get('extra') or []) %}
+  {% set pp = it.split('|') %}
+  {% set nm = pp[0] %}
+  {% if (nm|replace(':','')|trim|lower) not in _hid %}
+    {% set item = {'label': nm ~ ' :', 'val': params.get(nm, ''), 'unit': (pp[1] if pp|length > 1 else ''), 'ex': true} %}
+    {% if pp|length > 2 and pp[2] == 'R' %}{% set _ = R.append(item) %}{% else %}{% set _ = L.append(item) %}{% endif %}
+  {% endif %}
+{% endfor %}
+{% set nrows = [L|length, R|length]|max %}
 <style>
   .bf-box { width:100%; border-collapse:collapse; direction:ltr; font-size:{{ o.font }}px; color:#111; }
   .bf-box td { border:1.5px solid {{ o.border }}; padding:6px 9px; vertical-align:middle; }
-  .bf-box td.l { font-weight:700; background:{{ o.label_bg }}; }
+  .bf-box td.l { font-weight:700; background:{{ o.label_bg }}; white-space:nowrap; }
   .bf-box td.v { text-align:center; }
   .bf-box td.u { text-align:center; font-weight:700; width:11%; }
   .bf-box td.sec { font-weight:700; background:{{ o.label_bg }}; text-decoration:underline; font-family:"Times New Roman", serif; }
   .bf-box td.cap { font-weight:700; background:{{ o.label_bg }}; width:14%; }
   .bf-box tr.concl td { background:{{ o.concl_bg }}; font-weight:700; }
   .bf-box .rich-note { display:block; }
+  .rs-t { display:inline-block; margin-left:6px; text-indent:0; white-space:nowrap; opacity:.25; }
+  td:hover > .rs-t { opacity:1; }
+  .rs-t button { font-size:10px; line-height:1; padding:1px 3px; margin:0 1px; border:1px solid #bbb; border-radius:3px; background:#fff; cursor:pointer; }
+  .rs-bar { margin-top:12px; padding:10px 12px; border:1px dashed #94a3b8; border-radius:8px; background:#f8fafc; font-family:Tahoma, Arial, sans-serif; font-size:13px; line-height:2; direction:rtl; text-align:right; box-sizing:border-box; overflow:hidden; }
+  .rs-chip { display:inline-block; margin:0 4px; padding:0 8px; border:1px solid #cbd5e1; border-radius:12px; background:#fff; }
+  .rs-bar input, .rs-bar select, .rs-bar button { font-size:13px; padding:2px 6px; }
+  @media print { .rs-np { display:none !important; } }
 </style>
 <table class="bf-box">
-  <tr><td class="l" style="width:23%">WBC Count:</td><td class="v" style="width:15%">{{ wbc }}</td><td class="u">X 10<sup>9</sup>/L</td>
-      <td class="l" style="width:14%">Hb:</td><td class="v" style="width:13%">{{ hb }}</td><td class="u">g/dl</td></tr>
-  <tr><td class="l">Platelet count:</td><td class="v">{{ plt }}</td><td class="u">X 10<sup>9</sup>/L</td>
-      <td class="l">HCT:</td><td class="v">{{ hct }}</td><td class="u">%</td></tr>
-  <tr><td class="sec" colspan="6">Differential Leucocyte Count:</td></tr>
+  <tr>
+    {% if 'wbc count' not in _hid %}{{ labtd('WBC Count:', sm, edit, false, 'l', 'width:23%') }}<td class="v" style="width:15%">{{ wbc }}</td><td class="u">{{ un(u_wbc) }}</td>
+    {% else %}<td class="l" style="width:23%"></td><td class="v" style="width:15%"></td><td class="u"></td>{% endif %}
+    {% if 'hb' not in _hid %}{{ labtd('Hb:', sm, edit, false, 'l', 'width:22%') }}<td class="v" style="width:13%">{{ hb }}</td><td class="u">{{ un(u_hb) }}</td>
+    {% else %}<td class="l" style="width:22%"></td><td class="v" style="width:13%"></td><td class="u"></td>{% endif %}
+  </tr>
+  <tr>
+    {% if 'platelet count' not in _hid %}{{ labtd('Platelet count:', sm, edit) }}<td class="v">{{ plt }}</td><td class="u">{{ un(u_plt) }}</td>
+    {% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
+    {% if 'hct' not in _hid %}{{ labtd('HCT:', sm, edit) }}<td class="v">{{ hct }}</td><td class="u">{{ un(u_hct) }}</td>
+    {% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
+  </tr>
+  {% if 'differential leucocyte count' not in _hid %}<tr>{{ labtd('Differential Leucocyte Count:', sm, edit, false, 'sec', '', 6) }}</tr>{% endif %}
   {% for i in range(nrows) %}
   <tr>
-    {% if i < rows_l|length %}<td class="l">{{ rows_l[i][0] }} :</td><td class="v">{{ params.get(rows_l[i][1], '') }}</td><td class="u">{{ units.get(rows_l[i][1]) or '%' }}</td>
+    {% if i < L|length %}{{ labtd(L[i].label, sm, edit, L[i].ex) }}<td class="v">{{ L[i].val }}</td><td class="u">{{ un(L[i].unit) }}</td>
     {% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
-    {% if i < rows_r|length %}<td class="l" colspan="1">{{ rows_r[i][0] }}</td><td class="v">{{ rows_r[i][1] }}</td><td class="u">{% if rows_r[i][1] != '' %}{{ rows_r[i][2] }}{% endif %}</td>
+    {% if i < R|length %}{{ labtd(R[i].label, sm, edit, R[i].ex) }}<td class="v">{{ R[i].val }}</td><td class="u">{{ un(R[i].unit) }}</td>
     {% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
   </tr>
   {% endfor %}
-  <tr><td class="cap">RBC:</td><td colspan="5">{{ rich_note(order_test_id, 'RBC_desc', params.get('RBC_desc', ''), style='flex:1') }}</td></tr>
-  <tr><td class="cap">WBC:</td><td colspan="5">{{ rich_note(order_test_id, 'WBC_desc', params.get('WBC_desc', ''), style='flex:1') }}</td></tr>
-  <tr><td class="cap">Platelet:</td><td colspan="5">{{ rich_note(order_test_id, 'Platelets_desc', params.get('Platelets_desc', ''), style='flex:1') }}</td></tr>
-  <tr class="concl"><td class="cap" style="background:transparent">Conclusion:</td><td colspan="5">{{ rich_note(order_test_id, 'Conclusion', params.get('Conclusion', ''), conclusion=True, style='flex:1') }}</td></tr>
-  {% if params.get('Other Notes') %}<tr><td class="cap">Other Notes:</td><td colspan="5" style="font-weight:700;">{{ rich_note(order_test_id, 'Other Notes', params.get('Other Notes', ''), style='flex:1') }}</td></tr>{% endif %}
+  {% if 'rbc' not in _hid %}<tr><td class="cap">RBC:{% if edit %}<span class="rs-t rs-np"><button type="button" data-rs="hide" data-row="RBC" title="&#1581;&#1584;&#1601; &#1607;&#1584;&#1575; &#1575;&#1604;&#1589;&#1601;">&#10005;</button></span>{% endif %}</td><td colspan="5">{{ rich_note(order_test_id, 'RBC_desc', params.get('RBC_desc', ''), style='flex:1') }}</td></tr>{% endif %}
+  {% if 'wbc' not in _hid %}<tr><td class="cap">WBC:{% if edit %}<span class="rs-t rs-np"><button type="button" data-rs="hide" data-row="WBC" title="&#1581;&#1584;&#1601; &#1607;&#1584;&#1575; &#1575;&#1604;&#1589;&#1601;">&#10005;</button></span>{% endif %}</td><td colspan="5">{{ rich_note(order_test_id, 'WBC_desc', params.get('WBC_desc', ''), style='flex:1') }}</td></tr>{% endif %}
+  {% if 'platelet' not in _hid %}<tr><td class="cap">Platelet:{% if edit %}<span class="rs-t rs-np"><button type="button" data-rs="hide" data-row="Platelet" title="&#1581;&#1584;&#1601; &#1607;&#1584;&#1575; &#1575;&#1604;&#1589;&#1601;">&#10005;</button></span>{% endif %}</td><td colspan="5">{{ rich_note(order_test_id, 'Platelets_desc', params.get('Platelets_desc', ''), style='flex:1') }}</td></tr>{% endif %}
+  {% if 'conclusion' not in _hid %}<tr class="concl"><td class="cap" style="background:transparent">Conclusion:{% if edit %}<span class="rs-t rs-np"><button type="button" data-rs="hide" data-row="Conclusion" title="&#1581;&#1584;&#1601; &#1607;&#1584;&#1575; &#1575;&#1604;&#1589;&#1601;">&#10005;</button></span>{% endif %}</td><td colspan="5">{{ rich_note(order_test_id, 'Conclusion', params.get('Conclusion', ''), conclusion=True, style='flex:1') }}</td></tr>{% endif %}
+  {% if params.get('Other Notes') and 'other notes' not in _hid %}<tr><td class="cap">Other Notes:</td><td colspan="5" style="font-weight:700;">{{ rich_note(order_test_id, 'Other Notes', params.get('Other Notes', ''), style='flex:1') }}</td></tr>{% endif %}
 </table>
+
+{% if edit %}
+<div class="rs-bar rs-np" id="rs-bar" data-key="{{ rs.key }}">
+  <div><b>&#1589;&#1601;&#1608;&#1601; &#1605;&#1582;&#1601;&#1610;&#1577;:</b>
+    {% if o.get('hide') %}{% for h in o.hide %}<span class="rs-chip">{{ h }} <button type="button" data-rs="show" data-row="{{ h }}">&#1575;&#1587;&#1578;&#1585;&#1580;&#1575;&#1593;</button></span>{% endfor %}{% else %}&#1604;&#1575; &#1610;&#1608;&#1580;&#1583;{% endif %}
+  </div>
+  <div>&#10133; &#1573;&#1590;&#1575;&#1601;&#1577; &#1576;&#1575;&#1585;&#1575;&#1605;&#1610;&#1578;&#1585; &#1580;&#1583;&#1610;&#1583;:
+    <input id="rs-n" placeholder="&#1575;&#1604;&#1575;&#1587;&#1605; (&#1593;&#1585;&#1576;&#1610; &#1571;&#1608; &#1573;&#1606;&#1603;&#1604;&#1610;&#1586;&#1610;)" size="22">
+    <input id="rs-u" placeholder="&#1575;&#1604;&#1608;&#1581;&#1583;&#1577;" size="7">
+    <select id="rs-s"><option value="L">&#1575;&#1604;&#1593;&#1605;&#1608;&#1583; &#1575;&#1604;&#1571;&#1610;&#1587;&#1585; (L)</option><option value="R">&#1575;&#1604;&#1593;&#1605;&#1608;&#1583; &#1575;&#1604;&#1571;&#1610;&#1605;&#1606; (R)</option></select>
+    <button type="button" id="rs-add">&#1573;&#1590;&#1575;&#1601;&#1577;</button>
+  </div>
+  <div style="color:#64748b;font-size:12px">&#1575;&#1604;&#1576;&#1575;&#1585;&#1575;&#1605;&#1610;&#1578;&#1585; &#1575;&#1604;&#1605;&#1590;&#1575;&#1601; &#1610;&#1615;&#1606;&#1588;&#1571; &#1578;&#1604;&#1602;&#1575;&#1574;&#1610;&#1575;&#1611; &#1576;&#1578;&#1581;&#1604;&#1610;&#1604; Blood film &#1604;&#1573;&#1583;&#1582;&#1575;&#1604; &#1602;&#1610;&#1605;&#1578;&#1607;. &#10005; &#1581;&#1584;&#1601; &#1575;&#1604;&#1589;&#1601; &#183; &#9664; &#9654; &#1573;&#1586;&#1575;&#1581;&#1577; &#1575;&#1604;&#1593;&#1606;&#1608;&#1575;&#1606; &#183; &#128465; &#1581;&#1584;&#1601; &#1576;&#1575;&#1585;&#1575;&#1605;&#1610;&#1578;&#1585; &#1605;&#1590;&#1575;&#1601;.</div>
+</div>
+<script>
+(function () {
+  var bar = document.getElementById('rs-bar'); if (!bar) return;
+  var key = bar.getAttribute('data-key');
+  function post(url, d) {
+    var fd = new FormData(); fd.append('key', key);
+    for (var k in d) fd.append(k, d[k]);
+    return fetch(url, {method: 'POST', body: fd, credentials: 'same-origin'}).then(function () { location.reload(); });
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-rs]'); if (!b) return;
+    var a = b.getAttribute('data-rs'), row = b.getAttribute('data-row');
+    if (a === 'hide') post('/management/report-styles/hide-row', {row: row});
+    else if (a === 'show') post('/management/report-styles/hide-row', {row: row, mode: 'show'});
+    else if (a === 'shift') post('/management/report-styles/shift-row', {row: row, dx: b.getAttribute('data-dx')});
+    else if (a === 'rmextra') post('/management/report-styles/extra-row', {name: row, mode: 'remove'});
+  });
+  document.getElementById('rs-add').addEventListener('click', function () {
+    var n = document.getElementById('rs-n').value.trim(); if (!n) return;
+    post('/management/report-styles/extra-row', {name: n, unit: document.getElementById('rs-u').value, side: document.getElementById('rs-s').value});
+  });
+})();
+</script>
+{% endif %}
+{% if o.get('autofit') %}
+<script>
+/* v31: يفعّل «ملاءمة A4» الموجودة بـ base_report (نفس حساباتها لهوامش A4) بدل حساب منفصل */
+window.addEventListener('load', function () {
+  setTimeout(function () { var b = document.getElementById('rsA4'); if (b && !b.classList.contains('on')) b.click(); }, 250);
+});
+</script>
+{% endif %}
 
 {% else %}
 <div class="report-heading">Blood film and Morphology</div>

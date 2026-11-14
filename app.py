@@ -399,7 +399,7 @@ def _bf_autofill_enabled():
     """مفتاح الملء التلقائي لتقرير Blood film (ستايل bf المؤطّر: خيار show_cbc، الافتراضي مفعّل)."""
     try:
         st = app.jinja_env.globals["report_style"]("bf")
-        if st.get("id") == "boxed":
+        if st.get("id") in ("boxed", "framed"):
             return bool(st["opts"].get("show_cbc", 1))     # نفس مفتاح «ملء ... تلقائياً» بستايل Blood film المؤطّر
         return False                                        # الكلاسيكي لا يطبع هذي الباراميترات الأربعة
     except Exception:

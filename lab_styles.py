@@ -57,10 +57,15 @@ OPT_SPECS = {
         ("concl_bg", "خلفية Conclusion", _C, "#DCE9F7"), ("font", "حجم الخط (px)", "num", 15),
         ("show_cbc", "ملء WBC / Hb / Platelet / HCT تلقائياً من CBC نفس الزيارة (بالتقرير وبشاشة الإدخال) — إلغاء التأشير = ما تنملأ", "bool", 1),
         ("autofit", "ضغط الخط تلقائيًا لتبقى النتيجة بصفحة واحدة (لو RBC/WBC/Platelet طويلة)", "bool", 1),
+        ("unit_wbc", "وحدة WBC الافتراضية (تُستعمل لو ما وُجدت وحدة من CBC/الباراميتر) — اكتب ⁹ أو ^9 للأُس", "text", "X 10⁹/L"),
+        ("unit_hb", "وحدة Hb الافتراضية", "text", "g/dl"),
+        ("unit_plt", "وحدة Platelet الافتراضية", "text", "X 10⁹/L"),
+        ("unit_hct", "وحدة HCT الافتراضية", "text", "%"),
         ("hide", "صفوف مخفية (أسماؤها مفصولة بفاصلة) — أو اضغط ✕ على الصف بالمعاينة", "list", []),
         ("extra", "باراميترات مضافة (الاسم|الوحدة|L أو R) — أو استخدم ➕ بالمعاينة", "list", []),
         ("shift", "إزاحة العناوين يمين/يسار (الاسم|بكسل) — أو استخدم ◀ ▶ بالمعاينة", "list", []),
     ],
+    "bf:framed": [],     # يُملأ أسفل (نسخة من bf:boxed مع افتراضيات الصورة)
     "bma:classic": [],
     "bma:blue": [
         ("head_bg", "لون أشرطة العناوين", _C, "#B8D0EC"), ("border", "لون الإطار", _C, "#1F3A7A"),
@@ -91,6 +96,12 @@ OPT_SPECS = {
     ],
 }
 
+# v31: ستايل bf:framed = نفس خيارات bf:boxed، لكن الافتراضي: Coomb's test مخفي، وعنوان Hb مزاح 24px (مثل الصورة)
+OPT_SPECS["bf:framed"] = [
+    (n, l, t, ["Coomb's test"] if n == "hide" else (["Hb|24"] if n == "shift" else d))
+    for n, l, t, d in OPT_SPECS["bf:boxed"]
+]
+
 # الكتالوج الأساسي: key -> (family, id, عنوان, وصف)
 BASE_STYLES = [
     ("cbc", "classic", "الكلاسيكي (الحالي)", "الجدول الحالي: Test / result / units / Normal Range"),
@@ -101,6 +112,9 @@ BASE_STYLES = [
     ("bf", "classic", "الكلاسيكي (الحالي)", "جدول الديفرنشل + RBC/WBC/Platelets + Conclusion"),
     ("bf", "boxed", "جدول مؤطّر (CBC + Differential + Retic)",
      "حسب الصورة: جدول بإطار واحد يجمع قيم CBC والديفرنشل والريتك وحقول الوصف والخلاصة"),
+    ("bf", "framed", "جدول مؤطّر مرن (حسب الصورة) — حذف وإضافة باراميترات",
+     "نفس تصميم الجدول المؤطّر بالضبط: NRBCs بالعمود الأيسر، Retic/Corrected بالأيمن، وCoomb's مخفي افتراضياً (يرجع بضغطة). "
+     "بالمعاينة: ✕ لحذف أي صف، ◀ ▶ لإزاحة العنوان، ➕ لإضافة باراميتر جديد يُنشأ تلقائياً بتحليل Blood film"),
     ("bma", "classic", "الكلاسيكي (الحالي)", "إطار واحد: Cellularity … Conclusion"),
     ("bma", "blue", "أشرطة زرقاء (BM aspirate)", "حسب الصورة: شريط رقم العينة + شريط العنوان + قائمة نقاط + شريط Conclusion"),
     ("culture", "classic", "الكلاسيكي (الحالي)", "جدول Sensitive / Intermediate / Resistant لكل بكتيريا"),
@@ -278,30 +292,47 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                   "plt": ["PLT", "Platelet count", "Platelets"], "hct": ["HCT", "PCV"]}
 
     def lab_cbc_vals(ot):
-        """قيم CBC لنفس الزيارة (لجدول Blood film المؤطّر). بالمعاينة: قيم نموذجية."""
+        """قيم CBC لنفس الزيارة (لجدول Blood film المؤطّر) + وحدات باراميترات CBC نفسها (wbc_u/hb_u/plt_u/hct_u).
+        v31: الوحدة = وحدة باراميتر CBC (مع تخصيص المريض إن وُجد) فتتبع وحدات الجهاز/الإعداد تلقائياً."""
+        blank = {"wbc": "", "hb": "", "plt": "", "hct": "", "wbc_u": "", "hb_u": "", "plt_u": "", "hct_u": ""}
         try:
             visit_id = ot["visit_id"]
         except (KeyError, IndexError, TypeError):
-            return {"wbc": "", "hb": "", "plt": "", "hct": ""}
+            return blank
         db = get_db()
         try:
             rows = db.execute(
-                "SELECT tp.name AS n, r.value_text AS t, r.value_numeric AS v FROM order_tests ot2 "
+                "SELECT tp.id AS pid, tp.name AS n, tp.unit AS u, r.value_text AS t, r.value_numeric AS v FROM order_tests ot2 "
                 "JOIN orders o2 ON o2.id = ot2.order_id JOIN test_definitions td ON td.id = ot2.test_definition_id "
                 "JOIN results r ON r.order_test_id = ot2.id JOIN test_parameters tp ON tp.id = r.test_parameter_id "
                 "WHERE o2.visit_id = ? AND td.code = 'CBC'", (visit_id,)).fetchall()
+            ovr = {}
+            try:   # تخصيص وحدة لمريض معيّن (الجدول يُنشأ عند أول استعمال، فقد لا يكون موجوداً)
+                pr = db.execute("SELECT patient_id FROM visits WHERE id=?", (visit_id,)).fetchone()
+                if pr:
+                    ovr = {x["test_parameter_id"]: x["unit"] for x in db.execute(
+                        "SELECT test_parameter_id, unit FROM lis_patient_param_overrides WHERE patient_id=? AND unit IS NOT NULL",
+                        (pr["patient_id"],)).fetchall()}
+            except Exception:
+                ovr = {}
         except Exception:
             return {}
         finally:
             db.close()
-        by = {}
+        by, un = {}, {}
         for r in rows:
             v = r["t"] if r["t"] not in (None, "") else r["v"]
             if isinstance(v, float) and v == int(v):
                 v = int(v)
             if v not in (None, ""):
                 by[r["n"]] = v
-        return {k: next((by[n] for n in names if n in by), "") for k, names in _CBC_NAMES.items()}
+                un[r["n"]] = (ovr.get(r["pid"]) if r["pid"] in ovr else r["u"]) or ""
+        out = dict(blank)
+        for k, names in _CBC_NAMES.items():
+            nm = next((n for n in names if n in by), None)
+            if nm:
+                out[k], out[k + "_u"] = by[nm], str(un.get(nm) or "").strip()
+        return out
 
     def preview_fill(code, params, cbc_groups, row_groups):
         """معاينة الستايلات: هيكل التقرير فقط، كل الحقول فاضية (بلا أرقام نموذجية). ترجع (params, cbc_groups, prev_date)."""
@@ -403,6 +434,16 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                 lst.append(f"{name}|{unit}|{side}")
             oa[key] = {**oa.get(key, {}), "extra": lst[:40]}
             set_setting(db, "rs_opts", json.dumps(oa, ensure_ascii=False))
+            if request.form.get("mode") != "remove" and s["family"] == "bf":
+                # v31: الباراميتر المضاف يُنشأ بتحليل Blood film (إن لم يكن موجوداً) ليظهر بشاشة إدخال النتائج
+                try:
+                    td = db.execute("SELECT id FROM test_definitions WHERE code='BF'").fetchone()
+                    if td and not db.execute("SELECT id FROM test_parameters WHERE test_definition_id=? AND name=?",
+                                             (td["id"], name)).fetchone():
+                        db.execute("INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, ?, ?, 'Text')",
+                                   (td["id"], name, unit))
+                except Exception:
+                    pass
             db.commit()
             return jsonify({"ok": True, "extra": lst})
         finally:
