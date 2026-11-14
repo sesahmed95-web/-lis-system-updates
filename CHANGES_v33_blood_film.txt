@@ -1,0 +1,7 @@
+تحديث Blood film (ملف واحد): templates/reports/blood_film.html
+- إصلاح: أزرار ✎ ◀ ▶ ✕ كانت ما تشتغل لأن سكربت التعديل فيه "});" زائدة (SyntaxError) فيتعطل كله. صُحّح.
+- أيقونات التعديل صارت أوضح (كانت شبه مخفية).
+- ستايل «مؤطّر مرن»: Retic count + Corrected retic count نزلوا أسفل Conclusion (يظهروا بالتقرير فقط إذا فيهم قيمة، وبالمعاينة دايماً للتعديل).
+- ستايل «مؤطّر مرن»: أُضيفت صفوف Band / Metamyelocytes / Myelocytes / Promyelocytes / NRBCs / Blast (عمود أيمن) و Atypical lymphocytes (أيسر) مثل الكلاسيكي، دائماً ظاهرة ويمكن إخفاء أي صف بـ ✕.
+- RBC / WBC / Platelet / Conclusion صار لها ✎ ◀ ▶ ✕ مثل باقي الباراميترات.
+التركيب: انسخ الملف فوق نفس المسار بمجلد البرنامج ثم أعد تشغيله (أو Ctrl+F5).

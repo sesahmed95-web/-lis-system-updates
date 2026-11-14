@@ -41,7 +41,7 @@
 
 {# --- الأعمدة الافتراضية --- #}
 {% set left = [('Neutrophils', 'Neutrophils'), ('Lymphocytes', 'Lymphocytes'), ('Monocytes', 'Monocytes'), ('Eosinophils', 'Eosinophils'), ('Basophils', 'Basophils')] %}
-{% if fr %}{% set left = left + [('NRBCs', 'NRBC')] %}{% endif %}
+{% if fr %}{% set left = left + [('Reactive lymphocytes' if params.get('Reactive lymphocytes') else 'Atypical lymphocytes', 'Reactive lymphocytes' if params.get('Reactive lymphocytes') else 'Atypical lymphocytes')] %}{% endif %}
 {% set left_extra = [('Band', 'Band'), ('Metamyelocytes', 'Metamyelocytes'), ('Myelocytes', 'Myelocytes'), ('Promyelocytes', 'Promyelocytes'), ('Reactive lymphocytes', 'Reactive lymphocytes'), ('Atypical lymphocytes', 'Atypical lymphocytes'), ('Blast', 'Blast')] %}
 {% set L = [] %}
 {% for lbl, key in left %}
@@ -49,16 +49,27 @@
   {% if key == 'NRBC' %}{% set un = ((units.get(key) or '/100wbc') if val != '' else '') %}{% else %}{% set un = (units.get(key) or '%') %}{% endif %}
   {% if (lbl|lower) not in _hid %}{% set _ = L.append({'label': lbl ~ ' :', 'val': val, 'unit': un, 'ex': false}) %}{% endif %}
 {% endfor %}
-{% for lbl, key in left_extra %}{% if params.get(key) and (lbl|lower) not in _hid %}{% set _ = L.append({'label': lbl ~ ' :', 'val': params.get(key), 'unit': (units.get(key) or '%'), 'ex': false}) %}{% endif %}{% endfor %}
+{% if not fr %}{% for lbl, key in left_extra %}{% if params.get(key) and (lbl|lower) not in _hid %}{% set _ = L.append({'label': lbl ~ ' :', 'val': params.get(key), 'unit': (units.get(key) or '%'), 'ex': false}) %}{% endif %}{% endfor %}{% endif %}
 
+{% if fr %}
+{# المؤطّر المرن: العمود الأيمن = Band / Metamyelocytes / Myelocytes / Promyelocytes / NRBCs / Blast (+ Coomb's لو أُرجع)، والريتك + Corrected أسفل Conclusion #}
+{% set rdef = [('Band :', 'Band', units.get('Band') or '%'),
+               ('Metamyelocytes :', 'Metamyelocytes', units.get('Metamyelocytes') or '%'),
+               ('Myelocytes :', 'Myelocytes', units.get('Myelocytes') or '%'),
+               ('Promyelocytes :', 'Promyelocytes', units.get('Promyelocytes') or '%'),
+               ('NRBCs :', 'NRBC', units.get('NRBC') or '/100wbc'),
+               ('Blast :', 'Blast', units.get('Blast') or '%'),
+               ("Coomb's test :", "Coomb's test", '')] %}
+{% else %}
 {% set rdef = [("Retic count :", 'Reticulocyte count', units.get('Reticulocyte count') or '%'),
                ("Corrected retic count:", 'Corrected Retic count', units.get('Corrected Retic count') or '%'),
-               ("Coomb's test :", "Coomb's test", '')] %}
-{% if not fr %}{% set rdef = rdef + [("NRBCs:", 'NRBC', units.get('NRBC') or '/100wbc')] %}{% endif %}
+               ("Coomb's test :", "Coomb's test", ''),
+               ("NRBCs:", 'NRBC', units.get('NRBC') or '/100wbc')] %}
+{% endif %}
 {% set R = [] %}
 {% for lbl, key, un in rdef %}
   {% set val = params.get(key, '') %}
-  {% if (lbl|replace(':','')|trim|lower) not in _hid %}{% set _ = R.append({'label': lbl, 'val': val, 'unit': (un if val != '' else ''), 'ex': false}) %}{% endif %}
+  {% if (lbl|replace(':','')|trim|lower) not in _hid %}{% set _ = R.append({'label': lbl, 'val': val, 'unit': (un if (val != '' or (fr and key != 'NRBC' and key != "Coomb's test")) else ''), 'ex': false}) %}{% endif %}
 {% endfor %}
 {# --- باراميترات مضافة: الاسم|الوحدة|L أو R --- #}
 {% for it in (o.get('extra') or []) %}
@@ -85,7 +96,7 @@
   .bf-box td.cap { font-weight:700; background:{{ o.label_bg }}; width:14%; }
   .bf-box tr.concl td { background:{{ o.concl_bg }}; font-weight:700; }
   .bf-box .rich-note { display:block; }
-  .rs-t { display:inline-block; margin-left:6px; text-indent:0; white-space:nowrap; opacity:.25; }
+  .rs-t { display:inline-block; margin-left:6px; text-indent:0; white-space:nowrap; opacity:.8; }
   td:hover > .rs-t { opacity:1; }
   .rs-t button { font-size:10px; line-height:1; padding:1px 3px; margin:0 1px; border:1px solid #bbb; border-radius:3px; background:#fff; cursor:pointer; }
   .rs-bar { margin-top:12px; padding:10px 12px; border:1px dashed #94a3b8; border-radius:8px; background:#f8fafc; font-family:Tahoma, Arial, sans-serif; font-size:13px; line-height:2; direction:rtl; text-align:right; box-sizing:border-box; overflow:hidden; }
@@ -122,10 +133,22 @@
   </tr>
   {% endfor %}
   {% if fr and 'blood film morphology' not in _hid %}<tr>{{ labtd('Blood film morphology', sm, edit, false, 'sec', '', 6, rn=rn) }}</tr>{% endif %}
-  {% if 'rbc' not in _hid %}<tr><td class="cap">RBC:{% if edit %}<span class="rs-t rs-np"><button type="button" data-rs="hide" data-row="RBC" title="&#1581;&#1584;&#1601; &#1607;&#1584;&#1575; &#1575;&#1604;&#1589;&#1601;">&#10005;</button></span>{% endif %}</td><td colspan="5">{{ rich_note(order_test_id, 'RBC_desc', params.get('RBC_desc', ''), style='flex:1') }}</td></tr>{% endif %}
-  {% if 'wbc' not in _hid %}<tr><td class="cap">WBC:{% if edit %}<span class="rs-t rs-np"><button type="button" data-rs="hide" data-row="WBC" title="&#1581;&#1584;&#1601; &#1607;&#1584;&#1575; &#1575;&#1604;&#1589;&#1601;">&#10005;</button></span>{% endif %}</td><td colspan="5">{{ rich_note(order_test_id, 'WBC_desc', params.get('WBC_desc', ''), style='flex:1') }}</td></tr>{% endif %}
-  {% if 'platelet' not in _hid %}<tr><td class="cap">Platelet:{% if edit %}<span class="rs-t rs-np"><button type="button" data-rs="hide" data-row="Platelet" title="&#1581;&#1584;&#1601; &#1607;&#1584;&#1575; &#1575;&#1604;&#1589;&#1601;">&#10005;</button></span>{% endif %}</td><td colspan="5">{{ rich_note(order_test_id, 'Platelets_desc', params.get('Platelets_desc', ''), style='flex:1') }}</td></tr>{% endif %}
-  {% if 'conclusion' not in _hid %}<tr class="concl"><td class="cap" style="background:transparent">Conclusion:{% if edit %}<span class="rs-t rs-np"><button type="button" data-rs="hide" data-row="Conclusion" title="&#1581;&#1584;&#1601; &#1607;&#1584;&#1575; &#1575;&#1604;&#1589;&#1601;">&#10005;</button></span>{% endif %}</td><td colspan="5">{{ rich_note(order_test_id, 'Conclusion', params.get('Conclusion', ''), conclusion=True, style='flex:1') }}</td></tr>{% endif %}
+  {% if 'rbc' not in _hid %}<tr>{{ labtd('RBC:', sm, edit, false, 'cap', '', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'RBC_desc', params.get('RBC_desc', ''), style='flex:1') }}</td></tr>{% endif %}
+  {% if 'wbc' not in _hid %}<tr>{{ labtd('WBC:', sm, edit, false, 'cap', '', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'WBC_desc', params.get('WBC_desc', ''), style='flex:1') }}</td></tr>{% endif %}
+  {% if 'platelet' not in _hid %}<tr>{{ labtd('Platelet:', sm, edit, false, 'cap', '', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'Platelets_desc', params.get('Platelets_desc', ''), style='flex:1') }}</td></tr>{% endif %}
+  {% if 'conclusion' not in _hid %}<tr class="concl">{{ labtd('Conclusion:', sm, edit, false, 'cap', 'background:transparent', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'Conclusion', params.get('Conclusion', ''), conclusion=True, style='flex:1') }}</td></tr>{% endif %}
+  {% if fr %}
+  {# v33: Retic count + Corrected retic count أسفل Conclusion (تظهر بالتقرير فقط لو فيها قيمة، وبالمعاينة دائماً للتعديل) #}
+  {% set _rv = params.get('Reticulocyte count', '') %}{% set _cv = params.get('Corrected Retic count', '') %}
+  {% set _show_rt = ((_rv != '' or _cv != '') or edit) %}
+  {% set _hr = ('retic count' in _hid) %}{% set _hc = ('corrected retic count' in _hid) %}
+  {% if _show_rt and not (_hr and _hc) %}
+  <tr>
+    {% if not _hr %}{{ labtd('Retic count :', sm, edit, false, 'l', '', 1, rn=rn) }}<td class="v">{{ _rv }}</td><td class="u">{{ units.get('Reticulocyte count') or '%' }}</td>{% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
+    {% if not _hc %}{{ labtd('Corrected retic count:', sm, edit, false, 'l', '', 1, rn=rn) }}<td class="v">{{ _cv }}</td><td class="u">{{ units.get('Corrected Retic count') or '%' }}</td>{% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
+  </tr>
+  {% endif %}
+  {% endif %}
   {% if params.get('Other Notes') and 'other notes' not in _hid %}<tr><td class="cap">Other Notes:</td><td colspan="5" style="font-weight:700;">{{ rich_note(order_test_id, 'Other Notes', params.get('Other Notes', ''), style='flex:1') }}</td></tr>{% endif %}
 </table>
 
@@ -172,7 +195,6 @@
     var n = document.getElementById('rs-n').value.trim(); if (!n) return;
     var pos = document.getElementById('rs-s').value.split('|');
     post('/management/report-styles/extra-row', {name: n, unit: document.getElementById('rs-u').value, side: pos[0], after: pos.slice(1).join('|')});
-  });
   });
 })();
 </script>

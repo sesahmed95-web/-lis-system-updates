@@ -715,3 +715,4 @@
   File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1737, in _hang_log
     with open(_HANG_LOG, "a", encoding="utf-8") as f:
 
+[2026-11-14T12:59:30] SLOW 2.0s POST /designer/update/check-now? (designer_update_check_now)
