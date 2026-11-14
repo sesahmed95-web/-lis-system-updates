@@ -27,7 +27,7 @@ set "CHROME=%ProgramFiles%\Google\Chrome\Application\chrome.exe"
 if not exist "%CHROME%" set "CHROME=%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"
 
 rem --- نافذة مستقلة بدون شريط المتصفح (وضع التطبيق) ---
-if exist "%EDGE%" ( start "" "%EDGE%" --app=%URL% --user-data-dir="%PROF%" --start-maximized & exit /b )
-if exist "%CHROME%" ( start "" "%CHROME%" --app=%URL% --user-data-dir="%PROF%" --start-maximized & exit /b )
+if exist "%EDGE%" ( start "" "%EDGE%" --app=%URL% --user-data-dir="%PROF%" --start-maximized --disable-extensions --no-first-run --no-default-browser-check --disable-sync & exit /b )
+if exist "%CHROME%" ( start "" "%CHROME%" --app=%URL% --user-data-dir="%PROF%" --start-maximized --disable-extensions --no-first-run --no-default-browser-check --disable-sync & exit /b )
 start "" %URL%
 exit /b
