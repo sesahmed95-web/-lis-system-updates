@@ -1,0 +1,60 @@
+{# v39: محاذاة موحّدة لنتائج كل التقارير — أول رقم بأي نتيجة يبدأ من نفس نقطة النتيجة اللي فوقها وتحتها (محاذاة لليسار)،
+   وكذلك المدى الطبيعي (من - إلى) وأعمدة low/high. تُطبَّق تلقائياً على أي جدول بجسم التقرير فيه عمود أرقام.
+   تعطيل لمرة: أضف ?align=0 للرابط. استثناء جدول/عمود: أضف class="no-align" للجدول أو للخلية. #}
+<style>
+  .ar-n { text-align:left !important; direction:ltr !important; padding-left:18px !important; }
+  .ar-rl, .ar-rh { display:inline-block; width:6.6ch; text-align:left; white-space:nowrap; }
+  .ar-rd { display:inline-block; width:2.4ch; text-align:center; }
+  td.ar-r { text-align:center; direction:ltr; unicode-bidi:isolate; white-space:nowrap; }
+  .ar-u { text-align:left !important; direction:ltr !important; padding-left:10px !important; white-space:nowrap; }
+</style>
+<script>
+(function () {
+  if (/[?&]align=0\b/.test(location.search) || window.__NOALIGN) return;
+  var root = document.getElementById('rptResults') || document.querySelector('.sheet'); if (!root) return;
+  var NUM = /^[<>≤≥~]?\s*[+-]?\d[\d,]*(\.\d+)?(\s|$|[A-Za-z%µμ×xX\/^*.\d²³⁹¹⁰⁻-]*)/;
+  var RANGE = /^\s*(\d[\d,]*(?:\.\d+)?)\s*[-–—]\s*(\d[\d,]*(?:\.\d+)?)\s*$/;
+  function txt(c) { return (c.textContent || '').replace(/\s+/g, ' ').trim(); }
+  function isNum(c) { var t = txt(c); return t && t.length < 40 && NUM.test(t) && !/[\/:]/.test(t.split(' ')[0]) ; }
+  function skip(c) { return c.classList.contains('no-align') || c.classList.contains('ar-n') || c.querySelector('input,select,textarea,button,table') || /(^|\s)(cl-res|cl-rng|c-res|c-unit|c-ref|dn|df)(\s|$)/.test(c.className) || (c.style && c.style.textAlign); }
+  function run() {
+    root.querySelectorAll('table').forEach(function (tb) {
+      if (tb.classList.contains('no-align') || tb.classList.contains('lt-cbc') || tb.getAttribute('data-ar')) return;
+      if (tb.querySelector('table') || tb.parentElement.closest('table.no-align')) return;
+      var rows = Array.prototype.slice.call(tb.rows).filter(function (r) { return !r.closest('thead'); });
+      var counts = {}; rows.forEach(function (r) { var n = r.cells.length; if (n > 1) counts[n] = (counts[n] || 0) + 1; });
+      var best = 0, bn = 0; for (var k in counts) if (counts[k] > bn) { bn = counts[k]; best = +k; }
+      if (!best || bn < 3) return;
+      var body = rows.filter(function (r) { return r.cells.length === best && !r.cells[0].hasAttribute('colspan'); });
+      var done = {}, klass = {}, uklass = {};
+      for (var j = 0; j < best; j++) {
+        var cells = body.map(function (r) { return r.cells[j]; }), vals = cells.filter(function (c) { return txt(c); });
+        var rng = vals.filter(function (c) { return !c.children.length && RANGE.test(txt(c)); });
+        var nums = vals.filter(isNum);
+        if (rng.length >= 3 && rng.length >= vals.length * 0.6) {                      // عمود مدى طبيعي «من - إلى»
+          rng.forEach(function (c) { var m = RANGE.exec(txt(c)); if (skip(c)) return;
+            c.innerHTML = '<span class="ar-rl">' + m[1] + '</span><span class="ar-rd">-</span><span class="ar-rh">' + m[2] + '</span>'; c.classList.add('ar-r'); });
+        } else if (nums.length >= 3 && nums.length >= vals.length * 0.6) {             // عمود نتائج/أرقام
+          cells.forEach(function (c) { if (!skip(c)) c.classList.add('ar-n'); if (c.classList.length) klass[c.classList[0]] = 1; });
+          var hr = tb.querySelector('thead tr:last-child'); var hc = hr && hr.cells.length === best ? hr.cells[j] : null;
+          if (hc && !skip(hc)) hc.classList.add('ar-n');
+          done[j] = 1;
+        }
+      }
+      // أعمدة نتائج ثانية بنفس الجدول (مثل Hb/HCT بجانب WBC/Platelet): نفس صنف الخلية ('v' مثلاً) → نفس المحاذاة
+      body.forEach(function (r) { for (var j = 0; j < best; j++) { var c = r.cells[j]; if (!done[j] && c.classList.length && klass[c.classList[0]] && isNum(c) && !skip(c)) c.classList.add('ar-n'); } });
+      // عمود الوحدات (يلي عمود أرقام مباشرة): نصوص قصيرة غير رقمية → محاذاة يسار موحّدة
+      for (var u in done) { var uj = +u + 1; if (uj >= best || done[uj]) continue;
+        var uc = body.map(function (r) { return r.cells[uj]; }), uv = uc.filter(function (c) { return txt(c); });
+        var short = uv.filter(function (c) { return txt(c).length <= 14 && !isNum(c); });
+        if (uv.length >= 3 && short.length >= uv.length * 0.6) uc.forEach(function (c) { if (!skip(c)) { c.classList.add('ar-u'); if (c.classList.length) uklass[c.classList[0]] = 1; } }); }
+      // أعمدة وحدات ثانية بنفس الصنف ('u' مثلاً)
+      body.forEach(function (r) { for (var j = 0; j < best; j++) { var c = r.cells[j]; if (!done[j] && !c.classList.contains('ar-u') && c.classList.length && uklass[c.classList[0]] && txt(c) && txt(c).length <= 14 && !isNum(c) && !skip(c)) c.classList.add('ar-u'); } });
+      tb.setAttribute('data-ar', '1');
+    });
+  }
+  window.addEventListener('load', function () { setTimeout(run, 30); });
+  window.addEventListener('beforeprint', run);
+  setTimeout(run, 20);
+})();
+</script>
