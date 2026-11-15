@@ -18123,25 +18123,37 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 return j["choices"][0]["message"]["content"].strip()
             except Exception:
                 raise _AIErr("جاء ردّ غير مفهوم من الخدمة.")
-        model = _pick_gemini_model(key, cfg["model"])
-        body = {"contents": [{"role": "user", "parts": [{"inlineData": {"mimeType": mime, "data": img_b64}}, {"text": prompt}]}],
-                "generationConfig": {"temperature": 0, "maxOutputTokens": 4096, "thinkingConfig": {"thinkingBudget": 0}}}
-        try:
-            j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
-                      {"x-goog-api-key": key}, body, 90)
-        except _AIErr as e400:
-            if "(400)" not in str(e400):
+        # v34: قراءة الصور بتجربة عدة موديلات (MODEL_404 / مشغول / الحد المجاني) بدل ما تفشل من أول موديل
+        _first = _pick_gemini_model(key, cfg["model"])
+        _order = [_first] + [m_ for m_ in ("gemini-2.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-pro") if m_ != _first]
+        _last = None
+        for model in _order:
+            body = {"contents": [{"role": "user", "parts": [{"inlineData": {"mimeType": mime, "data": img_b64}}, {"text": prompt}]}],
+                    "generationConfig": {"temperature": 0, "maxOutputTokens": 4096, "thinkingConfig": {"thinkingBudget": 0}}}
+            url_ = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model
+            try:
+                try:
+                    j = _post(url_, {"x-goog-api-key": key}, body, 90)
+                except _AIErr as e400:
+                    if "(400)" not in str(e400):
+                        raise
+                    body["generationConfig"].pop("thinkingConfig", None)
+                    j = _post(url_, {"x-goog-api-key": key}, body, 90)
+            except _AIErr as e_:
+                _last = e_
+                if str(e_) == "MODEL_404" or "مشغولة" in str(e_) or "الحد المجاني" in str(e_):
+                    continue
                 raise
-            body["generationConfig"].pop("thinkingConfig", None)
-            j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
-                      {"x-goog-api-key": key}, body, 90)
-        try:
-            txt = "".join(p_.get("text", "") for p_ in j["candidates"][0]["content"]["parts"]).strip()
-            if txt:
-                return txt
-        except Exception:
-            pass
-        raise _AIErr("جاء ردّ فارغ من الخدمة. أعد المحاولة.")
+            try:
+                txt = "".join(p_.get("text", "") for p_ in j["candidates"][0]["content"]["parts"]).strip()
+                if txt:
+                    return txt
+            except Exception:
+                pass
+            _last = _AIErr("جاء ردّ فارغ من الخدمة. أعد المحاولة.")
+        if _last is not None and str(_last) == "MODEL_404":
+            raise _AIErr("ما لقيت موديل Gemini متاح لقراءة الصور بهذا المفتاح. امسح خانة «موديل قراءة الصور» وأعد المحاولة.")
+        raise _last or _AIErr("جاء ردّ فارغ من الخدمة. أعد المحاولة.")
 
     @bp.route("/ai/api/extract-image", methods=["POST"])
     def ai_extract_image():
