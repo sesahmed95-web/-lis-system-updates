@@ -549,7 +549,7 @@
     {% macro nv_test_item(test) %}
       <span class="checkbox-item-wrap" id="test_item_{{ test['id'] }}">
       <label class="checkbox-item">
-        <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}"
+        <input type="checkbox" class="test-check" id="test_{{ test['id'] }}" name="tests" value="{{ test['id'] }}" data-code="{{ test['code'] or '' }}"
                data-exam="{{ '1' if test['id'] in examining_test_ids else '0' }}">
         <span id="test_label_{{ test['id'] }}" data-full="{{ test['name'] }}" data-short="{{ test['short_name'] or '' }}" title="{{ test['name'] }}">{{ (test['short_name'] or test['name']) }}</span> <span class="muted" id="pricewrap_{{ test['id'] }}" style="display:none;">(<span id="price_{{ test['id'] }}">0</span>)</span>
       </label>
@@ -949,6 +949,8 @@
       // v85: السعر قابل للتعديل مباشرة (لهذه الزيارة فقط) + زر 💾 لحفظه كسعر افتراضي للتحليل
       const pin = document.createElement('input'); pin.type = 'number'; pin.min = '0'; pin.step = 'any'; pin.className = 'nv-pin';
       pin.value = (price === null ? '' : Math.round(price)); pin.placeholder = 'سعر'; pin.title = 'عدّل السعر لهذه الزيارة';
+      pin.addEventListener('focus', function () { try { pin.select(); } catch (e) {} });
+      pin.addEventListener('mouseup', function (ev) { if (document.activeElement === pin && pin.dataset.sel !== '1') { ev.preventDefault(); pin.dataset.sel = '1'; } });
       pin.addEventListener('change', function () { nvSetOverride(id, pin.value); });
       c4.appendChild(pin);
       const sv = document.createElement('button'); sv.type = 'button'; sv.className = 'nv-pin-save'; sv.textContent = '💾'; sv.title = 'حفظ هذا السعر كسعر افتراضي للتحليل';
@@ -1780,6 +1782,27 @@
     // Enter داخل الحقول يُستخدم للتنقل فقط ولا يحفظ الزيارة (الحفظ بزر Create Visit)
     if (window.nvEnterGuardUntil && Date.now() < window.nvEnterGuardUntil) return;
     if (visitAlreadySaved) { alert('تم حفظ هذه الزيارة. لزيارة جديدة اضغط "زيارة جديدة أخرى" بالأسفل.'); return; }
+    // v37: تنبيهات قبل الحفظ — العمر / الاسم الثلاثي / الطبيب الفاحص لتحاليل BF, Retic, BF+Retic, Hb.H
+    (function () {
+      const warns = [];
+      const nm = (document.getElementById('patient_name').value || '').trim().split(/\s+/).filter(Boolean);
+      const ageV = (document.getElementById('age_input').value || '').trim();
+      if (ageV === '') warns.push('• لم تكتب عمر المريض.');
+      if (nm.length < 3) warns.push('• اسم المريض ليس ثلاثياً (كتبت ' + nm.length + (nm.length === 1 ? ' اسم' : ' اسماء') + ').');
+      const norm = function (x) { return (x || '').toLowerCase().replace(/[^a-z0-9]/g, ''); };
+      const NEED = ['bf', 'ret', 'retic', 'bfretic', 'bfandretic', 'hbh', 'hbhprep', 'hbhpreparation'];
+      let needExam = false;
+      document.querySelectorAll('.test-check:checked').forEach(function (cb) {
+        const lab = document.getElementById('test_label_' + cb.value);
+        const names = [cb.getAttribute('data-code'), lab && lab.getAttribute('data-short'), lab && lab.getAttribute('data-full'), lab && lab.textContent].map(norm);
+        if (names.some(function (n) { return n && (NEED.indexOf(n) >= 0 || n.indexOf('hbhprep') === 0); })) needExam = true;
+      });
+      if (needExam && !(document.getElementById('examining_doctor').value || '').trim())
+        warns.push('• لم تختر دكتور المختبر الفاحص (مطلوب لتحاليل BF / Retic / Hb.H Preparation).');
+      if (warns.length && !confirm('تنبيه قبل الحفظ:\n' + warns.join('\n') + '\n\nاضغط «موافق» للحفظ رغم ذلك، أو «إلغاء» للرجوع وتعديل البيانات.')) return (window.__nvStop = true);
+      window.__nvStop = false;
+    })();
+    if (window.__nvStop) return;
     // إلزامية اختيار تحليل واحد على الأقل قبل حفظ الزيارة — يشمل أي
     // تحليل من القائمة الأصلية أو تحليل جديد أُضيف عبر الحقل أعلاه
     // (لأنه بمجرد إضافته يصير خانة اختيار محدَّدة تلقائيًا بنفس الشبكة).

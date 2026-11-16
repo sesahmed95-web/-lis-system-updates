@@ -906,3 +906,4 @@
     return self._sslobj.read(len, buffer)
 
 [2026-11-15T10:03:41] SLOW 27.6s POST /ai/api/extract-image? (lis_ai.ai_extract_image)
+[2026-11-16T08:31:01] SLOW 2.0s POST /designer/update/check-now? (designer_update_check_now)
