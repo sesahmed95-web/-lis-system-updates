@@ -345,6 +345,32 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
             except Exception:
                 pass
 
+    def _visit_has_esr_cbc():
+        """زر «تنسيق ESR» يظهر فقط لو بزيارة المريض CBC + ESR."""
+        try:
+            va = request.view_args or {}
+            db = get_db()
+            try:
+                if "visit_id" in va:
+                    vid = va["visit_id"]
+                else:
+                    r = db.execute("SELECT o.visit_id FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE ot.id=?",
+                                   (va.get("order_test_id"),)).fetchone()
+                    vid = r["visit_id"] if r else None
+                if vid is None:
+                    return False
+                rows = db.execute("SELECT td.code AS code, td.name AS name FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+                                  "JOIN test_definitions td ON td.id=ot.test_definition_id WHERE o.visit_id=?", (vid,)).fetchall()
+            finally:
+                db.close()
+            codes = [(r["code"] or "").upper() for r in rows]
+            names = [(r["name"] or "").lower() for r in rows]
+            has_cbc = "CBC" in codes
+            has_esr = any(c == "ESR" or c.startswith("ESR") for c in codes) or any("sedimentation" in n or n.strip() == "esr" for n in names)
+            return has_cbc and has_esr
+        except Exception:
+            return True   # عند أي خطأ لا نخفي الزر
+
     import re
     _H = re.compile(rb'(<(?:div|h[1-6])\b[^>]*class="[^"]*\breport-(?:heading|title)\b[^"]*"[^>]*>)(.*?)(</(?:div|h[1-6])>)', re.S)
 
@@ -383,6 +409,11 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                 data = resp.get_data()
                 i = data.rfind(b"</body>")
                 resp.set_data(data[:i] + _SAMETAB.encode("utf-8") + data[i:])
+            if request.method == "GET" and resp.status_code == 200 and request.endpoint in ("visit_results_entry", "result_entry"):
+                data = resp.get_data()
+                if b"</body>" in data and b'id="labNoEsrBtn"' not in data and not _visit_has_esr_cbc():
+                    i = data.rfind(b"</body>")
+                    resp.set_data(data[:i] + b'<style id="labNoEsrBtn">a[href="/management/esr-layout"]{display:none!important}</style>' + data[i:])
             if path.rstrip("/") == "/management/report-designer":
                 data = resp.get_data()
                 if b'id="qeBtn"' not in data and b"</body>" in data:

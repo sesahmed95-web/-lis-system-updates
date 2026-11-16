@@ -73,14 +73,65 @@
     })();
     </script>
   {% endif %}
-  <table class="el-t">
-    <tr>{% for h in hb.headers %}<th>{{ h }}</th>{% endfor %}</tr>
-    {% for r in hb.rows %}<tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>{% endfor %}
+  <table class="el-t" id="elTbl">
+    <tr>{% for h in hb.headers %}<th>{{ h }}</th>{% endfor %}<th class="no-print" style="width:60px"></th></tr>
+    {% for r in hb.rows %}<tr data-i="{{ loop.index0 }}">{% for c in r %}<td class="el-ed" data-c="{{ loop.index0 }}" contenteditable="true" spellcheck="false">{{ c }}</td>{% endfor %}<td class="no-print"><button type="button" class="el-del" title="حذف هذا الباراميتر من التقرير">✕</button></td></tr>{% endfor %}
   </table>
+  <div class="no-print" style="width:92%;margin:4px auto;direction:rtl;font-size:12px;color:#475569;">
+    ✎ اضغط على أي رقم/اسم بالجدول وعدّله (يُحفظ عند الخروج من الخانة) · ✕ يحذف الصف · <button type="button" id="elAdd" style="border:1px solid #CBD5E1;background:#fff;border-radius:6px;cursor:pointer">＋ صف جديد</button>
+  </div>
+  <style>.el-del{border:1px solid #CBD5E1;background:#fff;color:#B91C1C;border-radius:50%;width:22px;height:22px;cursor:pointer;line-height:1} .el-ed:focus{outline:2px solid #60A5FA;background:#EFF6FF} @media print{.no-print{display:none!important}}</style>
+  <script>
+  (function () {
+    var id = {{ (ot['id'] or 0)|int }};
+    var F = {{ ({'printout': ['name','rt','abs','area','pct'], 'hplc': ['name','rt','area','pct','conc'], 'capillary': ['name','pct','','']}).get(hb.source, ['name','rt','area','pct','conc'])|tojson }};
+    function load(cb) { fetch('/api/order-tests/' + id + '/hb-data', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) { if (j.ok && j.data) cb(j.data); }); }
+    function save(d) {
+      fetch('/api/order-tests/' + id + '/hb-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ data: d }) })
+        .then(function (r) { return r.json(); }).then(function (j) { if (j.ok) location.reload(); else alert(j.error || 'تعذّر الحفظ'); });
+    }
+    var t = document.getElementById('elTbl');
+    t.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('.el-del'); if (!b) return;
+      var i = +b.closest('tr').dataset.i;
+      if (!confirm('حذف هذا الصف من التقرير؟')) return;
+      load(function (d) { d.peaks.splice(i, 1); save(d); });
+    });
+    t.addEventListener('focusin', function (e) { var c = e.target; if (c.classList && c.classList.contains('el-ed')) c.dataset.old = c.textContent; });
+    t.addEventListener('focusout', function (e) {
+      var c = e.target; if (!c.classList || !c.classList.contains('el-ed') || c.textContent === c.dataset.old) return;
+      var i = +c.closest('tr').dataset.i, f = F[+c.dataset.c], v = c.textContent.trim(); if (!f) return;
+      load(function (d) { if (d.peaks[i]) { d.peaks[i][f] = v; save(d); } });
+    });
+    document.getElementById('elAdd').onclick = function () { load(function (d) { d.peaks.push({ name: 'New', rt: '', abs: '', area: '', pct: '', conc: '' }); save(d); }); };
+  })();
+  </script>
   {% if hb.total_area %}<div class="el-tot">Total area: {{ hb.total_area }}</div>{% endif %}
   {% if hb.key %}<div class="el-key">{% for k, v in hb.key %}<div><b>{{ k }}</b> : {{ v }}</div>{% endfor %}</div>{% endif %}
 {% elif media.images %}
-  <div class="no-print" style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:6px;padding:6px 10px;margin:6px 0;font-size:12px;direction:rtl;">⚠️ الصورة الملتقطة لا تُطبع. لتظهر نتيجتها بالتقرير (منحنى + جدول مرتبين) افتح شاشة إدخال النتائج ← 📎 ← 🧬 Hb Curve، اقرأي الجدول ثم احفظيه.</div>
+  <div class="no-print" id="elConv" style="background:#EFF6FF;border:1px solid #60A5FA;border-radius:8px;padding:8px 12px;margin:6px 0;font-size:13px;direction:rtl;">
+    🧬 <b>تحويل صورة الجهاز إلى تقرير مرسوم</b> (منحنى + جدول) —
+    <button type="button" id="elConvBtn" style="border:1px solid #1D4ED8;background:#1D4ED8;color:#fff;border-radius:8px;padding:4px 12px;cursor:pointer">حوّل الآن</button>
+    <span id="elConvMsg" style="margin-inline-start:8px"></span>
+    <div style="font-size:11px;color:#64748B;margin-top:3px">يقرأ الجدول بالذكاء الصناعي (يحتاج مفتاح مفعّل بإعدادات الذكاء). بعد التحويل تقدر تعدّل أو تحذف أي صف بالتقرير. لو ما اشتغل: شاشة إدخال النتائج ← 📎 ← 🧬 Hb Curve.</div>
+  </div>
+  <script>
+  (function () {
+    var id = {{ (ot['id'] or 0)|int }}, img = {{ media.images[-1].id|tojson }}, msg = document.getElementById('elConvMsg'), btn = document.getElementById('elConvBtn');
+    function run() {
+      btn.disabled = true; msg.textContent = '⏳ جاري قراءة الصورة…';
+      fetch('/ai/api/hb-extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ order_test_id: id, image_id: img }) })
+        .then(function (r) { return r.json(); }).then(function (j) {
+          if (!j.ok) { msg.textContent = '⚠ ' + (j.error || 'تعذّرت القراءة'); btn.disabled = false; return; }
+          return fetch('/api/order-tests/' + id + '/hb-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ data: j.data }) })
+            .then(function (r) { return r.json(); }).then(function (k) { if (k.ok) location.reload(); else { msg.textContent = '⚠ ' + (k.error || 'تعذّر الحفظ'); btn.disabled = false; } });
+        }).catch(function () { msg.textContent = '⚠ خطأ اتصال'; btn.disabled = false; });
+    }
+    btn.onclick = run;
+    var k = 'hbauto_' + id + '_' + img;
+    try { if (!sessionStorage.getItem(k)) { sessionStorage.setItem(k, '1'); setTimeout(run, 400); } } catch (e) {}
+  })();
+  </script>
   <div class="el-img no-print">{% for im in media.images %}<img src="{{ im.url }}" alt="">{% endfor %}</div>
 {% else %}
   <table style="width:80%; margin:10px auto; direction:ltr; border-collapse:collapse; font-size:16px;">
