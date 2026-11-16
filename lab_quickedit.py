@@ -149,6 +149,24 @@ BTN = ('<a href="%s" id="qeBtn" title="تعديل سريع: باراميترات
        'border-radius:30px;text-decoration:none;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.25)">✎ تعديل سريع للتقارير</a>')
 
 
+_SAMETAB = r"""<script id="labSameTab">
+/* v39: أزرار «إدخال النتائج» تفتح بنفس النافذة/التبويب بدل تبويب متصفح جديد */
+document.addEventListener('click', function (e) {
+  var a = e.target.closest && e.target.closest('a[target="_blank"]'); if (!a) return;
+  var u; try { u = new URL(a.href, location.href); } catch (_) { return; }
+  if (u.origin === location.origin && /\/front-desk\/visits\/\d+\/results\/?$|\/enter-results|\/quick-entry/.test(u.pathname)) a.setAttribute('target', '_self');
+}, true);
+var _wo = window.open;
+window.open = function (url, name, feat) {
+  try {
+    var u = new URL(url, location.href);
+    if (u.origin === location.origin && /\/front-desk\/visits\/\d+\/results\/?$|\/enter-results|\/quick-entry/.test(u.pathname)) { location.href = u.href; return window; }
+  } catch (_) {}
+  return _wo.apply(window, arguments);
+};
+</script>"""
+
+
 def register(app, get_db, get_setting, set_setting, roles_required, log_action=None):
     from flask import g
     try:
@@ -360,6 +378,11 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                             new = new[:m.end()] + blk + new[m.end():]
                 if new != data:
                     resp.set_data(new)
+            if (b"</body>" in resp.get_data() and b'id="labSameTab"' not in resp.get_data()
+                    and "/print" not in path and not path.startswith("/api")):
+                data = resp.get_data()
+                i = data.rfind(b"</body>")
+                resp.set_data(data[:i] + _SAMETAB.encode("utf-8") + data[i:])
             if path.rstrip("/") == "/management/report-designer":
                 data = resp.get_data()
                 if b'id="qeBtn"' not in data and b"</body>" in data:
