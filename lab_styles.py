@@ -39,7 +39,8 @@ OPT_SPECS = {
         ("abn", "لون القيم غير الطبيعية", _C, "#C00000"), ("font", "حجم الخط (px)", "num", 14),
         ("range_note", "نص بجانب Reference Range", "text", "according to age"),
         ("prev_title", "عنوان عمود النتيجة السابقة", "text", "Previous Result"),
-        ("show_unit", "إظهار الوحدات", "bool", 1), ("show_prev", "عمود النتيجة السابقة (زيارة واحدة + تاريخها)", "bool", 1),
+        ("title_top", "عنوان القسم فوق الجدول", "bool", 1), ("title_text", "نص العنوان", "text", "Complete Blood Count (CBC)"),
+        ("unit_col", "عمود وحدات مستقل (يظهر دائماً حتى قبل كتابة النتيجة)", "bool", 1), ("show_unit", "إظهار الوحدة بجانب النتيجة (لو عمود الوحدات مطفي)", "bool", 1), ("show_prev", "عمود النتيجة السابقة (زيارة واحدة + تاريخها)", "bool", 1),
         ("show_all", "إظهار كل بارامترات CBC الموجودة (حتى غير المرتبة بالمجموعات)", "bool", 1),
         ("hide", "صفوف مخفية (أسماؤها مفصولة بفاصلة) — أو اضغط ✕ على الصف بالمعاينة", "list", []),
     ],
@@ -47,7 +48,8 @@ OPT_SPECS = {
         ("line", "لون الخطوط", _C, "#000000"), ("section", "لون عنوان القسم (Hematology)", _C, "#1D4ED8"),
         ("abn", "لون القيم غير الطبيعية", _C, "#C00000"), ("font", "حجم الخط (px)", "num", 14),
         ("range_note", "نص بجانب Reference Range", "text", "according to age"),
-        ("show_unit", "إظهار الوحدات", "bool", 1),
+        ("title_top", "عنوان القسم فوق الجدول", "bool", 1), ("title_text", "نص العنوان", "text", "Complete Blood Count (CBC)"),
+        ("unit_col", "عمود وحدات مستقل (يظهر دائماً حتى قبل كتابة النتيجة)", "bool", 1), ("show_unit", "إظهار الوحدة بجانب النتيجة (لو عمود الوحدات مطفي)", "bool", 1),
         ("show_all", "إظهار كل بارامترات CBC الموجودة (حتى غير المرتبة بالمجموعات)", "bool", 1),
         ("hide", "صفوف مخفية (أسماؤها مفصولة بفاصلة) — أو اضغط ✕ على الصف بالمعاينة", "list", []),
     ],
@@ -432,6 +434,31 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
 
     def _back(tab=""):
         return redirect(url_for("report_styles_page", tab=tab))
+
+    @app.route("/management/report-styles/cbc-unit", methods=["POST"])
+    @roles_required("admin")
+    def report_styles_cbc_unit():
+        """✎ على وحدة صف CBC بمعاينة الستايل: يعدّل test_parameters.unit (يؤثر على كل ستايلات CBC وشاشة الإدخال)."""
+        db = get_db()
+        try:
+            row = (request.form.get("row") or "").strip()[:60]
+            unit = (request.form.get("unit") or "").strip()[:30]
+            t = db.execute("SELECT id FROM test_definitions WHERE code='CBC'").fetchone()
+            if not t or not row:
+                return jsonify({"ok": False}), 400
+            p = db.execute("SELECT id FROM test_parameters WHERE test_definition_id=? AND (name=? OR display_label=?)",
+                           (t["id"], row, row)).fetchone()
+            if not p:
+                return jsonify({"ok": False, "msg": "not found"}), 404
+            db.execute("UPDATE test_parameters SET unit=? WHERE id=?", (unit, p["id"]))
+            db.commit()
+            try:
+                log_action("ReportStyles", "cbc_unit", p["id"], f"{row} -> {unit}")
+            except Exception:
+                pass
+            return jsonify({"ok": True, "unit": unit})
+        finally:
+            db.close()
 
     @app.route("/management/report-styles/hide-row", methods=["POST"])
     @roles_required("admin")
@@ -871,3 +898,11 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
         finally:
             db.close()
         return redirect(url_for("test_panel", test_id=test_id, tab="ranges"))
+
+
+    # v38: صفحة «تعديل سريع للتقارير» (ملف مستقل lab_quickedit.py) — فشلها ما يوقف التطبيق
+    try:
+        import lab_quickedit
+        lab_quickedit.register(app, get_db, get_setting, set_setting, roles_required, log_action)
+    except Exception as _qe_err:  # pragma: no cover
+        print("lab_quickedit not loaded:", _qe_err)

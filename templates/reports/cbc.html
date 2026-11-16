@@ -26,23 +26,29 @@
   .lt-cbc tr.sec td { text-align:center; padding:12px 8px 8px; }
   .lt-cbc .sec-t { display:inline-block; font-size:1.25em; font-weight:800; color:{{ o.section }}; }
   .lt-cbc tfoot td { border-top:2px solid {{ o.line }}; padding:0; }
+  .lt-title { text-align:center; font-size:1.25em; font-weight:800; color:{{ o.section }}; margin:4px 0 10px; font-family:Arial, Helvetica, sans-serif; }
+  .lt-cbc td.c-unit { color:#333; font-size:.92em; white-space:nowrap; }
+  .lt-x.lt-e { color:#1D4ED8; }
   .lt-x { display:none; margin-inline-start:8px; border:1px solid #CBD5E1; background:#fff; color:#B91C1C; border-radius:50%; width:20px; height:20px; line-height:16px; padding:0; cursor:pointer; font-size:12px; }
   .lt-cbc tr:hover .lt-x { display:inline-block; }
   @media print { .lt-x { display:none !important; } }
   .lt-prevnote { direction:rtl; text-align:right; margin-top:10px; font-size:.95em; color:#334155; }
   .lt-prevnote b { color:#14213D; }
 </style>
-{% set ncols = 3 + (1 if show_prev_col else 0) %}
+{% set ucol = o.unit_col %}
+{% set ncols = 3 + (1 if ucol else 0) + (1 if show_prev_col else 0) %}
+{% if o.title_top %}<div class="lt-title">{{ o.title_text or 'Complete Blood Count (CBC)' }}</div>{% endif %}
 <table class="lt-cbc">
   <thead>
     <tr>
       <th class="c-name">Investigation</th><th>Result</th>
+      {% if ucol %}<th>Unit</th>{% endif %}
       <th>Reference Range{% if o.range_note %} <small>({{ o.range_note }})</small>{% endif %}</th>
       {% if show_prev_col %}<th>{{ o.prev_title or 'Previous Result' }}</th>{% endif %}
     </tr>
   </thead>
   <tbody>
-    <tr class="sec"><td colspan="{{ ncols }}"><div class="sec-t">Complete Blood Count CBC</div></td></tr>
+    {% if not o.title_top %}<tr class="sec"><td colspan="{{ ncols }}"><div class="sec-t">{{ o.title_text or 'Complete Blood Count (CBC)' }}</div></td></tr>{% endif %}
     {% for group in cbc_groups %}{% for row in group %}
     {% if row.name not in hidden %}
     {% set rv = row.result|string|trim %}
@@ -52,7 +58,8 @@
     {% set abn = (row.flag and row.flag != 'Normal') or (rvn is not none and ((lo is not none and rvn < lo) or (hi is not none and rvn > hi))) %}
     <tr{% if row.highlight %} class="hl"{% endif %}>
       <td class="c-name">{{ row.name }}{% if can_hide %}<button type="button" class="lt-x" title="إخفاء هذا الصف" onclick="rsHide({{ rs.key|tojson }}, {{ row.name|tojson }})">✕</button>{% endif %}</td>
-      <td class="c-res"><span{% if abn %} class="abn"{% endif %}>{{ row.result }}</span>{% if o.show_unit and row.unit and rv %}<span class="u">{{ row.unit }}</span>{% endif %}</td>
+      <td class="c-res"><span{% if abn %} class="abn"{% endif %}>{{ row.result }}</span>{% if o.show_unit and not ucol and row.unit and rv %}<span class="u">{{ row.unit }}</span>{% endif %}</td>
+      {% if ucol %}<td class="c-unit">{{ row.unit }}{% if can_hide %}<button type="button" class="lt-x lt-e" title="تعديل الوحدة" onclick="rsUnit({{ row.name|tojson }}, {{ (row.unit or '')|tojson }})">✎</button>{% endif %}</td>{% endif %}
       <td class="c-ref">{% if lo is not none and hi is not none %}{{ '%g'|format(lo) }}-{{ '%g'|format(hi) }}{% elif lo is not none %}&gt; {{ '%g'|format(lo) }}{% elif hi is not none %}&lt; {{ '%g'|format(hi) }}{% endif %}</td>
       {% if show_prev_col %}<td class="c-prev">{{ row.previous }}</td>{% endif %}
     </tr>
@@ -68,6 +75,12 @@
 {{ esr_blk }}
 {% if can_hide %}
 <script>
+function rsUnit(row, cur) {
+  var u = prompt('الوحدة الجديدة لـ ' + row + ' (تتغير بكل ستايلات CBC وبشاشة الإدخال):', cur || '');
+  if (u === null) return;
+  var fd = new FormData(); fd.append('row', row); fd.append('unit', u);
+  fetch({{ url_for('report_styles_cbc_unit')|tojson }}, { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) { if (j.ok) location.reload(); else alert('تعذر الحفظ'); });
+}
 function rsHide(key, row) {
   var fd = new FormData(); fd.append('key', key); fd.append('row', row);
   fetch({{ url_for('report_styles_hide_row')|tojson }}, { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function () { location.reload(); });
