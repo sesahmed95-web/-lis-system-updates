@@ -167,6 +167,83 @@ window.open = function (url, name, feat) {
 </script>"""
 
 
+_ONECOMMENT = r"""<script id="labOneComment">
+/* v44: Hb Electrophoresis — حقل Comment واحد (محرر Hb Curve السفلي). نخفي حقل «ملاحظة التقرير» العلوي وننقل نصه للمحرر السفلي مرة وحدة */
+(function () {
+  var n = 0, t = setInterval(function () {
+    n++; if (n > 40) clearInterval(t);
+    document.querySelectorAll('details').forEach(function (box) {
+      var ed = box.querySelector('.hb-ed'), note = box.querySelector('.lm-note');
+      if (!ed || !note || box.dataset.oneC) return;
+      var wrap = note.parentElement; if (wrap) wrap.style.display = 'none';
+      box.dataset.oneC = '1';
+      setTimeout(function () {
+        if (!ed.textContent.trim() && note.value.trim()) {
+          ed.innerHTML = '<ul>' + note.value.split(/\n/).filter(function (x) { return x.trim(); }).map(function (x) { return '<li>' + x.replace(/&/g, '&amp;').replace(/</g, '&lt;').trim() + '</li>'; }).join('') + '</ul>';
+          var b = box.querySelector('.hb-save-c'); if (b) b.click();
+        }
+      }, 1500);
+    });
+  }, 300);
+})();
+</script>"""
+
+
+_HBQUICK = r"""<script id="labHbQuick">
+/* v44: إدخال سريع Hb Capillary — تكتب F و A2 وأي فراكشن ثاني (S/D/E/C/H) والبرنامج يحسب Hb A ويبني المنحنى (بدون اسم جهاز) */
+(function () {
+  var OTH = ['Hb S', 'Hb D', 'Hb E', 'Hb C', 'Hb H'];
+  var n = 0, t = setInterval(function () {
+    n++; if (n > 40) clearInterval(t);
+    document.querySelectorAll('details').forEach(function (box) {
+      var ed = box.querySelector('.hb-ed'); if (!ed || box.dataset.hbq) return;
+      var prev = box.previousElementSibling, inp = prev && prev.querySelector('input[name$="_analyzer"]');
+      var m = inp && inp.name.match(/^ot(\d+)_analyzer$/); if (!m) return;
+      box.dataset.hbq = '1';
+      var id = m[1], sec = ed.parentElement;
+      var P = document.createElement('div');
+      P.style.cssText = 'margin:8px 0;padding:8px 10px;border:1px solid #93c5fd;border-radius:8px;background:#eff6ff;direction:rtl';
+      var rows = '';
+      for (var i = 0; i < 3; i++) rows += '<span style="display:inline-flex;gap:4px;margin:2px 8px 2px 0"><select class="hq-n' + i + '"><option value="">— فراكشن آخر —</option>' + OTH.map(function (x) { return '<option>' + x + '</option>'; }).join('') + '</select><input class="hq-v' + i + '" type="number" step="any" min="0" max="100" style="width:80px" placeholder="%"></span>';
+      P.innerHTML = '<b>⚡ إدخال سريع (Capillary)</b> <span style="font-size:12px;color:#475569">اكتب النسب فقط — Hb A يُحسب تلقائياً والمنحنى يُبنى بدون اسم جهاز</span><div style="margin-top:6px">' +
+        'Hb F <input class="hq-f" type="number" step="any" min="0" max="100" style="width:80px" placeholder="%"> &nbsp; Hb A2 <input class="hq-a2" type="number" step="any" min="0" max="100" style="width:80px" placeholder="%"> &nbsp; <b>Hb A = <span class="hq-a">—</span></b></div>' +
+        '<div style="margin-top:4px">' + rows + '</div><button type="button" class="btn small hq-go" style="margin-top:6px">✅ حفظ وبناء المنحنى</button> <span class="hq-msg" style="font-size:12px"></span>' +
+        '<div style="font-size:11px;color:#64748B;margin-top:2px">فعّل الستايل: ستايلات التقارير ← Hb Electrophoresis ← Capillary. صورة الجهاز/الورقة تبقى ترفعها من 📎 للمرجعية (ما تنطبع بهذا الستايل).</div>';
+      sec.insertBefore(P, sec.children[1] || null);
+      var q = function (c) { return P.querySelector(c); };
+      function num(v) { v = parseFloat(v); return isNaN(v) ? null : v; }
+      function recalc() {
+        var tot = 0, any = false;
+        ['.hq-f', '.hq-a2', '.hq-v0', '.hq-v1', '.hq-v2'].forEach(function (c) { var v = num(q(c).value); if (v !== null) { tot += v; any = true; } });
+        q('.hq-a').textContent = any ? (Math.round((100 - tot) * 100) / 100) + ' %' : '—';
+      }
+      P.addEventListener('input', recalc);
+      fetch('/api/order-tests/' + id + '/hb-data', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j.ok || !j.data) return; var o = 0;
+        j.data.peaks.forEach(function (p) {
+          var k = (p.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (k === 'hbf' || k === 'f') q('.hq-f').value = p.pct;
+          else if (k === 'hba2' || k === 'a2') q('.hq-a2').value = p.pct;
+          else if (k !== 'hba' && k !== 'a' && o < 3) { q('.hq-n' + o).value = OTH.indexOf(p.name) >= 0 ? p.name : ''; q('.hq-v' + o).value = p.pct; o++; }
+        }); recalc();
+      });
+      q('.hq-go').onclick = function () {
+        var peaks = [], f = num(q('.hq-f').value), a2 = num(q('.hq-a2').value);
+        if (f !== null) peaks.push({ name: 'Hb F', pct: String(f) });
+        if (a2 !== null) peaks.push({ name: 'Hb A2', pct: String(a2) });
+        for (var i = 0; i < 3; i++) { var nm = q('.hq-n' + i).value, v = num(q('.hq-v' + i).value); if (nm && v !== null) peaks.push({ name: nm, pct: String(v) }); }
+        if (!peaks.length) { q('.hq-msg').textContent = 'اكتب نسبة وحدة على الأقل.'; return; }
+        q('.hq-msg').textContent = '⏳ جاري الحفظ…';
+        fetch('/api/order-tests/' + id + '/hb-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ data: { source: 'capillary', device_line: '', peaks: peaks, total_area: '', key: [] } }) })
+          .then(function (r) { return r.json(); }).then(function (j) { q('.hq-msg').textContent = j.ok ? '✔ تم — افتح التقرير' : ('⚠ ' + (j.error || 'تعذّر الحفظ')); if (j.ok) setTimeout(function () { location.reload(); }, 700); });
+      };
+    });
+  }, 300);
+})();
+</script>"""
+
+
 def register(app, get_db, get_setting, set_setting, roles_required, log_action=None):
     from flask import g
     try:
@@ -371,6 +448,27 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
         except Exception:
             return True   # عند أي خطأ لا نخفي الزر
 
+    # v44: دالة hb_cap للقالب (Hemoglobin Electrophoresis — Capillary)
+    try:
+        import lab_hbcap
+        import lab_hbcurve as _hbc
+
+        def _hb_cap(order_test_id, opts=None):
+            db = get_db()
+            try:
+                row = db.execute("SELECT data FROM lis_hb_data WHERE order_test_id=?", (int(order_test_id or 0),)).fetchone()
+                if not row or not row["data"]:
+                    return None
+                return lab_hbcap.build(_hbc.normalize(json.loads(row["data"])), dict(opts or {}))
+            except Exception:
+                return None
+            finally:
+                db.close()
+
+        app.jinja_env.globals["hb_cap"] = _hb_cap
+    except Exception as _e:  # pragma: no cover
+        print("hb_cap not loaded:", _e)
+
     import re
     _H = re.compile(rb'(<(?:div|h[1-6])\b[^>]*class="[^"]*\breport-(?:heading|title)\b[^"]*"[^>]*>)(.*?)(</(?:div|h[1-6])>)', re.S)
 
@@ -414,6 +512,15 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                 if b"</body>" in data and b'id="labNoEsrBtn"' not in data and not _visit_has_esr_cbc():
                     i = data.rfind(b"</body>")
                     resp.set_data(data[:i] + b'<style id="labNoEsrBtn">a[href="/management/esr-layout"]{display:none!important}</style>' + data[i:])
+            if request.method == "GET" and resp.status_code == 200 and request.endpoint in ("visit_results_entry", "result_entry"):
+                data = resp.get_data()
+                if b"</body>" in data and b'id="labHbQuick"' not in data and b"hb-ed" in data:
+                    i = data.rfind(b"</body>")
+                    data = data[:i] + _HBQUICK.encode("utf-8") + data[i:]
+                    resp.set_data(data)
+                if b"</body>" in data and b'id="labOneComment"' not in data and b"hb-ed" in data:
+                    i = data.rfind(b"</body>")
+                    resp.set_data(data[:i] + _ONECOMMENT.encode("utf-8") + data[i:])
             if path.rstrip("/") == "/management/report-designer":
                 data = resp.get_data()
                 if b'id="qeBtn"' not in data and b"</body>" in data:

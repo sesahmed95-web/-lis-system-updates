@@ -1,0 +1,5 @@
+v44 - ستايل جديد لـ Hb Electrophoresis: «Capillary — منحنى + جدول (حسب نموذج Sebia)» (hbe:cap)
+- العنوان Hemoglobin Electrophoresis، منحنى بالقمم الموجودة فقط بأحجام متناسبة مع النسب، تدريج الزمن بالثواني، جدول Name / % / Normal Values مع ▲▼، Hb A تلقائي = 100 − (A2+F+S الموجودة)، أبيض/أسود أو ملون، بدون خط تحت Comments.
+- إدخال سريع داخل شاشة إدخال النتائج (Hb Curve): F و A2 وحتى 3 فراكشنات ثانية (S/D/E/C/H) → Hb A يُحسب = 100 − مجموعها، المنحنى يُبنى بدون اسم جهاز. الصورة تبقى للمرجعية.
+- الملفات: lab_hbcap.py (جديد) + lab_styles.py + lab_quickedit.py + templates/reports/electrophoresis.html
+- يفعّل من: ستايلات التقارير ← Hb Electrophoresis ← Capillary. ينزل فوق v43.
