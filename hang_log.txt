@@ -1033,3 +1033,4 @@
 
 [2026-11-16T10:09:10] SLOW 90.8s POST /ai/api/hb-extract? (lis_ai.ai_hb_extract)
 [2026-11-16T10:09:37] SLOW 95.6s POST /ai/api/hb-extract? (lis_ai.ai_hb_extract)
+[2026-11-17T06:52:18] SLOW 2.9s POST /designer/update/check-now? (designer_update_check_now)

@@ -206,10 +206,52 @@ _HBQUICK = r"""<script id="labHbQuick">
       var rows = '';
       for (var i = 0; i < 3; i++) rows += '<span style="display:inline-flex;gap:4px;margin:2px 8px 2px 0"><select class="hq-n' + i + '"><option value="">— فراكشن آخر —</option>' + OTH.map(function (x) { return '<option>' + x + '</option>'; }).join('') + '</select><input class="hq-v' + i + '" type="number" step="any" min="0" max="100" style="width:80px" placeholder="%"></span>';
       P.innerHTML = '<b>⚡ إدخال سريع (Capillary)</b> <span style="font-size:12px;color:#475569">اكتب النسب فقط — Hb A يُحسب تلقائياً والمنحنى يُبنى بدون اسم جهاز</span><div style="margin-top:6px">' +
-        'Hb F <input class="hq-f" type="number" step="any" min="0" max="100" style="width:80px" placeholder="%"> &nbsp; Hb A2 <input class="hq-a2" type="number" step="any" min="0" max="100" style="width:80px" placeholder="%"> &nbsp; <b>Hb A = <span class="hq-a">—</span></b></div>' +
-        '<div style="margin-top:4px">' + rows + '</div><button type="button" class="btn small hq-go" style="margin-top:6px">✅ حفظ وبناء المنحنى</button> <span class="hq-msg" style="font-size:12px"></span>' +
+        '<div style="direction:ltr;text-align:left;display:flex;gap:14px;align-items:center;flex-wrap:wrap"><span>Hb F <input class="hq-f" type="number" step="any" min="0" max="100" style="width:80px" placeholder="%"></span><span>Hb A2 <input class="hq-a2" type="number" step="any" min="0" max="100" style="width:80px" placeholder="%"></span></div>' +
+        '<div style="direction:ltr;text-align:left;margin-top:6px"><span style="display:inline-block;padding:4px 12px;border:2px solid #16a34a;border-radius:8px;background:#f0fdf4;color:#166534"><b>Hb A (يُحسب تلقائياً — لا تكتبه): <span class="hq-a">—</span></b></span></div></div>' +
+        '<div style="margin-top:4px;direction:ltr;text-align:left">' + rows + '</div><button type="button" class="btn small hq-go" style="margin-top:6px">✅ حفظ وبناء المنحنى</button> <span class="hq-msg" style="font-size:12px"></span>' +
         '<div style="font-size:11px;color:#64748B;margin-top:2px">فعّل الستايل: ستايلات التقارير ← Hb Electrophoresis ← Capillary. صورة الجهاز/الورقة تبقى ترفعها من 📎 للمرجعية (ما تنطبع بهذا الستايل).</div>';
       sec.insertBefore(P, sec.children[1] || null);
+
+      /* ---- النسب الطبيعية لكل فراكشن ---- */
+      var N = document.createElement('details'); N.style.cssText = 'margin-top:8px;direction:ltr;text-align:left';
+      var FR = [['a', 'Hb A'], ['f', 'Hb F'], ['a2', 'Hb A2'], ['s', 'Hb S'], ['d', 'Hb D'], ['c', 'Hb C'], ['e', 'Hb E'], ['h', 'Hb H']];
+      var OPS = [['r', 'من – إلى'], ['<', '<  أصغر من'], ['≤', '≤  أصغر أو يساوي'], ['>', '>  أكبر من'], ['≥', '≥  أكبر أو يساوي']];
+      var nh = '<summary style="cursor:pointer;font-weight:700">⚙ النسب الطبيعية لكل فراكشن</summary><table style="margin-top:6px;border-collapse:collapse">';
+      FR.forEach(function (f) {
+        nh += '<tr data-f="' + f[0] + '"><td style="padding:2px 8px"><b>' + f[1] + '</b></td><td><select class="nm-op">' + OPS.map(function (o) { return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('') + '</select></td>' +
+          '<td><input class="nm-v1" type="number" step="any" style="width:80px" placeholder="القيمة"></td><td class="nm-t2" style="display:none">–</td><td><input class="nm-v2" type="number" step="any" style="width:80px;display:none" placeholder="إلى"></td><td class="nm-pv" style="padding:0 8px;color:#475569"></td></tr>';
+      });
+      N.innerHTML = nh + '</table><button type="button" class="btn small nm-save" style="margin-top:6px">💾 حفظ النسب الطبيعية</button> <span class="nm-msg" style="font-size:12px"></span>';
+      P.appendChild(N);
+      function nrow(f) { return N.querySelector('tr[data-f="' + f + '"]'); }
+      function compose(tr) {
+        var op = tr.querySelector('.nm-op').value, a = tr.querySelector('.nm-v1').value, b = tr.querySelector('.nm-v2').value;
+        if (a === '') return '';
+        if (op === 'r') return b === '' ? '' : a + ' - ' + b;
+        return op + ' ' + a;
+      }
+      function sync(tr) {
+        var r = tr.querySelector('.nm-op').value === 'r';
+        tr.querySelector('.nm-v2').style.display = r ? '' : 'none'; tr.querySelector('.nm-t2').style.display = r ? '' : 'none';
+        tr.querySelector('.nm-pv').textContent = compose(tr);
+      }
+      function parse(tr, t) {
+        t = String(t || '').trim().replace(/–|—/g, '-'); var m;
+        if ((m = t.match(/^([\d.]+)\s*-\s*([\d.]+)$/))) { tr.querySelector('.nm-op').value = 'r'; tr.querySelector('.nm-v1').value = m[1]; tr.querySelector('.nm-v2').value = m[2]; }
+        else if ((m = t.match(/^(<=|=<|≤|<)\s*([\d.]+)$/))) { tr.querySelector('.nm-op').value = (m[1] === '<') ? '<' : '≤'; tr.querySelector('.nm-v1').value = m[2]; }
+        else if ((m = t.match(/^(>=|=>|≥|>)\s*([\d.]+)$/))) { tr.querySelector('.nm-op').value = (m[1] === '>') ? '>' : '≥'; tr.querySelector('.nm-v1').value = m[2]; }
+        sync(tr);
+      }
+      N.addEventListener('input', function (e) { var tr = e.target.closest('tr[data-f]'); if (tr) sync(tr); });
+      N.addEventListener('change', function (e) { var tr = e.target.closest('tr[data-f]'); if (tr) sync(tr); });
+      fetch('/management/report-quick-edit/hb-norm', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j.ok) FR.forEach(function (f) { parse(nrow(f[0]), j.norms[f[0]]); });
+      });
+      N.querySelector('.nm-save').onclick = function () {
+        var body = {}; FR.forEach(function (f) { body[f[0]] = compose(nrow(f[0])); });
+        fetch('/management/report-quick-edit/hb-norm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) })
+          .then(function (r) { return r.json(); }).then(function (j) { N.querySelector('.nm-msg').textContent = j.ok ? '✔ تم الحفظ' : '⚠ تعذّر'; });
+      };
       var q = function (c) { return P.querySelector(c); };
       function num(v) { v = parseFloat(v); return isNaN(v) ? null : v; }
       function recalc() {
@@ -383,6 +425,39 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
         finally:
             db.close()
 
+    _NORM_DEF = {"a": "96.8 - 97.8", "f": "\u2264 0.5", "a2": "2.2 - 3.2", "s": "", "d": "", "c": "", "e": "", "h": ""}
+
+    def _hbcap_key(db):
+        k = (get_setting(db, "rs_active_hbe", "") or "").strip()
+        return k if k.startswith("hbe:") and k != "hbe:image" and k != "hbe:classic" else "hbe:cap"
+
+    @app.route("/management/report-quick-edit/hb-norm", methods=["GET", "POST"])
+    @roles_required("admin")
+    def quickedit_hb_norm():
+        """النسب الطبيعية لفراكشنات Hb Capillary (تُخزَّن بخيارات ستايل hbe:cap كـ norm_a / norm_f / ...)."""
+        db = get_db()
+        try:
+            key = _hbcap_key(db)
+            try:
+                oa = json.loads(get_setting(db, "rs_opts", "") or "{}")
+                oa = oa if isinstance(oa, dict) else {}
+            except (TypeError, ValueError):
+                oa = {}
+            cur = oa.get(key, {}) if isinstance(oa.get(key, {}), dict) else {}
+            if request.method == "GET":
+                return jsonify({"ok": True, "key": key, "norms": {k: str(cur.get("norm_" + k, _NORM_DEF[k]) or "") for k in _NORM_DEF}})
+            j = request.get_json(silent=True) or {}
+            new = dict(cur)
+            for k in _NORM_DEF:
+                if k in j:
+                    new["norm_" + k] = str(j.get(k) or "").strip()[:40]
+            oa[key] = new
+            set_setting(db, "rs_opts", json.dumps(oa, ensure_ascii=False))
+            db.commit()
+            return jsonify({"ok": True})
+        finally:
+            db.close()
+
     @app.route("/management/report-quick-edit/title", methods=["POST"])
     @roles_required("admin")
     def quickedit_title():
@@ -469,8 +544,70 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
     except Exception as _e:  # pragma: no cover
         print("hb_cap not loaded:", _e)
 
+    # v44: معاينة منحنى Capillary بصفحة إدخال النتائج بنفس شكل التقرير (قمم منفصلة بدل المنحنى القديم المتراكب)
+    try:
+        import lab_hbcurve as _hbm
+        import lab_hbcap as _hcap
+        _orig_curve = _hbm.curve_svg
+
+        def _curve_svg2(d):
+            try:
+                if d and d.get("source") == "capillary":
+                    db = get_db()
+                    try:
+                        oa = json.loads(get_setting(db, "rs_opts", "") or "{}")
+                    except (TypeError, ValueError):
+                        oa = {}
+                    o = oa.get("hbe:cap", {}) if isinstance(oa, dict) else {}
+                    r = _hcap.build(d, dict(o) if isinstance(o, dict) else {})
+                    if r and r.get("svg"):
+                        return r["svg"]
+            except Exception:
+                app.logger.exception("curve_svg2")
+            return _orig_curve(d)
+        if not getattr(_hbm, "_lab_cap_wrapped", False):
+            _hbm.curve_svg = _curve_svg2
+            _hbm._lab_cap_wrapped = True
+    except Exception as _e:
+        print("curve_svg wrap skipped:", _e)
+
     import re
     _H = re.compile(rb'(<(?:div|h[1-6])\b[^>]*class="[^"]*\breport-(?:heading|title)\b[^"]*"[^>]*>)(.*?)(</(?:div|h[1-6])>)', re.S)
+
+    _MARK = re.compile(r"^/api/order-tests/(\d+)/(hb-data|media)$")
+
+    @app.after_request
+    def _hb_mark_completed(resp):
+        """حفظ منحنى Hb (أو رفع صورة نتيجة) = النتيجة موجودة → يصير التحليل Completed حتى يظهر بالطباعة/اللوحة المجمّعة."""
+        try:
+            if request.method != "POST" or resp.status_code != 200:
+                return resp
+            m = _MARK.match(request.path)
+            if not m:
+                return resp
+            j = resp.get_json(silent=True) or {}
+            if not j.get("ok"):
+                return resp
+            oid = int(m.group(1))
+            db = get_db()
+            if m.group(2) == "hb-data":
+                row = db.execute("SELECT data FROM lis_hb_data WHERE order_test_id=?", (oid,)).fetchone()
+                try:
+                    pk = (json.loads(row["data"]) or {}).get("peaks") if row and row["data"] else []
+                except (TypeError, ValueError):
+                    pk = []
+                if not any(str(x.get("pct", "")).strip() for x in (pk or []) if isinstance(x, dict)):
+                    return resp
+            else:   # رفع صورة: فقط لتحليل Hb Electrophoresis (بقية التحاليل ما نغيّر حالتها)
+                td = db.execute("SELECT td.code, td.name FROM order_tests ot JOIN test_definitions td ON td.id=ot.test_definition_id WHERE ot.id=?", (oid,)).fetchone()
+                nm = ((td["code"] or "") + " " + (td["name"] or "")).lower() if td else ""
+                if "electro" not in nm:
+                    return resp
+            db.execute("UPDATE order_tests SET status='Completed' WHERE id=? AND status NOT IN ('Completed','Verified')", (oid,))
+            db.commit()
+        except Exception:
+            app.logger.exception("lab_quickedit hb mark completed")
+        return resp
 
     @app.after_request
     def _apply_title_and_button(resp):
