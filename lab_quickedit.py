@@ -216,12 +216,12 @@ _HBQUICK = r"""<script id="labHbQuick">
       var N = document.createElement('details'); N.style.cssText = 'margin-top:8px;direction:ltr;text-align:left';
       var FR = [['a', 'Hb A'], ['f', 'Hb F'], ['a2', 'Hb A2'], ['s', 'Hb S'], ['d', 'Hb D'], ['c', 'Hb C'], ['e', 'Hb E'], ['h', 'Hb H']];
       var OPS = [['r', 'من – إلى'], ['<', '<  أصغر من'], ['≤', '≤  أصغر أو يساوي'], ['>', '>  أكبر من'], ['≥', '≥  أكبر أو يساوي']];
-      var nh = '<summary style="cursor:pointer;font-weight:700">⚙ النسب الطبيعية لكل فراكشن</summary><table style="margin-top:6px;border-collapse:collapse">';
+      var nh = '<summary style="cursor:pointer;font-weight:700">⚙ العنوان والنسب الطبيعية</summary><table style="margin-top:6px;border-collapse:collapse">';
       FR.forEach(function (f) {
         nh += '<tr data-f="' + f[0] + '"><td style="padding:2px 8px"><b>' + f[1] + '</b></td><td><select class="nm-op">' + OPS.map(function (o) { return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('') + '</select></td>' +
           '<td><input class="nm-v1" type="number" step="any" style="width:80px" placeholder="القيمة"></td><td class="nm-t2" style="display:none">–</td><td><input class="nm-v2" type="number" step="any" style="width:80px;display:none" placeholder="إلى"></td><td class="nm-pv" style="padding:0 8px;color:#475569"></td></tr>';
       });
-      N.innerHTML = nh + '</table><button type="button" class="btn small nm-save" style="margin-top:6px">💾 حفظ النسب الطبيعية</button> <span class="nm-msg" style="font-size:12px"></span>';
+      N.innerHTML = '<div style="margin:6px 0"><b>عنوان التقرير:</b> <input class="nm-title" type="text" style="width:320px;direction:ltr" placeholder="Hemoglobin Electrophoresis"></div>' + nh + '</table><button type="button" class="btn small nm-save" style="margin-top:6px">💾 حفظ النسب الطبيعية</button> <span class="nm-msg" style="font-size:12px"></span>';
       P.appendChild(N);
       function nrow(f) { return N.querySelector('tr[data-f="' + f + '"]'); }
       function compose(tr) {
@@ -245,10 +245,10 @@ _HBQUICK = r"""<script id="labHbQuick">
       N.addEventListener('input', function (e) { var tr = e.target.closest('tr[data-f]'); if (tr) sync(tr); });
       N.addEventListener('change', function (e) { var tr = e.target.closest('tr[data-f]'); if (tr) sync(tr); });
       fetch('/management/report-quick-edit/hb-norm', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
-        if (j.ok) FR.forEach(function (f) { parse(nrow(f[0]), j.norms[f[0]]); });
+        if (j.ok) { N.querySelector('.nm-title').value = j.title || ''; FR.forEach(function (f) { parse(nrow(f[0]), j.norms[f[0]]); }); }
       });
       N.querySelector('.nm-save').onclick = function () {
-        var body = {}; FR.forEach(function (f) { body[f[0]] = compose(nrow(f[0])); });
+        var body = {title: N.querySelector('.nm-title').value}; FR.forEach(function (f) { body[f[0]] = compose(nrow(f[0])); });
         fetch('/management/report-quick-edit/hb-norm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) })
           .then(function (r) { return r.json(); }).then(function (j) { N.querySelector('.nm-msg').textContent = j.ok ? '✔ تم الحفظ' : '⚠ تعذّر'; });
       };
@@ -445,12 +445,14 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                 oa = {}
             cur = oa.get(key, {}) if isinstance(oa.get(key, {}), dict) else {}
             if request.method == "GET":
-                return jsonify({"ok": True, "key": key, "norms": {k: str(cur.get("norm_" + k, _NORM_DEF[k]) or "") for k in _NORM_DEF}})
+                return jsonify({"ok": True, "key": key, "title": str(cur.get("title_text", "Hemoglobin Electrophoresis") or ""), "norms": {k: str(cur.get("norm_" + k, _NORM_DEF[k]) or "") for k in _NORM_DEF}})
             j = request.get_json(silent=True) or {}
             new = dict(cur)
             for k in _NORM_DEF:
                 if k in j:
                     new["norm_" + k] = str(j.get(k) or "").strip()[:40]
+            if "title" in j:
+                new["title_text"] = str(j.get("title") or "").strip()[:120]
             oa[key] = new
             set_setting(db, "rs_opts", json.dumps(oa, ensure_ascii=False))
             db.commit()
@@ -534,7 +536,21 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
                 row = db.execute("SELECT data FROM lis_hb_data WHERE order_test_id=?", (int(order_test_id or 0),)).fetchone()
                 if not row or not row["data"]:
                     return None
-                return lab_hbcap.build(_hbc.normalize(json.loads(row["data"])), dict(opts or {}))
+                import lab_styles as _ls
+                mo = {sp[0]: sp[3] for sp in _ls.OPT_SPECS.get("hbe:cap", [])}
+                try:
+                    st = json.loads(get_setting(db, "rs_opts", "") or "{}")
+                    st = (st.get("hbe:cap") or {}) if isinstance(st, dict) else {}
+                    mo.update(st if isinstance(st, dict) else {})
+                except (TypeError, ValueError):
+                    pass
+                for k_, v_ in dict(opts or {}).items():     # خيارات الستايل الفعّال تتغلب (لما يكون Capillary هو المفعّل)
+                    if k_ in mo:
+                        mo[k_] = v_
+                res = lab_hbcap.build(_hbc.normalize(json.loads(row["data"])), mo)
+                if res is not None:
+                    res["opts"] = mo
+                return res
             except Exception:
                 return None
             finally:
@@ -573,6 +589,55 @@ def register(app, get_db, get_setting, set_setting, roles_required, log_action=N
 
     import re
     _H = re.compile(rb'(<(?:div|h[1-6])\b[^>]*class="[^"]*\breport-(?:heading|title)\b[^"]*"[^>]*>)(.*?)(</(?:div|h[1-6])>)', re.S)
+
+    def _hb_ready(db, oid):
+        """تحليل Electrophoresis عنده منحنى Hb (نسب) أو صورة نتيجة = نتيجة موجودة."""
+        td = db.execute("SELECT td.code, td.name FROM order_tests ot JOIN test_definitions td ON td.id=ot.test_definition_id WHERE ot.id=?", (oid,)).fetchone()
+        if not td or "electro" not in ((td["code"] or "") + " " + (td["name"] or "")).lower():
+            return False
+        try:
+            row = db.execute("SELECT data FROM lis_hb_data WHERE order_test_id=?", (oid,)).fetchone()
+            pk = (json.loads(row["data"]) or {}).get("peaks") if row and row["data"] else []
+            if any(str(x.get("pct", "")).strip() for x in (pk or []) if isinstance(x, dict)):
+                return True
+        except Exception:
+            pass
+        try:
+            return bool(db.execute("SELECT 1 FROM lis_result_images WHERE order_test_id=? LIMIT 1", (oid,)).fetchone())
+        except Exception:
+            return False
+
+    _RX_PS = re.compile(r"^/reports/print-and-save/(\d+)$")
+    _RX_VR = re.compile(r"^/front-desk/visits/(\d+)/results$")
+
+    @app.before_request
+    def _hb_before():
+        """زر 🖨 وزر "طباعة النتائج المكتملة": Hb Electrophoresis ما عنده صفوف بجدول results، فنعتبر وجود المنحنى/الصورة نتيجة مكتملة."""
+        try:
+            if request.method != "POST":
+                return None
+            path = request.path
+            m = _RX_PS.match(path)
+            if m:
+                oid = int(m.group(1))
+                db = get_db()
+                if _hb_ready(db, oid):
+                    db.execute("UPDATE order_tests SET status='Completed' WHERE id=? AND status NOT IN ('Completed','Verified')", (oid,))
+                    db.commit()
+                    from flask import url_for as _uf
+                    return jsonify({"ok": True, "saved": False, "archived": False, "print_url": _uf("print_report", order_test_id=oid)})
+                return None
+            m = _RX_VR.match(path)
+            if m:
+                db = get_db()
+                rows = db.execute("SELECT ot.id FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=? AND ot.status NOT IN ('Completed','Verified')", (int(m.group(1)),)).fetchall()
+                for r in rows:
+                    if _hb_ready(db, r["id"]):
+                        db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (r["id"],))
+                db.commit()
+        except Exception:
+            app.logger.exception("lab_quickedit hb before_request")
+        return None
 
     _MARK = re.compile(r"^/api/order-tests/(\d+)/(hb-data|media)$")
 

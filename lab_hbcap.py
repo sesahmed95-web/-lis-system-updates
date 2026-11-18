@@ -99,12 +99,12 @@ def build(data, opts=None):
             nt = o.get("norm_" + k.replace("hb", "")) or ""
             lo, hi = parse_range(nt)
             pc = items[k]["pct"]
-            flag = "▼" if (lo is not None and pc < lo) else "▲" if (hi is not None and pc > hi) else ""
+            flag = "<" if (lo is not None and pc < lo) else ">" if (hi is not None and pc > hi) else ""
             t0 = (nt or "").strip()
             if not flag and t0[:1] == "<" and t0[:2] != "<=" and hi is not None and pc >= hi:
-                flag = "▲"   # أصغر من (صارم): القيمة المساوية خارج الطبيعي
+                flag = ">"   # أصغر من (صارم): القيمة المساوية خارج الطبيعي
             if not flag and t0[:1] == ">" and t0[:2] != ">=" and lo is not None and pc <= lo:
-                flag = "▼"   # أكبر من (صارم)
+                flag = "<"   # أكبر من (صارم)
             rows.append({"k": k, "name": items[k]["name"], "pct": _fmt(pc), "norm": nt, "flag": flag})
     for e in extra:
         rows.append({"k": e["k"], "name": e["name"], "pct": _fmt(e["pct"]), "norm": "", "flag": ""})

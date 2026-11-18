@@ -7,7 +7,8 @@
 {% set media = ot_media(ot['id'] or 0) %}
 {% set rs = report_style('hbe') %}
 {% set hb = ot_hb(ot['id'] or 0) %}
-{% set cap = hb_cap(ot['id'] or 0, rs.opts) if (rs.id == 'cap' and hb_cap is defined) else none %}
+{% set use_cap = (rs.id == 'cap') or (rs.id != 'image' and hb.source == 'capillary' and hb.has_data) %}
+{% set cap = hb_cap(ot['id'] or 0, rs.opts) if (use_cap and hb_cap is defined) else none %}
 {% set comment_text = media.comment or params.get('Comment', '') or '' %}
 <style>
   .doc-col.logo-col { order:-1; }   /* الشعار على يسار الترويسة بتقرير Hb فقط */
@@ -39,7 +40,7 @@
   .el-hint { text-align:center; font-size:11px; color:#64748b; direction:rtl; margin:2px 0; }
   @media print { .el-c:hover { outline:none; } .el-hint { display:none !important; } }
 </style>
-<div class="report-heading" data-keep="1" style="font-style:italic; text-decoration:underline; direction:ltr;">{% if rs.id == 'cap' %}{{ rs.opts.title_text|default('Hemoglobin Electrophoresis') }}{% else %}{{ (rs.opts.title|default('')) or hb_title(ot['test_name'], hb.source) }}{% endif %}</div>
+<div class="report-heading" data-keep="1" style="font-style:italic; text-decoration:underline; direction:ltr;">{% if use_cap and cap %}{{ cap.opts.title_text|default('Hemoglobin Electrophoresis') }}{% else %}{{ (rs.opts.title|default('')) or hb_title(ot['test_name'], hb.source) }}{% endif %}</div>
 {% if rs.id == 'image' %}<style>.el-c { font-size:{{ rs.opts.com_font|default(16) }}px !important; }</style>{% endif %}
 
 {% if rs.id == 'image' and (media.images or is_design_preview) %}
@@ -50,15 +51,16 @@
     {% for im in _imgs %}<img src="{{ im.url }}" alt="" style="max-width:{{ rs.opts.img_w|default(100) }}%; max-height:{{ rs.opts.img_h|default(165) }}mm; height:auto; display:block; margin:0 auto 8px;">
     {% else %}<div style="border:2px dashed #94A3B8; color:#64748B; padding:70px 10px; max-height:{{ rs.opts.img_h|default(165) }}mm; direction:rtl;">مكان صورة الجهاز (تُرفع من إدخال النتائج ← 📷)</div>{% endfor %}
   </div>
-{% elif rs.id == 'cap' and cap %}
+{% elif use_cap and cap %}
   {# v44: Capillary (حسب نموذج Sebia) — أبيض/أسود أو ملون، فقط القمم الموجودة #}
   <style>
     .cp-svg { text-align:center; margin:4px 0 0; } .cp-svg svg { width:94%; height:auto; max-height:70mm; }
-    .cp-t { width:78%; margin:14px auto 0; direction:ltr; border-collapse:collapse; font-family:Arial,Helvetica,sans-serif; font-size:{{ rs.opts.font|default(15) }}px; }
+    .cp-t { width:78%; margin:14px auto 0; direction:ltr; border-collapse:collapse; font-family:Arial,Helvetica,sans-serif; font-size:{{ cap.opts.font|default(15) }}px; }
     .cp-t th { border-bottom:1.5px solid #000; padding:4px 8px; text-align:center; font-weight:700; }
     .cp-t th:first-child, .cp-t td:first-child { text-align:left; }
     .cp-t td { padding:4px 8px; text-align:center; }
-    .cp-t td.fl { width:24px; font-size:11px; }
+    .cp-t td:first-child { font-weight:700; }
+    .cp-t td.fl { width:30px; font-size:16px; font-weight:700; }
     .el-ch { border:0 !important; text-decoration:none !important; }
     .doc-col.logo-col { order:-1; }
   </style>

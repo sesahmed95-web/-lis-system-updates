@@ -1034,3 +1034,1073 @@
 [2026-11-16T10:09:10] SLOW 90.8s POST /ai/api/hb-extract? (lis_ai.ai_hb_extract)
 [2026-11-16T10:09:37] SLOW 95.6s POST /ai/api/hb-extract? (lis_ai.ai_hb_extract)
 [2026-11-17T06:52:18] SLOW 2.9s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:37:40] HANG 6s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:37:46] HANG 7s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2621, in designer_update_check_now
+    auto_updater.check_revocation(db)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 428, in check_revocation
+    revoked_map = fetch_revocation_list()
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 355, in fetch_revocation_list
+    with _api_request(_contents_url(REVOCATION_FILE_PATH)) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:37:49] HANG 9s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2621, in designer_update_check_now
+    auto_updater.check_revocation(db)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 428, in check_revocation
+    revoked_map = fetch_revocation_list()
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 355, in fetch_revocation_list
+    with _api_request(_contents_url(REVOCATION_FILE_PATH)) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:37:52] HANG 7s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:38:16] HANG 9s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:38:19] SLOW 46.1s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:38:19] SLOW 40.3s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:38:19] SLOW 39.1s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:38:28] HANG 7s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:38:31] SLOW 46.1s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:38:40] HANG 8s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:38:40] HANG 8s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:38:40] HANG 7s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:38:40] HANG 7s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:38:40] HANG 7s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:38:40] HANG 7s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:38:55] SLOW 48.2s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:39:07] SLOW 46.5s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:39:19] SLOW 47.0s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:39:19] SLOW 46.6s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:39:19] SLOW 47.7s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:39:19] SLOW 47.2s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:39:19] SLOW 46.4s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:39:19] SLOW 46.8s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:42:06] SLOW 2.1s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:54:16] HANG 7s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:54:31] HANG 7s+ /designer/update/check-now? (designer_update_check_now)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1708, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 2620, in designer_update_check_now
+    result = auto_updater.check_and_apply(db, force_apply=True)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 264, in check_and_apply
+    remote_version = fetch_remote_version(branch=branch)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 172, in fetch_remote_version
+    with _api_request(path) as resp:
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\auto_updater.py", line 160, in _api_request
+    return urllib.request.urlopen(req, timeout=20)
+  File "C:\Python314\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+  File "C:\Python314\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Python314\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "C:\Python314\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Python314\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+  File "C:\Python314\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Python314\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Python314\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+  File "C:\Python314\Lib\http\client.py", line 1066, in send
+    self.connect()
+  File "C:\Python314\Lib\http\client.py", line 1501, in connect
+    super().connect()
+  File "C:\Python314\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+  File "C:\Python314\Lib\socket.py", line 850, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+  File "C:\Python314\Lib\socket.py", line 987, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+
+[2026-11-17T12:54:43] SLOW 34.2s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:54:44] SLOW 19.6s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T12:54:47] SLOW 2.1s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T13:07:21] SLOW 2.0s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-17T16:07:28] HANG 7s+ /reports/archive/9/open-external? (pdf_archive_open_external)
+  File "C:\Python314\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 399, in handle
+    super().handle()
+  File "C:\Python314\Lib\http\server.py", line 496, in handle
+    self.handle_one_request()
+  File "C:\Python314\Lib\http\server.py", line 484, in handle_one_request
+    method()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\werkzeug\serving.py", line 332, in execute
+    application_iter = app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Mas\AppData\Roaming\Python\Python314\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 1666, in wrapped
+    return view(*args, **kwargs)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 17485, in pdf_archive_open_external
+    path = _v87_archive_path(get_db(), visit_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 17367, in _v87_archive_path
+    _maybe_archive_visit_pdf(db, visit_id)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 11475, in _maybe_archive_visit_pdf
+    _v86_html_to_pdf(html_content, request.url_root, pdf_path)
+  File "C:\Users\Mas\Documents\GitHub\-lis-system-updates\app.py", line 17097, in _v86_html_to_pdf
+    th.join(_V86_PDF_TIMEOUT)
+  File "C:\Python314\Lib\threading.py", line 1133, in join
+    self._os_thread_handle.join(timeout)
+
+[2026-11-17T16:07:30] SLOW 8.8s POST /reports/archive/9/open-external? (pdf_archive_open_external)
