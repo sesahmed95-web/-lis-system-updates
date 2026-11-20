@@ -98,6 +98,37 @@ def current_version():
     return b
 
 
+def pending_dir():
+    return os.path.join(updates_dir(), "pending")
+
+
+def _pending_supported():
+    """هل lab_overlay المضمَّن بالـexe يعرف يرقّي updates\\pending إلى current عند التشغيل؟ (Setup جديد فقط)"""
+    try:
+        import lab_overlay
+        return bool(getattr(lab_overlay, "PENDING_SUPPORT", False))
+    except Exception:
+        return False
+
+
+def staged_version():
+    """أحدث إصدار منزَّل ومجهَّز على القرص ولم يشتغل بعد (يشتغل عند الفتح القادم). '' إن لم يوجد.
+    المصدر هو القرص نفسه (pending أو current) وليس إعدادات القاعدة، فلا يتناقض مع الواقع أبداً."""
+    run = current_version()
+    best = ""
+    for d in (pending_dir(), os.path.join(updates_dir(), "current")):
+        if os.path.isfile(os.path.join(d, "app.py")):
+            v = _read(os.path.join(d, "VERSION"))
+            if _vkey(v) > _vkey(run) and (not best or _vkey(v) > _vkey(best)):
+                best = v
+    return best
+
+
+def effective_version():
+    """أحدث إصدار موجود عند العميل (الشغّال أو المجهَّز). كل مقارنة «هل يوجد تحديث؟» تتم عليه."""
+    return staged_version() or current_version()
+
+
 def update_url(db, get_setting):
     u = (get_setting(db, "update_url", "") or DEFAULT_UPDATE_URL or "").strip().rstrip("/")
     return u if u.startswith("https://") or u.startswith("http://127.0.0.1") or u.startswith("file://") else ""
@@ -268,13 +299,14 @@ def check_now(db, get_setting, set_setting):
     try:
         m = fetch_manifest(base)
         cur = current_version()
-        avail = _vkey(m["version"]) > _vkey(cur)
+        stg = staged_version()
+        avail = _vkey(m["version"]) > _vkey(stg or cur)      # ما نعرض تحديثاً سبق تجهيزه
         set_setting(db, "update_last_check", now)
         set_setting(db, "update_available_version", m["version"] if avail else "")
         set_setting(db, "update_available_notes", (m.get("notes") or "")[:500] if avail else "")
         db.commit()
         return {"ok": True, "configured": True, "available": avail, "version": m["version"], "current": cur,
-                "notes": m.get("notes", "")}
+                "staged": stg, "notes": m.get("notes", "")}
     except Exception as e:  # noqa: BLE001
         set_setting(db, "update_last_check", now)
         db.commit()
@@ -282,7 +314,9 @@ def check_now(db, get_setting, set_setting):
 
 
 def apply_now(db, get_setting, set_setting):
-    """download -> verify -> validate -> swap.  Does NOT restart (caller schedules restart())."""
+    """download -> verify -> validate -> STAGE.  لا يعيد تشغيل البرنامج أبداً.
+    التحديث يُجهَّز على القرص ويشتغل تلقائياً عند الفتح القادم (حالة «مجهَّز»)، فلا شريط يتكرر ولا حلقة.
+    إذا نُشر إصدار أحدث قبل إعادة التشغيل يستبدل المجهَّز القديم، فيستلم العميل دائماً الأحدث فقط."""
     if not frozen() and os.environ.get("LIS_UPDATER_TEST") != "1":
         return {"ok": False, "message": "التحديث الداخلي يعمل فقط في البرنامج المنصَّب (Setup)"}
     with _lock:
@@ -297,8 +331,9 @@ def apply_now(db, get_setting, set_setting):
         _ulog("apply: start, base=%s, current=%s" % (base, current_version()))
         m = fetch_manifest(base)
         _ulog("apply: manifest version=%s" % m.get("version"))
-        if _vkey(m["version"]) <= _vkey(current_version()):
-            return {"ok": False, "message": "البرنامج محدّث"}
+        if _vkey(m["version"]) <= _vkey(effective_version()):
+            return {"ok": False, "message": "البرنامج محدّث" if not staged_version() else "التحديث مجهَّز مسبقاً ويعمل عند الفتح القادم",
+                    "staged": staged_version()}
         data = _http_get(base + "/" + m["file"], MAX_ZIP)
         digest = hashlib.sha256(data).hexdigest()
         if digest != m["sha256"]:
@@ -322,22 +357,33 @@ def apply_now(db, get_setting, set_setting):
                 os.remove(zp)
             except Exception:
                 pass
-        _ulog("apply: downloaded+verified, swapping")
+        _ulog("apply: downloaded+verified, staging")
         backup_db("pre_update")
-        cur, prev = os.path.join(updates_dir(), "current"), os.path.join(updates_dir(), "previous")
-        shutil.rmtree(prev, ignore_errors=True)
-        if os.path.isdir(cur):
-            os.replace(cur, prev)
-        os.replace(stage, cur)
-        try:
-            os.remove(os.path.join(updates_dir(), "boot_attempt.json"))
-        except Exception:
-            pass
+        if _pending_supported():
+            # lab_overlay (الجديد) يرقّي pending -> current قبل تشغيل البرنامج، فالنسخة الشغّالة الآن لا تُمسّ إطلاقاً
+            shutil.rmtree(pending_dir(), ignore_errors=True)
+            os.replace(stage, pending_dir())
+            mode = "pending"
+        else:
+            # exe قديم (lab_overlay بدون pending): نكتب مباشرة بـcurrent، وسيُحمَّل عند أول تشغيل قادم
+            cur, prev = os.path.join(updates_dir(), "current"), os.path.join(updates_dir(), "previous")
+            shutil.rmtree(prev, ignore_errors=True)
+            if os.path.isdir(cur):
+                os.replace(cur, prev)
+            os.replace(stage, cur)
+            try:
+                os.remove(os.path.join(updates_dir(), "boot_attempt.json"))
+            except Exception:
+                pass
+            mode = "current"
         set_setting(db, "update_available_version", "")
+        set_setting(db, "update_available_notes", "")
+        set_setting(db, "update_staged_version", m["version"])
         set_setting(db, "update_last_applied", "%s @ %s" % (m["version"], datetime.now().isoformat(timespec="seconds")))
         db.commit()
-        _ulog("apply: OK -> %s (restart next)" % m["version"])
-        return {"ok": True, "version": m["version"], "message": "تم تنزيل التحديث. سيُعاد تشغيل البرنامج الآن."}
+        _ulog("apply: OK -> %s staged (%s), runs at next launch" % (m["version"], mode))
+        return {"ok": True, "version": m["version"], "staged": True, "mode": mode,
+                "message": "تم تجهيز التحديث (إصدار %s). سيعمل تلقائياً عند فتح البرنامج المرة القادمة." % m["version"]}
     except Exception as e:  # noqa: BLE001
         shutil.rmtree(stage, ignore_errors=True)
         _ulog("apply: FAILED %r" % (e,))
@@ -379,37 +425,63 @@ _BANNER_JS = r"""
 <script>
 (function(){
   if (window.__lisUpd) return; window.__lisUpd = 1;
-  var bar = null;
+  var bar = null, hideT = null;
   function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
-  function show(v, notes){
+  function mk(html){
+    if(!bar){
+      bar = document.createElement('div');
+      bar.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:99999;background:#14233a;color:#fff;'+
+        'padding:12px 16px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.35);font:14px/1.5 Tahoma,Arial,sans-serif;max-width:92vw;direction:rtl;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+      document.body.appendChild(bar);
+    }
+    bar.innerHTML = html;
+  }
+  function hide(){ if(hideT){clearTimeout(hideT);hideT=null;} if(bar){bar.remove();bar=null;} }
+  function lget(k){ try{return localStorage.getItem(k)||'';}catch(e){return '';} }
+  function lset(k,v){ try{localStorage.setItem(k,v);}catch(e){} }
+  var BTN = 'border:0;border-radius:8px;padding:6px 14px;cursor:pointer;font:inherit;';
+  function waitBack(ver){
+    var n=0,down=false,t=setInterval(function(){n++;
+      fetch('/api/update/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(s){
+        if(down || (ver && s.current===ver)){clearInterval(t);location.reload();}
+      }).catch(function(){down=true;});
+      if(n===45){mk('<span>⏳ ياخذ وقت أطول من المعتاد... انتظر قليلًا</span>');}
+      if(n>90){clearInterval(t);mk('<span>⚠️ لم يعد البرنامج للعمل — أغلق هذه النافذة وشغّل البرنامج من أيقونته.</span>');}
+    },2000);
+  }
+  // حالة «مجهَّز»: التحديث نُزِّل وتحقّقنا منه، ويشتغل عند الفتح القادم. تظهر مرة وحدة لكل إصدار وتختفي لوحدها.
+  function showStaged(v){
+    lset('lis_upd_staged_seen', v);
+    mk('<span>✅ تم تجهيز التحديث (إصدار '+esc(v)+'). سيعمل تلقائياً عند فتح البرنامج المرة القادمة.</span>'+
+      '<button id="lisUpdRestart" style="'+BTN+'background:#2e9e6b;color:#fff">إعادة التشغيل الآن</button>'+
+      '<button id="lisUpdOk" style="'+BTN+'background:transparent;color:#cfe0f5;border:1px solid #5b7aa0">حسناً</button>');
+    document.getElementById('lisUpdOk').onclick=hide;
+    document.getElementById('lisUpdRestart').onclick=function(){
+      if(!confirm('سيُعاد تشغيل البرنامج خلال ثوانٍ. تأكد أنك حفظت عملك. المتابعة؟')) return;
+      mk('<span>⏳ جاري إعادة التشغيل... لا تغلق النافذة</span>');
+      fetch('/api/update/restart',{method:'POST'}).then(function(){waitBack(v);}).catch(function(){waitBack(v);});
+    };
+    hideT=setTimeout(hide,15000);
+  }
+  function showAvail(v, notes){
     try{ if (sessionStorage.getItem('lis_upd_later')===v) return; }catch(e){}
     if (bar) return;
-    bar = document.createElement('div');
-    bar.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:99999;background:#14233a;color:#fff;'+
-      'padding:12px 16px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.35);font:14px/1.5 Tahoma,Arial,sans-serif;max-width:92vw;direction:rtl;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
-    bar.innerHTML = '<span>🆕 يتوفر تحديث للبرنامج (إصدار '+esc(v)+')'+(notes?' — '+esc(notes):'')+'</span>'+
-      '<button id="lisUpdNow" style="background:#2e9e6b;color:#fff;border:0;border-radius:8px;padding:6px 14px;cursor:pointer;font:inherit">تحديث الآن</button>'+
-      '<button id="lisUpdLater" style="background:transparent;color:#cfe0f5;border:1px solid #5b7aa0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">لاحقاً</button>';
-    document.body.appendChild(bar);
-    document.getElementById('lisUpdLater').onclick=function(){try{sessionStorage.setItem('lis_upd_later',v);}catch(e){} bar.remove(); bar=null;};
+    mk('<span>🆕 يتوفر تحديث للبرنامج (إصدار '+esc(v)+')'+(notes?' — '+esc(notes):'')+'</span>'+
+      '<button id="lisUpdNow" style="'+BTN+'background:#2e9e6b;color:#fff">تحديث الآن</button>'+
+      '<button id="lisUpdLater" style="'+BTN+'background:transparent;color:#cfe0f5;border:1px solid #5b7aa0">لاحقاً</button>');
+    document.getElementById('lisUpdLater').onclick=function(){try{sessionStorage.setItem('lis_upd_later',v);}catch(e){} hide();};
     document.getElementById('lisUpdNow').onclick=function(){
-      if(!confirm('سيُعاد تشغيل البرنامج خلال ثوانٍ. تأكد أنك حفظت عملك. المتابعة؟')) return;
-      bar.innerHTML='<span>⏳ جاري التحديث... لا تغلق النافذة</span>';
+      mk('<span>⏳ جاري تنزيل التحديث وتجهيزه... (لن يُعاد تشغيل البرنامج الآن)</span>');
       fetch('/api/update/apply',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
-        if(!j.ok){bar.innerHTML='<span>⚠️ '+esc(j.message)+'</span>';setTimeout(function(){if(bar){bar.remove();bar=null;}},8000);return;}
-        var n=0,down=false,t=setInterval(function(){n++;
-          fetch('/api/update/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(s){
-            if(s.current===j.version || down){clearInterval(t);location.reload();}   // رجع السيرفر بعد ما انقطع => أعد تحميل الصفحة حتى لو اختلف رقم الإصدار
-          }).catch(function(){down=true;});
-          if(n===45){bar.innerHTML='<span>⏳ التحديث ياخذ وقت أطول من المعتاد... انتظر قليلًا</span>';}
-          if(n>90){clearInterval(t);bar.innerHTML='<span>⚠️ لم يعد البرنامج للعمل — أغلق هذه النافذة وشغّل البرنامج من أيقونته. (لو تكرر: أرسل ملف updates\\update_log.txt للمطوّر)</span>';}
-        },2000);
-      }).catch(function(){bar.innerHTML='<span>⚠️ تعذر الاتصال بالبرنامج</span>';});
+        if(!j.ok){mk('<span>⚠️ '+esc(j.message)+'</span>');hideT=setTimeout(hide,8000);return;}
+        showStaged(j.version);
+      }).catch(function(){mk('<span>⚠️ تعذر الاتصال بالبرنامج</span>');hideT=setTimeout(hide,8000);});
     };
   }
   function poll(){
     fetch('/api/update/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(s){
-      if(s.available) show(s.available_version, s.notes);
+      if(s.available) showAvail(s.available_version, s.notes);
+      else if(s.staged && s.staged_version && lget('lis_upd_staged_seen')!==s.staged_version && !bar) showStaged(s.staged_version);
     }).catch(function(){});
   }
   setTimeout(poll,1500); setInterval(poll,15*60*1000);
@@ -426,7 +498,9 @@ def register(app, get_db, get_setting, set_setting, login_required):
         db = get_db()
         av = (get_setting(db, "update_available_version", "") or "")
         cur = current_version()
-        return jsonify(current=cur, available=bool(av) and _vkey(av) > _vkey(cur), available_version=av,
+        stg = staged_version()
+        return jsonify(current=cur, available=bool(av) and _vkey(av) > _vkey(stg or cur), available_version=av,
+                       staged=bool(stg), staged_version=stg,
                        notes=get_setting(db, "update_available_notes", "") or "", frozen=frozen(),
                        configured=bool(update_url(db, get_setting)),
                        last_check=get_setting(db, "update_last_check", ""))
@@ -442,10 +516,17 @@ def register(app, get_db, get_setting, set_setting, login_required):
     @login_required
     def api_update_apply():
         db = get_db()
-        r = apply_now(db, get_setting, set_setting)
-        if r.get("ok") and frozen():
-            restart()
+        r = apply_now(db, get_setting, set_setting)      # يجهّز فقط. لا إعادة تشغيل هنا (هذا كان سبب حلقة «يتوفر تحديث»)
         return jsonify(r)
+
+    @app.route("/api/update/restart", methods=["POST"])
+    @login_required
+    def api_update_restart():
+        """إعادة تشغيل يدوية اختيارية (زر «إعادة التشغيل الآن») لتفعيل تحديث مجهَّز فوراً."""
+        if not frozen():
+            return jsonify(ok=False, message="إعادة التشغيل متاحة فقط بالبرنامج المنصَّب")
+        restart()
+        return jsonify(ok=True)
 
     @app.after_request
     def _inject_update_banner(resp):

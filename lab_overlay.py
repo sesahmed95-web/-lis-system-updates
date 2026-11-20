@@ -23,6 +23,7 @@ import shutil
 import importlib.util
 
 HEALTHY_AFTER = 40       # seconds alive = this start is considered good
+PENDING_SUPPORT = True   # lab_updater يفحص هذا العلم: التحديث يُنزَّل إلى updates\\pending ويُرقَّى إلى current هنا عند التشغيل
 
 
 def _log(msg):
@@ -90,6 +91,43 @@ def quarantine(reason):
     _log("update quarantined: " + reason)
 
 
+def promote_pending():
+    """يُستدعى قبل تحميل أي كود: إذا وُجد تحديث مجهَّز (updates\\pending) وأحدث من الحالي يصير هو current.
+    بهذا النسخة الشغّالة لا تتغير ملفاتها وهي تعمل، والتحديث يبدأ فعلياً عند أول فتح بعد التجهيز (بدون أي restart من البرنامج)."""
+    pend = os.path.join(updates_dir(), "pending")
+    if not os.path.isdir(pend):
+        return
+    cur = os.path.join(updates_dir(), "current")
+    prev = os.path.join(updates_dir(), "previous")
+    try:
+        pv = read_version(os.path.join(pend, "VERSION"))
+        have = max(_vkey(bundled_version()), _vkey(overlay_version()) if os.path.isdir(cur) else (0,))
+        if not os.path.isfile(os.path.join(pend, "app.py")) or _vkey(pv) <= have:
+            shutil.rmtree(pend, ignore_errors=True)          # قديم أو ناقص: نتجاهله
+            return
+        shutil.rmtree(prev, ignore_errors=True)
+        moved = False
+        if os.path.isdir(cur):
+            os.replace(cur, prev)
+            moved = True
+        try:
+            os.replace(pend, cur)
+        except Exception:
+            if moved:                                          # رجّع القديم حتى لا نخسر نسخة شغّالة
+                try:
+                    os.replace(prev, cur)
+                except Exception:
+                    pass
+            raise
+        try:
+            os.remove(os.path.join(updates_dir(), "boot_attempt.json"))
+        except Exception:
+            pass
+        _log("pending update %s promoted to current" % pv)
+    except Exception as e:      # noqa: BLE001
+        _log("promote_pending failed: %s" % e)
+
+
 def mark_healthy():
     try:
         os.remove(os.path.join(updates_dir(), "boot_attempt.json"))
@@ -110,8 +148,11 @@ def _restart_bundled():
 def boot(real_file, g):
     """called from app.py:  import lab_overlay; lab_overlay.boot(__file__, globals())
     Returns normally when the bundled code should run; otherwise never returns."""
-    if not getattr(sys, "frozen", False) or os.environ.get("LIS_OVERLAY_ACTIVE") == "1":
+    # الحارس صار بمتغيرات البايثون (g) وليس بمتغير بيئة موروث: العملية الجديدة بعد التحديث كانت ترث
+    # LIS_OVERLAY_ACTIVE=1 من القديمة فتتخطى التحديث وتبقى النسخة القديمة (حلقة "يتوفر تحديث" المتكررة).
+    if not getattr(sys, "frozen", False) or g.get("_LIS_OVERLAY_ON"):
         return
+    promote_pending()
     cur = os.path.join(updates_dir(), "current")
     app_py = os.path.join(cur, "app.py")
     if not os.path.isfile(app_py):
@@ -150,6 +191,7 @@ def boot(real_file, g):
             sys.modules[name] = mod
             spec.loader.exec_module(mod)
         # 2) run the new app.py as the main program (same globals, same __file__ -> data folders unchanged)
+        g["_LIS_OVERLAY_ON"] = True
         os.environ["LIS_OVERLAY_ACTIVE"] = "1"
         os.environ["LIS_OVERLAY_DIR"] = cur
         os.environ["LIS_OVERLAY_VERSION"] = ov

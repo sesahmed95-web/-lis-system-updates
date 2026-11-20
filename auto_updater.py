@@ -110,11 +110,21 @@ def is_configured():
 
 
 def get_local_version():
+    """الإصدار الفعلي الشغّال: نسخة الـexe، أو نسخة التحديث الداخلي (updates\\current) إذا كانت أحدث."""
+    base = "0"
     try:
         with open(VERSION_FILE, "r", encoding="utf-8") as f:
-            return f.read().strip() or "0"
+            base = f.read().strip() or "0"
     except Exception:
-        return "0"
+        pass
+    try:
+        if os.environ.get("LIS_OVERLAY_ACTIVE") == "1":
+            ov = (os.environ.get("LIS_OVERLAY_VERSION") or "").strip()
+            if ov and _version_key(ov) > _version_key(base):
+                return ov
+    except Exception:
+        pass
+    return base
 
 
 def _version_key(v):
