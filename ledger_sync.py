@@ -52,7 +52,7 @@ def cfg(db):
         back = 3
     return {
         "url": (_get(db, "ledger_url") or "").strip().rstrip("/"),
-        "key": (_get(db, "ledger_key") or "").strip(),
+        "key": re.sub(r"[^A-Za-z0-9_.\-]", "", _get(db, "ledger_key") or ""),
         "enabled": _get(db, "ledger_enabled", "0") == "1",
         "back": back,
     }
@@ -334,7 +334,7 @@ def start():
 
 _BADGE = ('<script id="lis-ledger-badge">(function(){try{if(window.top!==window.self||document.getElementById("lis-lg"))return;'
           'var d=document.createElement("a");d.id="lis-lg";d.href="/ledger";d.title="مزامنة السجل السحابي";'
-          'd.style.cssText="position:fixed;top:8px;left:8px;z-index:99990;display:none;align-items:center;gap:6px;background:#fff;border:1px solid #cbd5e1;border-radius:20px;padding:3px 10px;font:12px Tahoma,sans-serif;color:#334155;text-decoration:none;box-shadow:0 1px 6px #0002";'
+          'd.style.cssText="position:fixed;bottom:10px;left:8px;z-index:99990;display:none;align-items:center;gap:6px;background:#fff;border:1px solid #cbd5e1;border-radius:20px;padding:3px 10px;font:12px Tahoma,sans-serif;color:#334155;text-decoration:none;box-shadow:0 1px 6px #0002";'
           'var c={g:"#16a34a",y:"#eab308",r:"#dc2626"};'
           'function u(){fetch("/ledger/status",{cache:"no-store"}).then(function(r){return r.json()}).then(function(j){'
           'if(j.hide){d.style.display="none";return}d.style.display="flex";'
@@ -426,7 +426,7 @@ def install(app):
             if u and not u.lower().startswith("https://"):
                 return jsonify(ok=False, message="الرابط لازم يبدأ بـ https://"), 400
             _set(db, "ledger_url", u)
-            k = re.sub(r"\s", "", d.get("key") or "")
+            k = re.sub(r"[^A-Za-z0-9_.\-]", "", d.get("key") or "")   # يحذف BOM/مسافات/اقتباس/أي حرف غير مفتاح
             if k:
                 _set(db, "ledger_key", k[:200])
             _set(db, "ledger_enabled", "1" if d.get("enabled") else "0")

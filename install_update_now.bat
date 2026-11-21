@@ -23,7 +23,7 @@ timeout /t 3 >nul
 set "CUR=%APP%\updates\current"
 if exist "%CUR%" ren "%CUR%" "old_%RANDOM%" 2>>"%LOG%"
 mkdir "%CUR%" 2>>"%LOG%"
-for %%F in (app.py ledger_sync.py lab_updater.py auto_updater.py) do (
+for %%F in (app.py ledger_sync.py lab_catalog.py lab_updater.py auto_updater.py) do (
   if exist "%SRC%%%F" (copy /y "%SRC%%%F" "%CUR%\" >>"%LOG%" 2>&1) else (echo MISSING %%F next to this file >> "%LOG%")
 )
 >"%CUR%\VERSION" echo 268

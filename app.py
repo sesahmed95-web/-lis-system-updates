@@ -18061,6 +18061,44 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
             why = "فشل اتصال"
         return "%s [%s: %s]" % (why, type(r).__name__, _redact(m))
 
+    _GHOST = "https://generativelanguage.googleapis.com"
+    _relay = {"prefer": False, "t": 0.0, "cfg": None}
+
+    def _relay_cfg():
+        """رابط ومفتاح السجل السحابي (ledger) إن كانا مضبوطين: يُستعمل كمرحّل لـGemini عند حجب الاتصال المباشر."""
+        if _relay["cfg"] is not None and time.time() - _relay["t"] < 60:
+            return _relay["cfg"]
+        c = None
+        try:
+            db = get_db()
+            try:
+                u = (get_setting(db, "ledger_url", "") or "").strip().rstrip("/")
+                k = (get_setting(db, "ledger_key", "") or "").strip()
+            finally:
+                db.close()
+            if u.startswith("https://") and k:
+                c = (u, k)
+        except Exception:
+            c = None
+        _relay["cfg"], _relay["t"] = c, time.time()
+        return c
+
+    def _relay_req(url, hdr, data, timeout, method):
+        """يمرّر طلب Gemini عبر Worker السجل السحابي. يرجع (code, text) أو يرفع استثناء اتصال."""
+        rc = _relay_cfg()
+        if not rc or not url.startswith(_GHOST):
+            return None
+        h = dict(hdr)
+        h["x-lis-key"] = rc[1]
+        req = urllib.request.Request(rc[0] + "/api/relay/gemini" + url[len(_GHOST):], data=data, headers=h, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.getcode(), r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            try: body = e.read().decode("utf-8", "replace")
+            except Exception: body = ""
+            return e.code, body
+
     def _curl_request(url, headers, data, timeout, method):
         """بديل احتياطي: curl.exe (موجود بويندوز 10/11). يرجع (status, text) أو None."""
         import shutil, subprocess, tempfile
@@ -18106,7 +18144,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         if code == 429:
             raise _AIErr("وصلت للحد المجاني للطلبات. انتظر دقيقة وأعد المحاولة.")
         if code >= 500:
-            raise _AIErr("خدمة الذكاء الصناعي مشغولة حالياً. أعد المحاولة بعد لحظات.")
+            raise _AIErr("خدمة الذكاء الصناعي مشغولة حالياً (HTTP %s). أعد المحاولة بعد لحظات. %s" % (code, _redact(msg)[:200]))
         raise _AIErr("رفضت الخدمة الطلب (HTTP %s): %s" % (code, _redact(msg)[:200]))
 
     def _post(url, headers, body, timeout=60):
@@ -18114,6 +18152,21 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         hdr = dict(headers, **{"Content-Type": "application/json", "User-Agent": _UA, "Accept": "application/json"})
         timeout = min(timeout, 45)
         last = None
+        if _relay["prefer"] and _relay_cfg() and url.startswith(_GHOST):
+            try:
+                res = _relay_req(url, hdr, data, timeout, "POST")
+                if res and 200 <= res[0] < 300:
+                    return json.loads(res[1])
+                if res and res[0] == 401:
+                    raise _AIErr("مفتاح الربط مع السجل السحابي (LIS_KEY) غير صحيح — صحّحه من صفحة /ledger ثم اختبر.")
+                if res and res[0] not in (502, 503, 504, 522, 524):
+                    _http_error(res[0], res[1], 2)
+            except _AIErr:
+                raise
+            except Exception:
+                _relay["prefer"] = False
+        if url.startswith(_GHOST) and _relay_cfg():
+            timeout = min(timeout, 20)   # يوجد مرحّل احتياطي: لا داعي لانتظار طويل على الاتصال المباشر
         for _attempt in range(3):
             req = urllib.request.Request(url, data=data, headers=hdr, method="POST")
             try:
@@ -18127,6 +18180,20 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
             except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError, OSError, ValueError) as e:
                 last = _net_reason(e)
                 break
+        if last and url.startswith(_GHOST) and _relay_cfg():
+            try:
+                res = _relay_req(url, hdr, data, min(timeout, 60), "POST")
+                if res and 200 <= res[0] < 300:
+                    _relay["prefer"] = True
+                    return json.loads(res[1])
+                if res and res[0] == 401:
+                    raise _AIErr("تعذّر الاتصال المباشر بـGoogle، ومفتاح الربط مع السجل السحابي (LIS_KEY) غير صحيح — صحّحه من صفحة /ledger.")
+                if res:
+                    _http_error(res[0], res[1], 2)
+            except _AIErr:
+                raise
+            except Exception as e2:
+                last += " | relay: " + _redact(type(e2).__name__ + ": " + str(e2))
         if last:
             # محاولة بديلة عبر curl (تتجاوز مشاكل SSL/بروكسي بايثون المضمّن)
             res = _curl_request(url, hdr, data, timeout, "POST")
@@ -18149,6 +18216,12 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         except urllib.error.HTTPError:
             return None
         except Exception:
+            try:
+                rr = _relay_req(url, hdr, None, timeout, "GET")
+                if rr and 200 <= rr[0] < 300:
+                    return json.loads(rr[1])
+            except Exception:
+                pass
             res = _curl_request(url, hdr, None, timeout, "GET")
             if res and 200 <= res[0] < 300:
                 try: return json.loads(res[1])
@@ -20300,6 +20373,12 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         ledger_sync.install(app)
     except Exception as _le:
         print("ledger_sync not loaded:", _le)
+    # كتالوج التحاليل الجاهز: يُثبَّت تلقائياً مرة واحدة لكل جهاز (يضيف الناقص فقط؛ الأسعار 0 ويحددها العميل)
+    try:
+        import lab_catalog
+        lab_catalog.auto_install(get_db, lambda _db: (sync_test_sections(_db), _db.commit()))
+    except Exception as _ce:
+        print("catalog auto-install not loaded:", _ce)
 
     _PAGE = r'''<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>مساعد المختبر</title><style>

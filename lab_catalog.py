@@ -19,6 +19,11 @@ def r(lo=None, hi=None, g=B, text=None):
     return (g, lo, hi, text)
 
 
+def ra(lo, hi, g, af, at, unit="Years"):
+    """نسبة طبيعية لفئة عمرية: من af إلى at (بالوحدة unit: Years/Months/Days)."""
+    return (g, lo, hi, None, af, at, unit)
+
+
 def mf(mlo, mhi, flo, fhi):
     return [r(mlo, mhi, M), r(flo, fhi, F)]
 
@@ -188,14 +193,18 @@ single(TM, TG, "Beta-2 Microglobulin", "B2M", S, "mg/L", [r(0.8, 2.2)])
 # =============================== أمراض الدم ===============================
 HM, HMG, WB = "Hematology", "", "Whole Blood (EDTA)"
 t(HM, HMG, "Complete Blood Count", "CBC", WB, [
-    p("White Blood Cells (WBC)", "x10^9/L", [r(4.0, 11.0)]),
+    p("White Blood Cells (WBC)", "x10^9/L", [ra(9.0, 30.0, B, 0, 1, "Months"), ra(6.0, 17.5, B, 1, 12, "Months"),
+                                              ra(5.5, 15.5, B, 1, 6), ra(4.5, 13.5, B, 6, 12), ra(4.0, 11.0, B, 12, 120)]),
     p("Neutrophils %", "%", [r(40, 75)]), p("Lymphocytes %", "%", [r(20, 45)]),
     p("Monocytes %", "%", [r(2, 10)]), p("Basophils %", "%", [r(0, 1)]), p("Eosinophils %", "%", [r(1, 6)]),
     p("Neutrophils #", "x10^9/L", [r(2.0, 7.5)]), p("Lymphocytes #", "x10^9/L", [r(1.0, 4.5)]),
     p("Monocytes #", "x10^9/L", [r(0.2, 1.0)]), p("Basophils #", "x10^9/L", [r(0.0, 0.1)]),
     p("Eosinophils #", "x10^9/L", [r(0.0, 0.5)]),
     p("Red Blood Cells (RBC)", "x10^12/L", mf(4.5, 5.9, 4.1, 5.1)),
-    p("Hemoglobin (HGB)", "g/dL", mf(13.5, 17.5, 12.0, 15.5)),
+    p("Hemoglobin (HGB)", "g/dL", [ra(14.0, 24.0, B, 0, 1, "Months"), ra(9.5, 14.0, B, 1, 6, "Months"), ra(10.5, 13.5, B, 6, 24, "Months"),
+                                    ra(11.5, 13.5, B, 2, 6), ra(11.5, 15.5, B, 6, 12),
+                                    ra(13.0, 16.0, M, 12, 18), ra(12.0, 16.0, F, 12, 18),
+                                    ra(13.5, 17.5, M, 18, 120), ra(12.0, 15.5, F, 18, 120)]),
     p("Hematocrit (HCT)", "%", mf(41, 53, 36, 46)),
     p("Mean Corpuscular Volume (MCV)", "fL", [r(80, 100)]),
     p("Mean Corpuscular Hemoglobin (MCH)", "pg", [r(27, 33)]),
@@ -260,6 +269,55 @@ t(HM, HMG, "Osmotic Fragility Test", "OFT", WB, [pt("Osmotic Fragility Test")])
 t(HM, HMG, "Lupus Anticoagulant", "LA", "Plasma (Citrate)", [pt("Lupus Anticoagulant", txt("Negative"))])
 t(HM, HMG, "Glycated Hemoglobin", "HbA1c", WB, [p("Glycated Hemoglobin (HbA1c)", "%", [r(4.0, 5.6, text="Non-diabetic: Up to 5.7\nPre-diabetic: 5.7 - 6.4\nDiabetic: 6.5 or more")])], ["HbA1c"])
 
+single("Vitamins", "Vitamins", "Homocysteine", "Hcy", "Serum", "µmol/L", [r(5, 15)])
+single("Vitamins", "Vitamins", "Vitamin A (Retinol)", "Vit A", "Serum", "µg/dL", [r(30, 80)], ["Retinol"])
+single("Vitamins", "Vitamins", "Vitamin E (Alpha-Tocopherol)", "Vit E", "Serum", "mg/L", [r(5.5, 17)], ["Tocopherol"])
+
+# =============================== المصليات والفيروسات والمناعة ===============================
+SV, SVG, SS = "Serology", "Serology & Immunology", "Serum"
+NEG = txt("Negative")
+for nm, sh, al in [
+    ("Hepatitis B Surface Antigen (HBsAg)", "HBsAg", ["HBs Ag", "Hepatitis B Surface Antigen"]),
+    ("Hepatitis B Surface Antibody (Anti-HBs)", "Anti-HBs", ["HBs Ab", "HBsAb"]),
+    ("Hepatitis B e Antigen (HBeAg)", "HBeAg", ["HBe Ag"]),
+    ("Hepatitis B e Antibody (Anti-HBe)", "Anti-HBe", ["HBe Ab"]),
+    ("Hepatitis B Core Antibody Total (Anti-HBc)", "Anti-HBc", ["HBc Ab", "HBcAb"]),
+    ("Hepatitis C Virus Antibody (Anti-HCV)", "HCV Ab", ["HCV", "Anti HCV"]),
+    ("Hepatitis A Virus IgM (Anti-HAV IgM)", "HAV IgM", ["HAV"]),
+    ("HIV 1/2 Antibody/Antigen", "HIV", ["HIV Ab", "AIDS"]),
+    ("Syphilis RPR/VDRL", "VDRL", ["RPR", "Syphilis"]),
+    ("Treponema pallidum Hemagglutination (TPHA)", "TPHA", []),
+    ("Brucella Antibodies (Rose Bengal)", "Brucella", ["Brucella Ab"]),
+    ("Helicobacter pylori Antigen (Stool)", "H.pylori Ag", ["H. pylori", "HP Ag"]),
+    ("Helicobacter pylori Antibody", "H.pylori Ab", ["HP Ab"]),
+    ("Antinuclear Antibody (ANA)", "ANA", []),
+    ("Anti-double Stranded DNA (Anti-dsDNA)", "Anti-dsDNA", ["dsDNA"]),
+    ("Toxoplasma IgG", "Toxo IgG", []), ("Toxoplasma IgM", "Toxo IgM", []),
+    ("Rubella IgG", "Rubella IgG", []), ("Rubella IgM", "Rubella IgM", []),
+    ("Cytomegalovirus IgG (CMV IgG)", "CMV IgG", []), ("Cytomegalovirus IgM (CMV IgM)", "CMV IgM", []),
+    ("Herpes Simplex Virus IgG (HSV IgG)", "HSV IgG", []), ("Herpes Simplex Virus IgM (HSV IgM)", "HSV IgM", []),
+    ("Epstein-Barr Virus VCA IgM (EBV)", "EBV IgM", ["EBV"]),
+    ("Pregnancy Test (hCG, Urine)", "UPT", ["Pregnancy Test", "HCG Urine"]),
+    ("Widal Test (Salmonella typhi O/H)", "Widal", ["Widal"]),
+]:
+    t(SV, SVG, nm, sh, SS, [pt(nm, NEG)], al)
+single(SV, SVG, "C-Reactive Protein (CRP)", "CRP", SS, "mg/L", [r(None, 6)], ["CRP"])
+single(SV, SVG, "Rheumatoid Factor (RF)", "RF", SS, "IU/mL", [r(None, 14)], ["RF", "Rheumatoid factor"])
+single(SV, SVG, "Anti-Streptolysin O Titre (ASO)", "ASO", SS, "IU/mL", [r(None, 200)], ["ASO", "ASOT"])
+single(SV, SVG, "Anti-CCP Antibodies", "Anti-CCP", SS, "U/mL", [r(None, 17)], ["CCP"])
+t(SV, SVG, "Hepatitis B Profile", "HBV Profile", SS, [
+    pt("HBsAg", NEG), pt("Anti-HBs"), pt("HBeAg", NEG), pt("Anti-HBe"), pt("Anti-HBc Total")], ["Hepatitis B Markers"])
+t(SV, SVG, "TORCH Screen IgG/IgM", "TORCH", SS, [
+    pt("Toxoplasma IgG"), pt("Toxoplasma IgM", NEG), pt("Rubella IgG"), pt("Rubella IgM", NEG),
+    pt("CMV IgG"), pt("CMV IgM", NEG), pt("HSV IgG"), pt("HSV IgM", NEG)], ["TORCH"])
+
+# =============================== الأنسجة والخلايا ===============================
+HP = "Histopathology"
+t(HP, "Histopathology", "Histopathology Report (Biopsy)", "Biopsy", "Tissue", [pt("Specimen"), pt("Gross Description"), pt("Microscopic Description"), pt("Diagnosis")], ["Biopsy", "Histopathology"])
+t(HP, "Histopathology", "Cytology Report (FNAC)", "FNAC", "Aspirate", [pt("Specimen"), pt("Microscopic Description"), pt("Diagnosis")], ["FNA", "Cytology"])
+t(HP, "Histopathology", "Pap Smear", "Pap", "Cervical Smear", [pt("Adequacy"), pt("Microscopic Description"), pt("Diagnosis")], ["Pap Smear"])
+t(HP, "Histopathology", "Immunohistochemistry Report (IHC)", "IHC", "Tissue", [pt("Markers"), pt("Interpretation")], ["IHC"])
+
 CATALOG = _CATALOG
 
 
@@ -321,10 +379,42 @@ def install(db, depts=None):
                 "INSERT INTO test_parameters (test_definition_id, name, unit, result_type, sort_order) VALUES (?, ?, ?, ?, ?)",
                 (tid, prm["name"], prm["unit"], prm["type"], i))
             nparams += 1
-            for g, lo, hi, text in prm["ranges"]:
+            for tup in prm["ranges"]:
+                g, lo, hi, text = tup[:4]
+                af, at, au = (tup[4], tup[5], tup[6]) if len(tup) > 4 else (0, 120, "Years")
                 db.execute(
                     "INSERT INTO reference_ranges (test_parameter_id, gender, age_from, age_from_unit, age_to, age_to_unit, low, high, range_text) "
-                    "VALUES (?, ?, 0, 'Years', 120, 'Years', ?, ?, ?)",
-                    (pc.lastrowid, g, lo, hi, text))
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (pc.lastrowid, g, af, au, at, au, lo, hi, text))
                 nranges += 1
     return {"added": added, "skipped": skipped, "params": nparams, "ranges": nranges}
+
+
+def auto_install(get_db, after=None, flag="catalog_auto_v1"):
+    """مرة واحدة لكل جهاز: بعد بدء البرنامج بـ30 ثانية يثبّت الكتالوج الناقص فقط (لا يعدّل ولا يحذف). يعمل بخيط خلفي ولا يوقف البرنامج."""
+    import threading, time
+
+    def run():
+        time.sleep(30)
+        try:
+            db = get_db()
+            try:
+                r = db.execute("SELECT value FROM settings WHERE key=?", (flag,)).fetchone()
+                if r and r["value"] == "1":
+                    return
+                res = install(db)
+                if db.execute("SELECT 1 FROM settings WHERE key=?", (flag,)).fetchone():
+                    db.execute("UPDATE settings SET value='1' WHERE key=?", (flag,))
+                else:
+                    db.execute("INSERT INTO settings (key, value) VALUES (?, '1')", (flag,))
+                db.commit()
+                if after:
+                    try:
+                        after(db)
+                    except Exception:
+                        pass
+            finally:
+                db.close()
+        except Exception:
+            pass
+    threading.Thread(target=run, name="catalog-auto", daemon=True).start()
