@@ -18344,7 +18344,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                     try:
                         j = _post(_url, {"x-goog-api-key": key}, body, 40)
                     except _AIErr as e400:
-                        if "(400)" not in str(e400):
+                        if "HTTP 400" not in str(e400):
                             raise
                         # بعض الموديلات ما تقبل إيقاف التفكير: أعد المحاولة بدونه
                         b2 = json.loads(json.dumps(body))
@@ -18429,7 +18429,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 try:
                     j = _post(url_, {"x-goog-api-key": key}, body, 90)
                 except _AIErr as e400:
-                    if "(400)" not in str(e400):
+                    if "HTTP 400" not in str(e400):
                         raise
                     body["generationConfig"].pop("thinkingConfig", None)
                     j = _post(url_, {"x-goog-api-key": key}, body, 90)
