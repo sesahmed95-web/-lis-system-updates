@@ -2105,3 +2105,4 @@
 
 [2026-11-17T16:07:30] SLOW 8.8s POST /reports/archive/9/open-external? (pdf_archive_open_external)
 [2026-11-21T06:32:53] SLOW 3.1s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-21T18:13:56] SLOW 2.8s POST /designer/update/check-now? (designer_update_check_now)

@@ -18134,12 +18134,14 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 try: os.unlink(tf.name)
                 except Exception: pass
 
+    _tl = threading.local()   # fast=True: لا تعيد المحاولة على نفس الموديل (ننتقل للموديل البديل فوراً)
+
     def _http_error(code, msg, attempt):
         if code in (401, 403) or ("API key" in msg and code == 400):
             raise _AIErr("مفتاح الذكاء الصناعي غير صحيح أو غير مفعّل (HTTP %s). %s" % (code, _redact(msg)[:160]))
         if code == 404:
             raise _AIErr("MODEL_404")
-        if code in (429, 500, 502, 503, 504, 529) and attempt < 2:
+        if code in (429, 500, 502, 503, 504, 529) and attempt < 2 and not getattr(_tl, "fast", False):
             return True
         if code == 429:
             raise _AIErr("وصلت للحد المجاني للطلبات. انتظر دقيقة وأعد المحاولة.")
@@ -18329,39 +18331,47 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         _order = [_first] + [m_ for m_ in ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-flash-lite-latest", "gemini-2.0-flash") if m_ != _first]
         _last = None
         _empty = None
-        for _i, model in enumerate(_order):
-            if _i:
-                time.sleep(1.5)
-            _url = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model
-            try:
+        _deadline = time.time() + 90      # سقف كلي: ما ننتظر أكثر من 90 ثانية مهما كثرت الموديلات
+        try:
+            for _i, model in enumerate(_order):
+                if _i:
+                    if time.time() > _deadline:
+                        break
+                    time.sleep(1.5)
+                _tl.fast = (_i < len(_order) - 1)
+                _url = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model
                 try:
-                    j = _post(_url, {"x-goog-api-key": key}, body, 40)
-                except _AIErr as e400:
-                    if "(400)" not in str(e400):
-                        raise
-                    # بعض الموديلات ما تقبل إيقاف التفكير: أعد المحاولة بدونه
-                    b2 = json.loads(json.dumps(body))
-                    b2["generationConfig"].pop("thinkingConfig", None)
-                    j = _post(_url, {"x-goog-api-key": key}, b2, 40)
-            except _AIErr as e:
-                _last = e
-                if str(e) == "MODEL_404":
-                    _model_cache["t"] = 0
-                    continue
-                if "مشغولة" in str(e) or "الحد المجاني" in str(e):
-                    continue
-                raise
-            try:
-                parts = j["candidates"][0]["content"]["parts"]
-                txt = "".join(p.get("text", "") for p in parts).strip()
-                if txt:
-                    return txt
-            except Exception:
-                pass
-            fb = (j.get("promptFeedback") or {}).get("blockReason")
-            if fb:
-                raise _AIErr("الخدمة امتنعت عن الرد على هذا الطلب.")
-            _empty = _AIErr("جاء ردّ فارغ من الخدمة. أعد المحاولة.")
+                    try:
+                        j = _post(_url, {"x-goog-api-key": key}, body, 40)
+                    except _AIErr as e400:
+                        if "(400)" not in str(e400):
+                            raise
+                        # بعض الموديلات ما تقبل إيقاف التفكير: أعد المحاولة بدونه
+                        b2 = json.loads(json.dumps(body))
+                        b2["generationConfig"].pop("thinkingConfig", None)
+                        j = _post(_url, {"x-goog-api-key": key}, b2, 40)
+                except _AIErr as e:
+                    _last = e
+                    if str(e) == "MODEL_404":
+                        _model_cache["t"] = 0
+                        continue
+                    if "مشغولة" in str(e) or "الحد المجاني" in str(e):
+                        continue
+                    raise
+                try:
+                    parts = j["candidates"][0]["content"]["parts"]
+                    txt = "".join(p.get("text", "") for p in parts).strip()
+                    if txt:
+                        return txt
+                except Exception:
+                    pass
+                fb = (j.get("promptFeedback") or {}).get("blockReason")
+                if fb:
+                    raise _AIErr("الخدمة امتنعت عن الرد على هذا الطلب.")
+                _empty = _AIErr("جاء ردّ فارغ من الخدمة. أعد المحاولة.")
+        finally:
+            _tl.fast = False
+        _tl.fast = False
         if _last is not None and str(_last) == "MODEL_404":
             raise _AIErr("الموديل المختار غير متاح. امسح خانة الموديل من «إعدادات الذكاء» ليختار البرنامج تلقائياً.")
         if _last is not None:
