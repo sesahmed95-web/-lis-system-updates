@@ -17875,6 +17875,114 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     def _allowed():
         return bool(session.get("designer_id") or ("interface" in session))
 
+    # ---- v-keyfix2: نسخ احتياطية دائمة لإعدادات الذكاء (المفتاح) خارج قاعدة البيانات ومجلد التحديث ----
+    # أماكن متعددة: لو ضاع واحد (إعادة تنصيب/استبدال القاعدة/تنظيف) يبقى غيره، ويرجع المفتاح تلقائياً للقاعدة.
+    _KEYF = ("key", "provider", "model", "enabled", "vision_provider", "vision_model", "vision_key")
+
+    def _key_backup_paths():
+        out = []
+        for env in ("APPDATA", "LOCALAPPDATA", "PROGRAMDATA"):
+            root = os.environ.get(env)
+            if root:
+                out.append(os.path.join(root, "LabSystem", "ai_settings.json"))
+        if not out:
+            out.append(os.path.join(os.path.expanduser("~"), ".config", "LabSystem", "ai_settings.json"))
+        try:
+            out.append(os.path.join(_base_dir(), "ai_settings.json"))
+        except Exception:
+            pass
+        seen, res = set(), []
+        for q in out:
+            if q not in seen:
+                seen.add(q)
+                res.append(q)
+        return res
+
+    def _key_backup_read():
+        """أول نسخة فيها مفتاح؛ وإلا أول نسخة سليمة؛ وإلا {}."""
+        first = {}
+        for p in _key_backup_paths():
+            try:
+                with open(p, encoding="utf-8") as fh:
+                    d = json.load(fh)
+            except Exception:
+                continue
+            if not isinstance(d, dict):
+                continue
+            if d.get("key") or d.get("vision_key"):
+                return d
+            if not first:
+                first = d
+        return first
+
+    def _key_backup_write(d):
+        d = {k: d.get(k) for k in _KEYF if k in d}
+        for p in _key_backup_paths():
+            try:
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                tmp = p + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump(d, fh, ensure_ascii=False)
+                os.replace(tmp, p)
+            except Exception:
+                pass
+
+    _key_synced = {"sig": None}
+
+    def _key_backup_sync(c):
+        """ادمج إعدادات القاعدة (غير الفارغة فقط) مع النسخة الاحتياطية؛ ما نمسح أبداً قيمة موجودة بالنسخة لأن القاعدة فاضية."""
+        try:
+            cur = {"key": c.get("key") or "", "provider": c.get("provider") or "", "model": c.get("model") or "",
+                   "enabled": bool(c.get("enabled")), "vision_provider": c.get("vprovider") or "",
+                   "vision_model": c.get("vmodel") or "", "vision_key": c.get("vkey") or ""}
+            sig = tuple(sorted(cur.items()))
+            if _key_synced["sig"] == sig:
+                return
+            bk = _key_backup_read()
+            merged = dict(bk)
+            for k, v in cur.items():
+                if k == "enabled" or v:
+                    merged[k] = v
+            if merged != bk:
+                _key_backup_write(merged)
+            _key_synced["sig"] = sig
+        except Exception:
+            pass
+
+    def _key_restore_if_missing(c):
+        """القاعدة ضاع منها المفتاح (استبدال القاعدة/إعادة تنصيب...) لكن توجد نسخة احتياطية => ارجعه للقاعدة."""
+        try:
+            if c.get("key") and c.get("vkey"):
+                return
+            bk = _key_backup_read()
+            if not (bk.get("key") or bk.get("vision_key")):
+                return
+            db2 = get_db()
+            try:
+                if not c.get("key") and bk.get("key"):
+                    c["key"] = bk["key"]
+                    c["provider"] = (bk.get("provider") or c["provider"]).lower()
+                    c["model"] = bk.get("model") or c.get("model") or ""
+                    if bk.get("enabled") is not None:
+                        c["enabled"] = bool(bk["enabled"])
+                    set_setting(db2, "ai_api_key", c["key"])
+                    set_setting(db2, "ai_provider", c["provider"])
+                    set_setting(db2, "ai_model", c["model"])
+                    set_setting(db2, "ai_enabled", "1" if c["enabled"] else "0")
+                if not c.get("vkey") and bk.get("vision_key"):
+                    c["vkey"] = bk["vision_key"]
+                    c["vprovider"] = (bk.get("vision_provider") or c["vprovider"]).lower()
+                    c["vmodel"] = bk.get("vision_model") or c.get("vmodel") or ""
+                    set_setting(db2, "ai_vision_key", c["vkey"])
+                    set_setting(db2, "ai_vision_provider", c["vprovider"])
+                    set_setting(db2, "ai_vision_model", c["vmodel"])
+                db2.commit()
+            finally:
+                try: db2.close()
+                except Exception: pass
+        except Exception:
+            pass
+
     def _file_defaults():
         """v31: ai_defaults.json بجانب البرنامج — يسافر مع ملف التحديث للعميل. يُستعمل فقط للحقول الفاضية بإعدادات العميل
         (ما يكتب فوق شي ضبطه العميل بنفسه). تصديره من صفحة «إعدادات الذكاء» ← «تصدير للتحديثات»."""
@@ -17894,11 +18002,11 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
             c = {
                 "enabled": get_setting(db, "ai_enabled", "") != "0" if get_setting(db, "ai_enabled", "") != "" else str(fd.get("enabled", "1")) != "0",
                 "provider": ((get_setting(db, "ai_provider", "") or fd.get("provider") or "gemini") or "gemini").strip().lower(),
-                "key": (get_setting(db, "ai_api_key", "") or fd.get("key") or "").strip(),
+                "key": (get_setting(db, "ai_api_key", "") or fd.get("key") or "").strip().strip("\"'").strip(),
                 "model": (get_setting(db, "ai_model", "") or fd.get("model") or "").strip(),
                 # قراءة الصور: مزوّد/مفتاح مستقل (مثلاً الدردشة Groq والصور Gemini) — فاضي = نفس المزوّد الرئيسي
                 "vprovider": (get_setting(db, "ai_vision_provider", "") or fd.get("vision_provider") or "gemini").strip().lower(),
-                "vkey": (get_setting(db, "ai_vision_key", "") or fd.get("vision_key") or "").strip(),
+                "vkey": (get_setting(db, "ai_vision_key", "") or fd.get("vision_key") or "").strip().strip("\"'").strip(),
                 "vmodel": (get_setting(db, "ai_vision_model", "") or fd.get("vision_model") or "").strip(),
             }
             if c["model"].lower() in ("auto", "none", "default"):
@@ -17906,6 +18014,9 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         finally:
             try: db.close()
             except Exception: pass
+        # v-keyfix2: القاعدة فيها مفتاح => انسخه احتياطياً؛ ما فيها => ارجعه من النسخة الاحتياطية
+        _key_restore_if_missing(c)     # ناقص من القاعدة؟ ارجعه من النسخة الاحتياطية
+        _key_backup_sync(c)            # ثم احفظ/ادمج الحالي بالنسخة الاحتياطية
         if not c["key"]:
             c["key"] = (os.environ.get("LIS_AI_KEY", "") or "").strip()
         if not c["key"]:
@@ -17918,38 +18029,130 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         return c
 
     # ---------------------------------------------------------------- HTTP
+    _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LIS-Assistant/1.0"
+    _last_net = {"err": ""}
+
+    def _redact(t):
+        t = str(t or "")
+        t = re.sub(r"(key=)[^&\s'\"]+", r"\1***", t)
+        t = re.sub(r"AQ\.[A-Za-z0-9_\-\.]{8,}|AIza[A-Za-z0-9_\-]{10,}|gsk_[A-Za-z0-9]{10,}|sk-[A-Za-z0-9_\-]{10,}", "***", t)
+        return t[:220]
+
+    def _net_reason(e):
+        """سبب فني مفهوم لفشل الاتصال (بدون أي مفتاح)."""
+        r = getattr(e, "reason", e)
+        m = str(r)
+        low = m.lower()
+        if "certificate" in low or "ssl" in low or "tls" in low:
+            why = "شهادة الأمان SSL (غالباً برنامج حماية/جدار ناري يعترض الاتصال أو تاريخ الجهاز غلط)"
+        elif "timed out" in low or isinstance(r, (socket.timeout, TimeoutError)):
+            why = "انتهت المهلة (الإنترنت بطيء أو الاتصال محجوب)"
+        elif "getaddrinfo" in low or "name or service" in low or "11001" in low or "dns" in low:
+            why = "تعذّر تحديد عنوان الخدمة DNS"
+        elif "unknown url type" in low:
+            why = "مكتبة SSL ناقصة داخل البرنامج"
+        elif "refused" in low or "10061" in low:
+            why = "الاتصال مرفوض"
+        elif "proxy" in low or "407" in low:
+            why = "بروكسي الشبكة يمنع الاتصال"
+        elif "reset" in low or "10054" in low or "aborted" in low:
+            why = "انقطع الاتصال (reset)"
+        else:
+            why = "فشل اتصال"
+        return "%s [%s: %s]" % (why, type(r).__name__, _redact(m))
+
+    def _curl_request(url, headers, data, timeout, method):
+        """بديل احتياطي: curl.exe (موجود بويندوز 10/11). يرجع (status, text) أو None."""
+        import shutil, subprocess, tempfile
+        exe = shutil.which("curl") or shutil.which("curl.exe")
+        if not exe:
+            return None
+        cmd = [exe, "-sS", "-m", str(int(timeout)), "-X", method, "-w", "\n__HTTP__%{http_code}", "-A", _UA]
+        for k, v in headers.items():
+            cmd += ["-H", "%s: %s" % (k, v)]
+        tf = None
+        try:
+            if data is not None:
+                tf = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+                tf.write(data); tf.close()
+                cmd += ["--data-binary", "@" + tf.name]
+            cmd.append(url)
+            flags = 0x08000000 if os.name == "nt" else 0
+            p = subprocess.run(cmd, capture_output=True, timeout=timeout + 10, creationflags=flags)
+            out = p.stdout.decode("utf-8", "replace")
+            if "\n__HTTP__" not in out:
+                _last_net["err"] = "curl: " + _redact(p.stderr.decode("utf-8", "replace"))
+                return None
+            body, code = out.rsplit("\n__HTTP__", 1)
+            if int(code or 0) == 0:
+                _last_net["err"] = "curl: " + _redact(p.stderr.decode("utf-8", "replace"))
+                return None
+            return int(code), body
+        except Exception as e:
+            _last_net["err"] = "curl: " + _redact(e)
+            return None
+        finally:
+            if tf:
+                try: os.unlink(tf.name)
+                except Exception: pass
+
+    def _http_error(code, msg, attempt):
+        if code in (401, 403) or ("API key" in msg and code == 400):
+            raise _AIErr("مفتاح الذكاء الصناعي غير صحيح أو غير مفعّل (HTTP %s). %s" % (code, _redact(msg)[:160]))
+        if code == 404:
+            raise _AIErr("MODEL_404")
+        if code in (429, 500, 502, 503, 504, 529) and attempt < 2:
+            return True
+        if code == 429:
+            raise _AIErr("وصلت للحد المجاني للطلبات. انتظر دقيقة وأعد المحاولة.")
+        if code >= 500:
+            raise _AIErr("خدمة الذكاء الصناعي مشغولة حالياً. أعد المحاولة بعد لحظات.")
+        raise _AIErr("رفضت الخدمة الطلب (HTTP %s): %s" % (code, _redact(msg)[:200]))
+
     def _post(url, headers, body, timeout=60):
         data = json.dumps(body).encode("utf-8")
+        hdr = dict(headers, **{"Content-Type": "application/json", "User-Agent": _UA, "Accept": "application/json"})
+        timeout = min(timeout, 45)
+        last = None
         for _attempt in range(3):
-            req = urllib.request.Request(url, data=data, headers=dict(headers, **{"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LIS-Assistant/1.0", "Accept": "application/json"}), method="POST")
+            req = urllib.request.Request(url, data=data, headers=hdr, method="POST")
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as r:
                     return json.loads(r.read().decode("utf-8"))
             except urllib.error.HTTPError as e:
-                try: msg = e.read().decode("utf-8", "replace")[:300]
+                try: msg = e.read().decode("utf-8", "replace")[:400]
                 except Exception: msg = ""
-                if e.code in (401, 403) or ("API key" in msg and e.code == 400):
-                    raise _AIErr("مفتاح الذكاء الصناعي غير صحيح أو غير مفعّل. افتح «إعدادات الذكاء» وتأكد من المفتاح.")
-                if e.code == 404:
-                    raise _AIErr("MODEL_404")
-                # إعادة محاولة تلقائية عند الضغط على الخدمة (429 / 5xx)
-                if e.code in (429, 500, 502, 503, 504, 529) and _attempt < 2:
-                    time.sleep(2 * (_attempt + 1))
-                    continue
-                if e.code == 429:
-                    raise _AIErr("وصلت للحد المجاني للطلبات. انتظر دقيقة وأعد المحاولة.")
-                if e.code >= 500:
-                    raise _AIErr("خدمة الذكاء الصناعي مشغولة حالياً. أعد المحاولة بعد لحظات.")
-                raise _AIErr("رفضت الخدمة الطلب (%s)." % e.code)
-            except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError, OSError):
-                raise _AIErr("ما كو اتصال بالإنترنت أو الخدمة ما ردّت. الذكاء الصناعي يحتاج إنترنت.")
+                if _http_error(e.code, msg, _attempt):
+                    time.sleep(2 * (_attempt + 1)); continue
+            except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError, OSError, ValueError) as e:
+                last = _net_reason(e)
+                break
+        if last:
+            # محاولة بديلة عبر curl (تتجاوز مشاكل SSL/بروكسي بايثون المضمّن)
+            res = _curl_request(url, hdr, data, timeout, "POST")
+            if res:
+                code, txt = res
+                if 200 <= code < 300:
+                    try: return json.loads(txt)
+                    except Exception: pass
+                else:
+                    _http_error(code, txt, 2)
+            raise _AIErr("تعذّر الاتصال بخدمة الذكاء: " + last + ((" | " + _last_net["err"]) if _last_net["err"] else ""))
+        raise _AIErr("ردّ غير متوقع من الخدمة.")
 
-    def _get(url, headers, timeout=25):
-        req = urllib.request.Request(url, headers=dict(headers, **{"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LIS-Assistant/1.0"}), method="GET")
+    def _get(url, headers, timeout=15):
+        hdr = dict(headers, **{"User-Agent": _UA})
+        req = urllib.request.Request(url, headers=hdr, method="GET")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError:
+            return None
         except Exception:
+            res = _curl_request(url, hdr, None, timeout, "GET")
+            if res and 200 <= res[0] < 300:
+                try: return json.loads(res[1])
+                except Exception: return None
             return None
 
     _BAD = re.compile(r"image|tts|live|audio|vision|embed|robot|imagen|veo|aqa|exp|thinking|computer|native|gemma|learnlm|banana", re.I)
@@ -18612,6 +18815,25 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
             if d.get("clear_vision_key"):
                 set_setting(db, "ai_vision_key", "")
             db.commit()
+            # v-keyfix2: نسخة دائمة خارج القاعدة (تبقى بعد التحديث/إعادة التنصيب/استبدال القاعدة)
+            try:
+                _bk = _key_backup_read()
+                _bk.update({"provider": prov, "enabled": bool(d.get("enabled", True)),
+                            "model": re.sub(r"[^A-Za-z0-9._:-]", "", (d.get("model") or ""))[:80],
+                            "vision_provider": vp,
+                            "vision_model": re.sub(r"[^A-Za-z0-9._:-]", "", (d.get("vision_model") or ""))[:80]})
+                if k:
+                    _bk["key"] = re.sub(r"\s", "", k)[:200]
+                if d.get("clear_key"):
+                    _bk["key"] = ""
+                if vk:
+                    _bk["vision_key"] = re.sub(r"\s", "", vk)[:200]
+                if d.get("clear_vision_key"):
+                    _bk["vision_key"] = ""
+                _key_backup_write(_bk)
+                _key_synced["sig"] = None
+            except Exception:
+                pass
         finally:
             try: db.close()
             except Exception: pass
@@ -20072,6 +20294,12 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     # ===== LIS-PLUS END =====
 
     app.register_blueprint(bp)
+    # ربط «سجل المرضى السحابي» (ledger_sync.py): صفحة /ledger + مزامنة تلقائية. اختياري: أي خطأ لا يوقف البرنامج.
+    try:
+        import ledger_sync
+        ledger_sync.install(app)
+    except Exception as _le:
+        print("ledger_sync not loaded:", _le)
 
     _PAGE = r'''<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>مساعد المختبر</title><style>
@@ -20149,7 +20377,7 @@ button{margin-top:16px;padding:10px 18px;border:0;border-radius:9px;background:#
 function save(cb){fetch("/ai/api/save-settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:$("en").checked,provider:$("pv").value,key:$("key").value,model:$("md").value,vision_provider:$("vpv").value,vision_key:$("vkey").value,vision_model:$("vmd").value})}).then(function(r){return r.json()}).then(function(j){if(j.ok){if($("key").value)$("hk").textContent="(مفتاح محفوظ ✓)";if($("vkey").value)$("vhk").textContent="(مفتاح محفوظ ✓)";$("key").value="";$("vkey").value="";cb&&cb()}else $("r").textContent=j.error})}
 $("sv").onclick=function(){save(function(){$("r").textContent="تم الحفظ ✓"})};
 $("ex").onclick=function(){save(function(){location.href="/ai/api/export-defaults"})};
-$("ts").onclick=function(){$("r").textContent="جاري الاختبار…";save(function(){fetch("/ai/api/test",{method:"POST"}).then(function(r){return r.json()}).then(function(j){$("r").textContent=j.ok?"الاتصال شغّال ✓":j.error})})};</script></body></html>'''
+$("ts").onclick=function(){$("r").textContent="جاري الاختبار…";save(function(){var ac=new AbortController();var tm=setTimeout(function(){ac.abort()},70000);fetch("/ai/api/test",{method:"POST",signal:ac.signal}).then(function(r){return r.json()}).then(function(j){clearTimeout(tm);$("r").textContent=j.ok?"الاتصال شغّال ✓":j.error}).catch(function(e){clearTimeout(tm);$("r").textContent="فشل الاختبار: "+(e&&e.name==="AbortError"?"انتهت المهلة (70 ثانية) — الاتصال بخدمة Google محجوب أو بطيء":(e&&e.message||e))})})};</script></body></html>'''
 # ===== LIS-AI END =====
 
 try:
