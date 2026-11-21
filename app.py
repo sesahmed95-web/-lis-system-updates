@@ -18144,7 +18144,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         if code in (429, 500, 502, 503, 504, 529) and attempt < 2 and not getattr(_tl, "fast", False):
             return True
         if code == 429:
-            raise _AIErr("وصلت للحد المجاني للطلبات. انتظر دقيقة وأعد المحاولة.")
+            raise _AIErr("وصلت للحد المجاني للطلبات (HTTP 429). انتظر دقيقة وأعد المحاولة. %s" % _redact(msg)[:220])
         if code >= 500:
             raise _AIErr("خدمة الذكاء الصناعي مشغولة حالياً (HTTP %s). أعد المحاولة بعد لحظات. %s" % (code, _redact(msg)[:200]))
         raise _AIErr("رفضت الخدمة الطلب (HTTP %s): %s" % (code, _redact(msg)[:200]))
@@ -18153,10 +18153,11 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         data = json.dumps(body).encode("utf-8")
         hdr = dict(headers, **{"Content-Type": "application/json", "User-Agent": _UA, "Accept": "application/json"})
         timeout = min(timeout, 45)
+        _relay_to = max(timeout, 45)   # مهلة المرحّل السحابي (طلب يمر عبر Cloudflare ثم Google)
         last = None
         if _relay["prefer"] and _relay_cfg() and url.startswith(_GHOST):
             try:
-                res = _relay_req(url, hdr, data, timeout, "POST")
+                res = _relay_req(url, hdr, data, _relay_to, "POST")
                 if res and 200 <= res[0] < 300:
                     return json.loads(res[1])
                 if res and res[0] == 401:
@@ -18168,7 +18169,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
             except Exception:
                 _relay["prefer"] = False
         if url.startswith(_GHOST) and _relay_cfg():
-            timeout = min(timeout, 20)   # يوجد مرحّل احتياطي: لا داعي لانتظار طويل على الاتصال المباشر
+            timeout = min(timeout, 12)   # يوجد مرحّل احتياطي: لا داعي لانتظار طويل على الاتصال المباشر
         for _attempt in range(3):
             req = urllib.request.Request(url, data=data, headers=hdr, method="POST")
             try:
@@ -18184,7 +18185,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 break
         if last and url.startswith(_GHOST) and _relay_cfg():
             try:
-                res = _relay_req(url, hdr, data, min(timeout, 60), "POST")
+                res = _relay_req(url, hdr, data, _relay_to, "POST")
                 if res and 200 <= res[0] < 300:
                     _relay["prefer"] = True
                     return json.loads(res[1])
@@ -18374,6 +18375,8 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         _tl.fast = False
         if _last is not None and str(_last) == "MODEL_404":
             raise _AIErr("الموديل المختار غير متاح. امسح خانة الموديل من «إعدادات الذكاء» ليختار البرنامج تلقائياً.")
+        if _last is not None and "الحد المجاني" in str(_last):
+            raise _AIErr("مفتاح Gemini المجاني وصل للحد المسموح (طلبات بالدقيقة أو باليوم) على الموديلات المجرَّبة. انتظر دقيقتين وأعد المحاولة مرة وحدة، وإذا تكرر فالحد يومي ويتجدد تلقائياً؛ أو استخدم مفتاحاً من مشروع آخر. تفاصيل Google: %s" % str(_last)[:260])
         if _last is not None:
             raise _AIErr("جرّبت %d موديلات Gemini وكلها مشغولة حالياً عند Google (ازدحام مؤقت). أعد المحاولة بعد دقائق. آخر رد: %s" % (len(_order), str(_last)[:160]))
         raise _empty or _AIErr("تعذّر الاتصال بالموديل.")
@@ -20388,7 +20391,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     # ربط «سجل المرضى السحابي» (ledger_sync.py): صفحة /ledger + مزامنة تلقائية. اختياري: أي خطأ لا يوقف البرنامج.
     try:
         import ledger_sync
-        ledger_sync.install(app)
+        ledger_sync.install(app, dict(next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no))
     except Exception as _le:
         print("ledger_sync not loaded:", _le)
     # كتالوج التحاليل الجاهز: يُثبَّت تلقائياً مرة واحدة لكل جهاز (يضيف الناقص فقط؛ الأسعار 0 ويحددها العميل)

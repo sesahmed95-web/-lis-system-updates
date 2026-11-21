@@ -24,7 +24,8 @@ _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LIS-Ledger/1.0"
 INTERVAL = 120
 _lock = threading.Lock()
 _started = {"v": False}
-_st = {"syncing": False, "ok_t": 0.0, "err": "", "try_t": 0.0}
+_st = {"syncing": False, "ok_t": 0.0, "err": "", "try_t": 0.0, "incoming": 0}
+_H = {}   # دوال البرنامج (رقم التسجيل، الأطباء، السعر...) تُمرَّر من app.py عند التثبيت
 
 
 # ------------------------------------------------------------------ settings helpers
@@ -77,6 +78,19 @@ def _gender(g):
     return ""
 
 
+def _orig_tests(db, vid, lis_tests):
+    """زيارة مستوردة من السجل: نحافظ على أسماء التحاليل كما كتبها العميل بالسجل (ما لم تتغير قائمة التحاليل بالـLIS)."""
+    try:
+        raw = _get(db, "ledger_orig_v%d" % vid)
+        if raw:
+            o = json.loads(raw)
+            if len(lis_tests) == int(o.get("n", -1)):
+                return o["tests"]
+    except Exception:
+        pass
+    return ", ".join(lis_tests)
+
+
 def collect_day(db, day):
     """صفوف يوم واحد بصيغة السجل السحابي."""
     vs = db.execute(
@@ -114,7 +128,7 @@ def collect_day(db, day):
             "priceType": "lab" if is_lab else "patient",
             "paid": int(paid) if paid == int(paid) else paid,
             "total": int(net_total) if net_total == int(net_total) else net_total,
-            "tests": ", ".join(tests),
+            "tests": _orig_tests(db, v["id"], tests),
         })
     return rows
 
@@ -306,6 +320,195 @@ def approve_payment(db, lis_id, user_id=None):
     return True, "تم تسجيل دفعة %s على فاتورة %s." % (int(amount) if amount == int(amount) else amount, it.get("name", ""))
 
 
+# ------------------------------------------------------------------ مرضى أُدخلوا بالسجل → واردون للـLIS
+_EXTRA_ALIAS = {
+    "bf": "peripheral blood film", "blood film": "peripheral blood film", "retic": "reticulocyte count",
+    "blood group & rh": "abo/rh", "blood group": "abo/rh", "coombs direct": "direct coombs test",
+    "coombs indirect": "indirect coombs test", "pt": "coagulation tests", "inr": "coagulation tests",
+    "ptt": "activated partial thromboplastin time", "hb electrophoresis": "hemoglobin electrophoresis",
+    "esr": "erythrocyte sedimentation rate", "blood sugar (f)": "fasting blood glucose", "blood sugar (r)": "random blood glucose",
+    "hba1c": "glycated hemoglobin", "vit.d": "vitamin d (25-hydroxy)", "gue": "general urine examination (gue)", "gse": "general stool examination (gse)",
+}
+
+
+def _nt(x):
+    return re.sub(r"[^a-z0-9؀-ۿ]+", "", (x or "").lower())
+
+
+def _split_tests(txt):
+    return [t.strip() for t in re.split(r"[,،;\n+]+", txt or "") if t.strip()]
+
+
+def _test_index(db):
+    idx = {}
+    for r in db.execute("SELECT id, name, short_name, code FROM test_definitions WHERE COALESCE(is_active,1)=1").fetchall():
+        for k in (r["name"], r["short_name"], r["code"]):
+            if k and _nt(k) not in idx:
+                idx[_nt(k)] = r["id"]
+    try:
+        import lab_catalog
+        for e in lab_catalog.CATALOG:
+            keys = [e["name"], e["short"]] + list(e["aliases"])
+            tid = next((idx[_nt(k)] for k in keys if _nt(k) in idx), None)
+            if tid:
+                for k in keys:
+                    idx.setdefault(_nt(k), tid)
+    except Exception:
+        pass
+    for a, target in _EXTRA_ALIAS.items():
+        tid = idx.get(_nt(target))
+        if tid:
+            idx.setdefault(_nt(a), tid)
+    return idx
+
+
+def _match_test(idx, name):
+    cands = [name, re.sub(r"\([^)]*\)", "", name)]
+    cands += re.findall(r"\(([^)]+)\)", name)
+    for c in cands:
+        k = _nt(c)
+        if k and k in idx:
+            return idx[k]
+    for c in cands:      # مطابقة بداية الاسم إذا كانت وحيدة (مثل Widal Test ← Widal Test (Salmonella...))
+        k = _nt(c)
+        if len(k) >= 5:
+            hits = {v for kk, v in idx.items() if kk.startswith(k)}
+            if len(hits) == 1:
+                return hits.pop()
+    return None
+
+
+def incoming(db):
+    c = cfg(db)
+    if not c["url"].startswith("https://") or not c["key"]:
+        return False, "الربط غير مضبوط.", []
+    try:
+        code, j = _request(c["url"] + "/api/lis/incoming?days=14", c["key"], None, 25)
+    except Exception as e:
+        return False, "تعذّر الاتصال بالسحابة: " + _redact(e), []
+    if code != 200 or not j.get("ok"):
+        return False, _explain(code, j), []
+    idx = _test_index(db)
+    items = []
+    for it in j.get("items", []):
+        ok, bad = [], []
+        for t in _split_tests(it.get("tests")):
+            tid = _match_test(idx, t)
+            (ok if tid else bad).append(t)
+        it["matched"], it["unmatched"] = ok, bad
+        if _get(db, "ledger_imp_%s|%s" % (it.get("date"), it.get("rowId"))):
+            continue        # مستورد سابقاً (ننتظر تثبيته بالسحابة)
+        items.append(it)
+    _st["incoming"] = len(items)
+    return True, "", items
+
+
+def _claim(c, it, lis_id, reg):
+    try:
+        code, j = _request(c["url"] + "/api/lis/claim", c["key"], {"date": it["date"], "rowId": it["rowId"], "lisId": lis_id, "lisReg": reg}, 25)
+        return code == 200 and bool(j.get("ok"))
+    except Exception:
+        return False
+
+
+def import_item(db, date_s, row_id, user_id=None, branch_id=None):
+    """يستورد مريضاً مضافاً بالسجل: مريض + زيارة + تحاليل + فاتورة/دفعة، ثم يربطه بالسحابة (لا يتكرر)."""
+    c = cfg(db)
+    key = "ledger_imp_%s|%s" % (date_s, row_id)
+    prev = _get(db, key)
+    if prev:
+        reg = ""
+        m = re.fullmatch(r"v(\d+)", prev)
+        if m:
+            r = db.execute("SELECT registration_number FROM visits WHERE id=?", (int(m.group(1)),)).fetchone()
+            reg = str(r["registration_number"]) if r else ""
+        _claim(c, {"date": date_s, "rowId": row_id}, prev, reg)
+        return True, "مستورد سابقاً."
+    ok, msg, items = incoming(db)
+    if not ok:
+        return False, msg
+    it = next((x for x in items if x["date"] == date_s and x["rowId"] == row_id), None)
+    if not it:
+        return False, "هذا المريض لم يعد بالقائمة (ربما اُستورد أو حُذف من السجل)."
+    H = _H
+    if not H:
+        return False, "وظائف الاستيراد غير جاهزة."
+    idx = _test_index(db)
+    tids = []
+    for t in _split_tests(it["tests"]):
+        tid = _match_test(idx, t)
+        if tid and tid not in tids:
+            tids.append(tid)
+    now_dt = datetime.now()
+    created = now_dt.isoformat(timespec="seconds") if date_s == now_dt.strftime("%Y-%m-%d") else date_s + "T" + now_dt.strftime("%H:%M:%S")
+    is_lab = it.get("priceType") == "lab"
+    ref = (it.get("refDoctor") or "").strip()
+    doctor_id = None if is_lab else H["doctor"](db, ref)
+    center_id = H["center"](db, ref) if is_lab else None
+    gender = {"ذكر": "Male", "أنثى": "Female"}.get(it.get("gender") or "", "")
+    unit = {"سنة": "Years", "شهر": "Months", "يوم": "Days"}.get(it.get("ageUnit") or "", "Years")
+    try:
+        age = float(it["age"]) if str(it.get("age") or "").strip() else None
+        age = int(age) if age is not None and age == int(age) else age
+    except ValueError:
+        age = None
+    name = (it.get("name") or "").strip()
+    pcur = db.execute("INSERT INTO patients (full_name, gender, age, age_unit, branch_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                      (name, gender, age, unit, branch_id, created))
+    reg = H["next_reg"](db)
+    note = "مستورد من سجل المرضى السحابي"
+    if it["unmatched"]:
+        note += " — تحاليل لم تُطابَق (أضفها يدوياً): " + "، ".join(it["unmatched"])
+    vcur = db.execute(
+        "INSERT INTO visits (registration_number, patient_id, doctor_id, referral_center_id, visit_type, fasting, notes, status, branch_id, created_by, created_at) "
+        "VALUES (?, ?, ?, ?, 'walk-in', 'Undefined', ?, 'Open', ?, ?, ?)",
+        (reg, pcur.lastrowid, doctor_id, center_id, note, branch_id, user_id, created))
+    vid = vcur.lastrowid
+    try:
+        db.execute("UPDATE visits SET sample_no=? WHERE id=?", (H["sample_no"](db, None), vid))
+    except Exception:
+        pass
+    oid = db.execute("INSERT INTO orders (visit_id, status, created_at) VALUES (?, 'Open', ?)", (vid, created)).lastrowid
+    total = 0.0
+    for tid in tids:
+        price = H["price"](db, tid, doctor_id, center_id)
+        db.execute("INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, collected_at, created_at, price_missing) "
+                   "VALUES (?, ?, 'Collected', ?, ?, ?, ?, ?, ?)",
+                   (oid, tid, "%s%03d" % (reg, tid), price if price is not None else 0, doctor_id, created, created, 1 if price is None else 0))
+        total += price or 0
+    paid = 0.0 if is_lab else max(0.0, float(it.get("paid") or 0))
+    inv_total = total if is_lab else max(total, paid)    # أسعار الكتالوج 0 افتراضياً: لا نخلي المدفوع أكبر من الفاتورة
+    disc = max(0.0, total - inv_total)
+    extra = max(0.0, inv_total - total)
+    status_ = "Paid" if (inv_total > 0 and paid >= inv_total) else ("Partial" if paid > 0 else ("Paid" if inv_total <= 0 else "Unpaid"))
+    icur = db.execute("INSERT INTO invoices (visit_id, total_amount, discount_amount, extra_charges, paid_amount, status, created_by, created_at) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (vid, inv_total, disc, extra, paid, status_, user_id, created))
+    if paid > 0:
+        db.execute("INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) VALUES (?, ?, 'Cash', ?, ?)",
+                   (icur.lastrowid, paid, user_id, created))
+    _set(db, key, "v%d" % vid)
+    _set(db, "ledger_orig_v%d" % vid, json.dumps({"tests": it["tests"], "n": len(tids)}, ensure_ascii=False))
+    db.commit()
+    _claim(c, it, "v%d" % vid, str(reg))
+    try:
+        sync(db, 14, force=True)
+    except Exception:
+        pass
+    msg = "تم استيراد %s (وصل %s)" % (name, reg)
+    if it["unmatched"]:
+        msg += " — لم تُطابَق: " + "، ".join(it["unmatched"])
+    return True, msg
+
+
+def skip_item(db, date_s, row_id):
+    c = cfg(db)
+    try:
+        code, j = _request(c["url"] + "/api/lis/claim", c["key"], {"date": date_s, "rowId": row_id, "skip": True}, 25)
+        return code == 200 and bool(j.get("ok"))
+    except Exception:
+        return False
+
+
 def _loop():
     time.sleep(20)
     while True:
@@ -318,6 +521,11 @@ def _loop():
                     if not ok:
                         _set(db, "ledger_last_err", "%s  %s" % (datetime.now().strftime("%H:%M"), msg))
                         db.commit()
+                    else:
+                        try:
+                            incoming(db)
+                        except Exception:
+                            pass
             finally:
                 db.close()
         except Exception:
@@ -350,7 +558,8 @@ def status():
     if _st["err"]:
         return "r", "السحابة: غير متصل", _st["err"]
     if _st["ok_t"] and now - _st["ok_t"] < INTERVAL * 3:
-        return "g", "السحابة: متزامن ✓", time.strftime("آخر مزامنة %H:%M:%S", time.localtime(_st["ok_t"]))
+        lbl = "السحابة: متزامن ✓" + (" • %d واردة من السجل" % _st["incoming"] if _st.get("incoming") else "")
+        return ("y" if _st.get("incoming") else "g"), lbl, time.strftime("آخر مزامنة %H:%M:%S", time.localtime(_st["ok_t"]))
     return "y", "بانتظار المزامنة…", ""
 
 
@@ -371,6 +580,7 @@ button.g{background:#64748b}.m{margin-top:14px;padding:10px;border-radius:9px;ba
 <label><input type="checkbox" id="e" __EN__> تفعيل المزامنة التلقائية</label>
 <div><button id="sv">حفظ</button><button id="ts" class="g">اختبار الاتصال</button><button id="sy" class="g">مزامنة الآن</button><button id="bf" class="g">رفع آخر 30 يوم</button></div>
 <div class="m" id="r">__STAT__</div>
+<h3 style="margin:18px 0 6px">مرضى أُدخلوا بالسجل (واردون للـLIS) <button id="ia" class="g" style="padding:4px 10px;font-size:13px">استيراد الكل</button></h3><div id="ii" class="s">جاري التحميل…</div>
 <h3 style="margin:18px 0 6px">دفعات أُدخلت من السجل (بانتظار اعتمادك)</h3><div id="pp" class="s">جاري التحميل…</div>
 <div class="s">فتح السجل: <a href="__URL__" target="_blank">__URL__</a></div></div>
 <script>
@@ -387,11 +597,19 @@ function lp(){post("/ledger/pending",{}).then(function(j){if(!j.ok){$("pp").text
 if(!j.items.length){$("pp").textContent="لا توجد دفعات معلّقة ✓";return}
 $("pp").innerHTML=j.items.map(function(i){return '<div style="padding:8px;border:1px solid #d6e4e1;border-radius:9px;margin:6px 0">'+esc(i.name)+' — <b>'+i.diff+'</b> د.ع ('+esc(i.date)+') <button data-id="'+esc(i.lisId)+'">اعتماد</button></div>'}).join("");
 Array.prototype.forEach.call($("pp").querySelectorAll("button"),function(b){b.onclick=function(){b.disabled=true;post("/ledger/approve",{lisId:b.getAttribute("data-id")}).then(function(j){$("r").textContent=j.message;lp()})}})}).catch(function(){$("pp").textContent="تعذّر التحميل"})}
-lp();
+function li(){post("/ledger/incoming",{}).then(function(j){if(!j.ok){$("ii").textContent=j.message||"تعذّر التحميل";return}
+if(!j.items.length){$("ii").textContent="لا يوجد مرضى جدد بالسجل ✓";return}
+$("ii").innerHTML=j.items.map(function(i){var bad=i.unmatched.length?'<div style="color:#b91c1c">لم تُطابَق: '+esc(i.unmatched.join("، "))+'</div>':"";
+return '<div style="padding:8px;border:1px solid #d6e4e1;border-radius:9px;margin:6px 0"><b>'+esc(i.name)+'</b> — '+esc(i.date)+(i.priceType==="lab"?" (مختبر: "+esc(i.refDoctor)+")":(i.refDoctor?" (د. "+esc(i.refDoctor)+")":""))+'<div>'+esc(i.tests)+'</div>'+bad+'<div>واصل: <b>'+i.paid+'</b> <button data-d="'+esc(i.date)+'" data-r="'+esc(i.rowId)+'">استيراد</button> <button class="g" data-s="1" data-d="'+esc(i.date)+'" data-r="'+esc(i.rowId)+'">تجاهل</button></div></div>'}).join("");
+Array.prototype.forEach.call($("ii").querySelectorAll("button"),function(b){b.onclick=function(){b.disabled=true;post(b.getAttribute("data-s")?"/ledger/skip":"/ledger/import",{date:b.getAttribute("data-d"),rowId:b.getAttribute("data-r")}).then(function(j){$("r").textContent=j.message;li()})}})}).catch(function(){$("ii").textContent="تعذّر التحميل"})}
+$("ia").onclick=function(){$("ia").disabled=true;$("r").textContent="جاري الاستيراد…";post("/ledger/import",{all:true}).then(function(j){$("r").textContent=j.message;$("ia").disabled=false;li()})};
+li();lp();
 </script></body></html>'''
 
 
-def install(app):
+def install(app, helpers=None):
+    if helpers:
+        _H.update(helpers)
     from flask import Blueprint, request, jsonify, session, Response
     import html as _h
 
@@ -483,6 +701,59 @@ def install(app):
             with _lock:
                 ok, msg = approve_payment(db, str(d.get("lisId") or ""), session.get("user_id"))
             return jsonify(ok=ok, message=msg)
+        finally:
+            db.close()
+
+    @bp.route("/ledger/incoming", methods=["POST"])
+    def inc():
+        if not allowed():
+            return jsonify(ok=False, message="سجّل الدخول أولاً."), 401
+        db = _db()
+        try:
+            ok, msg, items = incoming(db)
+            return jsonify(ok=ok, message=msg, items=items)
+        finally:
+            db.close()
+
+    @bp.route("/ledger/import", methods=["POST"])
+    def imp():
+        if not allowed():
+            return jsonify(ok=False, message="سجّل الدخول أولاً."), 401
+        d = request.get_json(silent=True) or {}
+        db = _db()
+        try:
+            with _lock:
+                if d.get("all"):
+                    ok, msg, items = incoming(db)
+                    if not ok:
+                        return jsonify(ok=False, message=msg)
+                    n, notes = 0, []
+                    for it in items:
+                        r_ok, r_msg = import_item(db, it["date"], it["rowId"], session.get("user_id"), session.get("branch_id"))
+                        n += 1 if r_ok else 0
+                        if not r_ok:
+                            notes.append(r_msg)
+                    return jsonify(ok=True, message="تم استيراد %d مريض." % n + (" " + " | ".join(notes) if notes else ""))
+                ok, msg = import_item(db, str(d.get("date") or ""), str(d.get("rowId") or ""), session.get("user_id"), session.get("branch_id"))
+            return jsonify(ok=ok, message=msg)
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            return jsonify(ok=False, message="فشل الاستيراد: " + _redact(e))
+        finally:
+            db.close()
+
+    @bp.route("/ledger/skip", methods=["POST"])
+    def skp():
+        if not allowed():
+            return jsonify(ok=False, message="سجّل الدخول أولاً."), 401
+        d = request.get_json(silent=True) or {}
+        db = _db()
+        try:
+            ok = skip_item(db, str(d.get("date") or ""), str(d.get("rowId") or ""))
+            return jsonify(ok=ok, message="تم التجاهل." if ok else "تعذّر التجاهل.")
         finally:
             db.close()
 
