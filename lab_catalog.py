@@ -318,6 +318,92 @@ t(HP, "Histopathology", "Cytology Report (FNAC)", "FNAC", "Aspirate", [pt("Speci
 t(HP, "Histopathology", "Pap Smear", "Pap", "Cervical Smear", [pt("Adequacy"), pt("Microscopic Description"), pt("Diagnosis")], ["Pap Smear"])
 t(HP, "Histopathology", "Immunohistochemistry Report (IHC)", "IHC", "Tissue", [pt("Markers"), pt("Interpretation")], ["IHC"])
 
+
+# =============== من سجل المرضى (قائمة التحاليل الكاملة) — يُضاف الناقص فقط ===============
+single('Hematology', 'Iron Studies', 'Transferrin', 'Transferrin', 'Blood (EDTA)', 'mg/dL', [r(200, 400, B)])
+single('Hematology', 'Hemolysis Work-up', 'Haptoglobin', 'Haptoglobin', 'Blood (EDTA)', 'mg/dL', [r(83, 267, B)])
+single('Hematology', 'Hemolysis Work-up', 'Plasma Hemoglobin', 'Plasma Hemoglobin', 'Blood (EDTA)', 'mg/dL', [r(None, 5, B)])
+single('Hematology', 'Hemolysis Work-up', 'Erythropoietin', 'Erythropoietin', 'Blood (EDTA)', 'mU/mL', [r(4, 26, B)])
+single('Coagulation', 'Factor Assays', 'Factor VII', 'Factor VII', 'Citrated Plasma', '%', [r(60, 130, B)])
+single('Coagulation', 'Factor Assays', 'Factor X', 'Factor X', 'Citrated Plasma', '%', [r(60, 130, B)])
+single('Coagulation', 'Factor Assays', 'Factor XI', 'Factor XI', 'Citrated Plasma', '%', [r(60, 130, B)])
+single('Coagulation', 'Factor Assays', 'Factor XII', 'Factor XII', 'Citrated Plasma', '%', [r(60, 130, B)])
+single('Coagulation', 'Factor Assays', 'von Willebrand Factor Activity (RCo)', 'von Willebrand Factor Activity (RCo)', 'Citrated Plasma', '%', [r(50, 150, B)])
+single('Coagulation', 'Thrombophilia Screen', 'ADAMTS13 Activity', 'ADAMTS13 Activity', 'Citrated Plasma', '%', [r(60, None, B)])
+single('Biochemistry', 'Liver function tests', 'Bilirubin Indirect', 'Bilirubin Indirect', 'Serum', 'mg/dl', [r(0.2, 0.7, B)])
+single('Biochemistry', 'Electrolytes & Minerals', 'Osmolality (Serum)', 'Osmolality (Serum)', 'Serum', 'mOsm/kg', [r(275, 295, B)])
+single('Biochemistry', 'Lipid profile', 'S. VLDL', 'S. VLDL', 'Serum', 'mg/dl', [r(None, 20, B)])
+single('Biochemistry', 'Lipid profile', 'Apolipoprotein A-1', 'Apolipoprotein A-1', 'Serum', 'mg/dL', [r(120, None, M), r(140, None, F)])
+single('Biochemistry', 'Lipid profile', 'Apolipoprotein B', 'Apolipoprotein B', 'Serum', 'mg/dL', [r(None, 90, B)])
+single('Biochemistry', 'Lipid profile', 'Lipoprotein (a)', 'Lipoprotein (a)', 'Serum', 'mg/dL', [r(None, 30, B)])
+single('Biochemistry', 'Cardiac markers', 'CK (Total)', 'CK (Total)', 'Serum', 'U/L', [r(55, 170, M), r(30, 135, F)])
+t('Biochemistry', 'Cardiac markers', 'Troponin T', 'Troponin T', 'Serum', [pt('Troponin T', [(B, None, None, '≤ 0.01')])])
+single('Biochemistry', 'Cardiac markers', 'BNP', 'BNP', 'Serum', 'pg/mL', [r(None, 100, B)])
+single('Biochemistry', 'Cardiac markers', 'NT-proBNP', 'NT-proBNP', 'Serum', 'pg/mL', [r(None, 300, B)])
+single('Biochemistry', 'Cardiac markers', 'Myoglobin', 'Myoglobin', 'Serum', 'µg/L', [r(None, 100, B)])
+single('Biochemistry', 'Other chemistry', 'Ceruloplasmin', 'Ceruloplasmin', 'Serum', 'mg/dL', [r(25, 43, B)])
+single('Biochemistry', 'Other chemistry', 'Lead (Blood)', 'Lead (Blood)', 'Serum', 'µg/dL', [r(None, 5, B)])
+single('Hormones', 'Thyroid function', 'Thyroglobulin', 'Thyroglobulin', 'Serum', 'ng/mL', [r(None, 20, B)])
+t('Hormones', 'Reproductive hormones', '17-OH Progesterone', '17-OH Progesterone', 'Serum', [pt('17-OH Progesterone', [r(None, 220, M), (F, None, None, 'Follicular < 80\nLuteal < 285')])])
+single('Hormones', 'Adrenal & pituitary', 'Cortisol (4 PM)', 'Cortisol (4 PM)', 'Serum', 'µg/dL', [r(None, 10, B)])
+t('Hormones', 'Adrenal & pituitary', 'Aldosterone', 'Aldosterone', 'Serum', [pt('Aldosterone', [(B, None, None, '≤ 10')])])
+single('Hormones', 'Adrenal & pituitary', 'Renin Activity', 'Renin Activity', 'Serum', 'ng/mL/hr', [r(0.3, 2.5, B)])
+t('Hormones', 'Calcium & bone', 'Calcitonin', 'Calcitonin', 'Serum', [pt('Calcitonin', [(M, None, None, '≤ 10'), (F, None, None, '≤ 5')])])
+t('Hormones', 'Calcium & bone', 'IGF-1', 'IGF-1', 'Serum', [pt('IGF-1', [(B, None, None, 'Age 16-24: 182 - 780\nAge 25-39: 114 - 492\nAge 40-54: 90 - 360\nAge ≥ 55: 71 - 290')])])
+single('Vitamins', 'Vitamins', 'Vitamin C', 'Vitamin C', 'Serum', 'mg/dL', [r(0.4, 1.5, B)])
+single('Vitamins', 'Vitamins', '1,25-(OH)2 Vitamin D', '1,25-(OH)2 Vitamin D', 'Serum', 'pg/mL', [r(15, 60, B)])
+single('Vitamins', 'Minerals & trace elements', 'Copper', 'Copper', 'Serum', 'µg/dL', [r(100, 200, B)])
+t('Serology', 'Inflammatory markers', 'hs-CRP', 'hs-CRP', 'Serum', [pt('hs-CRP', [(B, None, None, 'Low risk < 1.0\nAverage risk 1.0 - 3.0\nHigh risk > 3.0')])])
+single('Serology', 'Autoimmune', 'Anti-tTG IgA', 'Anti-tTG IgA', 'Serum', 'U/mL', [r(None, 4, B)])
+single('Serology', 'Autoimmune', 'Anticardiolipin IgG', 'Anticardiolipin IgG', 'Serum', 'GPL', [r(None, 20, B)])
+single('Serology', 'Autoimmune', 'Anticardiolipin IgM', 'Anticardiolipin IgM', 'Serum', 'MPL', [r(None, 20, B)])
+single('Serology', 'Immunoglobulins & complement', 'IgG', 'IgG', 'Serum', 'mg/dL', [r(800, 1500, B)])
+single('Serology', 'Immunoglobulins & complement', 'IgA', 'IgA', 'Serum', 'mg/dL', [r(90, 325, B)])
+single('Serology', 'Immunoglobulins & complement', 'IgM', 'IgM', 'Serum', 'mg/dL', [r(45, 150, B)])
+single('Serology', 'Immunoglobulins & complement', 'IgE (Total)', 'IgE (Total)', 'Serum', 'IU/mL', [r(None, 380, B)])
+single('Serology', 'Immunoglobulins & complement', 'C3', 'C3', 'Serum', 'mg/dL', [r(100, 233, B)])
+single('Serology', 'Immunoglobulins & complement', 'C4', 'C4', 'Serum', 'mg/dL', [r(14, 48, B)])
+t('Virology', 'Hepatitis B', 'Anti-HBc IgM', 'Anti-HBc IgM', 'Serum', [pt('Anti-HBc IgM', [(B, None, None, 'Non-reactive')])])
+t('Virology', 'Hepatitis B', 'HBV DNA (PCR)', 'HBV DNA (PCR)', 'Serum', [pt('HBV DNA (PCR)', [(B, None, None, 'Not detected')])])
+t('Virology', 'Hepatitis C', 'HCV RNA (PCR)', 'HCV RNA (PCR)', 'Serum', [pt('HCV RNA (PCR)', [(B, None, None, 'Not detected')])])
+t('Virology', 'Hepatitis A', 'HAV IgG', 'HAV IgG', 'Serum', [pt('HAV IgG', [(B, None, None, 'Non-reactive')])])
+t('Virology', 'TORCH & other viruses', 'EBV VCA IgG', 'EBV VCA IgG', 'Serum', [pt('EBV VCA IgG', [(B, None, None, 'Negative')])])
+t('Virology', 'TORCH & other viruses', 'COVID-19 Ag', 'COVID-19 Ag', 'Serum', [pt('COVID-19 Ag', [(B, None, None, 'Negative')])])
+single('Biochemistry', 'Urine chemistry', 'Creatinine Clearance', 'Creatinine Clearance', 'Urine', 'mL/min/1.73m²', [r(90, 140, B)])
+single('Biochemistry', 'Urine chemistry', 'Urine Calcium (24h)', 'Urine Calcium (24h)', 'Urine', 'mg/24h', [r(None, 300, M), r(None, 250, F)])
+single('Biochemistry', 'Urine chemistry', 'Urine Uric Acid (24h)', 'Urine Uric Acid (24h)', 'Urine', 'mg/24h', [r(250, 750, B)])
+t('Parasitology', 'Stool examination', 'Occult Blood (Stool)', 'Stool', 'Stool', [pt('Occult Blood (Stool)', [(B, None, None, 'Negative')])])
+t('Parasitology', 'Stool examination', 'Giardia Ag (Stool)', 'Stool', 'Stool', [pt('Giardia Ag (Stool)', [(B, None, None, 'Negative')])])
+t('Parasitology', 'Stool examination', 'Entamoeba histolytica Ag (Stool)', 'Stool', 'Stool', [pt('Entamoeba histolytica Ag (Stool)', [(B, None, None, 'Negative')])])
+t('Parasitology', 'Blood parasites', 'Malaria Film', 'Malaria Film', 'Blood', [pt('Malaria Film', [(B, None, None, 'Not seen')])])
+t('Parasitology', 'Blood parasites', 'Malaria Ag (Rapid)', 'Malaria Ag (Rapid)', 'Blood', [pt('Malaria Ag (Rapid)', [(B, None, None, 'Negative')])])
+t('Parasitology', 'Blood parasites', 'Leishmania rK39', 'Leishmania rK39', 'Blood', [pt('Leishmania rK39', [(B, None, None, 'Negative')])])
+t('Urinalysis', 'Urine examination', 'General Urine Examination (GUE)', 'GUE', 'Urine', [
+    pt('Urine Color', [(B, None, None, 'Pale yellow')]),
+    pt('Urine Appearance', [(B, None, None, 'Clear')]),
+    p('Urine Specific Gravity', '', [r(1.002, 1.03, B)]),
+    p('Urine pH', '', [r(4.5, 8, B)]),
+    pt('Urine Protein', [(B, None, None, 'Negative')]),
+    pt('Urine Glucose', [(B, None, None, 'Negative')]),
+    pt('Urine Ketones', [(B, None, None, 'Negative')]),
+    pt('Urine Blood', [(B, None, None, 'Negative')]),
+    pt('Urine Bilirubin', [(B, None, None, 'Negative')]),
+    p('Urine Urobilinogen', 'mg/dL', [r(0.2, 1, B)]),
+    pt('Urine Nitrite', [(B, None, None, 'Negative')]),
+    pt('Urine Leukocyte Esterase', [(B, None, None, 'Negative')]),
+    p('Urine Pus Cells', '/HPF', [r(0, 5, B)]),
+    p('Urine RBC', '/HPF', [r(0, 2, B)]),
+    pt('Urine Epithelial Cells', [(B, None, None, 'Few')]),
+    pt('Urine Casts', [(B, None, None, 'None')]),
+    pt('Urine Crystals', [(B, None, None, 'None')])])
+t('Parasitology', 'Stool examination', 'General Stool Examination (GSE)', 'GSE', 'Stool', [
+    pt('Stool Color', [(B, None, None, 'Brown')]),
+    pt('Stool Consistency', [(B, None, None, 'Formed')]),
+    pt('Stool Mucus', [(B, None, None, 'Absent')]),
+    p('Stool Pus Cells', '/HPF', [r(0, 2, B)]),
+    pt('Stool RBC', [(B, None, None, 'Nil')]),
+    pt('Stool Ova / Cysts / Parasites', [(B, None, None, 'Not seen')])])
+
 CATALOG = _CATALOG
 
 
@@ -390,7 +476,7 @@ def install(db, depts=None):
     return {"added": added, "skipped": skipped, "params": nparams, "ranges": nranges}
 
 
-def auto_install(get_db, after=None, flag="catalog_auto_v1"):
+def auto_install(get_db, after=None, flag="catalog_auto_v2"):
     """مرة واحدة لكل جهاز: بعد بدء البرنامج بـ30 ثانية يثبّت الكتالوج الناقص فقط (لا يعدّل ولا يحذف). يعمل بخيط خلفي ولا يوقف البرنامج."""
     import threading, time
 

@@ -18324,30 +18324,32 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 "contents": [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in messages],
                 "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096,
                                  "thinkingConfig": {"thinkingBudget": 0}}}
-        tried = []
-        for attempt in range(2):
-            model = _pick_gemini_model(key, cfg["model"]) if attempt == 0 else "gemini-flash-latest"
-            if model in tried:
-                break
-            tried.append(model)
+        # v35: عند 503/ازدحام/429 يجرّب موديلات بديلة بالتتابع (مع فاصل قصير) بدل ما يفشل من أول موديل
+        _first = _pick_gemini_model(key, cfg["model"])
+        _order = [_first] + [m_ for m_ in ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-flash-lite-latest", "gemini-2.0-flash") if m_ != _first]
+        _last = None
+        _empty = None
+        for _i, model in enumerate(_order):
+            if _i:
+                time.sleep(1.5)
+            _url = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model
             try:
                 try:
-                    j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
-                              {"x-goog-api-key": key}, body, 40)
+                    j = _post(_url, {"x-goog-api-key": key}, body, 40)
                 except _AIErr as e400:
                     if "(400)" not in str(e400):
                         raise
                     # بعض الموديلات ما تقبل إيقاف التفكير: أعد المحاولة بدونه
                     b2 = json.loads(json.dumps(body))
                     b2["generationConfig"].pop("thinkingConfig", None)
-                    j = _post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
-                              {"x-goog-api-key": key}, b2, 40)
+                    j = _post(_url, {"x-goog-api-key": key}, b2, 40)
             except _AIErr as e:
-                if str(e) == "MODEL_404" and attempt == 0:
+                _last = e
+                if str(e) == "MODEL_404":
                     _model_cache["t"] = 0
                     continue
-                if str(e) == "MODEL_404":
-                    raise _AIErr("الموديل المختار غير متاح. امسح خانة الموديل من «إعدادات الذكاء» ليختار البرنامج تلقائياً.")
+                if "مشغولة" in str(e) or "الحد المجاني" in str(e):
+                    continue
                 raise
             try:
                 parts = j["candidates"][0]["content"]["parts"]
@@ -18357,8 +18359,14 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
             except Exception:
                 pass
             fb = (j.get("promptFeedback") or {}).get("blockReason")
-            raise _AIErr("الخدمة امتنعت عن الرد على هذا الطلب." if fb else "جاء ردّ فارغ من الخدمة. أعد المحاولة.")
-        raise _AIErr("تعذّر الاتصال بالموديل.")
+            if fb:
+                raise _AIErr("الخدمة امتنعت عن الرد على هذا الطلب.")
+            _empty = _AIErr("جاء ردّ فارغ من الخدمة. أعد المحاولة.")
+        if _last is not None and str(_last) == "MODEL_404":
+            raise _AIErr("الموديل المختار غير متاح. امسح خانة الموديل من «إعدادات الذكاء» ليختار البرنامج تلقائياً.")
+        if _last is not None:
+            raise _AIErr("جرّبت %d موديلات Gemini وكلها مشغولة حالياً عند Google (ازدحام مؤقت). أعد المحاولة بعد دقائق. آخر رد: %s" % (len(_order), str(_last)[:160]))
+        raise _empty or _AIErr("تعذّر الاتصال بالموديل.")
 
     # ------------------------------------------------ قراءة القيم من صورة جهاز (CBC...)
     def _pick_groq_vision_model(key):

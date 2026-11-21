@@ -464,12 +464,15 @@ _BANNER_JS = r"""
     hideT=setTimeout(hide,15000);
   }
   function showAvail(v, notes){
-    try{ if (sessionStorage.getItem('lis_upd_later')===v) return; }catch(e){}
+    // «لاحقاً» تُحفظ 24 ساعة بالمتصفح (localStorage + كوكي احتياطي) بدل sessionStorage الي يضيع بنافذة البرنامج
+    try{ var z=lget('lis_upd_later'); if(z){ var a=z.split('|'); if(a[0]===v && (Date.now()-Number(a[1]||0))<86400000) return; } }catch(e){}
+    if (document.cookie.indexOf('lis_upd_later='+encodeURIComponent(v))!==-1) return;
+    if (window.__lisUpdFrozen===false) return;   // تشغيل من المصدر (مو exe): التحديث ما يتفعّل هنا فلا داعي للإشعار
     if (bar) return;
     mk('<span>🆕 يتوفر تحديث للبرنامج (إصدار '+esc(v)+')'+(notes?' — '+esc(notes):'')+'</span>'+
       '<button id="lisUpdNow" style="'+BTN+'background:#2e9e6b;color:#fff">تحديث الآن</button>'+
       '<button id="lisUpdLater" style="'+BTN+'background:transparent;color:#cfe0f5;border:1px solid #5b7aa0">لاحقاً</button>');
-    document.getElementById('lisUpdLater').onclick=function(){try{sessionStorage.setItem('lis_upd_later',v);}catch(e){} hide();};
+    document.getElementById('lisUpdLater').onclick=function(){lset('lis_upd_later',v+'|'+Date.now());try{document.cookie='lis_upd_later='+encodeURIComponent(v)+';max-age=86400;path=/';}catch(e){} hide();};
     document.getElementById('lisUpdNow').onclick=function(){
       mk('<span>⏳ جاري تنزيل التحديث وتجهيزه... (لن يُعاد تشغيل البرنامج الآن)</span>');
       fetch('/api/update/apply',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
@@ -480,6 +483,7 @@ _BANNER_JS = r"""
   }
   function poll(){
     fetch('/api/update/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(s){
+      window.__lisUpdFrozen = !!s.frozen;
       if(s.available) showAvail(s.available_version, s.notes);
       else if(s.staged && s.staged_version && lget('lis_upd_staged_seen')!==s.staged_version && !bar) showStaged(s.staged_version);
     }).catch(function(){});
