@@ -2924,7 +2924,11 @@ def new_visit():
         except ValueError:
             home_visit_fee = 0.0
         examining_doctor = request.form.get("examining_doctor", "")
-        expenses = request.form.get("expenses") or 0
+        try:
+            expenses = float((request.form.get("expenses") or "0").replace(",", "").strip() or 0)
+        except ValueError:
+            expenses = 0
+        expenses_note = (request.form.get("expenses_note") or "").strip()[:200]
         # حقل "الدكتور الفاحص" (attending_doctor) صار نفس "دكتور المختبر
         # الفاحص" (examining_doctor) — كانا حقلين منفصلين بالشاشة سابقًا
         # وصار واحد بس بناءً على طلب المستخدم، وهذا العمود يُملأ تلقائيًا
@@ -2985,6 +2989,15 @@ def new_visit():
              is_home_visit, home_visit_address, home_visit_fee, session.get("branch_id"), session.get("user_id"), now),
         )
         visit_id = cur.lastrowid
+        if expenses_note:
+            try:
+                db.execute("UPDATE visits SET expenses_note=? WHERE id=?", (expenses_note, visit_id))
+            except Exception:
+                try:
+                    db.execute("ALTER TABLE visits ADD COLUMN expenses_note TEXT")
+                    db.execute("UPDATE visits SET expenses_note=? WHERE id=?", (expenses_note, visit_id))
+                except Exception:
+                    pass
         # رقم العينة: من حقل "Sample No." بصفحة زيارة جديدة (يتسلسل من جديد حسب إعداد التصفير)
         db.execute("UPDATE visits SET sample_no=?, expected_ready_at=?, expected_ready_text=? WHERE id=?",
                    (resolve_visit_sample_no(db, request.form.get("sample_no")), expected_ready_at,
@@ -18356,7 +18369,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                     if str(e) == "MODEL_404":
                         _model_cache["t"] = 0
                         continue
-                    if "مشغولة" in str(e) or "الحد المجاني" in str(e):
+                    if "مشغولة" in str(e) or "HTTP 429" in str(e):
                         continue
                     raise
                 try:
@@ -18375,7 +18388,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         _tl.fast = False
         if _last is not None and str(_last) == "MODEL_404":
             raise _AIErr("الموديل المختار غير متاح. امسح خانة الموديل من «إعدادات الذكاء» ليختار البرنامج تلقائياً.")
-        if _last is not None and "الحد المجاني" in str(_last):
+        if _last is not None and "HTTP 429" in str(_last):
             raise _AIErr("مفتاح Gemini المجاني وصل للحد المسموح (طلبات بالدقيقة أو باليوم) على الموديلات المجرَّبة. انتظر دقيقتين وأعد المحاولة مرة وحدة، وإذا تكرر فالحد يومي ويتجدد تلقائياً؛ أو استخدم مفتاحاً من مشروع آخر. تفاصيل Google: %s" % str(_last)[:260])
         if _last is not None:
             raise _AIErr("جرّبت %d موديلات Gemini وكلها مشغولة حالياً عند Google (ازدحام مؤقت). أعد المحاولة بعد دقائق. آخر رد: %s" % (len(_order), str(_last)[:160]))
@@ -18438,7 +18451,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                     j = _post(url_, {"x-goog-api-key": key}, body, 90)
             except _AIErr as e_:
                 _last = e_
-                if str(e_) == "MODEL_404" or "مشغولة" in str(e_) or "الحد المجاني" in str(e_):
+                if str(e_) == "MODEL_404" or "مشغولة" in str(e_) or "HTTP 429" in str(e_):
                     continue
                 raise
             try:
@@ -20391,7 +20404,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     # ربط «سجل المرضى السحابي» (ledger_sync.py): صفحة /ledger + مزامنة تلقائية. اختياري: أي خطأ لا يوقف البرنامج.
     try:
         import ledger_sync
-        ledger_sync.install(app, dict(next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no))
+        ledger_sync.install(app, dict(next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no, ensure_partner=_ensure_partner_labs))
     except Exception as _le:
         print("ledger_sync not loaded:", _le)
     # كتالوج التحاليل الجاهز: يُثبَّت تلقائياً مرة واحدة لكل جهاز (يضيف الناقص فقط؛ الأسعار 0 ويحددها العميل)

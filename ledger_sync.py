@@ -78,6 +78,101 @@ def _gender(g):
     return ""
 
 
+_cols_ok = {"v": False}
+
+
+def _ensure_cols(db):
+    if _cols_ok["v"]:
+        return
+    try:
+        db.execute("SELECT expenses_note FROM visits LIMIT 1")
+    except Exception:
+        try:
+            db.execute("ALTER TABLE visits ADD COLUMN expenses_note TEXT")
+            db.commit()
+        except Exception:
+            pass
+    _cols_ok["v"] = True
+
+
+def _num(x):
+    try:
+        f = float(str(x if x is not None else "").replace(",", "").strip() or 0)
+    except ValueError:
+        return ""
+    if f == 0:
+        return ""
+    return str(int(f)) if f == int(f) else str(f)
+
+
+def _sent_str(db, vid):
+    """التحاليل المرسلة لمختبر آخر (LIS) بصيغة نص السجل: «t1, t2 — المختبر ؛ t3 — مختبر2»."""
+    try:
+        rows = db.execute(
+            "SELECT td.name AS n, ot.forwarded_lab_name AS lab FROM orders o JOIN order_tests ot ON ot.order_id=o.id "
+            "JOIN test_definitions td ON td.id=ot.test_definition_id WHERE o.visit_id=? AND TRIM(COALESCE(ot.forwarded_lab_name,''))<>'' "
+            "AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected') ORDER BY ot.id", (vid,)).fetchall()
+    except Exception:
+        return ""
+    by = {}
+    for r in rows:
+        by.setdefault(r["lab"].strip(), []).append(r["n"])
+    return " ؛ ".join("%s — %s" % (", ".join(v), k) for k, v in by.items())
+
+
+def _parse_sent(txt):
+    """«t1, t2 — Lab ؛ t3» → [(test, lab)]"""
+    out = []
+    for seg in re.split(r"[؛;\n]+", txt or ""):
+        seg = seg.strip()
+        if not seg:
+            continue
+        lab = ""
+        for sep in (" — ", " - ", " – "):
+            if sep in seg:
+                seg, lab = seg.rsplit(sep, 1)
+                break
+        for t in _split_tests(seg):
+            out.append((t, lab.strip()))
+    return out
+
+
+def _apply_sent(db, vid, idx, C_sent, base_sent):
+    """يضبط «مرسل لمختبر آخر» على تحاليل الزيارة حسب نص السجل. ما يرجّع إلا عدد التحاليل المتأثرة."""
+    try:
+        if _H.get("ensure_partner"):
+            _H["ensure_partner"](db)       # ينشئ أعمدة forwarded_* إذا ما موجودة
+    except Exception:
+        pass
+    want = {}
+    for t, lab in _parse_sent(C_sent):
+        tid = _match_test(idx, t)
+        if tid:
+            want[tid] = lab or "مختبر آخر"
+    had = set()
+    for t, _lab in _parse_sent(base_sent):
+        tid = _match_test(idx, t)
+        if tid:
+            had.add(tid)
+    n = 0
+    for r in db.execute("SELECT ot.id, ot.test_definition_id tid, ot.status FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=?", (vid,)).fetchall():
+        if (r["status"] or "") in ("Cancelled", "Canceled", "Rejected"):
+            continue
+        tid = r["tid"]
+        try:
+            if tid in want:
+                lab = want[tid]
+                pl = db.execute("SELECT pp.cost FROM partner_labs pl JOIN partner_lab_prices pp ON pp.lab_id=pl.id WHERE pl.name=? AND pp.test_definition_id=?", (lab, tid)).fetchone()
+                db.execute("UPDATE order_tests SET forwarded_lab_name=?, forwarded_cost=? WHERE id=?", (lab, float(pl["cost"] or 0) if pl else 0, r["id"]))
+                n += 1
+            elif tid in had:
+                db.execute("UPDATE order_tests SET forwarded_lab_name=NULL, forwarded_cost=0 WHERE id=?", (r["id"],))
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
 def _orig_tests(db, vid, lis_tests):
     """زيارة مستوردة من السجل: نحافظ على أسماء التحاليل كما كتبها العميل بالسجل (ما لم تتغير قائمة التحاليل بالـLIS)."""
     try:
@@ -93,8 +188,10 @@ def _orig_tests(db, vid, lis_tests):
 
 def collect_day(db, day):
     """صفوف يوم واحد بصيغة السجل السحابي."""
+    _ensure_cols(db)
     vs = db.execute(
         "SELECT v.id, v.registration_number, v.sample_no, v.created_at, v.status, v.referral_center_id, v.doctor_id, "
+        "v.examining_doctor, v.expenses, v.expenses_note, "
         "p.full_name, p.gender, p.age, p.age_unit, "
         "(SELECT name FROM referral_centers rc WHERE rc.id=v.referral_center_id) AS center, "
         "(SELECT full_name FROM doctors d WHERE d.id=v.doctor_id) AS doctor, "
@@ -129,6 +226,10 @@ def collect_day(db, day):
             "paid": int(paid) if paid == int(paid) else paid,
             "total": int(net_total) if net_total == int(net_total) else net_total,
             "tests": _orig_tests(db, v["id"], tests),
+            "labDoctor": (v["examining_doctor"] or "").strip(),
+            "expenses": _num(v["expenses"]),
+            "expNote": (v["expenses_note"] or "").strip(),
+            "sentTests": _sent_str(db, v["id"]),
         })
     return rows
 
@@ -231,7 +332,7 @@ def _sync(db, days=None, force=False):
     c = cfg(db)
     if not c["url"].startswith("https://") or not c["key"]:
         return False, "الربط غير مضبوط.", 0
-    n = max(1, min(90, int(days or c["back"])))
+    n = max(1, min(400, int(days or c["back"])))
     today = date.today()
     payload, marks = {}, {}
     for i in range(n):
@@ -378,12 +479,12 @@ def _match_test(idx, name):
     return None
 
 
-def incoming(db):
+def incoming(db, days=14):
     c = cfg(db)
     if not c["url"].startswith("https://") or not c["key"]:
         return False, "الربط غير مضبوط.", []
     try:
-        code, j = _request(c["url"] + "/api/lis/incoming?days=14", c["key"], None, 25)
+        code, j = _request(c["url"] + "/api/lis/incoming?days=%d" % max(1, min(400, int(days))), c["key"], None, 25)
     except Exception as e:
         return False, "تعذّر الاتصال بالسحابة: " + _redact(e), []
     if code != 200 or not j.get("ok"):
@@ -399,7 +500,8 @@ def incoming(db):
         if _get(db, "ledger_imp_%s|%s" % (it.get("date"), it.get("rowId"))):
             continue        # مستورد سابقاً (ننتظر تثبيته بالسحابة)
         items.append(it)
-    _st["incoming"] = len(items)
+    if days <= 30:
+        _st["incoming"] = len(items)
     return True, "", items
 
 
@@ -411,7 +513,7 @@ def _claim(c, it, lis_id, reg):
         return False
 
 
-def import_item(db, date_s, row_id, user_id=None, branch_id=None):
+def import_item(db, date_s, row_id, user_id=None, branch_id=None, _items=None, _sync_after=True, _days=14):
     """يستورد مريضاً مضافاً بالسجل: مريض + زيارة + تحاليل + فاتورة/دفعة، ثم يربطه بالسحابة (لا يتكرر)."""
     c = cfg(db)
     key = "ledger_imp_%s|%s" % (date_s, row_id)
@@ -424,9 +526,12 @@ def import_item(db, date_s, row_id, user_id=None, branch_id=None):
             reg = str(r["registration_number"]) if r else ""
         _claim(c, {"date": date_s, "rowId": row_id}, prev, reg)
         return True, "مستورد سابقاً."
-    ok, msg, items = incoming(db)
-    if not ok:
-        return False, msg
+    if _items is None:
+        ok, msg, items = incoming(db, _days)
+        if not ok:
+            return False, msg
+    else:
+        items = _items
     it = next((x for x in items if x["date"] == date_s and x["rowId"] == row_id), None)
     if not it:
         return False, "هذا المريض لم يعد بالقائمة (ربما اُستورد أو حُذف من السجل)."
@@ -464,6 +569,12 @@ def import_item(db, date_s, row_id, user_id=None, branch_id=None):
         "VALUES (?, ?, ?, ?, 'walk-in', 'Undefined', ?, 'Open', ?, ?, ?)",
         (reg, pcur.lastrowid, doctor_id, center_id, note, branch_id, user_id, created))
     vid = vcur.lastrowid
+    _ensure_cols(db)
+    try:
+        db.execute("UPDATE visits SET examining_doctor=?, attending_doctor=?, expenses=?, expenses_note=? WHERE id=?",
+                   ((it.get("labDoctor") or "").strip(), (it.get("labDoctor") or "").strip(), float(_num(it.get("expenses")) or 0), (it.get("expNote") or "").strip(), vid))
+    except Exception:
+        pass
     try:
         db.execute("UPDATE visits SET sample_no=? WHERE id=?", (H["sample_no"](db, None), vid))
     except Exception:
@@ -476,6 +587,8 @@ def import_item(db, date_s, row_id, user_id=None, branch_id=None):
                    "VALUES (?, ?, 'Collected', ?, ?, ?, ?, ?, ?)",
                    (oid, tid, "%s%03d" % (reg, tid), price if price is not None else 0, doctor_id, created, created, 1 if price is None else 0))
         total += price or 0
+    if (it.get("sentTests") or "").strip():
+        _apply_sent(db, vid, idx, it.get("sentTests"), "")
     paid = 0.0 if is_lab else max(0.0, float(it.get("paid") or 0))
     inv_total = total if is_lab else max(total, paid)    # أسعار الكتالوج 0 افتراضياً: لا نخلي المدفوع أكبر من الفاتورة
     disc = max(0.0, total - inv_total)
@@ -490,10 +603,11 @@ def import_item(db, date_s, row_id, user_id=None, branch_id=None):
     _set(db, "ledger_orig_v%d" % vid, json.dumps({"tests": it["tests"], "n": len(tids)}, ensure_ascii=False))
     db.commit()
     _claim(c, it, "v%d" % vid, str(reg))
-    try:
-        sync(db, 14, force=True)
-    except Exception:
-        pass
+    if _sync_after:
+        try:
+            sync(db, 14, force=True)
+        except Exception:
+            pass
     msg = "تم استيراد %s (وصل %s)" % (name, reg)
     if it["unmatched"]:
         msg += " — لم تُطابَق: " + "، ".join(it["unmatched"])
@@ -507,6 +621,251 @@ def skip_item(db, date_s, row_id):
         return code == 200 and bool(j.get("ok"))
     except Exception:
         return False
+
+
+_seen = {}   # توقيع كل مريض وارد: لا نستورده إلا إذا ثبت بدون تغيير بين مسحتين (حتى لا نستورد صفاً العميل لسا يكتب تحاليله)
+
+
+def _auto_import(db):
+    """يستورد تلقائياً المرضى المضافين بالسجل بعد ما يثبت صفّهم دورة كاملة (حوالي دقيقتين)."""
+    if _get(db, "ledger_auto_import", "1") != "1":
+        incoming(db)
+        return 0
+    ok, msg, items = incoming(db)
+    if not ok:
+        return 0
+    live = set()
+    n = 0
+    for it in items:
+        key = "%s|%s" % (it["date"], it["rowId"])
+        live.add(key)
+        sig = (it.get("name"), it.get("tests"), it.get("paid"), it.get("refDoctor"), it.get("age"), it.get("gender"), it.get("priceType"))
+        if _seen.get(key) == sig and n < 20:
+            try:
+                r_ok, r_msg = import_item(db, it["date"], it["rowId"], None, None)
+                if r_ok:
+                    n += 1
+                    _seen.pop(key, None)
+                    continue
+                _st["imp_err"] = r_msg
+            except Exception as e:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                _st["imp_err"] = _redact(e)
+        else:
+            _seen[key] = sig
+    for k in [k for k in _seen if k not in live]:
+        _seen.pop(k, None)
+    _st["incoming"] = max(0, len(items) - n)
+    return n
+
+
+# ------------------------------------------------------------------ تعديلات السجل على مريض موجود بالـLIS (اتجاه السجل ← LIS)
+_CANCELABLE = ("Accepted", "Collected", "Pending", "Received", "Ordered")
+
+
+def _state(r):
+    ts, seen = [], set()
+    for t in _split_tests(r.get("tests")):
+        if _nt(t) not in seen:
+            seen.add(_nt(t))
+            ts.append(t)
+    age = str(r.get("age") if r.get("age") is not None else "").strip()
+    if re.fullmatch(r"\d+\.0+", age):
+        age = age.split(".")[0]
+    return {"name": (r.get("name") or "").strip(), "gender": r.get("gender") or "", "age": age, "ageUnit": r.get("ageUnit") or "",
+            "ref": (r.get("refDoctor") or "").strip(), "lab": (r.get("priceType") == "lab"), "tests": ts,
+            "labDoctor": (r.get("labDoctor") or "").strip(), "expenses": _num(r.get("expenses")), "expNote": (r.get("expNote") or "").strip(),
+            "sentRaw": (r.get("sentTests") or "").strip(),
+            "sent": " | ".join(sorted("%s>%s" % (_nt(t), _nt(l)) for t, l in _parse_sent(r.get("sentTests"))))}
+
+
+def _same(a, b):
+    skip = ("tests", "sentRaw")
+    common = [k for k in a if k in b and k not in skip]
+    ka = {k: a[k] for k in common}
+    kb = {k: b[k] for k in common}
+    return ka == kb and {_nt(t) for t in a["tests"]} == {_nt(t) for t in b["tests"]}
+
+
+def _apply_cloud(db, vid, C, base, L):
+    """يطبّق تعديل السجل (C) على زيارة LIS: بيانات المريض + الدكتور/المختبر + إضافة/إلغاء تحاليل + تحديث الفاتورة."""
+    H = _H
+    v = db.execute("SELECT patient_id, registration_number, notes FROM visits WHERE id=?", (vid,)).fetchone()
+    if not v:
+        return
+    notes = []
+    sets, vals = [], []
+    if C["name"] != L["name"] and C["name"]:
+        sets.append("full_name=?"); vals.append(C["name"])
+    if C["gender"] != L["gender"]:
+        sets.append("gender=?"); vals.append({"ذكر": "Male", "أنثى": "Female"}.get(C["gender"], ""))
+    if (C["age"], C["ageUnit"]) != (L["age"], L["ageUnit"]):
+        try:
+            a = float(C["age"]) if C["age"] else None
+            a = int(a) if a is not None and a == int(a) else a
+        except ValueError:
+            a = None
+        sets += ["age=?", "age_unit=?"]
+        vals += [a, {"سنة": "Years", "شهر": "Months", "يوم": "Days"}.get(C["ageUnit"], "Years")]
+    if sets:
+        db.execute("UPDATE patients SET %s WHERE id=?" % ", ".join(sets), (*vals, v["patient_id"]))
+    if (C["ref"], C["lab"]) != (L["ref"], L["lab"]):
+        if C["lab"]:
+            db.execute("UPDATE visits SET doctor_id=NULL, referral_center_id=? WHERE id=?", (H["center"](db, C["ref"]), vid))
+        else:
+            db.execute("UPDATE visits SET doctor_id=?, referral_center_id=NULL WHERE id=?", (H["doctor"](db, C["ref"]), vid))
+    if C.get("sent", "") != L.get("sent", ""):
+        _apply_sent(db, vid, _test_index(db), C.get("sentRaw", ""), base.get("sentRaw", L.get("sentRaw", "")))
+    if (C["labDoctor"], C["expenses"], C["expNote"]) != (L["labDoctor"], L["expenses"], L["expNote"]):
+        _ensure_cols(db)
+        db.execute("UPDATE visits SET examining_doctor=?, attending_doctor=?, expenses=?, expenses_note=? WHERE id=?",
+                   (C["labDoctor"], C["labDoctor"], float(C["expenses"] or 0), C["expNote"], vid))
+    # --- التحاليل
+    idx = _test_index(db)
+    cset = {_nt(t) for t in C["tests"]}
+    bset = {_nt(t) for t in base["tests"]}
+    c_tids = {x for x in (_match_test(idx, t) for t in C["tests"]) if x}
+    oid = db.execute("SELECT id FROM orders WHERE visit_id=? ORDER BY id LIMIT 1", (vid,)).fetchone()
+    if not oid:
+        oid = db.execute("INSERT INTO orders (visit_id, status, created_at) VALUES (?, 'Open', ?)", (vid, datetime.now().isoformat(timespec="seconds")))
+        oid_v = oid.lastrowid
+    else:
+        oid_v = oid["id"]
+    have = {}
+    for r in db.execute("SELECT ot.id, ot.test_definition_id tid, ot.status, ot.price FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+                        "WHERE o.visit_id=? AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected')", (vid,)).fetchall():
+        have[r["tid"]] = r
+    doc_id = db.execute("SELECT doctor_id, referral_center_id FROM visits WHERE id=?", (vid,)).fetchone()
+    now = datetime.now().isoformat(timespec="seconds")
+    added = removed = 0.0
+    for t in [t for t in C["tests"] if _nt(t) not in bset]:
+        tid = _match_test(idx, t)
+        if not tid:
+            notes.append("تحليل لم يُطابَق: " + t)
+            continue
+        if tid in have:
+            continue
+        price = H["price"](db, tid, doc_id["doctor_id"], doc_id["referral_center_id"])
+        db.execute("INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, collected_at, created_at, price_missing) "
+                   "VALUES (?, ?, 'Collected', ?, ?, ?, ?, ?, ?)",
+                   (oid_v, tid, "%s%03d" % (v["registration_number"], tid), price if price is not None else 0, doc_id["doctor_id"], now, now, 1 if price is None else 0))
+        added += price or 0
+        have[tid] = {"status": "Collected"}
+    for t in [t for t in base["tests"] if _nt(t) not in cset]:
+        tid = _match_test(idx, t)
+        if not tid or tid in c_tids or tid not in have:
+            continue
+        r = have[tid]
+        if (r["status"] or "") in _CANCELABLE:
+            db.execute("UPDATE order_tests SET status='Cancelled' WHERE id=?", (r["id"],))
+            removed += float(r["price"] or 0)
+            have.pop(tid, None)
+        else:
+            notes.append("لم يُحذف %s لأن نتيجته أُدخلت" % t)
+    if added or removed:
+        inv = db.execute("SELECT id, total_amount, paid_amount, is_locked FROM invoices WHERE visit_id=? ORDER BY id DESC LIMIT 1", (vid,)).fetchone()
+        if inv and not inv["is_locked"]:
+            tot = max(0.0, float(inv["total_amount"] or 0) + added - removed)
+            paid = float(inv["paid_amount"] or 0)
+            st = "Paid" if (tot <= 0 or paid >= tot) else ("Partial" if paid > 0 else "Unpaid")
+            db.execute("UPDATE invoices SET total_amount=?, status=? WHERE id=?", (tot, st, inv["id"]))
+        elif inv:
+            notes.append("الفاتورة مقفلة: لم يتغير مبلغها")
+    if C.get("sent", "") != L.get("sent", ""):
+        _apply_sent(db, vid, idx, C.get("sentRaw", ""), base.get("sentRaw", L.get("sentRaw", "")))
+    if notes:
+        db.execute("UPDATE visits SET notes=COALESCE(notes,'') || ? WHERE id=?", ("\n[من السجل] " + "؛ ".join(notes), vid))
+    n_active = db.execute("SELECT COUNT(*) FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=? AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected')", (vid,)).fetchone()[0]
+    _set(db, "ledger_orig_v%d" % vid, json.dumps({"tests": ", ".join(C["tests"]), "n": n_active}, ensure_ascii=False))
+    db.commit()
+
+
+def apply_cloud_edits(db):
+    """يقارن كل صف مربوط بالسحابة مع الزيارة: إذا عدّل العميل بالسجل ولم يتغير شيء بالـLIS → يطبَّق على الـLIS.
+    إذا تعدّل الاثنان معاً يغلب الـLIS (ويُرفع للسجل). يرجع عدد الزيارات المعدّلة."""
+    c = cfg(db)
+    if not c["url"].startswith("https://") or not c["key"]:
+        return 0
+    try:
+        code, j = _request(c["url"] + "/api/lis/linked?days=%d" % max(7, c["back"]), c["key"], None, 30)
+    except Exception:
+        return 0
+    if code != 200 or not j.get("ok"):
+        return 0
+    days_cache, n = {}, 0
+    for it in j.get("items", []):
+        m = re.fullmatch(r"v(\d+)", str(it.get("lisId", "")))
+        if not m:
+            continue
+        vid = int(m.group(1))
+        vr = db.execute("SELECT substr(created_at,1,10) d FROM visits WHERE id=?", (vid,)).fetchone()
+        if not vr:
+            continue
+        if vr["d"] not in days_cache:
+            days_cache[vr["d"]] = {r["lisId"]: r for r in collect_day(db, vr["d"])}
+        Lrow = days_cache[vr["d"]].get(it["lisId"])
+        if not Lrow:
+            continue
+        Cs, Ls = _state(it), _state(Lrow)
+        bkey = "ledger_base_" + it["lisId"]
+        raw = _get(db, bkey)
+        try:
+            base = json.loads(raw) if raw else Ls
+        except Exception:
+            base = Ls
+        if _same(Cs, base):
+            if not raw or not _same(Ls, base):
+                _set(db, bkey, json.dumps(Ls, ensure_ascii=False))
+            continue
+        if _same(Ls, base):
+            try:
+                _apply_cloud(db, vid, Cs, base, Ls)
+                _set(db, bkey, json.dumps(Cs, ensure_ascii=False))
+                n += 1
+            except Exception as e:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                _st["imp_err"] = "تعديل من السجل: " + _redact(e)
+        else:
+            _set(db, bkey, json.dumps(Ls, ensure_ascii=False))
+    db.commit()
+    if n:
+        try:
+            sync(db, max(7, c["back"]), force=True)
+        except Exception:
+            pass
+    return n
+
+
+def import_all_old(db, days, user_id=None, branch_id=None):
+    """زر «استيراد بيانات السجل القديمة»: يستورد كل ما أُدخل بالسجل خلال N يوم ولم يصل للـLIS."""
+    ok, msg, items = incoming(db, days)
+    if not ok:
+        return False, msg
+    n, bad = 0, []
+    for it in items:
+        try:
+            r_ok, r_msg = import_item(db, it["date"], it["rowId"], user_id, branch_id, _items=items, _sync_after=False)
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            r_ok, r_msg = False, _redact(e)
+        if r_ok:
+            n += 1
+        else:
+            bad.append(r_msg)
+    try:
+        sync(db, min(400, int(days)), force=True)
+    except Exception:
+        pass
+    return True, "تم استيراد %d من %d مريض." % (n, len(items)) + (" فشل: " + " | ".join(bad[:3]) if bad else "")
 
 
 def _loop():
@@ -523,7 +882,14 @@ def _loop():
                         db.commit()
                     else:
                         try:
-                            incoming(db)
+                            with _lock:
+                                _auto_import(db)
+                                apply_cloud_edits(db)
+                                if _get(db, "ledger_backfill_v1", "") != "1":
+                                    ok_b, _m, _n = sync(db, 365)       # مرة وحدة: ارفع كل سجل السنة الماضية للسحابة
+                                    if ok_b:
+                                        _set(db, "ledger_backfill_v1", "1")
+                                        db.commit()
                         except Exception:
                             pass
             finally:
@@ -578,7 +944,7 @@ button.g{background:#64748b}.m{margin-top:14px;padding:10px;border-radius:9px;ba
 <label>رابط السحابة</label><input type="text" id="u" placeholder="https://lab-ledger.xxxx.workers.dev" value="__URL__">
 <label>مفتاح الربط (LIS_KEY) <span style="font-weight:400;color:#64748b">__HAS__</span></label><input type="password" id="k" placeholder="اتركه فارغاً للإبقاء على المحفوظ" autocomplete="off">
 <label><input type="checkbox" id="e" __EN__> تفعيل المزامنة التلقائية</label>
-<div><button id="sv">حفظ</button><button id="ts" class="g">اختبار الاتصال</button><button id="sy" class="g">مزامنة الآن</button><button id="bf" class="g">رفع آخر 30 يوم</button></div>
+<div><button id="sv">حفظ</button><button id="ts" class="g">اختبار الاتصال</button><button id="sy" class="g">مزامنة الآن</button><button id="bf" class="g">رفع آخر 30 يوم</button><button id="bo" class="g">رفع كل بيانات LIS (سنة)</button><button id="io" class="g">استيراد بيانات السجل القديمة (سنة)</button></div>
 <div class="m" id="r">__STAT__</div>
 <h3 style="margin:18px 0 6px">مرضى أُدخلوا بالسجل (واردون للـLIS) <button id="ia" class="g" style="padding:4px 10px;font-size:13px">استيراد الكل</button></h3><div id="ii" class="s">جاري التحميل…</div>
 <h3 style="margin:18px 0 6px">دفعات أُدخلت من السجل (بانتظار اعتمادك)</h3><div id="pp" class="s">جاري التحميل…</div>
@@ -592,6 +958,8 @@ $("sv").onclick=function(){run("/ledger/save",body(),"جاري الحفظ…")};
 $("ts").onclick=function(){post("/ledger/save",body()).then(function(){run("/ledger/test",{},"جاري الاختبار…")})};
 $("sy").onclick=function(){post("/ledger/save",body()).then(function(){run("/ledger/sync",{days:3},"جاري المزامنة…")})};
 $("bf").onclick=function(){post("/ledger/save",body()).then(function(){run("/ledger/sync",{days:30,force:true},"جاري رفع 30 يوم…")})};
+$("bo").onclick=function(){post("/ledger/save",body()).then(function(){run("/ledger/sync",{days:365,force:true},"جاري رفع بيانات سنة كاملة… قد ياخذ دقائق")})};
+$("io").onclick=function(){if(!confirm("سيُستورد للـLIS كل ما أُدخل بالسجل خلال آخر سنة ولم يصل للـLIS. متأكد؟"))return;post("/ledger/save",body()).then(function(){run("/ledger/import",{old:true,days:365},"جاري الاستيراد… قد ياخذ دقائق")})};
 function esc(t){return String(t).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function lp(){post("/ledger/pending",{}).then(function(j){if(!j.ok){$("pp").textContent=j.message||"تعذّر التحميل";return}
 if(!j.items.length){$("pp").textContent="لا توجد دفعات معلّقة ✓";return}
@@ -723,6 +1091,9 @@ def install(app, helpers=None):
         db = _db()
         try:
             with _lock:
+                if d.get("old"):
+                    ok, msg = import_all_old(db, int(d.get("days") or 365), session.get("user_id"), session.get("branch_id"))
+                    return jsonify(ok=ok, message=msg)
                 if d.get("all"):
                     ok, msg, items = incoming(db)
                     if not ok:

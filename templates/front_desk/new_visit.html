@@ -605,6 +605,18 @@
           </div>
         </div>
       </div>
+      <div class="form-grid">
+        <div class="nv-row nv-row-3" id="nvExpenseRow" style="margin-top:6px;">
+          <div class="form-field">
+            <label>المصروف <span class="muted" style="font-weight:400;">(يُسجَّل بالسجل السحابي)</span></label>
+            <input type="text" inputmode="decimal" id="expensesInput" name="expenses" value="" placeholder="0" autocomplete="off">
+          </div>
+          <div class="form-field" style="grid-column: span 2;">
+            <label>بيان الصرف</label>
+            <input type="text" id="expensesNoteInput" name="expenses_note" maxlength="200" placeholder="مثال: أجرة نقل عينة / مستهلكات" autocomplete="off">
+          </div>
+        </div>
+      </div>
       <div class="nv-grand">{{ t('grand_total') }}: <span id="grandTotal">0</span></div>
     </div>
   </div>
