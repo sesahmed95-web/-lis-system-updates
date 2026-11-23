@@ -565,6 +565,8 @@
       {% endif %}
       <button type="button" class="nv-param-arrow" title="تعديل اسم هذا التحليل"
               onclick="nvRenameTest('{{ test['id'] }}')">✏️</button>
+      <button type="button" class="nv-param-arrow" title="نقل هذا التحليل إلى قسم آخر"
+              onclick="nvMoveTest('{{ test['id'] }}')">🔀</button>
       <input type="hidden" id="selected_params_{{ test['id'] }}" name="selected_params_{{ test['id'] }}" value="">
       <div class="nv-param-panel" id="paramPanel_{{ test['id'] }}" style="display:none;"></div>
       </span>
@@ -1265,6 +1267,82 @@
         }
       })
       .catch(function () { alert('تعذّر الاتصال بالخادم'); });
+  };
+
+  // v93: نقل تحليل إلى قسم آخر (يختفي من القسم القديم ويظهر بالجديد، بدون نسخة مكررة)
+  window.nvMoveTest = function (testId) {
+    const label = document.getElementById('test_label_' + testId);
+    if (!label) return;
+    const name = (label.dataset.full || label.textContent).trim();
+    fetch('/api/sections/list').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) return;
+      const ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100001;display:flex;align-items:center;justify-content:center;direction:rtl';
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#fff;border-radius:13px;padding:18px;min-width:320px;max-width:92vw;font:14px Tahoma,Arial,sans-serif';
+      const esc = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]; }); };
+      box.innerHTML = '<div style="font-weight:700;margin-bottom:10px">نقل «' + esc(name) + '» إلى قسم:</div>' +
+        '<select id="nvMoveSel" style="width:100%;padding:8px;border:1px solid #CBD5E1;border-radius:8px;font:14px Tahoma">' +
+        d.sections.map(function (s) { return '<option value="' + s.id + '">' + new Array(s.depth + 1).join('— ') + esc(s.name) + ' (' + s.count + ')</option>'; }).join('') +
+        '</select><div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-start">' +
+        '<button type="button" id="nvMoveOk" class="btn small">نقل</button>' +
+        '<button type="button" id="nvMoveNo" class="btn small secondary">إلغاء</button></div>';
+      ov.appendChild(box); document.body.appendChild(ov);
+      const close = function () { ov.remove(); };
+      box.querySelector('#nvMoveNo').onclick = close;
+      ov.addEventListener('mousedown', function (e) { if (e.target === ov) close(); });
+      box.querySelector('#nvMoveOk').onclick = function () {
+        const sid = box.querySelector('#nvMoveSel').value;
+        const okBtn = box.querySelector('#nvMoveOk');
+        okBtn.disabled = true;
+        const done = function () {
+          const wrap = label.closest('.checkbox-item-wrap');
+          const oldSec = wrap ? wrap.closest('details.nv-sec') : null;
+          const target = document.querySelector('details.nv-sec[data-sec="' + sid + '"] .nv-sec-grid');
+          if (wrap && target) {
+            try {
+              target.appendChild(wrap);
+              [oldSec, target.closest('details.nv-sec')].forEach(function (sec, i) {
+                if (!sec) return;
+                const c = sec.querySelector('summary .nv-sec-count');
+                const m = c ? c.textContent.match(/\d+/) : null;
+                if (c && m) c.textContent = '(' + Math.max(0, parseInt(m[0], 10) + (i === 0 ? -1 : 1)) + ')';
+              });
+              close();
+              return;
+            } catch (e) { /* نعيد تحميل الصفحة بدل رسالة خطأ مضلّلة */ }
+          }
+          close(); location.reload();
+        };
+        const fail = function (msg) { okBtn.disabled = false; alert(msg); };
+        // 1) المسار الجديد. 2) لو غير موجود (البرنامج شغّال بنسخة قديمة من app.py) نستعمل مسار «الأقسام» القديم الموجود دائماً.
+        const legacy = function () {
+          return fetch('/master/sections', {
+            method: 'POST', credentials: 'same-origin', redirect: 'follow',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: 'action=move_tests&section_id=' + encodeURIComponent(sid) + '&test_ids=' + encodeURIComponent(testId)
+          }).then(function (r) {
+            if (r.redirected && r.url.indexOf('/master/sections') < 0) return fail('النقل يحتاج صلاحية مشرف. سجّل الدخول كمشرف ثم أعد المحاولة.');
+            if (r.status === 401 || r.status === 403) return fail('ليست لديك صلاحية (مشرف) أو انتهت الجلسة. أعد تسجيل الدخول.');
+            if (!r.ok) return fail('تعذّر النقل (رمز الخادم ' + r.status + '). أغلق البرنامج وافتحه من جديد ثم أعد المحاولة.');
+            done();
+          });
+        };
+        fetch('/api/tests/' + testId + '/move', {
+          method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({section_id: parseInt(sid, 10)})
+        }).then(function (r) {
+          const ct = (r.headers.get('content-type') || '');
+          if (r.status === 404 || ct.indexOf('json') < 0) return legacy();
+          return r.json().then(function (res) {
+            if (!res.ok) return fail(res.error || 'تعذّر النقل');
+            done();
+          });
+        }).catch(function (e) {
+          fail('تعذّر الاتصال بالخادم (' + (e && e.message ? e.message : 'شبكة') + '). تأكد أن البرنامج شغّال ثم أعد المحاولة.');
+        });
+      };
+    });
   };
 
   document.addEventListener('click', function (e) {

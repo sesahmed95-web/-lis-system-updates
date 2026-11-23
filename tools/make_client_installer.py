@@ -58,6 +58,17 @@ def main():
     # 1) database
     report = seal.sanitize_db(os.path.join(ws, "lis.db"), os.path.join(bld, "lis.db"), a)
 
+    # حذف أسرارك وروابطك الخاصة (GitHub، ربط السجل ledger، مفاتيح الذكاء، كلمات سر البوّابات، بقايا زياراتك)
+    # وتفشل البناء إذا بقي شي — client_scrub.py لازم يكون بنفس مجلد tools
+    _sp = os.path.join(HERE, "client_scrub.py")
+    if not os.path.exists(_sp): sys.exit("ERROR: tools\\client_scrub.py is missing - stopped, nothing built.")
+    _sspec = importlib.util.spec_from_file_location("client_scrub", _sp)
+    scrub = importlib.util.module_from_spec(_sspec); _sspec.loader.exec_module(scrub)
+    _removed = scrub.scrub(os.path.join(bld, "lis.db"), keep_portal=True, reset_gates=True, drop_ai=True)
+    _left = scrub.scrub(os.path.join(bld, "lis.db"), dry=True, keep_portal=True, reset_gates=True, drop_ai=True)
+    if _left: sys.exit("ERROR: private settings still in client DB: %s" % ", ".join(_left))
+    report.append("client_scrub: removed %d private settings: %s" % (len(_removed), ", ".join(_removed) or "-"))
+
     # v77: تأكد أن بوابة النتائج مضبوطة بهذا المجلد — وإلا العميل يطلع له "اضبط رابط بوابة النتائج أولاً" ما يقدر يطبع QR
     try:
         _pc = sqlite3.connect(os.path.join(bld, "lis.db"))
@@ -146,6 +157,11 @@ def main():
     if not has_icon: iss = re.sub(r"(?im)^SetupIconFile=.*\r?\n", "", iss)
     open(os.path.join(bld, "installer_client.iss"), "w", encoding="utf-8-sig", newline="").write(iss)
 
+    # فحص تسريب نهائي: أي قيمة سر موجودة بقاعدتك الأصلية ما لازم تظهر بأي ملف داخل client_build (كود، preset، قاعدة)
+    leaks = scrub.leak_scan(os.path.join(ws, "lis.db"), bld, keep_keys=seal.KEEP_SETTINGS, sensitive_re=seal.SENSITIVE_RE)
+    if leaks:
+        print("\n".join(report)); sys.exit("ERROR: your secret values were found inside the client build - nothing is safe to send:\n  " + "\n  ".join(leaks))
+    report.append("leak scan: OK (no secret value from your lis.db appears in any client_build file)")
     print("\n".join(report)); print("\nOK: %d files in %s" % (n, bld))
     if skipped_up: print("NOT copied from static\\uploads (not logo/background/stamps): " + ", ".join(sorted(set(skipped_up))[:20]))
     print("Next: double-click build_client.bat inside client_build")

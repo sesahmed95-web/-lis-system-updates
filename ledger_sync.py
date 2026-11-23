@@ -440,6 +440,10 @@ def _split_tests(txt):
     return [t.strip() for t in re.split(r"[,،;\n+]+", txt or "") if t.strip()]
 
 
+def _ensure_alias(db):
+    db.execute("CREATE TABLE IF NOT EXISTS ledger_alias (norm TEXT PRIMARY KEY, raw TEXT, test_id INTEGER, created_at TEXT)")
+
+
 def _test_index(db):
     idx = {}
     for r in db.execute("SELECT id, name, short_name, code FROM test_definitions WHERE COALESCE(is_active,1)=1").fetchall():
@@ -460,6 +464,14 @@ def _test_index(db):
         tid = idx.get(_nt(target))
         if tid:
             idx.setdefault(_nt(a), tid)
+    try:        # ما ربطه المستخدم بنافذة «التحاليل غير المطابقة» له الأولوية دائماً
+        _ensure_alias(db)
+        live = {r[0] for r in db.execute("SELECT id FROM test_definitions WHERE COALESCE(is_active,1)=1").fetchall()}
+        for r in db.execute("SELECT norm, test_id FROM ledger_alias").fetchall():
+            if r[1] in live:
+                idx[r[0]] = r[1]
+    except Exception:
+        pass
     return idx
 
 
@@ -477,6 +489,73 @@ def _match_test(idx, name):
             if len(hits) == 1:
                 return hits.pop()
     return None
+
+
+def _suggest_abbr(name):
+    n = (name or "").strip()
+    m = re.findall(r"\(([A-Za-z0-9 ./+\-]{2,10})\)", n)
+    if m:
+        return m[-1].strip()
+    base = re.sub(r"\([^)]*\)", "", n).strip()
+    toks = re.findall(r"[A-Za-z0-9]+", base)
+    if len(toks) == 1:
+        t = toks[0]
+        return t.upper() if len(t) <= 6 else t[:4].upper()
+    caps = [t for t in toks if t.isupper() and len(t) >= 2]
+    if caps:
+        return caps[0]
+    if toks:
+        ab = "".join(t[0] for t in toks if t.lower() not in ("test", "of", "and", "the", "for", "level", "total"))[:6].upper()
+        if len(ab) >= 2:
+            return ab
+    return (base or n)[:6]
+
+
+def resolve_info(db, names):
+    secs = [{"id": r["id"], "name": r["name"]} for r in db.execute("SELECT id, name FROM sections ORDER BY sort_order, id").fetchall()]
+    tests = [{"id": r["id"], "name": r["name"], "short": r["short_name"] or ""} for r in
+             db.execute("SELECT id, name, short_name FROM test_definitions WHERE COALESCE(is_active,1)=1 ORDER BY name").fetchall()]
+    default_sec = next((x["id"] for x in secs if x["name"].strip().lower() in ("others", "other", "اخرى", "أخرى")), secs[0]["id"] if secs else None)
+    return {"sections": secs, "tests": tests, "default_section": default_sec,
+            "suggest": {n: _suggest_abbr(n) for n in names}}
+
+
+def resolve_one(db, raw, mode, test_id=None, name="", short="", section_id=None):
+    """يربط اسماً غير مطابق بتحليل موجود أو يضيفه كتحليل جديد، ويحفظ الربط (alias) حتى يُعرف تلقائياً مستقبلاً."""
+    _ensure_alias(db)
+    norm = _nt(raw)
+    if not norm:
+        return False, "اسم فارغ", None
+    if mode == "link":
+        t = db.execute("SELECT id, name FROM test_definitions WHERE id=?", (int(test_id or 0),)).fetchone()
+        if not t:
+            return False, "اختر التحليل الموجود", None
+        tid, tname = t["id"], t["name"]
+    else:
+        tname = (name or raw).strip()[:120]
+        ex = db.execute("SELECT id FROM test_definitions WHERE LOWER(TRIM(name))=LOWER(TRIM(?)) AND COALESCE(is_active,1)=1", (tname,)).fetchone()
+        if ex:
+            tid = ex["id"]
+        else:
+            sec = db.execute("SELECT * FROM sections WHERE id=?", (int(section_id or 0),)).fetchone()
+            if not sec:
+                return False, "اختر القسم", None
+            dept = (sec["dept_name"] or "").strip() or sec["name"]
+            mk = _H.get("unique_code")
+            code = mk(db, tname) if mk else ("L" + re.sub(r"[^A-Za-z0-9]", "", tname)[:8].upper() + str(int(time.time()) % 100000))
+            cur = db.execute("INSERT INTO test_definitions (code, name, department, sample_type, price, is_active, is_examining_test, section_id) "
+                             "VALUES (?, ?, ?, '', 0, 1, 0, ?)", (code, tname, dept, sec["id"]))
+            tid = cur.lastrowid
+            sh = (short or "").strip()[:30]
+            if sh:
+                try:
+                    db.execute("UPDATE test_definitions SET short_name=? WHERE id=?", (sh, tid))
+                except Exception:
+                    pass
+    db.execute("INSERT OR REPLACE INTO ledger_alias (norm, raw, test_id, created_at) VALUES (?, ?, ?, ?)",
+               (norm, raw[:200], tid, datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return True, tname, tid
 
 
 def incoming(db, days=14):
@@ -513,7 +592,16 @@ def _claim(c, it, lis_id, reg):
         return False
 
 
-def import_item(db, date_s, row_id, user_id=None, branch_id=None, _items=None, _sync_after=True, _days=14):
+def _claim_many(c, claims):
+    """يثبّت كل المستوردين بالسحابة بالتوازي (بدل طلب شبكة لكل مريض بالتسلسل)."""
+    if not claims:
+        return
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(8, len(claims))) as ex:
+        list(ex.map(lambda a: _claim(c, a[0], a[1], a[2]), claims))
+
+
+def import_item(db, date_s, row_id, user_id=None, branch_id=None, _items=None, _sync_after=True, _days=14, _idx=None, _claims=None):
     """يستورد مريضاً مضافاً بالسجل: مريض + زيارة + تحاليل + فاتورة/دفعة، ثم يربطه بالسحابة (لا يتكرر)."""
     c = cfg(db)
     key = "ledger_imp_%s|%s" % (date_s, row_id)
@@ -538,7 +626,7 @@ def import_item(db, date_s, row_id, user_id=None, branch_id=None, _items=None, _
     H = _H
     if not H:
         return False, "وظائف الاستيراد غير جاهزة."
-    idx = _test_index(db)
+    idx = _idx if _idx is not None else _test_index(db)
     tids = []
     for t in _split_tests(it["tests"]):
         tid = _match_test(idx, t)
@@ -600,9 +688,14 @@ def import_item(db, date_s, row_id, user_id=None, branch_id=None, _items=None, _
         db.execute("INSERT INTO payments (invoice_id, amount, method, user_id, paid_at) VALUES (?, ?, 'Cash', ?, ?)",
                    (icur.lastrowid, paid, user_id, created))
     _set(db, key, "v%d" % vid)
+    if it["unmatched"]:
+        _set(db, "ledger_unm_%d" % vid, json.dumps(it["unmatched"], ensure_ascii=False))
     _set(db, "ledger_orig_v%d" % vid, json.dumps({"tests": it["tests"], "n": len(tids)}, ensure_ascii=False))
     db.commit()
-    _claim(c, it, "v%d" % vid, str(reg))
+    if _claims is not None:
+        _claims.append((it, "v%d" % vid, str(reg)))      # تُرسل دفعة واحدة بآخر الدفعة
+    else:
+        _claim(c, it, "v%d" % vid, str(reg))
     if _sync_after:
         try:
             sync(db, 14, force=True)
@@ -623,7 +716,116 @@ def skip_item(db, date_s, row_id):
         return False
 
 
+def import_many(db, items, user_id=None, branch_id=None):
+    """استيراد دفعة بسرعة: فهرس تحاليل واحد، بدون إعادة جلب القائمة ولا مزامنة لكل مريض، تثبيت متوازي، ومزامنة وحدة بالآخر."""
+    c = cfg(db)
+    idx = _test_index(db)
+    claims, n, bad = [], 0, []
+    for it in items:
+        try:
+            r_ok, r_msg = import_item(db, it["date"], it["rowId"], user_id, branch_id, _items=items, _sync_after=False,
+                                      _idx=idx, _claims=claims)
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            r_ok, r_msg = False, _redact(e)
+        if r_ok:
+            n += 1
+        else:
+            bad.append(r_msg)
+    try:
+        _claim_many(c, claims)
+    except Exception:
+        pass
+    if n:
+        try:
+            sync(db, 14, force=True)
+        except Exception:
+            pass
+    return n, bad
+
+
 _seen = {}   # توقيع كل مريض وارد: لا نستورده إلا إذا ثبت بدون تغيير بين مسحتين (حتى لا نستورد صفاً العميل لسا يكتب تحاليله)
+
+
+def _pending_unmatched(db):
+    """زيارات مستورَدة وفيها أسماء تحاليل لم تُطابَق بعد: [(visit_id, [names])]. تبقى هنا لحد ما يربطها العميل من النافذة."""
+    out = []
+    try:
+        rows = db.execute("SELECT key, value FROM settings WHERE key LIKE 'ledger_unm_%'").fetchall()
+    except Exception:
+        return out
+    for r in rows:
+        m = re.fullmatch(r"ledger_unm_(\d+)", r["key"])
+        if not m:
+            continue
+        try:
+            names = [str(x) for x in json.loads(r["value"] or "[]") if str(x).strip()]
+        except Exception:
+            names = []
+        if names:
+            out.append((int(m.group(1)), names))
+    return out
+
+
+def pending_items(db):
+    """بنفس شكل items بالنافذة، حتى تظهر أسماؤها غير المطابقة بنافذة الربط حتى بعد ما نزل المريض."""
+    items = []
+    for vid, names in _pending_unmatched(db):
+        r = db.execute("SELECT p.full_name AS n, substr(v.created_at,1,10) AS d FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.id=?", (vid,)).fetchone()
+        if r:
+            items.append({"name": r["n"], "date": r["d"], "rowId": "", "tests": "", "unmatched": names, "pending": True})
+    return items
+
+
+def retro_add(db):
+    """بعد ما يربط/يضيف العميل اسم تحليل: يضيف التحاليل اللي صارت تُطابَق للزيارات المستورَدة سابقاً (بدون ما يوقف الاستيراد أبداً)."""
+    H = _H
+    if not H or not H.get("price"):
+        return 0
+    idx = _test_index(db)
+    total_added = 0
+    now = datetime.now().isoformat(timespec="seconds")
+    for vid, names in _pending_unmatched(db):
+        v = db.execute("SELECT id, doctor_id, referral_center_id, registration_number FROM visits WHERE id=?", (vid,)).fetchone()
+        o = db.execute("SELECT id FROM orders WHERE visit_id=? ORDER BY id LIMIT 1", (vid,)).fetchone()
+        if not v or not o:
+            _set(db, "ledger_unm_%d" % vid, "[]")
+            continue
+        have = {r[0] for r in db.execute("SELECT ot.test_definition_id FROM order_tests ot JOIN orders o2 ON o2.id=ot.order_id WHERE o2.visit_id=?", (vid,)).fetchall()}
+        left, added = [], 0
+        for n in names:
+            tid = _match_test(idx, n)
+            if not tid:
+                left.append(n)
+                continue
+            if tid in have:
+                continue
+            price = H["price"](db, tid, v["doctor_id"], v["referral_center_id"])
+            db.execute("INSERT INTO order_tests (order_id, test_definition_id, status, barcode, price, doctor_id, collected_at, created_at, price_missing) "
+                       "VALUES (?, ?, 'Collected', ?, ?, ?, ?, ?, ?)",
+                       (o["id"], tid, "%s%03d" % (v["registration_number"], tid), price if price is not None else 0, v["doctor_id"], now, now, 1 if price is None else 0))
+            if price:
+                db.execute("UPDATE invoices SET total_amount=COALESCE(total_amount,0)+? WHERE visit_id=?", (price, vid))
+                db.execute("UPDATE invoices SET status=CASE WHEN COALESCE(paid_amount,0)>=COALESCE(total_amount,0)-COALESCE(discount_amount,0) THEN 'Paid' "
+                           "WHEN COALESCE(paid_amount,0)>0 THEN 'Partial' ELSE 'Unpaid' END WHERE visit_id=?", (vid,))
+            have.add(tid)
+            added += 1
+        if added:
+            try:   # نبقي نص السجل الأصلي هو المرجع (ما يتبدّل عند الدفع للسحابة)
+                raw = _get(db, "ledger_orig_v%d" % vid)
+                if raw:
+                    o2 = json.loads(raw)
+                    o2["n"] = int(o2.get("n", 0)) + added
+                    _set(db, "ledger_orig_v%d" % vid, json.dumps(o2, ensure_ascii=False))
+            except Exception:
+                pass
+            total_added += added
+        _set(db, "ledger_unm_%d" % vid, json.dumps(left, ensure_ascii=False))
+    db.commit()
+    return total_added
 
 
 def _auto_import(db):
@@ -635,27 +837,35 @@ def _auto_import(db):
     if not ok:
         return 0
     live = set()
-    n = 0
+    stable, held = [], 0
     for it in items:
         key = "%s|%s" % (it["date"], it["rowId"])
         live.add(key)
+        if it.get("unmatched"):
+            held += 1                    # v94: لا نحجز المريض! يُستورد بتحاليله المطابقة، والأسماء غير المطابقة تنتظر النافذة وتُضاف لاحقاً
         sig = (it.get("name"), it.get("tests"), it.get("paid"), it.get("refDoctor"), it.get("age"), it.get("gender"), it.get("priceType"))
-        if _seen.get(key) == sig and n < 20:
-            try:
-                r_ok, r_msg = import_item(db, it["date"], it["rowId"], None, None)
-                if r_ok:
-                    n += 1
-                    _seen.pop(key, None)
-                    continue
-                _st["imp_err"] = r_msg
-            except Exception as e:
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-                _st["imp_err"] = _redact(e)
+        if _seen.get(key) == sig and len(stable) < 20:
+            stable.append(it)
         else:
             _seen[key] = sig
+    n = 0
+    if stable:
+        try:
+            n, bad = import_many(db, stable)
+            for it in stable:
+                _seen.pop("%s|%s" % (it["date"], it["rowId"]), None)
+            if bad:
+                _st["imp_err"] = bad[0]
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            _st["imp_err"] = _redact(e)
+    try:
+        _st["held"] = len({x for _v, ns in _pending_unmatched(db) for x in ns})
+    except Exception:
+        _st["held"] = held
     for k in [k for k in _seen if k not in live]:
         _seen.pop(k, None)
     _st["incoming"] = max(0, len(items) - n)
@@ -847,20 +1057,7 @@ def import_all_old(db, days, user_id=None, branch_id=None):
     ok, msg, items = incoming(db, days)
     if not ok:
         return False, msg
-    n, bad = 0, []
-    for it in items:
-        try:
-            r_ok, r_msg = import_item(db, it["date"], it["rowId"], user_id, branch_id, _items=items, _sync_after=False)
-        except Exception as e:
-            try:
-                db.rollback()
-            except Exception:
-                pass
-            r_ok, r_msg = False, _redact(e)
-        if r_ok:
-            n += 1
-        else:
-            bad.append(r_msg)
+    n, bad = import_many(db, items, user_id, branch_id)
     try:
         sync(db, min(400, int(days)), force=True)
     except Exception:
@@ -899,10 +1096,66 @@ def _loop():
         time.sleep(INTERVAL)
 
 
+def _activation_dirs():
+    """أماكن ملف ledger_link.json: مجلد البرنامج (بجانب LabSystem.exe) ومجلد الكود الحالي ومجلد التشغيل."""
+    import sys
+    ds = []
+    try:
+        if getattr(sys, "frozen", False):
+            ds.append(os.path.dirname(sys.executable))
+    except Exception:
+        pass
+    here = os.path.dirname(os.path.abspath(__file__))
+    ds += [here, os.path.dirname(os.path.dirname(here)), os.getcwd()]
+    out = []
+    for d in ds:
+        if d and d not in out and os.path.isdir(d):
+            out.append(d)
+    return out
+
+
+def consume_activation():
+    """v94: إذا وُجد ledger_link.json {"url":"https://...","key":"..."} بمجلد البرنامج يفعّل الربط تلقائياً (رابط + مفتاح + مزامنة)
+    ثم يعيد تسميته .done. العميل لا يفتح صفحة /ledger ولا يلصق شي: يكفي نسخ الملف بمجلد البرنامج وإعادة فتحه.
+    يرجّع نص حالة أو "" إن ما كان فيه ملف."""
+    for d in _activation_dirs():
+        p = os.path.join(d, "ledger_link.json")
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, "r", encoding="utf-8-sig") as f:
+                j = json.load(f)
+            u = str(j.get("url") or "").strip().rstrip("/")
+            k = re.sub(r"[^A-Za-z0-9_.\-]", "", str(j.get("key") or ""))
+            if not u.lower().startswith("https://") or len(k) < 16:
+                return "ledger_link.json غير صالح (الرابط لازم https والمفتاح 16 حرف على الأقل)"
+            db = _db()
+            try:
+                _set(db, "ledger_url", u)
+                _set(db, "ledger_key", k)
+                _set(db, "ledger_enabled", "1")
+                _set(db, "ledger_link_file_applied", datetime.now().isoformat(timespec="seconds"))
+                db.commit()
+            finally:
+                db.close()
+            try:
+                os.replace(p, p + ".done")
+            except Exception:
+                pass
+            return "تم تفعيل ربط السجل من الملف"
+        except Exception as e:  # noqa: BLE001
+            return "تعذر قراءة ledger_link.json: %s" % e
+    return ""
+
+
 def start():
     if _started["v"]:
         return
     _started["v"] = True
+    try:
+        consume_activation()
+    except Exception:
+        pass
     threading.Thread(target=_loop, name="ledger-sync", daemon=True).start()
 
 
@@ -924,7 +1177,7 @@ def status():
     if _st["err"]:
         return "r", "السحابة: غير متصل", _st["err"]
     if _st["ok_t"] and now - _st["ok_t"] < INTERVAL * 3:
-        lbl = "السحابة: متزامن ✓" + (" • %d واردة من السجل" % _st["incoming"] if _st.get("incoming") else "")
+        lbl = "السحابة: متزامن ✓" + (" • %d واردة من السجل" % _st["incoming"] if _st.get("incoming") else "") + (" • %d تحتاج ربط تحليل" % _st["held"] if _st.get("held") else "")
         return ("y" if _st.get("incoming") else "g"), lbl, time.strftime("آخر مزامنة %H:%M:%S", time.localtime(_st["ok_t"]))
     return "y", "بانتظار المزامنة…", ""
 
@@ -938,7 +1191,13 @@ h2{margin:0 0 6px}label{display:block;margin:14px 0 4px;font-weight:700}
 input[type=text],input[type=password]{width:100%;padding:10px;border:1px solid #b9cfcb;border-radius:9px;font-size:15px;direction:ltr;box-sizing:border-box}
 button{padding:10px 16px;border:0;border-radius:9px;background:#0f766e;color:#fff;font-size:15px;cursor:pointer;margin:6px 4px 0 0}
 button.g{background:#64748b}.m{margin-top:14px;padding:10px;border-radius:9px;background:#eef6f5;white-space:pre-wrap;min-height:20px}
-.s{font-size:13px;color:#475569;margin-top:10px;line-height:1.8}a{color:#0f766e}</style></head><body><div class="c">
+.s{font-size:13px;color:#475569;margin-top:10px;line-height:1.8}a{color:#0f766e}
+.um-ov{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99;display:none;align-items:center;justify-content:center}
+.um-b{background:#fff;border-radius:14px;max-width:780px;width:96%;max-height:90vh;overflow:auto;padding:16px 18px}
+.um-r{border:1px solid #d6e4e1;border-radius:10px;padding:10px 12px;margin:10px 0;background:#f8fbfa}
+.um-r input[type=text],.um-r select{direction:rtl;padding:7px;margin:3px 0;width:100%;box-sizing:border-box;border:1px solid #b9cfcb;border-radius:8px;font-size:14px}
+.um-g{display:grid;grid-template-columns:1fr 1fr;gap:8px}.um-r label{display:inline-block;margin:6px 12px 2px 0;font-weight:600}</style></head><body><div class="c">
+<a href="/" onclick="if(window.opener){window.close();return false}if(history.length>1){history.back();return false}" style="display:inline-block;margin-bottom:10px;padding:6px 14px;border-radius:9px;background:#e7f3f1;text-decoration:none">&#8617; رجوع</a>
 <h2>☁ ربط «سجل المرضى السحابي»</h2>
 <div class="s">يدفع الزيارات والمبالغ للسحابة كل دقيقتين لتظهر على الموبايل. بيانات المرضى والحسابات فقط.</div>
 <label>رابط السحابة</label><input type="text" id="u" placeholder="https://lab-ledger.xxxx.workers.dev" value="__URL__">
@@ -946,9 +1205,10 @@ button.g{background:#64748b}.m{margin-top:14px;padding:10px;border-radius:9px;ba
 <label><input type="checkbox" id="e" __EN__> تفعيل المزامنة التلقائية</label>
 <div><button id="sv">حفظ</button><button id="ts" class="g">اختبار الاتصال</button><button id="sy" class="g">مزامنة الآن</button><button id="bf" class="g">رفع آخر 30 يوم</button><button id="bo" class="g">رفع كل بيانات LIS (سنة)</button><button id="io" class="g">استيراد بيانات السجل القديمة (سنة)</button></div>
 <div class="m" id="r">__STAT__</div>
-<h3 style="margin:18px 0 6px">مرضى أُدخلوا بالسجل (واردون للـLIS) <button id="ia" class="g" style="padding:4px 10px;font-size:13px">استيراد الكل</button></h3><div id="ii" class="s">جاري التحميل…</div>
+<h3 style="margin:18px 0 6px">مرضى أُدخلوا بالسجل (واردون للـLIS) <button id="ia" class="g" style="padding:4px 10px;font-size:13px">استيراد الكل</button> <button id="um" class="g" style="padding:4px 10px;font-size:13px;background:#b45309;display:none">حل التحاليل غير المطابقة</button></h3><div id="ii" class="s">جاري التحميل…</div>
 <h3 style="margin:18px 0 6px">دفعات أُدخلت من السجل (بانتظار اعتمادك)</h3><div id="pp" class="s">جاري التحميل…</div>
 <div class="s">فتح السجل: <a href="__URL__" target="_blank">__URL__</a></div></div>
+<div class="um-ov" id="umo"><div class="um-b" id="umb"></div></div>
 <script>
 var $=function(i){return document.getElementById(i)};
 function post(p,b){return fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(function(r){return r.json()})}
@@ -965,7 +1225,33 @@ function lp(){post("/ledger/pending",{}).then(function(j){if(!j.ok){$("pp").text
 if(!j.items.length){$("pp").textContent="لا توجد دفعات معلّقة ✓";return}
 $("pp").innerHTML=j.items.map(function(i){return '<div style="padding:8px;border:1px solid #d6e4e1;border-radius:9px;margin:6px 0">'+esc(i.name)+' — <b>'+i.diff+'</b> د.ع ('+esc(i.date)+') <button data-id="'+esc(i.lisId)+'">اعتماد</button></div>'}).join("");
 Array.prototype.forEach.call($("pp").querySelectorAll("button"),function(b){b.onclick=function(){b.disabled=true;post("/ledger/approve",{lisId:b.getAttribute("data-id")}).then(function(j){$("r").textContent=j.message;lp()})}})}).catch(function(){$("pp").textContent="تعذّر التحميل"})}
-function li(){post("/ledger/incoming",{}).then(function(j){if(!j.ok){$("ii").textContent=j.message||"تعذّر التحميل";return}
+var LAST=[];
+function ugroups(items){var g={};items.forEach(function(i){(i.unmatched||[]).forEach(function(n){var k=n.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g,"");if(!k)return;if(!g[k])g[k]={raw:n,count:0};g[k].count++})});return Object.keys(g).map(function(k){return g[k]})}
+function openUM(){var gs=ugroups(LAST);if(!gs.length){$("umo").style.display="none";return}
+post("/ledger/resolve-info",{names:gs.map(function(x){return x.raw})}).then(function(inf){
+var so=inf.sections.map(function(s){return '<option value="'+s.id+'"'+(s.id===inf.default_section?' selected':'')+'>'+esc(s.name)+'</option>'}).join("");
+var dl='<datalist id="umtl">'+inf.tests.map(function(t){return '<option value="'+esc(t.name+(t.short?' ['+t.short+']':''))+'" data-id="'+t.id+'"></option>'}).join("")+'</datalist>';
+var h='<h3 style="margin:0 0 6px">تحاليل لم تُطابَق ('+gs.length+')</h3><div class="s">لكل اسم: اربطه بتحليل موجود، أو أضفه كتحليل جديد بقسمه واختصاره. يُحفظ الاختيار ويُعرف تلقائياً مرات قادمة.</div>'+dl;
+h+=gs.map(function(g,i){var ab=(inf.suggest&&inf.suggest[g.raw])||"";
+return '<div class="um-r" data-i="'+i+'" data-raw="'+esc(g.raw)+'"><b>'+esc(g.raw)+'</b> <span class="s">('+g.count+' مريض)</span><div>'+
+'<label><input type="radio" name="m'+i+'" value="new" checked> إضافة كتحليل جديد</label><label><input type="radio" name="m'+i+'" value="link"> ربط بتحليل موجود</label><label><input type="radio" name="m'+i+'" value="skip"> لاحقاً</label></div>'+
+'<div class="um-new um-g"><div>اسم التحليل<input type="text" class="un" value="'+esc(g.raw)+'"></div><div>الاختصار<input type="text" class="us" value="'+esc(ab)+'"></div><div style="grid-column:1/3">القسم<select class="uc">'+so+'</select></div></div>'+
+'<div class="um-link" style="display:none">التحليل الموجود<input type="text" class="ut" list="umtl" placeholder="اكتب للبحث…"></div></div>'}).join("");
+h+='<div style="margin-top:10px"><button id="umsave">حفظ وتطبيق</button><button class="g" id="umclose">إغلاق</button> <span id="umm" class="s"></span></div>';
+$("umb").innerHTML=h;$("umo").style.display="flex";
+Array.prototype.forEach.call($("umb").querySelectorAll(".um-r"),function(r){Array.prototype.forEach.call(r.querySelectorAll("input[type=radio]"),function(x){x.onchange=function(){var m=r.querySelector("input[type=radio]:checked").value;r.querySelector(".um-new").style.display=m==="new"?"grid":"none";r.querySelector(".um-link").style.display=m==="link"?"block":"none"}})});
+$("umclose").onclick=function(){$("umo").style.display="none"};
+$("umsave").onclick=function(){var rows=Array.prototype.slice.call($("umb").querySelectorAll(".um-r")),done=0,bad=[];$("umsave").disabled=true;
+var tmap={};inf.tests.forEach(function(t){tmap[t.name+(t.short?' ['+t.short+']':'')]=t.id;tmap[t.name]=t.id});
+(function nx(k){if(k>=rows.length){$("umsave").disabled=false;$("umm").textContent="تم: "+done+(bad.length?" — تعذّر: "+bad.join("، "):"");$("r").textContent="تم حفظ الربط/الإضافة لـ "+done+" تحليل";li();return}
+var r=rows[k],m=r.querySelector("input[type=radio]:checked").value,raw=r.getAttribute("data-raw");
+if(m==="skip"){nx(k+1);return}
+var body={raw:raw,mode:m};
+if(m==="link"){body.testId=tmap[r.querySelector(".ut").value];if(!body.testId){bad.push(raw+" (اختر تحليلاً من القائمة)");nx(k+1);return}}
+else{body.name=r.querySelector(".un").value;body.short=r.querySelector(".us").value;body.sectionId=+r.querySelector(".uc").value}
+post("/ledger/resolve",body).then(function(j){if(j.ok)done++;else bad.push(raw+" ("+(j.message||"")+")");nx(k+1)}).catch(function(){bad.push(raw);nx(k+1)})})(0)}})}
+$("um").onclick=openUM;
+function li(){post("/ledger/incoming",{}).then(function(j){if(!j.ok){$("ii").textContent=j.message||"تعذّر التحميل";return}LAST=(j.items||[]).concat(j.pend||[]);var hasU=ugroups(LAST).length>0;$("um").style.display=hasU?"inline-block":"none";if(hasU&&!window.__umShown){window.__umShown=1;setTimeout(openUM,200)}
 if(!j.items.length){$("ii").textContent="لا يوجد مرضى جدد بالسجل ✓";return}
 $("ii").innerHTML=j.items.map(function(i){var bad=i.unmatched.length?'<div style="color:#b91c1c">لم تُطابَق: '+esc(i.unmatched.join("، "))+'</div>':"";
 return '<div style="padding:8px;border:1px solid #d6e4e1;border-radius:9px;margin:6px 0"><b>'+esc(i.name)+'</b> — '+esc(i.date)+(i.priceType==="lab"?" (مختبر: "+esc(i.refDoctor)+")":(i.refDoctor?" (د. "+esc(i.refDoctor)+")":""))+'<div>'+esc(i.tests)+'</div>'+bad+'<div>واصل: <b>'+i.paid+'</b> <button data-d="'+esc(i.date)+'" data-r="'+esc(i.rowId)+'">استيراد</button> <button class="g" data-s="1" data-d="'+esc(i.date)+'" data-r="'+esc(i.rowId)+'">تجاهل</button></div></div>'}).join("");
@@ -1000,6 +1286,31 @@ def install(app, helpers=None):
         finally:
             db.close()
         return Response(html, mimetype="text/html")
+
+    @bp.route("/ledger/make-link", methods=["GET", "POST"])
+    def make_link():
+        """v94 (للمصمم فقط): يولّد ملف ledger_link.json جاهز للعميل. تنسخه العميل لمجلد البرنامج فيتفعّل الربط بدون لصق شي."""
+        if not session.get("designer_id"):
+            return Response("<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;padding:20px'>هذه الصفحة للمصمم فقط.</body>", 403, mimetype="text/html")
+        if request.method == "POST":
+            u = (request.form.get("url") or "").strip().rstrip("/")
+            k = re.sub(r"[^A-Za-z0-9_.\-]", "", request.form.get("key") or "")
+            if not u.lower().startswith("https://") or len(k) < 16:
+                return Response("الرابط لازم https والمفتاح 16 حرف على الأقل", 400)
+            body = json.dumps({"url": u, "key": k}, ensure_ascii=False, indent=1)
+            return Response(body, mimetype="application/json",
+                            headers={"Content-Disposition": "attachment; filename=ledger_link.json"})
+        db = _db()
+        try:
+            c = cfg(db)
+        finally:
+            db.close()
+        return Response("<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;max-width:640px;margin:30px auto'>"
+                        "<h2>ملف ربط السجل للعميل</h2><p>الصق رابط سحابة هذا العميل ومفتاحه (LIS_KEY) ثم نزّل الملف وأرسله له. "
+                        "يضعه بمجلد البرنامج ويعيد فتحه: يتفعّل الربط لوحده.</p>"
+                        "<form method=post><label>رابط السحابة</label><br><input name=url style='width:100%;padding:8px' value='" + _h.escape(c["url"], True) + "'><br><br>"
+                        "<label>LIS_KEY</label><br><input name=key style='width:100%;padding:8px'><br><br>"
+                        "<button style='padding:10px 18px'>تنزيل ledger_link.json</button></form></body>", mimetype="text/html")
 
     @bp.route("/ledger/save", methods=["POST"])
     def save():
@@ -1079,7 +1390,7 @@ def install(app, helpers=None):
         db = _db()
         try:
             ok, msg, items = incoming(db)
-            return jsonify(ok=ok, message=msg, items=items)
+            return jsonify(ok=ok, message=msg, items=items, pend=pending_items(db))
         finally:
             db.close()
 
@@ -1098,12 +1409,7 @@ def install(app, helpers=None):
                     ok, msg, items = incoming(db)
                     if not ok:
                         return jsonify(ok=False, message=msg)
-                    n, notes = 0, []
-                    for it in items:
-                        r_ok, r_msg = import_item(db, it["date"], it["rowId"], session.get("user_id"), session.get("branch_id"))
-                        n += 1 if r_ok else 0
-                        if not r_ok:
-                            notes.append(r_msg)
+                    n, notes = import_many(db, items, session.get("user_id"), session.get("branch_id"))
                     return jsonify(ok=True, message="تم استيراد %d مريض." % n + (" " + " | ".join(notes) if notes else ""))
                 ok, msg = import_item(db, str(d.get("date") or ""), str(d.get("rowId") or ""), session.get("user_id"), session.get("branch_id"))
             return jsonify(ok=ok, message=msg)
@@ -1113,6 +1419,41 @@ def install(app, helpers=None):
             except Exception:
                 pass
             return jsonify(ok=False, message="فشل الاستيراد: " + _redact(e))
+        finally:
+            db.close()
+
+    @bp.route("/ledger/resolve-info", methods=["POST"])
+    def res_info():
+        if not allowed():
+            return jsonify(ok=False, message="سجّل الدخول أولاً."), 401
+        d = request.get_json(silent=True) or {}
+        db = _db()
+        try:
+            return jsonify(ok=True, **resolve_info(db, [str(x) for x in (d.get("names") or [])][:200]))
+        finally:
+            db.close()
+
+    @bp.route("/ledger/resolve", methods=["POST"])
+    def res_one():
+        if not allowed():
+            return jsonify(ok=False, message="سجّل الدخول أولاً."), 401
+        d = request.get_json(silent=True) or {}
+        db = _db()
+        try:
+            with _lock:
+                ok, msg, tid = resolve_one(db, str(d.get("raw") or ""), "link" if d.get("mode") == "link" else "new",
+                                           d.get("testId"), str(d.get("name") or ""), str(d.get("short") or ""), d.get("sectionId"))
+            added = 0
+            if ok:
+                with _lock:
+                    added = retro_add(db)
+            return jsonify(ok=ok, message=msg + ((" — أُضيف لـ %d زيارة سابقة" % added) if added else ""), testId=tid)
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            return jsonify(ok=False, message="فشل الحفظ: " + _redact(e))
         finally:
             db.close()
 

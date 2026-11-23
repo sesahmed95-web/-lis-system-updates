@@ -180,10 +180,10 @@ td input{padding:3px 5px}
   <div class="card">
     <h3>🔗 روابط سريعة</h3>
     <div class="bars">
-      <a class="b s" target="_blank" href="{{ url_for('visit_results_entry', visit_id=v['id']) }}">📝 إدخال النتائج</a>
+      <a class="b s" target="_top" href="{{ url_for('visit_results_entry', visit_id=v['id']) }}">📝 إدخال النتائج</a>
       <a class="b s" onclick="op('{{ url_for('report_pdf_visit', visit_id=v['id']) }}');return false" href="#">📄 النتائج PDF</a>
       <a class="b s" onclick="op('{{ url_for('print_invoice', visit_id=v['id']) }}');return false" href="#">🧾 الفاتورة</a>
-      <a class="b s" target="_blank" href="{{ url_for('visit_edit', visit_id=v['id']) }}">✏️ التعديل الكامل</a>
+      <a class="b s" target="_top" href="{{ url_for('visit_edit', visit_id=v['id']) }}">✏️ التعديل الكامل</a>
     </div>
   </div>
 </div>
@@ -192,7 +192,7 @@ td input{padding:3px 5px}
 <script>
 var VID={{ v['id'] }},API='/api/patient-card/'+VID,PR={{ pc_prices|tojson }},dirty=false;
 function $(i){return document.getElementById(i);}
-function op(u){var w=null;try{w=window.open(u,'_blank');}catch(e){} if(!w)location.href=u;}
+function op(u){try{(window.top||window).location.href=u;}catch(e){location.href=u;}}  /* v94b: يبقى داخل نافذة البرنامج (بدون متصفح خارجي) */
 function post(u,b){return fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){return r.json();});}
 function say(id,m,ok){var e=$(id);e.textContent=m;e.className='msg '+(ok?'ok':'er');if(ok)setTimeout(function(){e.textContent='';},2500);}
 function closeCard(){ if(window.parent!==window){window.parent.postMessage({lisCard:'close'},'*');} else {window.close();} }

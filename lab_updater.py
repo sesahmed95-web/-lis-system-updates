@@ -33,6 +33,12 @@ PUBLIC_KEY_B64 = "BIvWzHkoQLs26itNenrUpBTruHmz5aOWIitoWyXvu1U="            # Ed2
 DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/sesahmed95-web/lab-updates/main/updates"        # folder URL that contains update.json, e.g. https://your-name.github.io/lab-updates
 # ---------------------------------------------------------------------------------------------------------------------
 
+# v94: مصادر احتياطية للتحديث. إذا تعذّر الأول (GitHub محجوب/الحساب مقفل/المستودع خاص) يجرّب البرنامج التالي تلقائياً.
+# الثاني = سحابتك على Cloudflare (مجلد public/updates بمشروع lab-ledger-cloud، يُنشر بـ نشر-التحديث.bat) — لا يحتاج GitHub إطلاقاً.
+FALLBACK_UPDATE_URLS = [
+    "https://lab-ledger.sesahmed95.workers.dev/updates",
+]
+
 CHECK_EVERY = 6 * 3600
 MAX_ZIP = 40 * 1024 * 1024
 ALLOWED_TOP = ("templates/",)
@@ -134,6 +140,33 @@ def update_url(db, get_setting):
     return u if u.startswith("https://") or u.startswith("http://127.0.0.1") or u.startswith("file://") else ""
 
 
+def update_urls(db, get_setting):
+    """كل عناوين التحديث بالترتيب: المضبوط يدوياً ثم الافتراضي ثم الاحتياطية (بدون تكرار)."""
+    out = []
+    for u in [get_setting(db, "update_url", ""), DEFAULT_UPDATE_URL] + list(FALLBACK_UPDATE_URLS):
+        u = (u or "").strip().rstrip("/")
+        if (u.startswith("https://") or u.startswith("http://127.0.0.1") or u.startswith("file://")) and u not in out:
+            out.append(u)
+    return out
+
+
+def fetch_best(bases):
+    """يجرّب كل المصادر ويرجّع (base, manifest) لأحدث إصدار متاح، مع قائمة أخطاء المصادر المعطّلة."""
+    best, errs = None, []
+    for b in bases:
+        try:
+            m = fetch_manifest(b)
+            if best is None or _vkey(m["version"]) > _vkey(best[1]["version"]):
+                best = (b, m)
+        except Exception as e:  # noqa: BLE001
+            errs.append("%s -> %s" % (b, e))
+    if best is None:
+        raise ValueError("كل مصادر التحديث تعذّرت: " + " | ".join(errs)[:400])
+    for e in errs:
+        _ulog("source failed: " + e)
+    return best[0], best[1], errs
+
+
 # ----------------------------------------------------------------------------- crypto / package checks
 def verify_signature(version, sha256_hex, sig_b64, pub_b64=None):
     pub_b64 = pub_b64 or PUBLIC_KEY_B64
@@ -162,6 +195,8 @@ def _safe_extract(zip_path, dest):
             name = info.filename.replace("\\", "/")
             if info.is_dir():
                 continue
+            if "/" not in name and name.endswith(".html"):
+                name = "templates/" + name          # v94: قالب بجذر الـzip (مثل new_visit.html) كان يُرفض فيفشل التحديث كله
             if name.startswith("/") or ".." in name.split("/") or ":" in name:
                 raise ValueError("مسار غير مسموح داخل التحديث: " + name)
             ok = name == "VERSION" or ("/" not in name and name.endswith(".py")) or \
@@ -291,13 +326,99 @@ def fetch_manifest(base):
     return m
 
 
+# ----------------------------------------------------------------------------- ربط العميل تلقائياً (بدون لصق ملفات)
+# المصمم يولّد links_<HWID>.json (موقّع بمفتاح التحديثات + مشفّر بمعرّف جهاز العميل) من /designer/client-link ويضعه بنفس مكان update.json
+# (GitHub و/أو public/updates بالسحابة). جهاز العميل يجلبه مع فحص التحديث، يتحقق من التوقيع، يفكّه، ويضبط رابط ومفاتيح
+# السجل السحابي وبوابة النتائج بنفسه. لا يطبّق نفس الملف مرتين، ولا يقدر جهاز ثاني يفكّه (المفتاح مشتق من HWID).
+_links_applier = None
+
+
+def set_links_applier(fn):
+    global _links_applier
+    _links_applier = fn
+
+
+def _links_key(hw, created):
+    return hashlib.sha256(("lislink|%s|%s" % (hw.strip().upper(), created)).encode("utf-8")).digest()
+
+
+def _links_stream(key, n):
+    out = bytearray()
+    ctr = 0
+    while len(out) < n:
+        out += hashlib.sha256(key + ctr.to_bytes(4, "big")).digest()
+        ctr += 1
+    return bytes(out[:n])
+
+
+def seal_links(hw, created, data):
+    import hmac
+    key = _links_key(hw, created)
+    raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ct = bytes(a ^ b for a, b in zip(raw, _links_stream(key, len(raw))))
+    tag = hmac.new(key, ct, hashlib.sha256).digest()[:16]
+    return base64.b64encode(tag + ct).decode("ascii")
+
+
+def open_links(hw, created, sealed):
+    import hmac
+    key = _links_key(hw, created)
+    blob = base64.b64decode(sealed)
+    tag, ct = blob[:16], blob[16:]
+    if not hmac.compare_digest(tag, hmac.new(key, ct, hashlib.sha256).digest()[:16]):
+        raise ValueError("ملف الربط لا يخص هذا الجهاز")
+    return json.loads(bytes(a ^ b for a, b in zip(ct, _links_stream(key, len(ct)))).decode("utf-8"))
+
+
+def links_digest(payload):
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def check_links(db, get_setting, set_setting):
+    """يرجّع رسالة لو طُبّق ملف ربط جديد، وإلا None. لا يرفع استثناء."""
+    try:
+        hw = _my_hw_id()
+        if not hw or _links_applier is None:
+            return None
+        for base in update_urls(db, get_setting):
+            try:
+                env = json.loads(_http_get(base + "/links_%s.json" % hw, 400_000).decode("utf-8"))
+            except Exception:
+                continue
+            created, sig, payload = env.get("created", ""), env.get("sig", ""), env.get("payload")
+            if not (created and sig and isinstance(payload, dict) and payload.get("links")):
+                continue
+            if created == get_setting(db, "last_applied_links", ""):
+                return None
+            ok, why = verify_signature(created, links_digest(payload), sig)
+            if not ok:
+                set_setting(db, "links_last_status", "⚠️ %s — %s" % (datetime.now().isoformat(timespec="seconds"), why))
+                db.commit()
+                return None
+            data = open_links(hw, created, payload["links"])
+            msg = _links_applier(db, data) or "تم"
+            set_setting(db, "last_applied_links", created)
+            set_setting(db, "links_last_status", "✅ %s — %s" % (datetime.now().isoformat(timespec="seconds"), msg))
+            db.commit()
+            _ulog("links applied: " + msg)
+            return msg
+    except Exception as e:  # noqa: BLE001
+        try:
+            set_setting(db, "links_last_status", "⚠️ تعذر تطبيق ملف الربط: %s" % str(e)[:200])
+            db.commit()
+        except Exception:
+            pass
+    return None
+
+
 def check_now(db, get_setting, set_setting):
-    base = update_url(db, get_setting)
+    check_links(db, get_setting, set_setting)
+    bases = update_urls(db, get_setting)
     now = datetime.now().isoformat(timespec="seconds")
-    if not base:
+    if not bases:
         return {"ok": False, "configured": False, "message": "عنوان التحديثات غير مضبوط"}
     try:
-        m = fetch_manifest(base)
+        base, m, _errs = fetch_best(bases)
         cur = current_version()
         stg = staged_version()
         avail = _vkey(m["version"]) > _vkey(stg or cur)      # ما نعرض تحديثاً سبق تجهيزه
@@ -309,7 +430,9 @@ def check_now(db, get_setting, set_setting):
                 "staged": stg, "notes": m.get("notes", "")}
     except Exception as e:  # noqa: BLE001
         set_setting(db, "update_last_check", now)
+        set_setting(db, "update_last_error", str(e)[:500])
         db.commit()
+        _ulog("check FAILED: %s" % e)
         return {"ok": False, "configured": True, "message": "تعذر فحص التحديث: %s" % e}
 
 
@@ -325,11 +448,11 @@ def apply_now(db, get_setting, set_setting):
         _state["applying"] = True
     stage = os.path.join(updates_dir(), "staging")
     try:
-        base = update_url(db, get_setting)
-        if not base:
+        bases = update_urls(db, get_setting)
+        if not bases:
             return {"ok": False, "message": "عنوان التحديثات غير مضبوط"}
+        base, m, _errs = fetch_best(bases)
         _ulog("apply: start, base=%s, current=%s" % (base, current_version()))
-        m = fetch_manifest(base)
         _ulog("apply: manifest version=%s" % m.get("version"))
         if _vkey(m["version"]) <= _vkey(effective_version()):
             return {"ok": False, "message": "البرنامج محدّث" if not staged_version() else "التحديث مجهَّز مسبقاً ويعمل عند الفتح القادم",
@@ -506,8 +629,30 @@ def register(app, get_db, get_setting, set_setting, login_required):
         return jsonify(current=cur, available=bool(av) and _vkey(av) > _vkey(stg or cur), available_version=av,
                        staged=bool(stg), staged_version=stg,
                        notes=get_setting(db, "update_available_notes", "") or "", frozen=frozen(),
-                       configured=bool(update_url(db, get_setting)),
+                       configured=bool(update_urls(db, get_setting)),
                        last_check=get_setting(db, "update_last_check", ""))
+
+    @app.route("/api/update/diagnose")
+    @login_required
+    def api_update_diagnose():
+        """v94: يبيّن بالضبط ليش ما يوصل التحديث: كل مصدر (GitHub/Cloudflare) شنو يرجّع + آخر سطور السجل."""
+        db = get_db()
+        res = []
+        for b in update_urls(db, get_setting):
+            try:
+                m = fetch_manifest(b)
+                res.append({"url": b, "ok": True, "version": m["version"], "notes": (m.get("notes") or "")[:120]})
+            except Exception as e:  # noqa: BLE001
+                res.append({"url": b, "ok": False, "error": str(e)[:300]})
+        tail = ""
+        try:
+            with open(os.path.join(updates_dir(), "update_log.txt"), "r", encoding="utf-8") as f:
+                tail = "".join(f.readlines()[-25:])
+        except Exception:
+            pass
+        return jsonify(current=current_version(), staged=staged_version(), frozen=frozen(), hw_id=_my_hw_id(),
+                       auto_check=get_setting(db, "update_auto_check", "1"), last_check=get_setting(db, "update_last_check", ""),
+                       last_error=get_setting(db, "update_last_error", ""), links_status=get_setting(db, "links_last_status", ""), sources=res, log_tail=tail)
 
     @app.route("/api/update/check", methods=["POST"])
     @login_required

@@ -262,6 +262,8 @@ def build_payload(db, visit_id, cfg, token=None):
     # الاسم الظاهر للمريض: كامل كما هو بالبرنامج (راجع README لتقليله إن حبيت)
     payload = {"token": token, "patient_name": data["patient_name"] or "—",
                "status": "ready" if show_ready else "pending",
+               # v95: رقم الزيارة بالـLIS ("v123") — سجل المرضى السحابي يربط به نتيجة المريض حتى لو الـLIS مغلق
+               "lis_id": "v%d" % int(visit_id),
                # اسم المختبر الظاهر بصفحة المريض = اسم المختبر بإعدادات هذا البرنامج (يختلف لكل عميل)
                "lab_name": (database.get_setting(db, "app_name_ar", "") or database.get_setting(db, "app_name", "")
                             or "")[:120]}
@@ -276,7 +278,7 @@ def build_payload(db, visit_id, cfg, token=None):
 
 def _fingerprint(payload):
     # lab_name خارج البصمة: تغيير الاسم لا يستوجب إعادة توليد كل ملفات PDF؛ يصل مع أول دفع طبيعي.
-    raw = json.dumps({k: v for k, v in payload.items() if k != "lab_name"}, sort_keys=True, ensure_ascii=False)
+    raw = json.dumps({k: v for k, v in payload.items() if k not in ("lab_name", "lis_id")}, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -381,9 +383,9 @@ def test_connection(cfg, timeout=20):
         return True, "✅ الاتصال ناجح والمفتاح صحيح."
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            return False, "❌ المفتاح السري غير مطابق لـ API_SECRET_KEY بـ Render."
+            return False, "❌ المفتاح السري غير مطابق لمفتاح البوابة بالسحابة (LIS_KEY / API_SECRET_KEY)."
         if e.code == 500:
-            return False, "❌ السيرفر يقول API_SECRET_KEY غير مضبوط بمتغيرات Render."
+            return False, "❌ السيرفر يقول مفتاح البوابة غير مضبوط (LIS_KEY / API_SECRET_KEY) بالسحابة."
         return False, f"❌ البوابة رجّعت خطأ HTTP {e.code}."
     except Exception as e:  # noqa: BLE001 — أي فشل شبكة نعرضه بنص مفهوم
         return False, f"❌ تعذر الوصول للبوابة (إنترنت/رابط خطأ؟): {type(e).__name__}"
@@ -481,7 +483,7 @@ def _find_missing_visit_ids(db, cfg):
         return set()
     by_token = {r["portal_token"]: r["id"] for r in rows}
     try:
-        res = _post_json(cfg, "/api/missing", {"tokens": list(by_token)[:2000]})
+        res = _post_json(cfg, "/api/missing", {"tokens": list(by_token)[:2000], "lis": 1})
     except Exception:  # noqa: BLE001 — البوابة قد تكون نايمة/بدون إنترنت؛ نجرب بالدورة القادمة
         return set()
     return {by_token[t] for t in (res.get("missing") or []) if t in by_token}

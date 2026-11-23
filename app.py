@@ -20404,7 +20404,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     # ربط «سجل المرضى السحابي» (ledger_sync.py): صفحة /ledger + مزامنة تلقائية. اختياري: أي خطأ لا يوقف البرنامج.
     try:
         import ledger_sync
-        ledger_sync.install(app, dict(next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no, ensure_partner=_ensure_partner_labs))
+        ledger_sync.install(app, dict(next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no, ensure_partner=_ensure_partner_labs, unique_code=unique_test_code))
     except Exception as _le:
         print("ledger_sync not loaded:", _le)
     # كتالوج التحاليل الجاهز: يُثبَّت تلقائياً مرة واحدة لكل جهاز (يضيف الناقص فقط؛ الأسعار 0 ويحددها العميل)
@@ -20557,6 +20557,660 @@ def api_save_results_scale():
 
 lab_styles.register(app, get_db=get_db, get_setting=get_setting, set_setting=set_setting,
                     roles_required=roles_required, log_action=lambda *a, **k: log_action(*a, **k))
+
+
+# =====================================================================================
+# v93 — (1) زر رجوع موحّد بكل صفحة + بطاقة المريض داخل البرنامج فقط (مع زرّي الرجوع)
+#       (2) نقل التحاليل بين الأقسام + صفحة تصحيح أقسام مقترحة (معاينة ثم تطبيق)
+#       (3) INR تلقائي من PT/MNPT/ISI + Absolute Retic تلقائي من Retic% × RBC (+ LDL/VLDL موجود أصلاً)
+#       (4) تفعيل بوابة النتائج بدون لصق مفتاح: ملف portal_activation.json أو زر "استخدام مفتاح السجل السحابي"
+# كل شيء هنا إضافة فقط؛ ما تغيّر أي سطر قديم بالملف.
+# =====================================================================================
+import json as _v93_json
+from flask import render_template_string as _v93_rts, Response
+
+_V93_NAV_JS = r'''<script id="lis-v93-nav">(function(){
+ if(window.__lisV93)return; window.__lisV93=1;
+ var P=location.pathname, inFrame=(window.top!==window.self);
+ function cid(u){try{var a=document.createElement('a');a.href=u;if(a.host!==location.host)return null;var m=a.pathname.match(/^\/patient-card\/(\d+)\/?$/);return m?m[1]:null;}catch(e){return null;}}
+ function openInApp(id){try{if(window.top.lisOpenPatientCard){window.top.lisOpenPatientCard(id);return true;}}catch(e){}return false;}
+ var _o=window.open;
+ window.open=function(u,n,f){var id=cid(u||'');if(id){if(!openInApp(id)){location.href='/patient-card/'+id;}return null;}return _o.apply(window,arguments);};
+ document.addEventListener('click',function(e){var a=(e.target&&e.target.closest)?e.target.closest('a[href]'):null;if(!a||!a.target)return;var id=cid(a.getAttribute('href'));if(id){e.preventDefault();e.stopPropagation();if(!openInApp(id))location.href='/patient-card/'+id;}},true);
+ function goBack(){if(window.opener&&!inFrame){try{window.close();return;}catch(e){}}if(history.length>1){history.back();}else{location.href='/';}}
+ function hasBack(){var els=document.querySelectorAll('a,button');for(var i=0;i<els.length;i++){var t=(els[i].textContent||'').replace(/\s+/g,' ').trim();if(t.length<26&&(t.indexOf('رجوع')>=0||/^\W*Back$/i.test(t))){var r=els[i].getBoundingClientRect();if(r.width>0&&r.height>0)return true;}}return false;}
+ var home=(P==='/'||P==='/dashboard'||P==='/landing'||P==='/login'||P==='/home');
+ var mc=P.match(/^\/patient-card\/(\d+)\/?$/);
+ function nav(u){try{window.top.location.href=u;}catch(e){location.href=u;}}
+ function mk(txt,fn,bg){var b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText='cursor:pointer;border:0;border-radius:9px;padding:7px 14px;color:#fff;background:'+bg+';font:600 13px Tahoma,Arial,sans-serif';b.onclick=fn;return b;}
+ function init(){
+  if(mc&&!document.getElementById('lisPcNav')){
+   var bar=document.createElement('div');bar.id='lisPcNav';
+   bar.style.cssText='display:flex;gap:8px;align-items:center;direction:rtl;padding:8px 12px;background:#F1F5F9;border-bottom:1px solid #CBD5E1;position:sticky;top:0;z-index:9000';
+   bar.appendChild(mk('↩ رجوع إلى صفحة الزيارة',function(){nav('/front-desk/visits/'+mc[1]+'/results');},'#205072'));
+   bar.appendChild(mk('🏠 رجوع إلى الشاشة الرئيسية',function(){nav('/');},'#0F766E'));
+   document.body.insertBefore(bar,document.body.firstChild);
+  }
+  if(!mc&&!home&&!inFrame&&!document.getElementById('lisBackBtn')&&!hasBack()){
+   var b=mk('↩ رجوع',goBack,'#205072');b.id='lisBackBtn';
+   b.style.cssText+=';position:fixed;top:10px;right:12px;z-index:99990;box-shadow:0 3px 10px rgba(0,0,0,.25)';
+   document.body.appendChild(b);
+  }
+  var all=document.querySelectorAll('div,p,span,li');
+  for(var i=0;i<all.length;i++){var el=all[i];if(el.children.length<3&&(el.textContent||'').indexOf('بوابة النتائج غير مفعّلة')>=0&&!el.querySelector('a[href="/portal/activate"]')){var a=document.createElement('a');a.href='/portal/activate';a.textContent=' ⚡ تفعيل البوابة تلقائياً';a.style.cssText='font-weight:700;margin-inline-start:10px;color:#0F766E';el.appendChild(a);break;}}
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){setTimeout(init,450);});else setTimeout(init,450);
+})();</script>'''
+
+
+@app.after_request
+def _v93_inject_nav(resp):
+    try:
+        if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        p = request.path
+        if p.startswith("/static") or "/print/" in p or p.startswith("/api/"):
+            return resp
+        data = resp.get_data()
+        if b"</body>" not in data or b'id="lis-v93-nav"' in data:
+            return resp
+        head, _, tail = data.rpartition(b"</body>")
+        resp.set_data(head + _V93_NAV_JS.encode("utf-8") + b"</body>" + tail)
+    except Exception:
+        pass
+    return resp
+
+
+# ------------------------------------------------------------------ نقل التحاليل بين الأقسام
+def _v93_move_test(db, test_id, sid):
+    t = db.execute("SELECT id, name, section_id, department FROM test_definitions WHERE id=?", (test_id,)).fetchone()
+    sec = db.execute("SELECT * FROM sections WHERE id=?", (sid,)).fetchone()
+    if not t or not sec:
+        return None
+    dept = (sec["dept_name"] or "").strip() or sec["name"]
+    db.execute("UPDATE test_definitions SET section_id=?, department=? WHERE id=?", (sid, dept, test_id))
+    try:
+        log_action("MoveTest", "test_definition", test_id, "%s: %s -> %s" % (t["name"], t["department"], dept))
+    except Exception:
+        pass
+    return {"name": t["name"], "department": dept, "section_id": sid}
+
+
+@app.route("/api/tests/<int:test_id>/move", methods=["POST"])
+@login_required
+def v93_api_test_move(test_id):
+    """ينقل تحليل لقسم ثاني: يتحدث section_id وdepartment بنفس الصف، فيختفي من القسم السابق تلقائياً (بدون نسخة مكررة).
+    نتائج المرضى السابقة مرتبطة بـtest_definition_id فما تتأثر."""
+    db = get_db()
+    d = request.get_json(silent=True) or {}
+    try:
+        sid = int(d.get("section_id"))
+    except (TypeError, ValueError):
+        return jsonify(ok=False, error="اختر القسم"), 400
+    try:
+        r = _v93_move_test(db, test_id, sid)
+        if not r:
+            return jsonify(ok=False, error="التحليل أو القسم غير موجود"), 404
+        db.commit()
+    except Exception as e:  # noqa: BLE001  — نرجّع JSON واضح بدل صفحة خطأ HTML (كانت تظهر كـ«تعذّر الاتصال بالخادم»)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return jsonify(ok=False, error="تعذّر النقل: %s" % str(e)[:160]), 500
+    return jsonify(ok=True, **r)
+
+
+_V93_COAG = {"ddimer", "fviii", "fix", "fvii", "fx", "fxi", "fxii", "fxiii", "fii", "fv", "fib", "fibrinogen",
+             "proteinc", "proteins", "tt", "thrombintime", "vwfag", "vwf", "antithrombin", "at3"}
+_V93_RULES = [  # (مجموعة أسماء مطبّعة, اسم القسم الهدف, أكيد؟)
+    (_V93_COAG, "coagulation", True),
+    ({"erythropoietin", "epo"}, "hormones", True),
+    ({"la"}, "coagulation", False),
+    ({"iron", "tibc", "tsat", "transferrin", "ferritin", "ironprofile"}, "biochemistry", False),
+    ({"sproteinelectro", "proteinelectrophoresis"}, "biochemistry", False),
+]
+
+
+def _v93_dept_suggestions(db):
+    secs = [dict(r) for r in db.execute("SELECT id, name FROM sections ORDER BY sort_order, id").fetchall()]
+    by_name = {_v93_norm(s["name"]): s for s in secs}
+    tests = db.execute("SELECT td.id, td.name, td.section_id, td.department, s.name AS sec_name FROM test_definitions td "
+                       "LEFT JOIN sections s ON s.id=td.section_id WHERE td.is_active=1 ORDER BY td.name").fetchall()
+    out = []
+    for t in tests:
+        n = _v93_norm(t["name"])
+        for names, target, sure in _V93_RULES:
+            if n in names:
+                tgt = by_name.get(_v93_norm(target))
+                if tgt and tgt["id"] != t["section_id"]:
+                    out.append({"id": t["id"], "name": t["name"], "cur": t["sec_name"] or t["department"] or "—",
+                                "to": tgt["id"], "to_name": tgt["name"], "sure": sure})
+                break
+    return secs, out
+
+
+_V93_FIX_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تصحيح أقسام التحاليل</title>
+<style>body{font-family:Tahoma,Arial,sans-serif;background:#F1F5F9;margin:0;padding:24px 20px 60px}.box{max-width:980px;margin:auto;background:#fff;border-radius:14px;padding:20px;box-shadow:0 4px 18px rgba(0,0,0,.08)}
+table{width:100%;border-collapse:collapse;margin-top:12px}th,td{padding:8px 10px;border-bottom:1px solid #E2E8F0;text-align:right}th{background:#E0F2FE}
+button{background:#205072;color:#fff;border:0;border-radius:9px;padding:9px 18px;font:700 14px Tahoma;cursor:pointer}.m{color:#64748B;font-size:13px}.ok{color:#15803D;font-weight:700}</style></head><body><div class="box">
+<h2>تصحيح أقسام التحاليل</h2>
+<p class="m">هذي مقترحات مبنية على أسماء التحاليل الحالية. المؤشّر عليها ✔ «أكيدة» (تخثر/هرمونات)، وغير المؤشّرة «تحتاج قرارك». تقدر تغيّر القسم الهدف لكل صف. النقل يغيّر قسم التحليل فقط ولا يلمس نتائج المرضى السابقة.</p>
+{% if not rows %}<p class="ok">ما لكيت تحاليل تحتاج نقل حسب القواعد الحالية. تقدر تنقل أي تحليل يدوياً بزر 🔀 بشاشة «زيارة جديدة».</p>{% else %}
+<table><tr><th></th><th>التحليل</th><th>قسمه الحالي</th><th>انقله إلى</th></tr>
+{% for r in rows %}<tr data-id="{{r.id}}"><td><input type="checkbox" class="ck" {{'checked' if r.sure else ''}}></td><td>{{r.name}} {% if not r.sure %}<span class="m">(تحتاج قرارك)</span>{% endif %}</td><td>{{r.cur}}</td>
+<td><select class="to">{% for s in secs %}<option value="{{s.id}}" {{'selected' if s.id==r.to else ''}}>{{s.name}}</option>{% endfor %}</select></td></tr>{% endfor %}</table>
+<p><button onclick="apply()">تطبيق المحدد</button> <span id="msg" class="m"></span></p>{% endif %}
+</div><script>function apply(){var items=[];document.querySelectorAll('tr[data-id]').forEach(function(tr){if(tr.querySelector('.ck').checked)items.push({test_id:+tr.dataset.id,section_id:+tr.querySelector('.to').value});});
+if(!items.length){document.getElementById('msg').textContent='ما حددت شي';return;}
+fetch('/management/fix-departments/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:items})}).then(function(r){return r.json();}).then(function(d){document.getElementById('msg').textContent=d.ok?('تم نقل '+d.moved+' تحليل'):(d.error||'فشل');if(d.ok)setTimeout(function(){location.reload();},900);});}</script></body></html>"""
+
+
+@app.route("/management/fix-departments")
+@login_required
+def v93_fix_departments():
+    db = get_db()
+    secs, rows = _v93_dept_suggestions(db)
+    return _v93_rts(_V93_FIX_HTML, rows=rows, secs=secs)
+
+
+@app.route("/management/fix-departments/apply", methods=["POST"])
+@login_required
+def v93_fix_departments_apply():
+    db = get_db()
+    n = 0
+    for it in ((request.get_json(silent=True) or {}).get("items") or []):
+        try:
+            if _v93_move_test(db, int(it["test_id"]), int(it["section_id"])):
+                n += 1
+        except (KeyError, TypeError, ValueError):
+            continue
+    db.commit()
+    return jsonify(ok=True, moved=n)
+
+
+# ------------------------------------------------------------------ التحاليل الحسابية (INR / Absolute Retic)
+def _v93_norm(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _v93_stored(db, ot_id, pid):
+    return db.execute("SELECT id, value_numeric, value_text, flag FROM results WHERE order_test_id=? AND test_parameter_id=?",
+                      (ot_id, pid)).fetchone()
+
+
+def _v93_num(db, ot_id, prm):
+    if not prm:
+        return None
+    row = _v93_stored(db, ot_id, prm["id"])
+    return row["value_numeric"] if row else None
+
+
+def _v93_autofill(db, ot, prm, val, form, field_prefix, user_id, now, patient_id, analyzer_value, decimals=2):
+    """نفس منطق LDL/VLDL: القيمة المكتوبة يدوياً لها الأولوية، والمحسوبة تتحدث تلقائياً وتُحذف إذا اختفت مدخلاتها."""
+    db.execute("CREATE TABLE IF NOT EXISTS lis_auto_calc (order_test_id INTEGER, test_parameter_id INTEGER, "
+               "PRIMARY KEY (order_test_id, test_parameter_id))")
+    typed = ((form or {}).get(f"{field_prefix}param_{prm['id']}", "") or "").strip()
+    cur = _v93_stored(db, ot["id"], prm["id"])
+    has_val = cur is not None and (cur["value_numeric"] is not None or (cur["value_text"] or "").strip() != "")
+    auto_ids = {r_[0] for r_ in db.execute("SELECT test_parameter_id FROM lis_auto_calc WHERE order_test_id=?", (ot["id"],)).fetchall()}
+    if typed:
+        db.execute("DELETE FROM lis_auto_calc WHERE order_test_id=? AND test_parameter_id=?", (ot["id"], prm["id"]))
+        return False
+    if has_val and prm["id"] not in auto_ids:
+        return False                                   # قيمة يدوية: لا نلمسها
+    if val is None:
+        if cur is not None and prm["id"] in auto_ids:
+            db.execute("DELETE FROM results WHERE id=?", (cur["id"],))
+            db.execute("DELETE FROM lis_auto_calc WHERE order_test_id=? AND test_parameter_id=?", (ot["id"], prm["id"]))
+            return True
+        return False
+    val = round(val, decimals)
+    rng = find_reference_range(db, prm["id"], ot["gender"], ot["age"], ot["age_unit"], patient_id=patient_id, analyzer=analyzer_value)
+    flag = "Normal"
+    if rng and rng["low"] is not None and val < rng["low"]:
+        flag = "Low"
+    elif rng and rng["high"] is not None and val > rng["high"]:
+        flag = "High"
+    if cur is not None:
+        if cur["value_numeric"] == val:
+            return False
+        db.execute("UPDATE results SET value_numeric=?, value_text=NULL, flag=?, entered_by=?, entered_at=? WHERE id=?",
+                   (val, flag, user_id, now, cur["id"]))
+    else:
+        db.execute("INSERT INTO results (order_test_id, test_parameter_id, value_numeric, value_text, flag, entered_by, entered_at) "
+                   "VALUES (?, ?, ?, NULL, ?, ?, ?)", (ot["id"], prm["id"], val, flag, user_id, now))
+    db.execute("INSERT OR IGNORE INTO lis_auto_calc (order_test_id, test_parameter_id) VALUES (?, ?)", (ot["id"], prm["id"]))
+    return True
+
+
+def _v93_float_setting(db, key):
+    try:
+        v = float(str(get_setting(db, key, "") or "").replace(",", ".").strip())
+        return v if v > 0 else None
+    except ValueError:
+        return None
+
+
+def _v93_apply_inr(db, ot, parameters, form, field_prefix, user_id, now, patient_id, analyzer_value):
+    """INR = (Patient PT / Control PT[MNPT]) ^ ISI — يُحسب فقط لما يكون ISI معروف (بارامتر ISI بالتحليل أو إعداد inr_isi)
+    وControl معروف (بارامتر PT Control أو إعداد inr_mnpt). بدونهم ما يُحسب شي (حتى ما تنزل INR غلط)."""
+    roles = {}
+    for p in parameters:
+        n = _v93_norm(p["name"])
+        if n == "pt":
+            roles.setdefault("pt", p)
+        elif n in ("ptcontrol", "mnpt", "ptcontrolmnpt", "controlpt", "ptmnpt"):
+            roles.setdefault("ctl", p)
+        elif n == "inr":
+            roles.setdefault("inr", p)
+        elif n == "isi":
+            roles.setdefault("isi", p)
+    if "pt" not in roles or "inr" not in roles:
+        return False
+    pt = _v93_num(db, ot["id"], roles["pt"])
+    ctl = _v93_num(db, ot["id"], roles.get("ctl")) or _v93_float_setting(db, "inr_mnpt")
+    isi = _v93_num(db, ot["id"], roles.get("isi")) or _v93_float_setting(db, "inr_isi")
+    val = None
+    if pt and ctl and isi and pt > 0 and ctl > 0 and isi > 0:
+        try:
+            val = (pt / ctl) ** isi
+        except (OverflowError, ZeroDivisionError):
+            val = None
+    return _v93_autofill(db, ot, roles["inr"], val, form, field_prefix, user_id, now, patient_id, analyzer_value, 2)
+
+
+def _v93_find_ot(db, order_id, code):
+    return db.execute(
+        "SELECT ot2.*, td2.code AS test_code, v.id AS visit_id, p.gender, p.age, p.age_unit "
+        "FROM order_tests ot2 JOIN test_definitions td2 ON td2.id=ot2.test_definition_id "
+        "JOIN orders o2 ON o2.id=ot2.order_id JOIN visits v ON v.id=o2.visit_id JOIN patients p ON p.id=v.patient_id "
+        "WHERE ot2.order_id=? AND td2.code=?", (order_id, code)).fetchone()
+
+
+def _v93_apply_abs_retic(db, ot, parameters, form, field_prefix, user_id, now, patient_id, analyzer_value):
+    """Absolute Retic = (Retic% / 100) × RBC × معامل الوحدة (افتراضي 1000 => x10^9/L من RBC بوحدة x10^12/L).
+    يُحسب عند حفظ RETIC أو CBC (لنفس الطلب)، فقط إذا كان بارامتر Absolute Retic موجود بتحليل RETIC."""
+    code = ot["test_code"] if "test_code" in ot.keys() else ""
+    if code not in ("RETIC", "CBC"):
+        return False
+    if code == "RETIC":
+        retic_ot, retic_params = ot, parameters
+        cbc_ot = _v93_find_ot(db, ot["order_id"], "CBC")
+    else:
+        cbc_ot = ot
+        retic_ot = _v93_find_ot(db, ot["order_id"], "RETIC")
+        retic_params = db.execute("SELECT * FROM test_parameters WHERE test_definition_id=?",
+                                  (retic_ot["test_definition_id"],)).fetchall() if retic_ot else []
+        form, field_prefix = {}, ""
+    if not retic_ot:
+        return False
+    pct_prm = next((p for p in retic_params if _v93_norm(p["name"]) in ("reticulocytecount", "reticulocytes", "reticpercent", "retic")), None)
+    abs_prm = next((p for p in retic_params if "absolute" in _v93_norm(p["name"]) and "retic" in _v93_norm(p["name"])), None)
+    if not abs_prm or not pct_prm:
+        return False
+    pct = _v93_num(db, retic_ot["id"], pct_prm)
+    rbc = None
+    if cbc_ot:
+        cbc_params = db.execute("SELECT * FROM test_parameters WHERE test_definition_id=?", (cbc_ot["test_definition_id"],)).fetchall()
+        rbc_prm = next((p for p in cbc_params if _v93_norm(p["name"]) in ("rbc", "rbcs", "rbccount", "redbloodcells", "redbloodcell")), None)
+        rbc = _v93_num(db, cbc_ot["id"], rbc_prm)
+    val = None
+    if pct is not None and rbc:
+        if rbc > 100:                      # RBC بالخلية/µL => حوّلها لـ x10^12/L
+            rbc = rbc / 1e6
+        factor = _v93_float_setting(db, "abs_retic_factor") or 1000.0
+        val = (pct / 100.0) * rbc * factor
+    return _v93_autofill(db, retic_ot, abs_prm, val, form, field_prefix, user_id, now, patient_id, analyzer_value, 1)
+
+
+_v93_orig_lipid_autocalc = _apply_lipid_autocalc
+
+
+def _apply_lipid_autocalc(db, ot, parameters, form, field_prefix, user_id, now, patient_id, analyzer_value):   # noqa: F811
+    changed = False
+    try:
+        changed = bool(_v93_orig_lipid_autocalc(db, ot, parameters, form, field_prefix, user_id, now, patient_id, analyzer_value))
+    except Exception:
+        pass
+    for fn in (_v93_apply_inr, _v93_apply_abs_retic):
+        try:
+            if fn(db, ot, parameters, form, field_prefix, user_id, now, patient_id, analyzer_value):
+                changed = True
+        except Exception as _e:
+            try:
+                print("v93 calc:", fn.__name__, _e)
+            except Exception:
+                pass
+    return changed
+
+
+_V93_CALC_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>إعدادات التحاليل الحسابية</title>
+<style>body{font-family:Tahoma,Arial,sans-serif;background:#F1F5F9;margin:0;padding:24px 20px 60px}.box{max-width:760px;margin:auto;background:#fff;border-radius:14px;padding:22px;box-shadow:0 4px 18px rgba(0,0,0,.08)}
+label{display:block;margin:14px 0 4px;font-weight:700}input{width:100%;padding:9px 10px;border:1px solid #CBD5E1;border-radius:9px;font:14px Tahoma;box-sizing:border-box}
+.m{color:#64748B;font-size:13px;margin-top:3px}button{background:#205072;color:#fff;border:0;border-radius:9px;padding:9px 18px;font:700 14px Tahoma;cursor:pointer;margin-top:16px;margin-inline-end:8px}.ok{color:#15803D;font-weight:700}h3{margin-top:26px;border-top:1px solid #E2E8F0;padding-top:14px}</style></head><body><div class="box">
+<h2>إعدادات التحاليل الحسابية</h2>{% if msg %}<p class="ok">{{msg}}</p>{% endif %}
+<form method="post"><input type="hidden" name="act" value="save">
+<h3>INR (من PT)</h3><p class="m">INR = (PT المريض ÷ Control/MNPT) ^ ISI. لا يُحسب INR إلا إذا كان ISI معروفاً (من هنا أو من بارامتر ISI داخل التحليل) وControl معروفاً (بارامتر «PT Control» بالتحليل أو القيمة الافتراضية أدناه). إذا كتبت INR يدوياً تبقى قيمتك.</p>
+<label>ISI للكاشف (مطلوب)</label><input name="inr_isi" value="{{v.inr_isi}}" placeholder="مثال 1.1">
+<label>MNPT / Control PT الافتراضي (اختياري — يُستعمل إذا ما انكتب PT Control بالزيارة)</label><input name="inr_mnpt" value="{{v.inr_mnpt}}" placeholder="مثال 13">
+<h3>Absolute Retic</h3><p class="m">Absolute = (Retic% ÷ 100) × RBC × المعامل. المعامل 1000 يعطي النتيجة بوحدة ×10^9/L عندما RBC بوحدة ×10^12/L. يُحسب عند حفظ Retic أو CBC لنفس الطلب.</p>
+<label>معامل الوحدة</label><input name="abs_retic_factor" value="{{v.abs_retic_factor}}">
+<button>حفظ</button></form>
+<h3>إنشاء بارامتر Absolute Retic</h3><p class="m">الحالة: {{'موجود بتحليل RETIC ✔' if abs_exists else 'غير موجود بتحليل RETIC'}}. إنشاؤه يضيف صفاً جديداً لتحليل RETIC (لا يغيّر الصفوف الموجودة).</p>
+<form method="post"><input type="hidden" name="act" value="create_abs"><button {{'disabled' if abs_exists or not retic_id else ''}}>إنشاء Absolute Retic count</button></form>
+<h3>LDL / VLDL</h3><p class="m">موجودة أصلاً: عند عدم إدخالهما يُحسبان بمعادلة Friedewald (VLDL = TG÷5، LDL = TC − HDL − VLDL) وتتوقف الحسبة إذا TG ≥ 400 mg/dL.</p>
+</div></body></html>"""
+
+
+@app.route("/management/calc-settings", methods=["GET", "POST"])
+@login_required
+def v93_calc_settings():
+    db = get_db()
+    msg = ""
+    retic = db.execute("SELECT id FROM test_definitions WHERE code='RETIC' LIMIT 1").fetchone()
+    if request.method == "POST":
+        if request.form.get("act") == "save":
+            for k in ("inr_isi", "inr_mnpt", "abs_retic_factor"):
+                set_setting(db, k, (request.form.get(k) or "").strip().replace(",", ".")[:20])
+            msg = "تم الحفظ"
+        elif request.form.get("act") == "create_abs" and retic:
+            ex = db.execute("SELECT 1 FROM test_parameters WHERE test_definition_id=? AND LOWER(name) LIKE '%absolute%retic%'", (retic["id"],)).fetchone()
+            if not ex:
+                db.execute("INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, 'Absolute Retic count', 'x10^9/L', 'Numeric')", (retic["id"],))
+                log_action("Create", "test_parameter", retic["id"], "Absolute Retic count")
+                msg = "تم إنشاء Absolute Retic count"
+        db.commit()
+    abs_exists = bool(retic and db.execute("SELECT 1 FROM test_parameters WHERE test_definition_id=? AND LOWER(name) LIKE '%absolute%retic%'", (retic["id"],)).fetchone())
+    v = {"inr_isi": get_setting(db, "inr_isi", ""), "inr_mnpt": get_setting(db, "inr_mnpt", ""), "abs_retic_factor": get_setting(db, "abs_retic_factor", "1000") or "1000"}
+    return _v93_rts(_V93_CALC_HTML, v=v, msg=msg, abs_exists=abs_exists, retic_id=bool(retic))
+
+
+# ------------------------------------------------------------------ تفعيل بوابة النتائج بدون لصق مفتاح
+_V93_ACT_DONE = {"v": False}
+
+
+def _v93_apply_activation_file():
+    """ملف portal_activation.json بجانب البرنامج: {"url": "...", "key": "...", "client": "..."} يُطبَّق مرة واحدة تلقائياً ثم يُعاد تسميته."""
+    dirs = []
+    for d in (os.path.dirname(os.path.abspath(__file__)), os.getcwd(), os.path.dirname(getattr(sys, "executable", "") or "")):
+        if d and d not in dirs:
+            dirs.append(d)
+    for d in dirs:
+        fp = os.path.join(d, "portal_activation.json")
+        if not os.path.isfile(fp):
+            continue
+        try:
+            cfg = _v93_json.load(open(fp, encoding="utf-8"))
+            url = str(cfg.get("url") or "").strip().rstrip("/")
+            key = str(cfg.get("key") or "").strip()
+            if url.startswith("http") and key:
+                db = get_db()
+                if not get_setting(db, "portal_api_key", "") or cfg.get("force"):
+                    _v93_save_portal(db, url, key)
+                    db.commit()
+            os.replace(fp, os.path.join(d, "portal_activation.applied.json"))
+        except Exception as _e:
+            print("portal_activation.json:", _e)
+        break
+
+
+def _v93_save_portal(db, url, key):
+    set_setting(db, "portal_url", url.rstrip("/")[:200])
+    if key:
+        set_setting(db, "portal_api_key", key[:200])
+    set_setting(db, "portal_enabled", "1")
+    set_setting(db, "portal_mode", "remote")
+    try:
+        db.execute("DELETE FROM portal_state")          # يعيد دفع الزيارات الأخيرة للبوابة
+    except Exception:
+        pass
+
+
+@app.before_request
+def _v93_boot_activation():
+    if not _V93_ACT_DONE["v"]:
+        _V93_ACT_DONE["v"] = True
+        try:
+            _v93_apply_activation_file()
+        except Exception:
+            pass
+
+
+_V93_PORTAL_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تفعيل بوابة النتائج</title>
+<style>body{font-family:Tahoma,Arial,sans-serif;background:#F1F5F9;margin:0;padding:24px 20px 60px}.box{max-width:720px;margin:auto;background:#fff;border-radius:14px;padding:22px;box-shadow:0 4px 18px rgba(0,0,0,.08)}
+label{display:block;margin:14px 0 4px;font-weight:700}input{width:100%;padding:9px 10px;border:1px solid #CBD5E1;border-radius:9px;font:14px Tahoma;box-sizing:border-box}
+.m{color:#64748B;font-size:13px}button{background:#205072;color:#fff;border:0;border-radius:9px;padding:9px 18px;font:700 14px Tahoma;cursor:pointer;margin-top:14px;margin-inline-end:8px}.g{background:#0F766E}.ok{color:#15803D;font-weight:700}.er{color:#B91C1C;font-weight:700}h3{margin-top:24px;border-top:1px solid #E2E8F0;padding-top:14px}</style></head><body><div class="box">
+<h2>تفعيل بوابة النتائج</h2>
+{% if msg %}<p class="{{ 'ok' if ok else 'er' }}">{{msg}}</p>{% endif %}
+<p class="m">الحالة الحالية: الرابط {{ '✔ ' + url if url else '✘ غير مضبوط' }} — المفتاح {{ '✔ محفوظ' if key_set else '✘ غير مضبوط' }}.</p>
+<p class="m">ملاحظة: بوابة النتائج لها Worker ومفتاح مستقل عن «السجل السحابي»؛ لا تستعمل مفتاح LIS_KEY هنا.</p>
+<h3>الطريقة 1: ملف تفعيل جاهز لكل عميل (بدون لصق)</h3>
+<p class="m">من جهاز مضبوط، حمّل الملف أدناه وانسخه بجانب برنامج العميل باسم <b>portal_activation.json</b>؛ يتفعّل تلقائياً أول تشغيل ثم يُعاد تسميته. اكتب اسم العميل:</p>
+<form method="get" action="/portal/activation-file"><input name="client" placeholder="اسم العميل (اختياري)"><button type="submit">تحميل ملف التفعيل لهذا الجهاز</button></form>
+<h3>الطريقة 2: إدخال يدوي</h3>
+<form method="post"><input type="hidden" name="act" value="manual"><label>رابط البوابة</label><input name="url" value="{{url}}" placeholder="https://..."><label>المفتاح</label><input name="key" placeholder="اتركه فارغاً للإبقاء على المحفوظ"><button>حفظ وتفعيل</button></form>
+</div></body></html>"""
+
+
+@app.route("/portal/activate", methods=["GET", "POST"])
+@login_required
+def v93_portal_activate():
+    db = get_db()
+    msg, ok = "", True
+    if request.method == "POST":
+        act = request.form.get("act")
+        url = (request.form.get("url") or "").strip()
+        key = (request.form.get("key") or "").strip()
+        if not url.startswith("http") or not (key or get_setting(db, "portal_api_key", "")):
+            msg, ok = "الرابط أو المفتاح غير صالح", False
+        else:
+            _v93_save_portal(db, url, key)
+            db.commit()
+            try:
+                cloud_sync.trigger()
+            except Exception:
+                pass
+            msg = "تم تفعيل بوابة النتائج. جرّب طباعة QR لزيارة (أو اضغط «اختبار الاتصال» من الإعدادات)."
+    return _v93_rts(_V93_PORTAL_HTML, msg=msg, ok=ok, url=get_setting(db, "portal_url", "") or "",
+                    key_set=bool(get_setting(db, "portal_api_key", "")))
+
+
+@app.route("/portal/activation-file")
+@login_required
+def v93_portal_activation_file():
+    db = get_db()
+    url = (get_setting(db, "portal_url", "") or "").strip()
+    key = (get_setting(db, "portal_api_key", "") or "").strip()
+    if not (url and key):
+        return "فعّل البوابة بهذا الجهاز أولاً (/portal/activate)", 400
+    body = _v93_json.dumps({"url": url, "key": key, "client": (request.args.get("client") or "")[:80]}, ensure_ascii=False, indent=2)
+    return Response(body, mimetype="application/json",
+                    headers={"Content-Disposition": "attachment; filename=portal_activation.json"})
+# ===================== end v93 =====================
+
+
+# ===================== v94 =====================
+# (1) شاشة «الإحصائيات» داخل الـLIS (نفس تبويبات سجل المرضى؛ المختبر/الطبيب بلا نشاط بالفترة ما يظهر)
+# (2) منع فتح بطاقة المريض بنافذة/متصفح خارجي: نغلق أي نافذة مكرَّرة تُفتح بـ?modal=1 خارج إطار البرنامج،
+#     ونحوّل أي window.open/رابط target لبطاقة مريض إلى نافذة البرنامج الداخلية (يُحقن بأول <head> قبل أي سكربت).
+# (3) توليد ملف portal_activation.json جاهز للعميل (للمصمم فقط) — نفس صيغة v93.
+# إضافة فقط: لا يتغيّر أي سطر قديم.
+try:
+    import lis_stats as _v94_stats
+    _v94_stats.install(app, get_db, get_setting, set_setting, login_required)
+except Exception as _v94_e:           # لو الملف غير موجود/فيه خطأ: البرنامج يكمل بدون الإحصائيات
+    print("lis_stats not loaded:", _v94_e)
+
+_V94_HEAD_JS = r"""<script id="lis-v94-head">(function(){
+ if(window.__lisV94)return; window.__lisV94=1;
+ var inFrame=(window.top!==window.self);
+ var isCard=/^\/patient-card\/\d+\/?$/.test(location.pathname);
+ if(!inFrame && isCard && /[?&]modal=1(&|$)/.test(location.search)){
+  // هذي النافذة مخصصة للعرض داخل إطار البرنامج فقط. إذا انفتحت لحالها (متصفح خارجي/نافذة ثانية) نغلقها.
+  try{window.close();}catch(e){}
+  document.addEventListener('DOMContentLoaded',function(){
+   document.body.innerHTML='<div style="font:700 18px Tahoma;padding:40px;text-align:center;direction:rtl">فُتحت بطاقة المريض داخل البرنامج. يمكنك إغلاق هذه النافذة.</div>';
+   setTimeout(function(){try{window.close();}catch(e){}},300);
+  });
+  return;
+ }
+ function cid(u){try{var a=document.createElement('a');a.href=u;if(a.host!==location.host)return null;var m=a.pathname.match(/^\/patient-card\/(\d+)\/?$/);return m?m[1]:null;}catch(e){return null;}}
+ function openIn(id){try{if(window.top.lisOpenPatientCard){window.top.lisOpenPatientCard(id);return true;}}catch(e){}return false;}
+ var _o=window.open;
+ window.open=function(u,n,f){var id=cid(String(u||''));if(id){if(!openIn(id)){location.href='/patient-card/'+id;}return null;}return _o.apply(window,arguments);};
+ document.addEventListener('click',function(e){var a=(e.target&&e.target.closest)?e.target.closest('a[href]'):null;if(!a)return;var id=cid(a.getAttribute('href'));
+  if(id&&(a.target&&a.target!=='_self'&&a.target!=='_top')){e.preventDefault();e.stopPropagation();if(!openIn(id))location.href='/patient-card/'+id;}},true);
+})();</script>"""
+
+
+@app.after_request
+def _v94_inject_head(resp):
+    try:
+        if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        p = request.path
+        if p.startswith("/static") or p.startswith("/api/"):
+            return resp
+        data = resp.get_data()
+        if b"lis-v94-head" in data:
+            return resp
+        _m = re.search(rb"<head[\s>]", data)
+        if _m:
+            j = data.find(b">", _m.start())
+            if j >= 0:
+                resp.set_data(data[:j + 1] + _V94_HEAD_JS.encode("utf-8") + data[j + 1:])
+                return resp
+        k = data.find(b"<body")
+        if k >= 0:
+            resp.set_data(data[:k] + _V94_HEAD_JS.encode("utf-8") + data[k:])
+    except Exception:
+        pass
+    return resp
+
+
+@app.route("/portal/make-activation", methods=["GET", "POST"])
+def v94_portal_make_activation():
+    """للمصمم فقط: يولّد portal_activation.json (رابط البوابة + مفتاحها) للعميل. ينسخه بمجلد البرنامج فيتفعّل تلقائياً."""
+    if not session.get("designer_id"):
+        return Response("هذه الصفحة للمصمم فقط.", 403)
+    if request.method == "POST":
+        u = (request.form.get("url") or "").strip().rstrip("/")
+        k = (request.form.get("key") or "").strip()
+        if not u.lower().startswith("https://") or len(k) < 8:
+            return Response("الرابط لازم https والمفتاح 8 أحرف على الأقل", 400)
+        return Response(_v93_json.dumps({"url": u, "key": k}, ensure_ascii=False, indent=1), mimetype="application/json",
+                        headers={"Content-Disposition": "attachment; filename=portal_activation.json"})
+    db = get_db()
+    cur_url = get_setting(db, "portal_url", "") or ""
+    return Response("<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;max-width:640px;margin:30px auto'>"
+                    "<h2>ملف تفعيل بوابة النتائج للعميل</h2><p>الصق رابط بوابة هذا العميل ومفتاحها، نزّل الملف وأرسله له. يضعه بمجلد البرنامج ويعيد فتحه.</p>"
+                    "<form method=post><label>رابط البوابة</label><br><input name=url style='width:100%;padding:8px' value='" + cur_url.replace("'", "") + "'><br><br>"
+                    "<label>مفتاح البوابة</label><br><input name=key style='width:100%;padding:8px'><br><br>"
+                    "<button style='padding:10px 18px'>تنزيل portal_activation.json</button></form></body>", mimetype="text/html")
+# ===================== end v94 =====================
+
+
+
+# ===================== v95: ربط العميل تلقائياً (بدون لصق ملفات) =====================
+# المصمم: /designer/client-link ← يولّد links_<HWID>.json (موقّع + مشفّر بمعرّف جهاز العميل) ← يضعه بجانب update.json
+# (مجلد updates بـGitHub و/أو lab-ledger-cloud\public\updates) ← جهاز العميل يلتقطه مع فحص التحديث ويضبط السجل السحابي والبوابة بنفسه.
+def _v95_apply_links(db, data):
+    done = []
+    lu = str(data.get("ledger_url") or "").strip().rstrip("/")
+    lk = re.sub(r"[^A-Za-z0-9_.\-]", "", str(data.get("ledger_key") or ""))
+    if lu.lower().startswith("https://") and lk:
+        set_setting(db, "ledger_url", lu)
+        set_setting(db, "ledger_key", lk[:200])
+        set_setting(db, "ledger_enabled", "1")
+        done.append("السجل السحابي")
+    pu = str(data.get("portal_url") or "").strip().rstrip("/")
+    pk = str(data.get("portal_key") or "").strip()
+    if pu.lower().startswith("http") and pk:
+        _v93_save_portal(db, pu, pk)
+        done.append("بوابة النتائج")
+    db.commit()
+    try:
+        cloud_sync.trigger()
+    except Exception:
+        pass
+    return ("تم ربط: " + "، ".join(done)) if done else "ملف الربط فارغ"
+
+
+try:
+    lab_updater.set_links_applier(_v95_apply_links)
+except Exception as _v95_e:
+    print("links applier not set:", _v95_e)
+
+
+_V95_LINK_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>ربط عميل</title>
+<style>body{font-family:Tahoma,Arial,sans-serif;background:#F1F5F9;margin:0;padding:24px 20px 60px}.box{max-width:760px;margin:auto;background:#fff;border-radius:14px;padding:22px}
+label{display:block;margin:14px 0 4px;font-weight:700}input{width:100%;padding:9px 10px;border:1px solid #CBD5E1;border-radius:9px;font:14px Tahoma;box-sizing:border-box;direction:ltr}
+.m{color:#64748B;font-size:13px;line-height:1.9}button{background:#205072;color:#fff;border:0;border-radius:9px;padding:10px 18px;font:700 14px Tahoma;cursor:pointer;margin:14px 6px 0 0}button.g{background:#64748b}
+code{background:#eef2f6;padding:2px 6px;border-radius:5px;direction:ltr;display:inline-block}.er{color:#b91c1c}</style></head><body><div class="box">
+<h2>ربط عميل تلقائياً (بدون لصق ملفات عنده)</h2>
+{% if err %}<p class="er">{{err}}</p>{% endif %}
+<p class="m">1) اكتب معرّف جهاز العميل (Hardware ID — يظهر بشاشة الترخيص عنده، أو من لوحة المصمم). 2) اكتب رابط ومفتاح السجل السحابي و/أو بوابة النتائج الخاصة بهذا العميل.
+3) اضغط «تنزيل». 4) ضع الملف <code>links_&lt;HWID&gt;.json</code> بنفس مكان <code>update.json</code>: بمجلد <code>updates</code> بمستودع GitHub، و/أو بمجلد <code>lab-ledger-cloud\\public\\updates</code> ثم شغّل <code>نشر-التحديث.bat</code>.
+العميل يلتقطه تلقائياً (خلال دقائق من فتح البرنامج، ثم كل 6 ساعات، أو فوراً بزر «تحقق من تحديث الآن»). الملف موقّع بمفتاح تحديثاتك ومشفّر لجهاز هذا العميل فقط، فلا ينفع لجهاز ثاني.</p>
+<form method="post">
+<label>معرّف جهاز العميل (HWID)</label><input name="hw" required value="{{hw}}">
+<label>رابط السجل السحابي (https://…)</label><input name="ledger_url" value="{{lu}}">
+<label>مفتاح الربط LIS_KEY (لكل عميل مفتاح مختلف)</label><input name="ledger_key" autocomplete="off" value="{{lk}}">
+<label>رابط بوابة النتائج</label><input name="portal_url" value="{{pu}}">
+<label>مفتاح بوابة النتائج</label><input name="portal_key" autocomplete="off" value="{{pk}}">
+<button type="button" class="g" onclick="fillMine()">تعبئة من الإعدادات المحفوظة بهذا الجهاز</button><button type="submit">تنزيل links_&lt;HWID&gt;.json</button></form>
+<p class="m">ملاحظة: بوابة النتائج لها Worker/Render ومفتاح مستقل عن السجل السحابي؛ لا تستعمل LIS_KEY هناك. إذا مفتاح البوابة ضاع من هذا الجهاز: ادخل لوحة Render/Cloudflare الخاصة بالبوابة وانسخ المفتاح (أو ولّد مفتاحاً جديداً هناك) ثم الصقه هنا.</p>
+<p class="m"><a href="/">رجوع للشاشة الرئيسية</a></p></div>
+<script>function fillMine(){fetch('/designer/client-link/mine',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){
+var f=document.forms[0];f.ledger_url.value=j.ledger_url||'';f.ledger_key.value=j.ledger_key||'';f.portal_url.value=j.portal_url||'';f.portal_key.value=j.portal_key||'';})}</script></body></html>"""
+
+
+@app.route("/designer/client-link", methods=["GET", "POST"])
+def v95_client_link():
+    if not session.get("designer_id"):
+        return Response("هذه الصفحة للمصمم فقط.", 403)
+    db = get_db()
+    f = request.form if request.method == "POST" else {}
+    hw = re.sub(r"[^A-Za-z0-9_-]", "", (f.get("hw") or "")).upper()
+    lu, lk = (f.get("ledger_url") or "").strip().rstrip("/"), (f.get("ledger_key") or "").strip()
+    pu, pk = (f.get("portal_url") or "").strip().rstrip("/"), (f.get("portal_key") or "").strip()
+    err = ""
+    if request.method == "POST":
+        data = {}
+        if lu and lk:
+            if not lu.lower().startswith("https://"):
+                err = "رابط السجل لازم يبدأ بـ https://"
+            data.update(ledger_url=lu, ledger_key=lk)
+        if pu and pk:
+            if not pu.lower().startswith("https://"):
+                err = "رابط البوابة لازم يبدأ بـ https://"
+            data.update(portal_url=pu, portal_key=pk)
+        if not hw:
+            err = "اكتب معرّف جهاز العميل"
+        elif not data:
+            err = "أدخل (رابط + مفتاح) للسجل أو للبوابة (أو للاثنين)"
+        if not err:
+            try:
+                created = datetime.now().isoformat(timespec="seconds")
+                payload = {"created": created, "links": lab_updater.seal_links(hw, created, data)}
+                env = {"created": created, "sig": _cfg_sign(db, created, payload), "payload": payload}
+                log_action("ClientLink", "settings", 0, hw)
+                return Response(_v93_json.dumps(env, ensure_ascii=False, indent=1), mimetype="application/json",
+                                headers={"Content-Disposition": "attachment; filename=links_%s.json" % hw})
+            except Exception as e:  # noqa: BLE001
+                err = "تعذّر التوقيع: %s" % e
+    return _v93_rts(_V95_LINK_HTML, err=err, hw=hw, lu=lu, lk=lk, pu=pu, pk=pk)
+
+
+@app.route("/designer/client-link/mine")
+def v95_client_link_mine():
+    if not session.get("designer_id"):
+        return jsonify(error="designer only"), 403
+    db = get_db()
+    return jsonify(ledger_url=get_setting(db, "ledger_url", "") or "", ledger_key=get_setting(db, "ledger_key", "") or "",
+                   portal_url=get_setting(db, "portal_url", "") or "", portal_key=get_setting(db, "portal_api_key", "") or "")
+# ===================== end v95 =====================
 
 
 if __name__ == "__main__":

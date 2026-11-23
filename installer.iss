@@ -35,6 +35,9 @@ Source: "stop_lab.bat"; DestDir: "{app}"; Flags: ignoreversion
 ; optional per-client settings: put portal_preset.json (made by tools\make_portal_preset.py) NEXT TO LabSystem_Setup.exe;
 ; the installer copies it into the app folder and the program applies it on first start (portal URL/key, lab name...)
 Source: "{src}\portal_preset.json"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist ignoreversion
+; v94: ledger_link.json (رابط+مفتاح السجل السحابي) و portal_activation.json (رابط+مفتاح بوابة النتائج): ضعهما بجانب LabSystem_Setup.exe وقت البناء
+Source: "{src}\ledger_link.json"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist ignoreversion
+Source: "{src}\portal_activation.json"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist ignoreversion
 
 [Icons]
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\start_lab.vbs"""; IconFilename: "{app}\{#MyAppExe}"; WorkingDir: "{app}"
