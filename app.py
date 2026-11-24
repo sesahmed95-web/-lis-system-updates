@@ -21141,6 +21141,23 @@ def v94_portal_make_activation():
                     "<button style='padding:10px 18px'>تنزيل portal_activation.json</button></form></body>", mimetype="text/html")
 # ===================== end v94 =====================
 
+# ===================== v97: تفاصيل الإحصائيات (lis_stats_plus.py) =====================
+# ضغط على أي تاريخ بالإحصائيات ← مرضى اليوم وتحاليلهم؛ مختبرات أرسلت لنا؛ تحاليل أرسلناها لمختبرات؛ PDF + واتساب.
+def _v97_make_pdf(html_content, name):
+    import pdf_export
+    p = pdf_export.make_temp_pdf_path(re.sub(r"[^\w\-]+", "_", name))
+    _v86_html_to_pdf(html_content, request.url_root, p)
+    return p
+
+
+try:
+    import lis_stats_plus as _v97_sp
+    _v97_sp.install(app, dict(get_db=get_db, login_required=login_required, get_setting=get_setting, set_setting=set_setting,
+                              make_pdf=_v97_make_pdf, open_wa=_open_whatsapp_with_pdf))
+except Exception as _v97_e:
+    print("lis_stats_plus not loaded:", _v97_e)
+# ===================== end v97 =====================
+
 
 
 # ===================== v95: ربط العميل تلقائياً (بدون لصق ملفات) =====================

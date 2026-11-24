@@ -2117,3 +2117,4 @@
 [2026-11-23T11:01:09] SLOW 5.5s POST /api/tests/143/move? (v93_api_test_move)
 [2026-11-23T11:01:23] SLOW 5.6s POST /api/tests/180/move? (v93_api_test_move)
 [2026-11-23T11:01:39] SLOW 5.6s POST /api/tests/139/move? (v93_api_test_move)
+[2026-11-24T10:18:03] SLOW 2.2s POST /designer/update/check-now? (designer_update_check_now)
