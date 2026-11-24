@@ -21089,6 +21089,37 @@ def _v94_inject_head(resp):
     return resp
 
 
+_V96_NOAUTOFILL_JS = """<script>/* v96-noautofill */(function(){
+var sel='input[type=password],input[name=gate_username],input[name=new_gate_username]';
+function prep(){document.querySelectorAll(sel).forEach(function(el){
+  el.setAttribute('autocomplete', el.type==='password' ? 'new-password' : 'off');
+  if(!el.dataset.v96){el.dataset.v96='1';
+    el.addEventListener('keydown',function(){el.dataset.typed='1';});
+    el.addEventListener('paste',function(){el.dataset.typed='1';});}});}
+function clean(){document.querySelectorAll(sel).forEach(function(el){
+  if(el.dataset.typed!=='1' && el.value){el.value='';}});}
+prep();clean();
+[150,500,1200,2500,5000].forEach(function(t){setTimeout(function(){prep();clean();},t);});
+})();</script>"""
+
+
+@app.after_request
+def _v96_settings_no_autofill(resp):
+    """شاشة الإعدادات: المتصفح يعبّي حقول اليوزر/الباسوورد الحالي تلقائياً بقيم محفوظة (مثلاً رابط)، فيفشل حفظ بطاقات التحليل المجاني/الحذف. نمنع التعبئة ونفرّغ المعبّى."""
+    try:
+        if request.method != "GET" or request.path != "/management/settings":
+            return resp
+        if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        data = resp.get_data()
+        if b"v96-noautofill" in data or b"</body>" not in data:
+            return resp
+        resp.set_data(data.replace(b"</body>", _V96_NOAUTOFILL_JS.encode("utf-8") + b"</body>", 1))
+    except Exception:
+        pass
+    return resp
+
+
 @app.route("/portal/make-activation", methods=["GET", "POST"])
 def v94_portal_make_activation():
     """للمصمم فقط: يولّد portal_activation.json (رابط البوابة + مفتاحها) للعميل. ينسخه بمجلد البرنامج فيتفعّل تلقائياً."""

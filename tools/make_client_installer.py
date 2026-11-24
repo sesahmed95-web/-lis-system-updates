@@ -27,9 +27,9 @@ for _f in ("scrub_designer_seed", "sanitize_db", "EXCLUDE_FILES"):
         sys.exit("ERROR: tools\\seal_client_package.py is an OLD version (missing %s). Replace it with the seal_client_package.py from the zip." % _f)
 
 SKIP_DIRS = {".git", "__pycache__", "build", "dist", "installer_output", "portal_pdf_cache", "whatsapp_profile", "tools",
-             "sealed", "client_packages", "client_build", "venv", ".venv", ".idea", ".vscode", "node_modules"}
+             "sealed", "client_packages", "client_build", "backups", "backup", "LabSystemBackup", "venv", ".venv", ".idea", ".vscode", "node_modules"}
 SKIP_FILES = set(seal.EXCLUDE_FILES) | {"local_config.py", ".gitignore", ".gitattributes", "build_client.bat", "installer_client.iss"}
-SKIP_PATTERNS = ["*.bak*", "*.pyc", "*.log", "*.zip", "lis.db*", "*.db-wal", "*.db-shm", "- Copy.gitignore", "designer_login_PRIVATE.txt"]
+SKIP_PATTERNS = ["*.bak*", "*.pyc", "*.log", "*.zip", "*.db", "*.sqlite*", "lis.db*", "*.db-wal", "*.db-shm", "- Copy.gitignore", "designer_login_PRIVATE.txt"]
 STATIC_SKIP_DIRS = {"whatsapp_pdfs", "pdf_archive", "reports_pdf"}
 SENSITIVE = re.compile(r"(token|secret|api_?key|password|passwd|whatsapp|smtp)", re.I)
 UPLOAD_KEEP = ("logo*", "dashboard-bg*")          # files directly inside static/uploads
@@ -44,7 +44,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("workspace"); ap.add_argument("--out", default=None)
     ap.add_argument("--admin-password"); ap.add_argument("--deactivate-demo-users", action="store_true")
-    ap.add_argument("--keep-license", action="store_true"); ap.add_argument("--keep-designer", action="store_true")
+    ap.add_argument("--links", default=None, help="folder made by make_client_links.py (client_links\\<Client>): its ledger_link.json / portal_activation.json are embedded INSIDE the Setup"); ap.add_argument("--keep-portal", action="store_true", help="ship YOUR portal url+key inside the Setup (default: no - each client gets portal_activation.json)"); ap.add_argument("--keep-license", action="store_true"); ap.add_argument("--keep-designer", action="store_true")
     ap.add_argument("--keep-setting", action="append", default=[]); ap.add_argument("--yes", action="store_true")
     a = ap.parse_args()
     ws = os.path.abspath(a.workspace)
@@ -56,6 +56,20 @@ def main():
     os.makedirs(bld)
 
     # 1) database
+    print("make_client_installer build r5 (skips backups, blocks DB copies, keeps non-secret WhatsApp/SMTP settings)")
+    # إعدادات واتساب/SMTP غير السرّية (قوالب الرسائل، رمز الدولة، تفعيل...) تبقى للعميل "جاهزة"؛ تُفرَّغ فقط الأسرار الحقيقية
+    _SECRETISH = re.compile(r"(token|secret|api_?key|password|passwd|phone_?number_?id|account_?sid|auth|bearer|session|cookie|private)", re.I)
+    _SECRET_VAL = re.compile(r"(token|apikey|api_key|secret|access_key|key)=|bearer\s|eyJ[A-Za-z0-9_-]{20,}|ghp_|github_pat_|sk-[A-Za-z0-9]", re.I)
+    _keep_extra = []
+    try:
+        _c = sqlite3.connect("file:%s?mode=ro" % os.path.join(ws, "lis.db").replace("\\", "/"), uri=True)
+        for _k, _v in _c.execute("SELECT key, value FROM settings"):
+            if re.search(r"(whatsapp|smtp)", _k, re.I) and not _SECRETISH.search(_k) and not _SECRET_VAL.search(str(_v or "")):
+                _keep_extra.append(_k)
+        _c.close()
+    except Exception:
+        pass
+    a.keep_setting = list(a.keep_setting or []) + _keep_extra
     report = seal.sanitize_db(os.path.join(ws, "lis.db"), os.path.join(bld, "lis.db"), a)
 
     # حذف أسرارك وروابطك الخاصة (GitHub، ربط السجل ledger، مفاتيح الذكاء، كلمات سر البوّابات، بقايا زياراتك)
@@ -64,10 +78,12 @@ def main():
     if not os.path.exists(_sp): sys.exit("ERROR: tools\\client_scrub.py is missing - stopped, nothing built.")
     _sspec = importlib.util.spec_from_file_location("client_scrub", _sp)
     scrub = importlib.util.module_from_spec(_sspec); _sspec.loader.exec_module(scrub)
-    _removed = scrub.scrub(os.path.join(bld, "lis.db"), keep_portal=True, reset_gates=True, drop_ai=True)
-    _left = scrub.scrub(os.path.join(bld, "lis.db"), dry=True, keep_portal=True, reset_gates=True, drop_ai=True)
+    _removed = scrub.scrub(os.path.join(bld, "lis.db"), keep_portal=a.keep_portal, reset_gates=True, drop_ai=True)
+    _left = scrub.scrub(os.path.join(bld, "lis.db"), dry=True, keep_portal=a.keep_portal, reset_gates=True, drop_ai=True)
     if _left: sys.exit("ERROR: private settings still in client DB: %s" % ", ".join(_left))
-    report.append("client_scrub: removed %d private settings: %s" % (len(_removed), ", ".join(_removed) or "-"))
+    _grp = {}
+    for _k in _removed: _grp[re.sub(r"[_v\-\d]+$", "", _k) or _k] = _grp.get(re.sub(r"[_v\-\d]+$", "", _k) or _k, 0) + 1
+    report.append("client_scrub: removed %d private settings: %s" % (len(_removed), ", ".join("%s x%d" % (g, n) if n > 1 else g for g, n in sorted(_grp.items())) or "-"))
 
     # v77: تأكد أن بوابة النتائج مضبوطة بهذا المجلد — وإلا العميل يطلع له "اضبط رابط بوابة النتائج أولاً" ما يقدر يطبع QR
     try:
@@ -137,7 +153,7 @@ def main():
     # 3b) branding preset (شعار + أطباء الترويسة بشهاداتهم + تصاميم + صور الشاشة الرئيسية) داخل الـSetup نفسه.
     #     يُطبَّق عند أول تشغيل مرة وحدة بكل جهاز حتى لو كان عند العميل lis.db قديم (الـSetup ما يبدّل قاعدة موجودة).
     try:
-        pre_msg = build_branding_preset(bld)
+        pre_msg = build_branding_preset(bld, keep_portal=a.keep_portal)
     except Exception as e:
         pre_msg = "WARNING: branding preset not created: %r" % (e,)
     print(pre_msg)
@@ -154,13 +170,45 @@ def main():
         fn = ("\r\nfunction LisPresetNotApplied: Boolean;\r\nbegin\r\n"
               "  Result := not FileExists(ExpandConstant('{app}\\portal_preset.applied.json'));\r\nend;\r\n")
         iss = (iss.replace("[Code]", "[Code]" + fn, 1) if "[Code]" in iss else iss + "\r\n[Code]" + fn)
+    if a.links:
+        _got = []
+        for _nm in ("ledger_link.json", "portal_activation.json"):
+            _src = os.path.join(os.path.abspath(a.links), _nm)
+            if not os.path.isfile(_src): continue
+            try:
+                _j = json.load(open(_src, encoding="utf-8-sig"))
+                assert str(_j.get("url", "")).lower().startswith("https://") and len(str(_j.get("key", ""))) >= 8
+            except Exception:
+                sys.exit("ERROR: %s is not a valid link file (needs https url + key)." % _src)
+            shutil.copy2(_src, os.path.join(bld, _nm))
+            if 'Source: "%s"; DestDir' % _nm not in iss:
+                iss = iss.replace("[Files]", "[Files]\r\n; per-client link file embedded in this Setup (applied once at first start)\r\nSource: \"%s\"; DestDir: \"{app}\"; Flags: ignoreversion" % _nm, 1)
+            _got.append(_nm)
+        if not _got: sys.exit("ERROR: --links folder has neither ledger_link.json nor portal_activation.json.")
+        report.append("links embedded in Setup: " + ", ".join(_got))
     if not has_icon: iss = re.sub(r"(?im)^SetupIconFile=.*\r?\n", "", iss)
     open(os.path.join(bld, "installer_client.iss"), "w", encoding="utf-8-sig", newline="").write(iss)
 
     # فحص تسريب نهائي: أي قيمة سر موجودة بقاعدتك الأصلية ما لازم تظهر بأي ملف داخل client_build (كود، preset، قاعدة)
-    leaks = scrub.leak_scan(os.path.join(ws, "lis.db"), bld, keep_keys=seal.KEEP_SETTINGS, sensitive_re=seal.SENSITIVE_RE)
+    # أي ملف قاعدة SQLite غير lis.db بنسخة العميل = نسخة من بياناتك (مرضى/أسرار): نوقف البناء
+    _dbs = []
+    for _dp, _, _fns in os.walk(bld):
+        for _fn in _fns:
+            _fp = os.path.join(_dp, _fn)
+            if os.path.abspath(_fp) == os.path.abspath(os.path.join(bld, "lis.db")): continue
+            try:
+                with open(_fp, "rb") as _fh:
+                    if _fh.read(16) == b"SQLite format 3\x00": _dbs.append(os.path.relpath(_fp, bld))
+            except OSError:
+                pass
+    if _dbs: sys.exit("ERROR: SQLite database files found inside the client build (copies of your data):\n  " + "\n  ".join(_dbs))
+    leaks = scrub.leak_scan(os.path.join(ws, "lis.db"), bld, keep_keys=(set(_keep_extra) | (set(seal.KEEP_SETTINGS) if a.keep_portal else set())), sensitive_re=seal.SENSITIVE_RE)
     if leaks:
-        print("\n".join(report)); sys.exit("ERROR: your secret values were found inside the client build - nothing is safe to send:\n  " + "\n  ".join(leaks))
+        _byf = {}
+        for _l in leaks:
+            _f, _k = _l.split("  <-  ", 1); _byf.setdefault(_f, []).append(_k)
+        _sum = "\n  ".join("%s  (%d secrets)" % (f, len(k)) for f, k in sorted(_byf.items()))
+        print("\n".join(report)); sys.exit("ERROR: your secret values were found inside the client build - nothing is safe to send. Files:\n  " + _sum + "\n(make_client_installer build r5 - if you still see 'backups' here, the old script is the one running)")
     report.append("leak scan: OK (no secret value from your lis.db appears in any client_build file)")
     print("\n".join(report)); print("\nOK: %d files in %s" % (n, bld))
     if skipped_up: print("NOT copied from static\\uploads (not logo/background/stamps): " + ", ".join(sorted(set(skipped_up))[:20]))
@@ -187,14 +235,14 @@ DESIGN_KEYS = (
 )
 
 
-def build_branding_preset(bld):
+def build_branding_preset(bld, keep_portal=False):
     """يقرأ النسخة المنظَّفة bld/lis.db + bld/static/uploads ويكتب bld/portal_preset.json (مفتاح البوابة يُضمَّن فقط داخل Setup هذا العميل — لا ترفع portal_preset.json لأي مكان)."""
     con = sqlite3.connect(os.path.join(bld, "lis.db")); con.row_factory = sqlite3.Row
     try:
         # v78: إعدادات بوابة النتائج (الرابط + المفتاح) تنتقل داخل الـSetup نفسه (نفس المفتاح اللي أصلاً داخل lis.db بالـSetup) —
         # حتى لو العميل عنده lis.db قديم ما ينتقل له، الـpreset يضبطها مرة وحدة عند أول تشغيل.
         keys = ("app_name", "app_name_ar", "lab_phone", "lab_address", "logo_path",
-                "portal_url", "portal_api_key", "portal_enabled", "portal_mode", "portal_pdf_enabled") + DESIGN_KEYS
+                "portal_enabled", "portal_mode", "portal_pdf_enabled") + (("portal_url", "portal_api_key") if keep_portal else ()) + DESIGN_KEYS
         st = {r["key"]: r["value"] for r in con.execute(
             "SELECT key, value FROM settings WHERE key IN (%s)" % ",".join("?" * len(keys)), keys)}
         cols = [r[1] for r in con.execute("PRAGMA table_info(examining_doctors_list)")]

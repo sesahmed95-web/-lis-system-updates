@@ -52,9 +52,11 @@ def scrub(path, keep_portal=True, reset_gates=False, drop_ai=False, dry=False):
     try:
         keys = find(db, keep_portal, reset_gates, drop_ai)
         if not dry:
+            db.execute("PRAGMA secure_delete=ON")        # لا تبقى قيم الأسرار المحذوفة داخل صفحات الملف
             for k in keys:
                 db.execute("DELETE FROM settings WHERE key=?", (k,))
             db.commit()
+            db.execute("VACUUM")                          # يعيد كتابة الملف بدون أي بقايا محذوفة
         return keys
     finally:
         db.close()
@@ -74,6 +76,8 @@ def leak_scan(src_db, folder, keep_keys=(), sensitive_re=None, min_len=8):
         v = (v or "").strip()
         if len(v) < min_len or k in keep_keys:
             continue
+        if re.match(r"^https?://", v, re.I) and not re.search(r"(token|secret|key|password|passwd)", k, re.I):
+            continue                      # رابط عام (مثل رابط سحابتك للتحديثات) مو سر
         if k in exact or sensitive_re.search(k) or any(k.startswith(p) for p in STALE_PREFIX):
             needles[k] = v.encode("utf-8")
     hits = []
