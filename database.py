@@ -731,6 +731,8 @@ def migrate(conn):
             # إلا بدخول يوزر/باسورد حساب مسؤول أو مشرف حقيقي (راجع
             # _check_completed_result_gate بـapp.py). NULL = لسا ما انطبعت.
             ("printed_at", "TEXT"),
+            # examining_doctor: الطبيب الفاحص لهذا التحليل تحديداً (فاضي = طبيب الزيارة الافتراضي) -- per_test_doctor_v1
+            ("examining_doctor", "TEXT"),
         ],
         "invoices": [("is_locked", "INTEGER DEFAULT 0"), ("extra_charges", "REAL DEFAULT 0")],
         "visits": [("tests_display", "TEXT"), ("other_lab_note", "TEXT"), ("examining_doctor", "TEXT"), ("expenses", "REAL DEFAULT 0"),
@@ -2894,27 +2896,51 @@ def compute_examining_doctor_fee(db, doctor_name, test_ids):
     return total
 
 
+def _order_tests_has_examiner(db):
+    try:
+        return any(r[1] == "examining_doctor" for r in db.execute("PRAGMA table_info(order_tests)").fetchall())
+    except Exception:
+        return False
+
+
+def examining_fee_breakdown(db, visit_id):
+    """per_test_doctor_v1: [(doctor, test_name, fee)] لكل تحليل فاحص غير مجاني بالزيارة.
+    طبيب التحليل = order_tests.examining_doctor، وإن كان فاضياً فطبيب الزيارة (visits.examining_doctor)."""
+    visit = db.execute("SELECT examining_doctor FROM visits WHERE id=?", (visit_id,)).fetchone()
+    if not visit:
+        return []
+    order = db.execute("SELECT id FROM orders WHERE visit_id=?", (visit_id,)).fetchone()
+    if not order:
+        return []
+    default_doc = (visit["examining_doctor"] or "").strip()
+    has_col = _order_tests_has_examiner(db)
+    sel = "ot.test_definition_id AS tid, td.name AS name" + (", ot.examining_doctor AS odoc" if has_col else ", NULL AS odoc")
+    rows = db.execute(
+        "SELECT " + sel + " FROM order_tests ot JOIN test_definitions td ON td.id=ot.test_definition_id "
+        "WHERE ot.order_id=? AND (ot.fee_waived IS NULL OR ot.fee_waived=0)", (order["id"],)).fetchall()
+    eligible_ids = {r["id"] for r in get_examining_tests(db)}
+    out = []
+    for r in rows:
+        if r["tid"] not in eligible_ids:
+            continue
+        doc = ((r["odoc"] or "").strip() or default_doc)
+        if not doc:
+            continue
+        rt = db.execute("SELECT rate FROM examining_doctor_rates WHERE doctor_name=? AND test_definition_id=?",
+                        (doc, r["tid"])).fetchone()
+        if rt is not None:
+            out.append((doc, r["name"], float(rt["rate"] or 0)))
+    return out
+
+
 def recompute_examining_doctor_fee(db, visit_id):
-    """يعيد حساب أجر دكتور المختبر الفاحص لكل زيارة من الفحوصات الحالية
-    غير الملغى أجرها فقط (fee_waived=0) ويحدّث visits.examining_doctor_fee
-    مباشرة. يُستدعى بعد أي تبديل لعلامة "تحليل مجاني" (راجع
-    toggle_order_test_fee_waiver بـapp.py) وأيضًا من شاشة تعديل الزيارة
-    بدل الحساب اليدوي القديم، حتى يبقى المصدر الوحيد لهذا الحساب مكانًا
-    واحدًا. لا يستدعي commit بنفسه -- الطرف المستدعي يتحكم بذلك."""
+    """per_test_doctor_v1: يعيد حساب أجر الأطباء الفاحصين لكل تحليل حسب طبيبه
+    (طبيب التحليل إن حُدّد، وإلا طبيب الزيارة) ويحدّث visits.examining_doctor_fee بالمجموع.
+    التحاليل المجانية (fee_waived=1) تُستثنى. لا يستدعي commit بنفسه."""
     visit = db.execute("SELECT examining_doctor FROM visits WHERE id=?", (visit_id,)).fetchone()
     if not visit:
         return 0.0
-    order = db.execute("SELECT id FROM orders WHERE visit_id=?", (visit_id,)).fetchone()
-    test_ids = []
-    if order:
-        test_ids = [
-            r["test_definition_id"] for r in db.execute(
-                "SELECT test_definition_id FROM order_tests WHERE order_id=? "
-                "AND (fee_waived IS NULL OR fee_waived=0)",
-                (order["id"],),
-            ).fetchall()
-        ]
-    fee = compute_examining_doctor_fee(db, visit["examining_doctor"], test_ids)
+    fee = sum(x[2] for x in examining_fee_breakdown(db, visit_id))
     db.execute("UPDATE visits SET examining_doctor_fee=? WHERE id=?", (fee, visit_id))
     return fee
 

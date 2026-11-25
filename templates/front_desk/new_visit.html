@@ -393,7 +393,8 @@
             </select>
             <button type="button" class="btn small secondary" onclick="toggleAddDoctorBox()" title="إضافة طبيب فاحص جديد">+ طبيب</button>
           </div>
-          <small class="muted">أجره عن الفحوصات المختارة: <span id="examFeePreview">0</span></small>
+          <small class="muted">هذا الطبيب الافتراضي لكل التحاليل الفاحصة؛ غيّر طبيب تحليل معيّن من القائمة أدناه. أجورهم: <span id="examFeePreview">0</span></small>
+          <div id="examPerTest"></div><!-- newvisit_testdoctor_v1 -->
         </div>
         <div class="form-field" id="addDoctorBox" style="display:none; grid-column: span 2;">
           <label>اسم الطبيب الفاحص الجديد</label>
@@ -1688,17 +1689,53 @@
   }, true);
   nvFlattenSections();
 
-  function refreshExamFeePreview() {
-    const doctorName = document.getElementById('examining_doctor').value;
+  // newvisit_testdoctor_v1: قائمة طبيب لكل تحليل فاحص مختار (فارغ = الطبيب الافتراضي أعلاه)
+  function examComputeFee() {
+    const def = document.getElementById('examining_doctor').value;
     const previewEl = document.getElementById('examFeePreview');
-    if (!doctorName || !EXAM_RATES[doctorName]) { previewEl.textContent = '0'; return; }
     let fee = 0;
-    document.querySelectorAll('.test-check').forEach(function (cb) {
-      if (cb.checked && cb.getAttribute('data-exam') === '1' && EXAM_RATES[doctorName].hasOwnProperty(cb.value)) {
-        fee += EXAM_RATES[doctorName][cb.value];
-      }
+    document.querySelectorAll('#examPerTest select').forEach(function (sel) {
+      const doc = sel.value || def;
+      const tid = sel.getAttribute('data-tid');
+      if (doc && EXAM_RATES[doc] && EXAM_RATES[doc].hasOwnProperty(tid)) fee += EXAM_RATES[doc][tid];
     });
     previewEl.textContent = Math.round(fee);
+  }
+  function examAllAssigned() {
+    const sels = document.querySelectorAll('#examPerTest select');
+    if (!sels.length) return false;
+    const def = document.getElementById('examining_doctor').value;
+    return Array.prototype.every.call(sels, function (s) { return (s.value || def || '').trim() !== ''; });
+  }
+  function refreshExamFeePreview() {
+    const box = document.getElementById('examPerTest');
+    if (!box) return;
+    const keep = {};
+    box.querySelectorAll('select').forEach(function (s) { keep[s.getAttribute('data-tid')] = s.value; });
+    box.innerHTML = '';
+    const docs = Array.prototype.map.call(document.getElementById('examining_doctor').options, function (o) { return o.value; }).filter(Boolean);
+    document.querySelectorAll('.test-check').forEach(function (cb) {
+      if (!(cb.checked && cb.getAttribute('data-exam') === '1')) return;
+      const tid = cb.value;
+      const lab = document.getElementById('test_label_' + tid);
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:6px;';
+      const sp = document.createElement('span');
+      sp.style.cssText = 'min-width:120px;font-weight:700;font-size:13px;';
+      sp.textContent = lab ? lab.textContent : tid;
+      const sel = document.createElement('select');
+      sel.name = 'test_doctor_new_' + tid;
+      sel.setAttribute('data-tid', tid);
+      sel.style.flex = '1';
+      const o0 = document.createElement('option');
+      o0.value = ''; o0.textContent = '(الطبيب الافتراضي)';
+      sel.appendChild(o0);
+      docs.forEach(function (d) { const o = document.createElement('option'); o.value = d; o.textContent = d; sel.appendChild(o); });
+      if (keep[tid] && docs.indexOf(keep[tid]) >= 0) sel.value = keep[tid];
+      sel.addEventListener('change', examComputeFee);
+      row.appendChild(sp); row.appendChild(sel); box.appendChild(row);
+    });
+    examComputeFee();
   }
 
   // ------------------------------------------------------------------
@@ -1887,7 +1924,7 @@
         const names = [cb.getAttribute('data-code'), lab && lab.getAttribute('data-short'), lab && lab.getAttribute('data-full'), lab && lab.textContent].map(norm);
         if (names.some(function (n) { return n && (NEED.indexOf(n) >= 0 || n.indexOf('hbhprep') === 0); })) needExam = true;
       });
-      if (needExam && !(document.getElementById('examining_doctor').value || '').trim())
+      if (needExam && !(document.getElementById('examining_doctor').value || '').trim() && !examAllAssigned())
         warns.push('• لم تختر دكتور المختبر الفاحص (مطلوب لتحاليل BF / Retic / Hb.H Preparation).');
       if (warns.length && !confirm('تنبيه قبل الحفظ:\n' + warns.join('\n') + '\n\nاضغط «موافق» للحفظ رغم ذلك، أو «إلغاء» للرجوع وتعديل البيانات.')) return (window.__nvStop = true);
       window.__nvStop = false;

@@ -53,7 +53,7 @@ from database import (get_db, init_db, hash_password, get_setting, set_setting,
                        get_letterhead_doctors,
                        get_examining_tests, get_examining_rates_map,
                        set_examining_doctor_rate, compute_examining_doctor_fee,
-                       recompute_examining_doctor_fee,
+                       recompute_examining_doctor_fee, examining_fee_breakdown,
                        find_reference_range,
                        save_saved_report, get_saved_report, search_saved_reports,
                        get_digital_stamps, get_digital_stamp, add_digital_stamp,
@@ -3065,6 +3065,14 @@ def new_visit():
 
         _apply_partner_forward(db, order_id, request.form.get("forward_lab_id"))
 
+        # newvisit_testdoctor_v1: طبيب فاحص لكل تحليل (قوائم test_doctor_new_<id>؛ فارغ = الطبيب الافتراضي) ثم إعادة حساب الأجر
+        for _tid in test_ids:
+            _ed = (request.form.get("test_doctor_new_%s" % _tid) or "").strip()
+            if _ed and _ed != (examining_doctor or "").strip():
+                db.execute("UPDATE order_tests SET examining_doctor=? WHERE order_id=? AND test_definition_id=?",
+                           (_ed, order_id, _tid))
+        recompute_examining_doctor_fee(db, visit_id)
+
         # أجرة الزيارة المنزلية الإضافية (إن فُعِّلت) تُضاف لمجموع الفحوصات
         # قبل حساب الفاتورة، بنفس أسلوب أي بند إضافي بالمجموع.
         total += home_visit_fee
@@ -4802,13 +4810,21 @@ def examining_doctor_rates(doctor_name):
 def examining_doctor_statement(doctor_name):
     db = get_db()
     month = request.args.get("month", datetime.now().strftime("%Y-%m"))
-    rows = db.execute(
-        "SELECT v.registration_number, v.examining_doctor_fee, v.created_at, p.full_name "
+    # per_test_doctor_v1: الأجر لكل تحليل حسب طبيبه (وليس حسب طبيب الزيارة فقط)
+    _cand = db.execute(
+        "SELECT v.id, v.registration_number, v.created_at, p.full_name "
         "FROM visits v JOIN patients p ON p.id = v.patient_id "
-        "WHERE v.examining_doctor=? AND substr(v.created_at,1,7)=? AND v.examining_doctor_fee > 0 "
+        "WHERE substr(v.created_at,1,7)=? AND (v.examining_doctor=? OR EXISTS ("
+        "SELECT 1 FROM orders o JOIN order_tests ot ON ot.order_id=o.id WHERE o.visit_id=v.id AND ot.examining_doctor=?)) "
         "ORDER BY v.created_at",
-        (doctor_name, month),
+        (month, doctor_name, doctor_name),
     ).fetchall()
+    rows = []
+    for _r in _cand:
+        _fee = sum(x[2] for x in examining_fee_breakdown(db, _r["id"]) if x[0] == doctor_name)
+        if _fee > 0:
+            rows.append({"registration_number": _r["registration_number"], "examining_doctor_fee": _fee,
+                         "created_at": _r["created_at"], "full_name": _r["full_name"]})
     total = sum((r["examining_doctor_fee"] or 0) for r in rows)
     return render_template("management/examining_doctor_statement.html", doctor_name=doctor_name,
                             rows=rows, month=month, total=total)
@@ -5210,6 +5226,15 @@ def visit_edit(visit_id):
                              datetime.now().isoformat(timespec="seconds"), 1 if _rp is None else 0),
                         )
 
+        # per_test_doctor_v1: طبيب فاحص لكل تحليل (فاضي = طبيب الزيارة الافتراضي)
+        for _k, _v in request.form.items():
+            if _k.startswith("test_doctor_"):
+                try:
+                    _otid = int(_k[len("test_doctor_"):])
+                except ValueError:
+                    continue
+                db.execute("UPDATE order_tests SET examining_doctor=? WHERE id=? AND order_id=?",
+                           ((_v or "").strip() or None, _otid, order["id"]))
         # نعيد حساب أجر دكتور المختبر الفاحص حسب كل الفحوصات الحالية بالزيارة
         # (بعد أي حذف/إضافة) واسم الدكتور الفاحص المختار حاليًا.
         # (تحاليل "مجانية" fee_waived=1 تُستثنى تلقائيًا من هذا الحساب --
@@ -5267,7 +5292,7 @@ def visit_edit(visit_id):
         return redirect(url_for("visits_list"))
 
     order_tests = db.execute(
-        "SELECT ot.id, ot.status, ot.test_definition_id, ot.fee_waived, ot.hidden_from_log, td.name, td.is_examining_test, "
+        "SELECT ot.id, ot.status, ot.test_definition_id, ot.fee_waived, ot.hidden_from_log, ot.examining_doctor, td.name, td.is_examining_test, "
         "COALESCE(ot.price, td.price) as price "
         "FROM order_tests ot JOIN test_definitions td ON td.id = ot.test_definition_id WHERE ot.order_id=?",
         (order["id"] if order else 0,),
@@ -7060,7 +7085,7 @@ def _daily_report_html(db, report_date):
         #   إطلاقًا بهذا التقرير)، مع بقاء نتيجته محفوظة بقاعدة البيانات.
         items = db.execute(
             "SELECT td.name, td.short_name, td.code as test_code, td.is_examining_test, "
-            "COALESCE(ot.price, td.price) as price, ot.doctor_id, "
+            "COALESCE(ot.price, td.price) as price, ot.doctor_id, COALESCE(ot.examining_doctor,'') as exam_doc, "
             "ot.fee_waived, ot.hidden_from_log, ot.forwarded_cost, ot.forwarded_lab_name FROM order_tests ot "
             "JOIN test_definitions td ON td.id = ot.test_definition_id "
             "JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
@@ -7111,7 +7136,15 @@ def _daily_report_html(db, report_date):
             if i["test_code"] in EXAM_SIGNATURE_TEST_CODES or bool(i["is_examining_test"])
         ]
         examining_doctor_display = v["examining_doctor"] or "-"
-        if v["examining_doctor"] and exam_names:
+        _grp99 = {}
+        for i in visible_items:
+            if i["test_code"] in EXAM_SIGNATURE_TEST_CODES or bool(i["is_examining_test"]):
+                _dn99 = ((i["exam_doc"] or "").strip() or (v["examining_doctor"] or "").strip())
+                if _dn99:
+                    _grp99.setdefault(_dn99, []).append(_abbr_test(i["name"], i["short_name"], i["test_code"]))
+        if _grp99:
+            examining_doctor_display = " ، ".join("%s (%s)" % (d_, ", ".join(ns_)) for d_, ns_ in _grp99.items())
+        elif v["examining_doctor"] and exam_names:
             examining_doctor_display = f"{v['examining_doctor']} ({', '.join(exam_names)})"
 
         # عمود "الباقي": المبلغ المتبقي فعليًا بعد خصم أي دفعة/خصم مسجّلة
@@ -10301,7 +10334,7 @@ def _print_report_impl_v79(order_test_id):
         "td.hide_signature_box as hide_signature_box, td.signature_position as signature_position, "
         "p.id as patient_id, p.full_name as patient_name, p.gender, p.age, p.age_unit, "
         "v.id as visit_id, v.created_at as visit_created_at, v.registration_number, v.sample_no as visit_sample_no, "
-        "v.doctor_id, v.referral_center_id, v.examining_doctor, "
+        "v.doctor_id, v.referral_center_id, COALESCE(NULLIF(TRIM(ot.examining_doctor),''), v.examining_doctor) AS examining_doctor, "
         "d.full_name as referring_doctor_name, rc.name as referral_center_name "
         "FROM order_tests ot "
         "JOIN test_definitions td ON td.id = ot.test_definition_id "
@@ -10315,6 +10348,9 @@ def _print_report_impl_v79(order_test_id):
     ).fetchone()
     if not ot:
         return "Not found", 404
+    # per_test_doctor: ot.* فيه examining_doctor (طبيب التحليل) وآخر عمود examining_doctor = الفعلي (التحليل ثم الزيارة).
+    # نبني القاموس بالفهرس فيبقى آخر عمود بنفس الاسم، فكل القوالب والأختام تقرأ الطبيب الفعلي.
+    ot = {_k99: ot[_i99] for _i99, _k99 in enumerate(ot.keys())}     # بالفهرس (لا بالاسم) حتى يغلب آخر عمود
 
     # أول فتحة فعلية لتقرير هذا التحليل (طباعة مفردة، ضمن حزمة نتائج
     # الزيارة، أو حتى توليد PDF لواتساب/الأرشيف يمر من هنا) تُثبَّت
@@ -21150,10 +21186,37 @@ def _v97_make_pdf(html_content, name):
     return p
 
 
+def _v99_cloud_logs(f, t):
+    """مرضى سجل المرضى السحابي بين تاريخين (للإحصائيات الموحّدة). أي فشل يرجع قائمة فارغة."""
+    try:
+        import ledger_sync
+        return ledger_sync.cloud_logs(get_db(), f, t)
+    except Exception as _e:
+        _v99_cloud_logs.state["err"] = str(_e)[:200]
+        return []
+
+
+_v99_cloud_logs.state = {"path": "", "err": ""}
+try:
+    import ledger_sync as _v99_ls
+    _v99_cloud_logs.state = _v99_ls.cloud_logs.state
+except Exception:
+    pass
+
+
+def _v99_cloud_accounts():
+    try:
+        import ledger_sync
+        return ledger_sync.cloud_accounts(get_db())
+    except Exception:
+        return {"adj": [], "doctors": []}
+
+
 try:
     import lis_stats_plus as _v97_sp
     _v97_sp.install(app, dict(get_db=get_db, login_required=login_required, get_setting=get_setting, set_setting=set_setting,
-                              make_pdf=_v97_make_pdf, open_wa=_open_whatsapp_with_pdf))
+                              make_pdf=_v97_make_pdf, open_wa=_open_whatsapp_with_pdf,
+                              cloud_logs=_v99_cloud_logs, cloud_accounts=_v99_cloud_accounts))
 except Exception as _v97_e:
     print("lis_stats_plus not loaded:", _v97_e)
 # ===================== end v97 =====================

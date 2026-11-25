@@ -199,6 +199,13 @@
         <tr>
           <td>
             {{ ot['name'] }}
+            {# per_test_doctor_v1 #}
+            {% if ot['is_examining_test'] %}
+            <div style="margin-top:4px;"><select name="test_doctor_{{ ot['id'] }}" style="max-width:230px;" {{ 'disabled' if locked }} title="الطبيب الفاحص لهذا التحليل (الافتراضي = طبيب الزيارة)">
+              <option value="">— طبيب الزيارة (افتراضي) —</option>
+              {% for d in examining_doctors %}<option value="{{ d }}" {{ 'selected' if ot['examining_doctor']==d }}>{{ d }}</option>{% endfor %}
+            </select></div>
+            {% endif %}
             {% if ot['fee_waived'] %}<span class="badge" style="background:#eee;color:#555;" title="لا يُحتسب أجر للفاحص عن هذا التحليل">🆓 مجاني للفاحص</span>{% endif %}
             {% if ot['hidden_from_log'] %}<span class="badge" style="background:#fdf1f1;color:#a33;" title="لا يظهر بصفحات الحسابات ولا يُحتسب سعره بأي تقرير">🚫 خارج السجل/الحسابات</span>{% endif %}
           </td>

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-lis_stats_plus.py (v98) - تفاصيل الإحصائيات داخل الـLIS (إضافة فقط، لا يغيّر أي ملف ثاني):
+lis_stats_plus.py (v99) - تفاصيل الإحصائيات داخل الـLIS (إضافة فقط، لا يغيّر أي ملف ثاني):
 
   * الضغط على أي تاريخ بصفحة «الإحصائيات» يفتح تفاصيل ذلك اليوم: كل مريض + تحاليله + أسعارها + المدفوع.
   * «مختبرات أرسلت لنا»: كل مختبر مُرسِل بالفترة ← مرضاه ← التحليل وقيمته.
@@ -314,47 +314,83 @@ def _day_body(db, f, t, ctx=None, lab_q="", full=False):
     return "".join(h)
 
 
-def _exp_body(db, f, t, ctx=None, lab_q="", full=False):
-    """الصرفيات: صرفيات الزيارات + جدول صرفيات المختبر (lab_expenses) بالـLIS، وصرفيات مرضى السجل غير النازلين."""
+def _lnk(label, url, interactive):
+    return ("<a href='%s' style='color:#075985;font-weight:700;text-decoration:none'>%s</a>" % (_E(url), _E(label))) if interactive else _E(label)
+
+
+def _exp_body(db, f, t, ctx=None, lab_q="", full=False, interactive=True):
+    """الصرفيات (v99): التاريخ + بيان الصرف + المبلغ فقط (بدون اسم المريض) + المجموع. النقر على التاريخ يفتح صرفيات ذلك اليوم."""
     ctx = ctx or {}
     items = []
     vc = _cols(db, "visits")
     if "expenses" in vc:
         note = "COALESCE(v.expenses_note,'')" if "expenses_note" in vc else "''"
-        for r in db.execute("SELECT substr(v.created_at,1,10) AS d, v.expenses AS a, %s AS n, p.full_name AS p FROM visits v JOIN patients p ON p.id=v.patient_id "
+        for r in db.execute("SELECT substr(v.created_at,1,10) AS d, v.expenses AS a, %s AS n FROM visits v "
                             "WHERE COALESCE(v.expenses,0)>0 AND substr(v.created_at,1,10) BETWEEN ? AND ? ORDER BY v.created_at" % note, (f, t)).fetchall():
-            items.append((r["d"], r["n"] or "—", r["p"] or "—", float(r["a"])))
+            items.append((r["d"], (r["n"] or "").strip() or "—", float(r["a"])))
     lc = _cols(db, "lab_expenses")
     if lc:
         kcol = "kind" if "kind" in lc else "''"
         ncol = "note" if "note" in lc else "''"
         for r in db.execute("SELECT expense_date AS d, amount AS a, %s AS k, %s AS n FROM lab_expenses WHERE expense_date BETWEEN ? AND ? ORDER BY expense_date, id" % (kcol, ncol), (f, t)).fetchall():
             if (r["a"] or 0) > 0:
-                items.append((r["d"], " — ".join(x for x in (r["k"], r["n"]) if x) or "—", "—", float(r["a"])))
+                items.append((r["d"], " — ".join(x for x in (r["k"], r["n"]) if x) or "—", float(r["a"])))
     try:
         import ledger_sync as _ls
         for a in ((_ls.fetch_accounts(db) or {}).get("genExp") or []):
             d = str(a.get("date") or "")
             if a.get("src") != "lis" and f <= d <= t and float(a.get("amount") or 0) > 0:
-                items.append((d, str(a.get("note") or "—"), "—", float(a["amount"])))
+                items.append((d, str(a.get("note") or "—"), float(a["amount"])))
     except Exception:
         pass
     for r in _cloud_rows(ctx, f, t):
         if r["exp"] > 0:
-            items.append((r["date"], r["exp_note"] or "—", r["name"] or "—", r["exp"]))
+            items.append((r["date"], (r["exp_note"] or "").strip() or "—", r["exp"]))
     items.sort(key=lambda x: x[0])
-    total = sum(x[3] for x in items)
+    total = sum(x[2] for x in items)
     h = ["<div class='kpi'><div><b>%d</b><span>عدد الصرفيات</span></div><div><b>%s</b><span>إجمالي الصرفيات</span></div></div>" % (len(items), _n(total))]
     if not items:
         return "".join(h) + "<p class='muted'>لا توجد صرفيات بهذه الفترة.</p>"
-    h.append("<table><thead><tr><th>#</th><th>التاريخ</th><th>بيان الصرف</th><th>المريض</th><th>المبلغ</th></tr></thead><tbody>")
+    h.append("<table><thead><tr><th>#</th><th>التاريخ</th><th>بيان الصرف</th><th>المبلغ</th></tr></thead><tbody>")
     for i, x in enumerate(items, 1):
-        h.append("<tr><td>%d</td><td class='num'>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td></tr>" % (i, _E(x[0]), _E(x[1]), _E(x[2]), _n(x[3])))
-    h.append("<tr class='sum'><td colspan='4'><b>المجموع</b></td><td class='num'><b>%s</b></td></tr></tbody></table>" % _n(total))
+        day = _lnk(x[0], "/stats-plus/view?kind=exp&from=%s&to=%s" % (x[0], x[0]), interactive and f != t)
+        h.append("<tr><td>%d</td><td class='num'>%s</td><td>%s</td><td class='num'>%s</td></tr>" % (i, day, _E(x[1]), _n(x[2])))
+    h.append("<tr class='sum'><td colspan='3'><b>المجموع</b></td><td class='num'><b>%s</b></td></tr></tbody></table>" % _n(total))
     return "".join(h)
 
 
 # sync_testdocs_v1
+def _per_test_entries(db, f, t, ex_col, shc, full):
+    """per_test_doctor_v1: أجور الفاحصين لكل تحليل حسب طبيبه (order_tests.examining_doctor أو طبيب الزيارة)."""
+    rates = {}
+    for r in db.execute("SELECT doctor_name, test_definition_id, rate FROM examining_doctor_rates").fetchall():
+        rates[((r[0] or "").strip(), r[1])] = r[2]
+    rows = db.execute(
+        "SELECT v.id AS vid, substr(v.created_at,1,10) AS d, COALESCE(v.examining_doctor,'') AS vdoc, p.full_name AS pn, "
+        "ot.test_definition_id AS tid, ot.examining_doctor AS odoc, td.name AS name, %s AS sh "
+        "FROM visits v JOIN patients p ON p.id=v.patient_id JOIN orders o ON o.visit_id=v.id "
+        "JOIN order_tests ot ON ot.order_id=o.id JOIN test_definitions td ON td.id=ot.test_definition_id "
+        "WHERE %s AND (ot.fee_waived IS NULL OR ot.fee_waived=0) AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected') "
+        "AND substr(v.created_at,1,10) BETWEEN ? AND ? ORDER BY v.created_at" % (shc, ex_col), (f, t)).fetchall()
+    per = {}
+    for r in rows:
+        doc = ((r["odoc"] or "").strip() or (r["vdoc"] or "").strip())
+        if not doc:
+            continue
+        rate = rates.get((doc, r["tid"]))
+        if not rate:
+            continue
+        e = per.setdefault((doc, r["vid"]), [r["d"], r["pn"] or "—", [], 0.0])
+        e[2].append(_full(r["name"]) if full else _abbr(r["name"], r["sh"]))
+        e[3] += float(rate)
+    ents = {}
+    for (doc, _vid), (d, pn, names, fee) in per.items():
+        ents.setdefault(doc, []).append((d, pn, "، ".join(names) or "—", fee))
+    for v in ents.values():
+        v.sort(key=lambda x: x[0])
+    return ents
+
+
 def _doc_body(db, f, t, ctx=None, lab_q="", full=False):
     """حسابات الأطباء الفاحصين (BF, Retic, Hb.H prep, Sickling, BMB, BMA, Fluid, CSF…) من جداول حسابات الـLIS (أجور الفاحصين)."""
     vc = _cols(db, "visits")
@@ -363,14 +399,17 @@ def _doc_body(db, f, t, ctx=None, lab_q="", full=False):
     tdc = _cols(db, "test_definitions")
     ex_col = "td.is_examining_test=1" if "is_examining_test" in tdc else "0"
     shc = "COALESCE(td.short_name,'')" if "short_name" in tdc else "''"
-    ents = {}
-    for v in db.execute("SELECT v.id AS vid, substr(v.created_at,1,10) AS d, v.examining_doctor AS doc, v.examining_doctor_fee AS fee, p.full_name AS pn "
-                        "FROM visits v JOIN patients p ON p.id=v.patient_id WHERE TRIM(COALESCE(v.examining_doctor,''))<>'' AND COALESCE(v.examining_doctor_fee,0)>0 "
-                        "AND substr(v.created_at,1,10) BETWEEN ? AND ? ORDER BY v.created_at", (f, t)).fetchall():
-        names = [(_full(r["name"]) if full else _abbr(r["name"], r["sh"])) for r in db.execute(
-            "SELECT td.name AS name, %s AS sh FROM orders o JOIN order_tests ot ON ot.order_id=o.id JOIN test_definitions td ON td.id=ot.test_definition_id "
-            "WHERE o.visit_id=? AND %s AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected')" % (shc, ex_col), (v["vid"],)).fetchall()]
-        ents.setdefault(v["doc"].strip(), []).append((v["d"], v["pn"] or "—", "، ".join(names) or "—", float(v["fee"])))
+    if "examining_doctor" in _cols(db, "order_tests"):
+        ents = _per_test_entries(db, f, t, ex_col, shc, full)      # per_test_doctor: لكل تحليل حسب طبيبه
+    else:
+        ents = {}
+        for v in db.execute("SELECT v.id AS vid, substr(v.created_at,1,10) AS d, v.examining_doctor AS doc, v.examining_doctor_fee AS fee, p.full_name AS pn "
+                            "FROM visits v JOIN patients p ON p.id=v.patient_id WHERE TRIM(COALESCE(v.examining_doctor,''))<>'' AND COALESCE(v.examining_doctor_fee,0)>0 "
+                            "AND substr(v.created_at,1,10) BETWEEN ? AND ? ORDER BY v.created_at", (f, t)).fetchall():
+            names = [(_full(r["name"]) if full else _abbr(r["name"], r["sh"])) for r in db.execute(
+                "SELECT td.name AS name, %s AS sh FROM orders o JOIN order_tests ot ON ot.order_id=o.id JOIN test_definitions td ON td.id=ot.test_definition_id "
+                "WHERE o.visit_id=? AND %s AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected')" % (shc, ex_col), (v["vid"],)).fetchall()]
+            ents.setdefault(v["doc"].strip(), []).append((v["d"], v["pn"] or "—", "، ".join(names) or "—", float(v["fee"])))
     # sync_testdocs_v1: تسويات الأطباء المسجّلة بالسجل (نفس المصدر)
     try:
         import ledger_sync as _ls
@@ -429,7 +468,10 @@ def _in_body(db, f, t):
     return "".join(h)
 
 
-def _out_body(db, f, t):
+def _out_body(db, f, t, lab_q="", full=False, interactive=True):
+    """تحاليل أرسلناها لمختبرات أخرى (v99): باليوم ثم المختبر: عدد التحاليل + المبلغ (التكلفة علينا) + سعر المريض.
+    النقر على التاريخ يفتح تفاصيل ذلك اليوم، والنقر على اسم المختبر يفتح تفاصيل ذلك المختبر (المريض + التحليل + المبلغ)."""
+    from urllib.parse import quote
     otc = _cols(db, "order_tests")
     if "forwarded_lab_name" not in otc:
         return "<p class='muted'>لا توجد تحاليل مرسلة لمختبرات أخرى.</p>"
@@ -440,29 +482,67 @@ def _out_body(db, f, t):
          "JOIN test_definitions td ON td.id=ot.test_definition_id "
          "WHERE TRIM(COALESCE(ot.forwarded_lab_name,''))<>'' AND substr(v.created_at,1,10) BETWEEN ? AND ? "
          "AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected') ORDER BY v.created_at, ot.id" % fc)
-    rows = db.execute(q, (f, t)).fetchall()
+    rows = [r for r in db.execute(q, (f, t)).fetchall() if not lab_q or lab_q.lower() in (r["lab"] or "").lower()]
     if not rows:
-        return "<p class='muted'>لم تُرسَل تحاليل لمختبرات أخرى بهذه الفترة.</p>"
+        return "<p class='muted'>لم تُرسَل تحاليل لمختبرات أخرى بهذه الفترة%s.</p>" % ((" (المختبر: %s)" % _E(lab_q)) if lab_q else "")
+    days = {}
     labs = {}
     for r in rows:
-        l = labs.setdefault(r["lab"], {"rows": [], "price": 0.0, "cost": 0.0})
-        l["rows"].append(r)
-        l["price"] += r["price"] or 0
-        l["cost"] += r["cost"] or 0
+        dl = days.setdefault(r["d"], {}).setdefault(r["lab"], {"rows": [], "price": 0.0, "cost": 0.0, "n": 0})
+        dl["rows"].append(r)
+        dl["n"] += 1
+        dl["price"] += r["price"] or 0
+        dl["cost"] += r["cost"] or 0
+        tl = labs.setdefault(r["lab"], {"price": 0.0, "cost": 0.0, "n": 0})
+        tl["n"] += 1
+        tl["price"] += r["price"] or 0
+        tl["cost"] += r["cost"] or 0
+    tot_n, tot_cost, tot_price = len(rows), sum(l["cost"] for l in labs.values()), sum(l["price"] for l in labs.values())
+
+    def day_url(d):
+        return "/stats-plus/view?kind=out&from=%s&to=%s&lab=%s" % (d, d, quote(lab_q))
+
+    def lab_url(d, lab):
+        return "/stats-plus/view?kind=out&from=%s&to=%s&lab=%s" % (d, d, quote(lab))
+
     h = ["<div class='kpi'><div><b>%d</b><span>عدد المختبرات</span></div><div><b>%d</b><span>عدد التحاليل</span></div>"
-         "<div><b>%s</b><span>سعرها على المريض</span></div><div><b>%s</b><span>تكلفتها علينا</span></div></div>"
-         % (len(labs), len(rows), _n(sum(l["price"] for l in labs.values())), _n(sum(l["cost"] for l in labs.values())))]
-    h.append("<table><thead><tr><th>المختبر</th><th>عدد التحاليل</th><th>سعر المريض</th><th>التكلفة</th></tr></thead><tbody>")
-    for name, l in sorted(labs.items(), key=lambda kv: -len(kv[1]["rows"])):
-        h.append("<tr><td><b>%s</b></td><td>%d</td><td class='num'>%s</td><td class='num'>%s</td></tr>" % (_E(name), len(l["rows"]), _n(l["price"]), _n(l["cost"])))
-    h.append("</tbody></table>")
-    for name, l in sorted(labs.items(), key=lambda kv: -len(kv[1]["rows"])):
-        h.append("<div class='card'><h3 style='margin:0 0 8px'>%s</h3><table><thead><tr><th>التاريخ</th><th>المريض</th><th>نوع التحليل</th>"
-                 "<th>سعر المريض</th><th>التكلفة</th></tr></thead><tbody>" % _E(name))
-        for r in l["rows"]:
-            h.append("<tr><td class='num'>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td><td class='num'>%s</td></tr>"
-                     % (_E(r["d"]), _E(r["pname"] or ""), _E(r["tname"]), _n(r["price"]), _n(r["cost"])))
-        h.append("<tr class='sub'><td colspan='3'><b>المجموع</b></td><td class='num'><b>%s</b></td><td class='num'><b>%s</b></td></tr></tbody></table></div>" % (_n(l["price"]), _n(l["cost"])))
+         "<div><b>%s</b><span>المبلغ المرسَل للمختبرات</span></div><div><b>%s</b><span>سعرها على المرضى</span></div></div>"
+         % (len(labs), tot_n, _n(tot_cost), _n(tot_price))]
+    detailed = (f == t) or bool(lab_q)
+    if not detailed:
+        h.append("<table><thead><tr><th>التاريخ</th><th>المختبر</th><th>عدد التحاليل</th><th>المبلغ (التكلفة)</th><th>سعر المريض</th></tr></thead><tbody>")
+        for d in sorted(days):
+            dn = sum(l["n"] for l in days[d].values())
+            dc = sum(l["cost"] for l in days[d].values())
+            dp = sum(l["price"] for l in days[d].values())
+            h.append("<tr style='background:#E0F2FE'><td class='num'><b>%s</b></td><td><b>مجموع اليوم (%d مختبر)</b></td><td><b>%d</b></td><td class='num'><b>%s</b></td><td class='num'><b>%s</b></td></tr>"
+                     % (_lnk(d, day_url(d), interactive), len(days[d]), dn, _n(dc), _n(dp)))
+            for lab, l in sorted(days[d].items(), key=lambda kv: -kv[1]["cost"]):
+                h.append("<tr><td></td><td>%s</td><td>%d</td><td class='num'>%s</td><td class='num'>%s</td></tr>"
+                         % (_lnk(lab, lab_url(d, lab), interactive), l["n"], _n(l["cost"]), _n(l["price"])))
+        h.append("<tr class='sum'><td colspan='2'><b>المجموع الكلي للفترة</b></td><td><b>%d</b></td><td class='num'><b>%s</b></td><td class='num'><b>%s</b></td></tr></tbody></table>"
+                 % (tot_n, _n(tot_cost), _n(tot_price)))
+        h.append("<div class='card'><h3 style='margin:0 0 8px'>مجموع كل مختبر بالفترة</h3><table><thead><tr><th>المختبر</th><th>عدد التحاليل</th><th>المبلغ (التكلفة)</th><th>سعر المريض</th></tr></thead><tbody>")
+        for lab, l in sorted(labs.items(), key=lambda kv: -kv[1]["cost"]):
+            url = "/stats-plus/view?kind=out&from=%s&to=%s&lab=%s" % (f, t, quote(lab))
+            h.append("<tr><td>%s</td><td>%d</td><td class='num'>%s</td><td class='num'>%s</td></tr>" % (_lnk(lab, url, interactive), l["n"], _n(l["cost"]), _n(l["price"])))
+        h.append("</tbody></table></div>")
+        return "".join(h)
+    # عرض تفصيلي: يوم واحد أو مختبر محدد
+    if len(labs) > 1 or f != t:
+        h.append("<table><thead><tr><th>المختبر</th><th>عدد التحاليل</th><th>المبلغ (التكلفة)</th><th>سعر المريض</th></tr></thead><tbody>")
+        for lab, l in sorted(labs.items(), key=lambda kv: -kv[1]["cost"]):
+            h.append("<tr><td><b>%s</b></td><td>%d</td><td class='num'>%s</td><td class='num'>%s</td></tr>" % (_E(lab), l["n"], _n(l["cost"]), _n(l["price"])))
+        h.append("<tr class='sum'><td><b>المجموع</b></td><td><b>%d</b></td><td class='num'><b>%s</b></td><td class='num'><b>%s</b></td></tr></tbody></table>" % (tot_n, _n(tot_cost), _n(tot_price)))
+    for d in sorted(days):
+        for lab, l in sorted(days[d].items(), key=lambda kv: -kv[1]["cost"]):
+            h.append("<div class='card'><h3 style='margin:0 0 8px'>%s — %s</h3><table><thead><tr><th>المريض</th><th>نوع التحليل</th>"
+                     "<th>سعر المريض</th><th>المبلغ (التكلفة)</th></tr></thead><tbody>" % (_E(d), _E(lab)))
+            for r in l["rows"]:
+                h.append("<tr><td>%s</td><td>%s</td><td class='num'>%s</td><td class='num'>%s</td></tr>"
+                         % (_E(r["pname"] or ""), _E(r["tname"]), _n(r["price"]), _n(r["cost"])))
+            h.append("<tr class='sub'><td colspan='2'><b>مجموع %s بتاريخ %s (%d تحليل)</b></td><td class='num'><b>%s</b></td><td class='num'><b>%s</b></td></tr></tbody></table></div>"
+                     % (_E(lab), _E(d), l["n"], _n(l["price"]), _n(l["cost"])))
     return "".join(h)
 
 
@@ -471,13 +551,15 @@ def _page(db, kind, f, t, lab_name, interactive=True, phone="", ctx=None, lab_q=
     if kind == "day":
         body = _day_body(db, f, t, ctx, lab_q, full)
     elif kind == "exp":
-        body = _exp_body(db, f, t, ctx, lab_q, full)
+        body = _exp_body(db, f, t, ctx, lab_q, full, interactive)
+    elif kind == "out":
+        body = _out_body(db, f, t, lab_q, full, interactive)
     elif kind == "doc":
         body = _doc_body(db, f, t, ctx, lab_q, full)
     else:
-        body = {"in": _in_body, "out": _out_body}[kind](db, f, t)
+        body = _in_body(db, f, t)
     title = "%s — %s" % (_TITLES[kind], _period(f, t))
-    if lab_q and kind in ("day", "in"):
+    if lab_q and kind in ("day", "in", "out"):
         title += " — مختبر: " + lab_q
     h = [_head(title, lab_name)]
     if interactive:
