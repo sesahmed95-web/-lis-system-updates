@@ -186,6 +186,131 @@ def _orig_tests(db, vid, lis_tests):
     return ", ".join(lis_tests)
 
 
+# ===================== sync_testdocs_v1 =====================
+def _clean_td(x):
+    return re.sub(r"[=|]+", " ", str(x or "")).strip()
+
+
+def _testdocs_str(db, vid):
+    """«BF=د.خليل|BMA=د.هدى»: التحاليل التي لها طبيب فاحص خاص (order_tests.examining_doctor). فاضي = الكل عند طبيب الزيارة."""
+    try:
+        rows = db.execute(
+            "SELECT td.name AS n, ot.examining_doctor AS d FROM orders o JOIN order_tests ot ON ot.order_id=o.id "
+            "JOIN test_definitions td ON td.id=ot.test_definition_id WHERE o.visit_id=? AND TRIM(COALESCE(ot.examining_doctor,''))<>'' "
+            "AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected') ORDER BY ot.id", (vid,)).fetchall()
+    except Exception:
+        return ""
+    return "|".join("%s=%s" % (_clean_td(r["n"]), _clean_td(r["d"])) for r in rows)
+
+
+def _parse_testdocs(txt):
+    out = []
+    for seg in str(txt or "").split("|"):
+        if "=" in seg:
+            t, d = seg.split("=", 1)
+            if t.strip() and d.strip():
+                out.append((t.strip(), d.strip()))
+    return out
+
+
+def _canon_testdocs(idx, txt):
+    """يوحّد الأسماء (BF = Blood Film...) إلى «رقم التحليل=الطبيب» مرتبة، ليُقارن السجل بالـLIS بدون اختلاف تسمية."""
+    m = {}
+    for t, d in _parse_testdocs(txt):
+        tid = _match_test(idx, t)
+        m[str(tid) if tid else "n:" + _nt(t)] = d
+    return "|".join("%s=%s" % (k, m[k]) for k in sorted(m))
+
+
+def _apply_testdocs(db, vid, canon):
+    """يطبّق «tid=الطبيب|...» القادم من السجل على تحاليل الزيارة (ما ليس بالقائمة يرجع لطبيب الزيارة)."""
+    want = {}
+    for k, d in _parse_testdocs(canon):
+        if k.isdigit():
+            want[int(k)] = d
+    try:
+        for r in db.execute("SELECT ot.id, ot.test_definition_id tid FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+                            "WHERE o.visit_id=? AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected')", (vid,)).fetchall():
+            db.execute("UPDATE order_tests SET examining_doctor=? WHERE id=?", (want.get(r["tid"]) or None, r["id"]))
+    except Exception:
+        pass
+
+
+def _recompute_fee(db, vid):
+    try:
+        import database
+        database.recompute_examining_doctor_fee(db, vid)
+    except Exception:
+        pass
+
+
+_ACC = {"t": 0.0, "v": None}
+
+
+def fetch_accounts(db, ttl=60):
+    """التسويات (docAdj) والصرفيات العامة (genExp) والأسعار من السحابة (settings/app). None عند الفشل."""
+    if _ACC["v"] is not None and time.time() - _ACC["t"] < ttl:
+        return _ACC["v"]
+    c = cfg(db)
+    if not (c["url"].startswith("https://") and c["key"]):
+        return None
+    try:
+        code, j = _request(c["url"] + "/api/lis/accounts", c["key"], None, 25)
+        if code == 200 and j.get("ok"):
+            _ACC.update(t=time.time(), v=j)
+            return j
+    except Exception:
+        pass
+    return _ACC["v"]
+
+
+def push_accounts(db, c):
+    """lab_expenses (الصرفيات العامة بالـLIS) → السحابة. تُرفع الجديدة/المعدّلة وتُحذف المحذوفة. يرجع عدد العمليات."""
+    try:
+        cols = {r[1] for r in db.execute("PRAGMA table_info(lab_expenses)").fetchall()}
+    except Exception:
+        return 0
+    if not ({"id", "expense_date", "amount"} <= cols):
+        return 0
+    kcol = "kind" if "kind" in cols else "''"
+    ncol = "note" if "note" in cols else "''"
+    since = (date.today() - timedelta(days=400)).isoformat()
+    cur = {}
+    for r in db.execute("SELECT id, expense_date AS d, amount AS a, %s AS k, %s AS n FROM lab_expenses WHERE expense_date>=? ORDER BY id" % (kcol, ncol), (since,)).fetchall():
+        d = str(r["d"] or "")[:10]
+        try:
+            a = float(r["a"] or 0)
+        except (TypeError, ValueError):
+            continue
+        if a <= 0 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+            continue
+        cur["lis-e%d" % r["id"]] = [d, a, " — ".join(x for x in ((r["k"] or "").strip(), (r["n"] or "").strip()) if x)]
+    try:
+        prev = json.loads(_get(db, "ledger_exp_ids", "{}") or "{}")
+    except Exception:
+        prev = {}
+    ops = []
+    for k, v in cur.items():
+        if prev.get(k) != v:
+            if k in prev:
+                ops.append({"op": "exp_del", "id": k})
+            ops.append({"op": "exp", "id": k, "date": v[0], "amount": v[1], "note": v[2]})
+    for k in prev:
+        if k not in cur:
+            ops.append({"op": "exp_del", "id": k})
+    if not ops:
+        return 0
+    for i in range(0, len(ops), 150):
+        code, j = _request(c["url"] + "/api/lis/accounts", c["key"], {"ops": ops[i:i + 150]}, 30)
+        if code != 200 or not j.get("ok"):
+            return 0
+    _set(db, "ledger_exp_ids", json.dumps(cur, ensure_ascii=False))
+    db.commit()
+    _ACC["v"] = None
+    return len(ops)
+# ===================== end sync_testdocs_v1 =====================
+
+
 def collect_day(db, day):
     """صفوف يوم واحد بصيغة السجل السحابي."""
     _ensure_cols(db)
@@ -230,6 +355,7 @@ def collect_day(db, day):
             "expenses": _num(v["expenses"]),
             "expNote": (v["expenses_note"] or "").strip(),
             "sentTests": _sent_str(db, v["id"]),
+            "testDocs": _testdocs_str(db, v["id"]),
         })
     return rows
 
@@ -333,6 +459,10 @@ def _sync(db, days=None, force=False):
     if not c["url"].startswith("https://") or not c["key"]:
         return False, "الربط غير مضبوط.", 0
     n = max(1, min(400, int(days or c["back"])))
+    try:
+        push_accounts(db, c)
+    except Exception:
+        pass
     today = date.today()
     payload, marks = {}, {}
     for i in range(n):
@@ -889,7 +1019,8 @@ def _state(r):
             "ref": (r.get("refDoctor") or "").strip(), "lab": (r.get("priceType") == "lab"), "tests": ts,
             "labDoctor": (r.get("labDoctor") or "").strip(), "expenses": _num(r.get("expenses")), "expNote": (r.get("expNote") or "").strip(),
             "sentRaw": (r.get("sentTests") or "").strip(),
-            "sent": " | ".join(sorted("%s>%s" % (_nt(t), _nt(l)) for t, l in _parse_sent(r.get("sentTests"))))}
+            "sent": " | ".join(sorted("%s>%s" % (_nt(t), _nt(l)) for t, l in _parse_sent(r.get("sentTests")))),
+            **({"testDocs": r["testDocsCanon"]} if "testDocsCanon" in r else {})}
 
 
 def _same(a, b):
@@ -929,6 +1060,8 @@ def _apply_cloud(db, vid, C, base, L):
             db.execute("UPDATE visits SET doctor_id=?, referral_center_id=NULL WHERE id=?", (H["doctor"](db, C["ref"]), vid))
     if C.get("sent", "") != L.get("sent", ""):
         _apply_sent(db, vid, _test_index(db), C.get("sentRaw", ""), base.get("sentRaw", L.get("sentRaw", "")))
+    if "testDocs" in C and "testDocs" in L and C["testDocs"] != L["testDocs"]:
+        _apply_testdocs(db, vid, C["testDocs"])
     if (C["labDoctor"], C["expenses"], C["expNote"]) != (L["labDoctor"], L["expenses"], L["expNote"]):
         _ensure_cols(db)
         db.execute("UPDATE visits SET examining_doctor=?, attending_doctor=?, expenses=?, expenses_note=? WHERE id=?",
@@ -988,6 +1121,7 @@ def _apply_cloud(db, vid, C, base, L):
         _apply_sent(db, vid, idx, C.get("sentRaw", ""), base.get("sentRaw", L.get("sentRaw", "")))
     if notes:
         db.execute("UPDATE visits SET notes=COALESCE(notes,'') || ? WHERE id=?", ("\n[من السجل] " + "؛ ".join(notes), vid))
+    _recompute_fee(db, vid)      # أجر الفاحصين بعد أي تغيير بطبيب الزيارة أو طبيب التحليل أو التحاليل
     n_active = db.execute("SELECT COUNT(*) FROM order_tests ot JOIN orders o ON o.id=ot.order_id WHERE o.visit_id=? AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected')", (vid,)).fetchone()[0]
     _set(db, "ledger_orig_v%d" % vid, json.dumps({"tests": ", ".join(C["tests"]), "n": n_active}, ensure_ascii=False))
     db.commit()
@@ -1006,6 +1140,7 @@ def apply_cloud_edits(db):
     if code != 200 or not j.get("ok"):
         return 0
     days_cache, n = {}, 0
+    idx_td = None
     for it in j.get("items", []):
         m = re.fullmatch(r"v(\d+)", str(it.get("lisId", "")))
         if not m:
@@ -1019,6 +1154,11 @@ def apply_cloud_edits(db):
         Lrow = days_cache[vr["d"]].get(it["lisId"])
         if not Lrow:
             continue
+        if "testDocs" in it:
+            if idx_td is None:
+                idx_td = _test_index(db)
+            it["testDocsCanon"] = _canon_testdocs(idx_td, it.get("testDocs"))
+            Lrow["testDocsCanon"] = _canon_testdocs(idx_td, Lrow.get("testDocs"))
         Cs, Ls = _state(it), _state(Lrow)
         bkey = "ledger_base_" + it["lisId"]
         raw = _get(db, bkey)
