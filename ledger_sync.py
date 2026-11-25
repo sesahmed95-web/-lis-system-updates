@@ -1058,6 +1058,314 @@ def import_all_old(db, days, user_id=None, branch_id=None):
     return True, "تم استيراد %d من %d مريض." % (n, len(items)) + (" فشل: " + " | ".join(bad[:3]) if bad else "")
 
 
+def apply_cloud_deletes(db):
+    """v101: مريض حُذف من سجل المرضى (بالرقم السري) ← تُحذف زيارته من الـLIS بكل تفاصيلها (طلبات/نتائج/فواتير).
+    أول تشغيل يضبط المؤشر على «الآن» فقط (لا يحذف شيئاً من الماضي). يرجع عدد الزيارات المحذوفة."""
+    c = cfg(db)
+    if not c["url"].startswith("https://") or not c["key"] or not _H.get("delete_visit"):
+        return 0
+    raw = _get(db, "ledger_del_since", "")
+    try:
+        code, j = _request(c["url"] + "/api/lis/deleted?since=%d" % int(raw or 0), c["key"], None, 20)
+    except Exception:
+        return 0
+    if code != 200 or not j.get("ok"):
+        return 0
+    if raw == "":
+        _set(db, "ledger_del_since", str(int(j.get("now") or 0)))
+        db.commit()
+        return 0
+    n, last = 0, int(raw)
+    for it in j.get("items", []):
+        last = max(last, int(it.get("at") or 0))
+        m = re.fullmatch(r"v(\d+)", str(it.get("lisId", "")))
+        if not m:
+            continue
+        v = db.execute("SELECT * FROM visits WHERE id=?", (int(m.group(1)),)).fetchone()
+        if v:
+            try:
+                _H["delete_visit"](db, v)
+                n += 1
+            except Exception as e:
+                _st["imp_err"] = "حذف من السجل: " + _redact(e)
+                return n          # لا نحرّك المؤشر: يُعاد المحاولة بالدورة القادمة
+    _set(db, "ledger_del_since", str(last))
+    db.commit()
+    return n
+
+
+
+# ------------------------------------------------------------------ v102: نسخة محلية لنتائج المرضى + ضمان وجودها بالسحابة
+# - كل PDF يُولَّد لبوابة النتائج يُحفظ بالحاسبة (مجلد portal_archive بجانب قاعدة البيانات) مع بصمة المحتوى.
+# - لو انتهت مدة النتيجة بالسحابة (180 يوم) أو انمسحت: يُعاد رفعها من النسخة المحلية مباشرة بدون إعادة توليد.
+# - فحص دوري: أي نتيجة غير مرفوعة أو حالتها بالسحابة أقدم من الحالية (تسجيل/اكتمال) تُرفع تلقائياً.
+# - طلبات «إعادة رفع» من سجل المرضى (لنتيجة غير موجودة بالسحابة) تُنفَّذ خلال دقيقتين إذا كان الـLIS شغّالاً.
+import sqlite3 as _sq
+
+_PG_LOCK = threading.Lock()
+_pg = {"deep_t": 0.0, "last": "", "last_t": 0.0}
+
+
+def arch_dir():
+    from database import DB_PATH
+    d = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "portal_archive")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _st_db():
+    c = _sq.connect(os.path.join(arch_dir(), "state.db"), timeout=15)
+    c.execute("CREATE TABLE IF NOT EXISTS st (vid INTEGER PRIMARY KEY, pdf_h TEXT DEFAULT '', push_h TEXT DEFAULT '', "
+              "push_at TEXT DEFAULT '', revoked INTEGER DEFAULT 0)")
+    return c
+
+
+def portal_state_hash(data):
+    """بصمة محتوى النتيجة (دون حقل الوقت المتوقع): تتغير فقط عند تغيّر نتيجة/مدى/حالة تحليل."""
+    if not data:
+        return ""
+    core = {k: data.get(k) for k in ("patient_name", "created_at", "tests", "group_order")}
+    return hashlib.sha1(json.dumps(core, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def archive_get(vid, h):
+    """يرجع bytes للـPDF المحفوظ إذا كان لنفس محتوى النتيجة الحالي، وإلا None."""
+    try:
+        p = os.path.join(arch_dir(), "v%d.pdf" % int(vid))
+        if not h or not os.path.isfile(p):
+            return None
+        c = _st_db()
+        try:
+            r = c.execute("SELECT pdf_h FROM st WHERE vid=?", (int(vid),)).fetchone()
+        finally:
+            c.close()
+        if r and r[0] == h:
+            with open(p, "rb") as f:
+                b = f.read()
+            return b if b[:4] == b"%PDF" else None
+    except Exception:
+        pass
+    return None
+
+
+def archive_save(vid, pdf, h):
+    """يحفظ نسخة PDF محلية (كتابة آمنة: ملف مؤقت ثم استبدال). لا يرمي أخطاء."""
+    try:
+        if not pdf or pdf[:4] != b"%PDF":
+            return False
+        p = os.path.join(arch_dir(), "v%d.pdf" % int(vid))
+        tmp = p + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(pdf)
+        os.replace(tmp, p)
+        c = _st_db()
+        try:
+            c.execute("INSERT INTO st (vid, pdf_h) VALUES (?, ?) ON CONFLICT(vid) DO UPDATE SET pdf_h=excluded.pdf_h", (int(vid), h))
+            c.commit()
+        finally:
+            c.close()
+        return True
+    except Exception:
+        return False
+
+
+def _st_set(vid, **kw):
+    try:
+        c = _st_db()
+        try:
+            c.execute("INSERT OR IGNORE INTO st (vid) VALUES (?)", (int(vid),))
+            for k, v in kw.items():
+                if k in ("push_h", "push_at", "revoked", "pdf_h"):
+                    c.execute("UPDATE st SET %s=? WHERE vid=?" % k, (v, int(vid)))
+            c.commit()
+        finally:
+            c.close()
+    except Exception:
+        pass
+
+
+def _st_get(vid):
+    try:
+        c = _st_db()
+        try:
+            r = c.execute("SELECT push_h, revoked FROM st WHERE vid=?", (int(vid),)).fetchone()
+        finally:
+            c.close()
+        return (r[0] or "", int(r[1] or 0)) if r else ("", 0)
+    except Exception:
+        return "", 0
+
+
+def portal_mark_revoked(vid, on=True):
+    """عند إلغاء رابط مريض (revoke) لا يعيد الفحص الدوري رفعه، ويُحذف PDF المحلي. عند إصدار QR جديد يُرفع الإلغاء."""
+    _st_set(vid, revoked=1 if on else 0)
+    if on:
+        try:
+            os.remove(os.path.join(arch_dir(), "v%d.pdf" % int(vid)))
+        except OSError:
+            pass
+
+
+def archive_stats():
+    try:
+        d = arch_dir()
+        n = tot = 0
+        for f in os.listdir(d):
+            if f.endswith(".pdf"):
+                n += 1
+                tot += os.path.getsize(os.path.join(d, f))
+        return n, tot
+    except Exception:
+        return 0, 0
+
+
+def _expected_code(data):
+    """الحالة المتوقعة بالسحابة: r جاهزة كاملة، p جزئية، w قيد التحضير."""
+    ts = [t for t in (data or {}).get("tests", []) if t.get("status") not in ("Cancelled", "Canceled", "Rejected")]
+    if not ts:
+        return "w"
+    done = [t for t in ts if t.get("status") in ("Completed", "Verified")]
+    return "r" if len(done) == len(ts) else ("p" if done else "w")
+
+
+def _push_visit(db, vid):
+    import cloud_sync
+    cloud_sync.ensure_token(db, vid)
+    ok, msg = cloud_sync.sync_visit(db, vid, force=True)
+    if ok:
+        try:
+            coll = _H.get("portal_collect")
+            _st_set(vid, push_h=portal_state_hash(coll(db, vid)) if coll else "", push_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            pass
+    return ok, msg
+
+
+def portal_guard(db, force=False):
+    """يضمن أن كل نتيجة (آخر portal_guard_days يوم، الافتراضي 150) موجودة بالسحابة وبحالتها الصحيحة. يرجع نص ملخّص."""
+    c = cfg(db)
+    if not (c["enabled"] and c["url"].startswith("https://") and c["key"]):
+        return "ربط السجل غير مفعّل."
+    if _get(db, "portal_guard", "1") != "1" and not force:
+        return "الفحص التلقائي معطّل."
+    try:
+        import cloud_sync
+        if not cloud_sync.get_cfg(db).get("enabled"):
+            return "بوابة النتائج (QR) غير مفعّلة بالـLIS."
+    except Exception as e:
+        return "تعذّر تحميل cloud_sync: %s" % e
+    if not _PG_LOCK.acquire(blocking=False):
+        return "الفحص يعمل حالياً."
+    n = {"resend": 0, "missing": 0, "changed": 0, "fail": 0}
+    first_err = ""
+    try:
+        cap_resend = 40 if force else 10
+        cap_missing = 40 if force else 4        # نتائج ناقصة قديمة: دفعات صغيرة حتى لا يُثقل الحاسبة
+        cap_changed = 60 if force else 12
+        # 1) طلبات «إعادة رفع» القادمة من سجل المرضى
+        try:
+            code, j = _request(c["url"] + "/api/lis/resend", c["key"], None, 20)
+            ids = [x for x in (j.get("ids") or []) if re.fullmatch(r"v\d+", str(x))] if code == 200 else []
+        except Exception:
+            ids = []
+        done = []
+        for x in ids[:cap_resend]:
+            vid = int(x[1:])
+            if not db.execute("SELECT 1 FROM visits WHERE id=?", (vid,)).fetchone():
+                done.append(x)                  # الزيارة غير موجودة بالـLIS: أغلق الطلب
+                continue
+            portal_mark_revoked(vid, False)     # طلب صريح من المستخدم = رفع الإلغاء
+            ok, msg = _push_visit(db, vid)
+            if ok:
+                done.append(x)
+                n["resend"] += 1
+            else:
+                n["fail"] += 1
+                first_err = first_err or str(msg)
+        if done:
+            try:
+                _request(c["url"] + "/api/lis/resend-done", c["key"], {"ids": done}, 20)
+            except Exception:
+                pass
+        # 2) الفحص العميق (كل 5 دقائق أو يدوياً)
+        now = time.time()
+        if force or now - _pg["deep_t"] >= 300:
+            _pg["deep_t"] = now
+            try:
+                win = max(7, min(365, int(_get(db, "portal_guard_days", "150") or 150)))
+            except ValueError:
+                win = 150
+            cutoff = (date.today() - timedelta(days=win)).isoformat()
+            recent_cut = (date.today() - timedelta(days=c["back"])).isoformat()
+            rows = db.execute(
+                "SELECT v.id AS id, v.portal_token AS tok, substr(v.created_at,1,10) AS d FROM visits v "
+                "WHERE substr(v.created_at,1,10)>=? AND EXISTS (SELECT 1 FROM orders o JOIN order_tests ot ON ot.order_id=o.id "
+                "WHERE o.visit_id=v.id) ORDER BY v.id DESC LIMIT 6000", (cutoff,)).fetchall()
+            toks = [r["tok"] for r in rows if r["tok"]]
+            have, missing_set, got, cloud_full = {}, set(), False, False
+            for i in range(0, len(toks), 1500):
+                try:
+                    code, j = _request(c["url"] + "/api/lis/portal-missing", c["key"], {"tokens": toks[i:i + 1500]}, 40)
+                except Exception:
+                    break
+                if code != 200 or not j.get("ok"):
+                    break
+                got = True
+                have.update(j.get("have") or {})
+                cloud_full = cloud_full or bool(j.get("full"))
+                missing_set.update(j.get("missing") or [])
+            if got or not toks:
+                coll = _H.get("portal_collect")
+                to_miss, to_chg = [], []
+                for r in rows:                              # الأحدث أولاً
+                    vid = r["id"]
+                    _h, rev = _st_get(vid)
+                    if rev:
+                        continue
+                    tok = r["tok"]
+                    is_recent = r["d"] >= recent_cut
+                    if not tok:
+                        if is_recent:                       # تسجيل حديث بلا رمز: يُنشأ الرمز ويُرفع (لا نلمس القديم)
+                            to_miss.append(vid)
+                        continue
+                    if tok in missing_set:
+                        if is_recent or not cloud_full:    # السحابة ممتلئة: القديم يُرفع فقط عند طلب صريح من سجل المرضى
+                            to_miss.append(vid)
+                        continue
+                    if not is_recent or not coll:
+                        continue
+                    try:
+                        data = coll(db, vid)
+                        h = portal_state_hash(data)
+                    except Exception:
+                        continue
+                    if have.get(tok) != _expected_code(data) or (_h and _h != h):
+                        to_chg.append(vid)
+                    elif not _h:
+                        _st_set(vid, push_h=h)              # مطابقة للسحابة: سجّل البصمة فقط
+                for vid in to_chg[:cap_changed]:
+                    ok, msg = _push_visit(db, vid)
+                    n["changed" if ok else "fail"] += 1
+                    if not ok:
+                        first_err = first_err or str(msg)
+                for vid in to_miss[:cap_missing]:
+                    ok, msg = _push_visit(db, vid)
+                    n["missing" if ok else "fail"] += 1
+                    if not ok:
+                        first_err = first_err or str(msg)
+                left = max(0, len(to_miss) - cap_missing) + max(0, len(to_chg) - cap_changed)
+                if left:
+                    _pg["deep_t"] = 0.0                     # تبقّى عمل: كمّل بالدورة التالية
+        msg = "رُفع: %d بطلب من السجل، %d ناقصة، %d محدَّثة" % (n["resend"], n["missing"], n["changed"])
+        if n["fail"]:
+            msg += "، فشل %d (%s)" % (n["fail"], first_err[:120])
+        if any(n.values()) or force:
+            _pg["last"], _pg["last_t"] = msg, time.time()
+        return msg
+    finally:
+        _PG_LOCK.release()
+
+
 def _loop():
     time.sleep(20)
     while True:
@@ -1065,6 +1373,11 @@ def _loop():
             db = _db()
             try:
                 if cfg(db)["enabled"]:
+                    try:
+                        with _lock:
+                            apply_cloud_deletes(db)      # قبل الدفع: حتى لا يُعاد رفع مريض محذوف
+                    except Exception:
+                        pass
                     with _lock:
                         ok, msg, _n = sync(db)
                     if not ok:
@@ -1080,6 +1393,10 @@ def _loop():
                                     if ok_b:
                                         _set(db, "ledger_backfill_v1", "1")
                                         db.commit()
+                        except Exception:
+                            pass
+                        try:
+                            portal_guard(db)               # v102: ضمان رفع النتائج للسحابة (خارج قفل المزامنة)
                         except Exception:
                             pass
             finally:
@@ -1135,6 +1452,7 @@ button.g{background:#64748b}.m{margin-top:14px;padding:10px;border-radius:9px;ba
 <label>مفتاح الربط (LIS_KEY) <span style="font-weight:400;color:#64748b">__HAS__</span></label><input type="password" id="k" placeholder="اتركه فارغاً للإبقاء على المحفوظ" autocomplete="off">
 <label><input type="checkbox" id="e" __EN__> تفعيل المزامنة التلقائية</label>
 <div><button id="sv">حفظ</button><button id="ts" class="g">اختبار الاتصال</button><button id="sy" class="g">مزامنة الآن</button><button id="bf" class="g">رفع آخر 30 يوم</button><button id="bo" class="g">رفع كل بيانات LIS (سنة)</button><button id="io" class="g">استيراد بيانات السجل القديمة (سنة)</button></div>
+<div style="margin-top:10px"><button id="pg" class="g">رفع النتائج الناقصة للسحابة الآن</button><button id="ps" class="g">حالة النتائج</button></div>
 <div class="m" id="r">__STAT__</div>
 <h3 style="margin:18px 0 6px">مرضى أُدخلوا بالسجل (واردون للـLIS) <button id="ia" class="g" style="padding:4px 10px;font-size:13px">استيراد الكل</button></h3><div id="ii" class="s">جاري التحميل…</div>
 <h3 style="margin:18px 0 6px">دفعات أُدخلت من السجل (بانتظار اعتمادك)</h3><div id="pp" class="s">جاري التحميل…</div>
@@ -1145,6 +1463,8 @@ function post(p,b){return fetch(p,{method:"POST",headers:{"Content-Type":"applic
 function body(){return {url:$("u").value,key:$("k").value,enabled:$("e").checked}}
 function run(p,b,w){$("r").textContent=w;post(p,b).then(function(j){$("r").textContent=j.message||j.error||"تم"}).catch(function(e){$("r").textContent="فشل: "+e})}
 $("sv").onclick=function(){run("/ledger/save",body(),"جاري الحفظ…")};
+$("pg").onclick=function(){post("/ledger/save",body()).then(function(){run("/ledger/portal-guard",{},"جاري البدء…")})};
+$("ps").onclick=function(){run("/ledger/portal-status",{},"جاري القراءة…")};
 $("ts").onclick=function(){post("/ledger/save",body()).then(function(){run("/ledger/test",{},"جاري الاختبار…")})};
 $("sy").onclick=function(){post("/ledger/save",body()).then(function(){run("/ledger/sync",{days:3},"جاري المزامنة…")})};
 $("bf").onclick=function(){post("/ledger/save",body()).then(function(){run("/ledger/sync",{days:30,force:true},"جاري رفع 30 يوم…")})};
@@ -1237,6 +1557,30 @@ def install(app, helpers=None):
             return jsonify(ok=ok, message=msg)
         finally:
             db.close()
+
+    @bp.route("/ledger/portal-guard", methods=["POST"])
+    def portal_guard_now():
+        if not allowed():
+            return jsonify(ok=False, message="سجّل الدخول أولاً."), 401
+
+        def _run():
+            d2 = _db()
+            try:
+                portal_guard(d2, force=True)
+            except Exception as e:
+                _pg["last"], _pg["last_t"] = "خطأ: %s" % e, time.time()
+            finally:
+                d2.close()
+        threading.Thread(target=_run, name="portal-guard-now", daemon=True).start()
+        return jsonify(ok=True, message="بدأ فحص النتائج ورفع الناقص بالخلفية. اضغط «حالة النتائج» بعد دقيقة.")
+
+    @bp.route("/ledger/portal-status", methods=["POST"])
+    def portal_status():
+        if not allowed():
+            return jsonify(ok=False, message="سجّل الدخول أولاً."), 401
+        cnt, size = archive_stats()
+        last = _pg["last"] + (time.strftime(" (%H:%M:%S)", time.localtime(_pg["last_t"])) if _pg["last_t"] else "")
+        return jsonify(ok=True, message="نسخ PDF محلية: %d ملف (%.1f ميغابايت)\nآخر فحص: %s" % (cnt, size / 1048576.0, last or "—"))
 
     @bp.route("/ledger/pending", methods=["POST"])
     def pend():

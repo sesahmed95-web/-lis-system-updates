@@ -16292,6 +16292,16 @@ def _portal_make_pdf(visit_id):
     with app.test_request_context("/?headings=1", base_url=base):
         session["interface"] = "both"
         db = get_db()
+        # v102: نسخة محلية بالحاسبة — لو محتوى النتيجة لم يتغير نرجع نفس الـPDF المحفوظ (إعادة رفع فورية بدون إعادة توليد)
+        _v102_h = ""
+        try:
+            import ledger_sync as _v102_ls
+            _v102_h = _v102_ls.portal_state_hash(_portal_collect(db, visit_id))
+            _v102_hit = _v102_ls.archive_get(visit_id, _v102_h)
+            if _v102_hit:
+                return _v102_hit
+        except Exception:
+            _v102_ls = None
         prev = {r["id"]: r["printed_at"] for r in db.execute(
             "SELECT ot.id, ot.printed_at FROM order_tests ot JOIN orders o ON o.id = ot.order_id WHERE o.visit_id=?",
             (visit_id,)).fetchall()}
@@ -16318,7 +16328,13 @@ def _portal_make_pdf(visit_id):
         try:
             _v86_html_to_pdf(html_content, request.url_root, pdf_path)
             with open(pdf_path, "rb") as fh:
-                return fh.read()
+                _v102_bytes = fh.read()
+            try:   # v102: احفظ نسخة محلية (لا يؤثر فشلها على الرفع)
+                if _v102_ls and _v102_h:
+                    _v102_ls.archive_save(visit_id, _v102_bytes, _v102_h)
+            except Exception:
+                pass
+            return _v102_bytes
         finally:
             try:
                 os.remove(pdf_path)
@@ -16362,6 +16378,11 @@ def print_visit_portal_qr(visit_id):
         flash("بوابة النتائج غير مفعّلة بهذا الجهاز (رابط البوابة/مفتاحها غير مضبوطين). اطلب من مسؤول النظام أو المصمم ضبطها، ثم أعد المحاولة.")
         return redirect(request.referrer or url_for("new_visit"))
     token = cloud_sync.ensure_token(db, visit_id)
+    try:   # v102: إصدار QR جديد = المريض يريد النتيجة، فيعود الفحص التلقائي لضمان رفعها
+        import ledger_sync as _v102_qr
+        _v102_qr.portal_mark_revoked(visit_id, False)
+    except Exception:
+        pass
     data = _portal_collect(db, visit_id) or {"tests": [], "created_at": visit["created_at"]}
     cloud_sync.trigger()
     return render_template("front_desk/print_portal_qr.html", visit=visit, link=cloud_sync.portal_link(cfg, token),
@@ -16438,6 +16459,12 @@ def api_portal_diagnose(visit_id):
 def api_portal_revoke(visit_id):
     db = get_db()
     ok, msg = cloud_sync.revoke(db, visit_id)
+    if ok:
+        try:   # v102: لا يعيد الفحص التلقائي رفع نتيجة أُلغي رابطها عمداً، ويُحذف PDF المحلي
+            import ledger_sync as _v102_rv
+            _v102_rv.portal_mark_revoked(visit_id, True)
+        except Exception:
+            pass
     log_action("PortalRevoke", "visit", visit_id, msg)
     return {"ok": ok, "message": msg}
 
@@ -20440,7 +20467,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     # ربط «سجل المرضى السحابي» (ledger_sync.py): صفحة /ledger + مزامنة تلقائية. اختياري: أي خطأ لا يوقف البرنامج.
     try:
         import ledger_sync
-        ledger_sync.install(app, dict(next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no, ensure_partner=_ensure_partner_labs, unique_code=unique_test_code))
+        ledger_sync.install(app, dict(delete_visit=_delete_visit_cascade, next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no, ensure_partner=_ensure_partner_labs, unique_code=unique_test_code, portal_collect=_portal_collect))
     except Exception as _le:
         print("ledger_sync not loaded:", _le)
     # كتالوج التحاليل الجاهز: يُثبَّت تلقائياً مرة واحدة لكل جهاز (يضيف الناقص فقط؛ الأسعار 0 ويحددها العميل)
