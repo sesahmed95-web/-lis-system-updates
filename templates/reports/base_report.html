@@ -516,6 +516,7 @@
       <tbody>
         <tr><td>
           <div id="rptResults">{% block report_body %}{% endblock %}</div>
+          {% include "reports/partials/fmt_style.html" %}{% if is_design_preview %}{% include "reports/partials/fmt_editor.html" %}{% endif %}
 
           {# v63: عنوان اسم التحليل (مثل A1c / T3) فوق جدول النتائج ما له داعي — الاسم موجود بالجدول. نخفيه لو نصه يطابق اسم/رمز التحليل، بكل الستايلات. #}
           <script>

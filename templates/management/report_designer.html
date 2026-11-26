@@ -63,6 +63,70 @@
   (function () { var d = document.getElementById('designs'); if (d && location.hash === '#designs') { d.open = true; d.scrollIntoView(); } })();
 </script>
 
+{# ====================== v108: تعديل وحدات كل التحاليل من داخل المصمم ====================== #}
+<details class="card" id="unitsCard" style="margin-bottom:18px; padding:0;">
+  <summary style="cursor:pointer; padding:12px 16px; font-weight:700; font-size:1.05em;">✏️ تعديل الوحدات (كل التحاليل وكل التقارير) — بدون مغادرة الصفحة</summary>
+  <div style="padding:0 16px 14px;">
+    <p class="muted" style="font-size:0.85em; margin:4px 0 8px;">يُحفظ مباشرة عند الخروج من الخانة أو الضغط على Enter، ويسري على كل التقارير والتصاميم (الوحدة تُقرأ من إعدادات الباراميتر نفسه). مثال: NRBC ← <b>/100 WBC</b>.</p>
+    <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+      <input type="search" id="unQ" placeholder="ابحث: اسم التحليل أو الباراميتر أو الوحدة…" style="flex:1; min-width:220px; padding:7px 10px;">
+      <button type="button" class="btn secondary" id="unNrbc">⚡ ضبط NRBC ← /100 WBC</button>
+      <span id="unMsg" class="muted" style="align-self:center; font-size:0.85em;"></span>
+    </div>
+    <div style="max-height:420px; overflow:auto; border:1px solid #E2E8F0; border-radius:8px;">
+      <table style="width:100%; border-collapse:collapse; font-size:0.9em;" id="unTbl">
+        <thead><tr style="background:#F1F5F9; position:sticky; top:0;"><th style="padding:5px 8px; text-align:start;">التحليل</th><th style="text-align:start;">الباراميتر</th><th style="text-align:start; width:190px;">الوحدة</th></tr></thead>
+        <tbody id="unBody"><tr><td colspan="3" class="muted" style="padding:10px;">افتح هذا القسم لتحميل القائمة…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</details>
+<script>
+(function () {
+  var card = document.getElementById('unitsCard'); if (!card) return;
+  var items = [], loaded = false;
+  var body = document.getElementById('unBody'), q = document.getElementById('unQ'), msg = document.getElementById('unMsg');
+  function say(t, ok) { msg.textContent = t; msg.style.color = ok === false ? '#B91C1C' : '#15803D'; }
+  function save(inp, it) {
+    var v = inp.value.trim(); if (v === it.unit) return;
+    var fd = new FormData(); fd.append('unit', v); fd.append('ajax', '1');
+    fetch('/master/unit-converter/' + it.id + '/set-unit', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (j && j.ok) { it.unit = j.unit; inp.style.background = '#DCFCE7'; say('تم حفظ وحدة ' + it.name + ' ✓'); setTimeout(function () { inp.style.background = ''; }, 1200); } else { inp.style.background = '#FEE2E2'; say('تعذّر الحفظ', false); } })
+      .catch(function () { inp.style.background = '#FEE2E2'; say('تعذّر الحفظ (صلاحية/اتصال)', false); });
+  }
+  function draw() {
+    var t = q.value.trim().toLowerCase(), n = 0; body.innerHTML = '';
+    items.forEach(function (it) {
+      if (t && (it.test_name + ' ' + it.test_code + ' ' + it.name + ' ' + it.unit).toLowerCase().indexOf(t) === -1) return;
+      if (++n > 300) return;
+      var tr = document.createElement('tr'); tr.style.borderTop = '1px solid #E2E8F0';
+      var a = document.createElement('td'); a.style.padding = '4px 8px'; a.textContent = it.test_name + (it.department ? ' · ' + it.department : '');
+      var b = document.createElement('td'); b.textContent = it.name; b.style.direction = 'ltr'; b.style.textAlign = 'start';
+      var c = document.createElement('td'), inp = document.createElement('input'); inp.type = 'text'; inp.value = it.unit; inp.style.cssText = 'width:100%; padding:4px 6px; direction:ltr;';
+      inp.addEventListener('change', function () { save(inp, it); });
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
+      c.appendChild(inp); tr.appendChild(a); tr.appendChild(b); tr.appendChild(c); body.appendChild(tr);
+    });
+    if (!n) body.innerHTML = '<tr><td colspan="3" class="muted" style="padding:10px;">لا نتائج</td></tr>';
+    else if (n > 300) say('يُعرض أول 300 — استخدم البحث لتضييق القائمة', true);
+  }
+  function load() {
+    if (loaded) return; loaded = true;
+    fetch('/api/report-units', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) { items = (j && j.items) || []; draw(); })
+      .catch(function () { loaded = false; body.innerHTML = '<tr><td colspan="3" style="padding:10px;color:#B91C1C;">تعذّر تحميل القائمة (يلزم صلاحية مدير)</td></tr>'; });
+  }
+  card.addEventListener('toggle', function () { if (card.open) load(); });
+  q.addEventListener('input', draw);
+  document.getElementById('unNrbc').addEventListener('click', function () {
+    if (!loaded) { say('افتح القائمة أولاً', false); return; }
+    var hits = items.filter(function (it) { return /^nrbc/i.test(it.name); }); if (!hits.length) { say('ما لقيت باراميتر NRBC', false); return; }
+    hits.forEach(function (it) { var fd = new FormData(); fd.append('unit', '/100 WBC'); fd.append('ajax', '1'); fetch('/master/unit-converter/' + it.id + '/set-unit', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) { if (j && j.ok) { it.unit = j.unit; draw(); } }); });
+    say('تم ضبط ' + hits.length + ' باراميتر NRBC ← /100 WBC ✓');
+  });
+})();
+</script>
+
 {# ====================== أسلوب جدول النتائج (عام لكل التقارير) ====================== #}
 {% set rl = result_layout %}
 <div class="card" id="barcodeCard" style="margin-bottom:18px;"><h3>🏷️ تصميم الباركودات</h3><p class="muted" style="font-size:0.85em;">ملصق الأنبوب (T1) وملصق الطلب (R1) والقياسات بالمليمتر.</p><a class="btn" href="{{ url_for('label_designer_page') }}">فتح صفحة تصميم الباركودات</a></div>

@@ -53,7 +53,7 @@ def cfg(db):
         back = 3
     return {
         "url": (_get(db, "ledger_url") or "").strip().rstrip("/"),
-        "key": re.sub(r"[^A-Za-z0-9_.\-]", "", _get(db, "ledger_key") or ""),
+        "key": re.sub(r"[^\x21-\x7e]|[\"']", "", _get(db, "ledger_key") or ""),
         "enabled": _get(db, "ledger_enabled", "0") == "1",
         "back": back,
     }
@@ -378,8 +378,9 @@ def _explain(code, j):
         return "مفتاح الربط غير صحيح (يجب أن يطابق LIS_KEY بالسحابة)."
     if code == 500 and (j or {}).get("code") == "no_lis_key":
         return "السحابة ما عندها LIS_KEY — نفّذ: npx wrangler secret put LIS_KEY"
-    if code == 404:
-        return "الرابط غير صحيح أو نسخة السحابة قديمة (ما فيها جسر المختبر). أعد نشر السحابة."
+    if code in (404, 405):
+        return ("الرابط يشير لـWorker قديم أو غير Worker السجل (ما يملك مسارات /api/lis). استعمل رابط السجل نفسه "
+                "(الذي يفتح السجل بالمتصفح) ثم انشر worker.js الجديد بـ npx wrangler deploy.")
     return "رفضت السحابة الطلب (HTTP %s) %s" % (code, _redact(m))
 
 
@@ -1399,11 +1400,111 @@ def _loop():
                             portal_guard(db)               # v102: ضمان رفع النتائج للسحابة (خارج قفل المزامنة)
                         except Exception:
                             pass
+                        try:
+                            flags_pull(db)                 # v111: بلاغات النتائج الخاطئة من سجل المرضى
+                        except Exception:
+                            pass
             finally:
                 db.close()
         except Exception:
             pass
         time.sleep(INTERVAL)
+
+
+# ------------------------------------------------------------------ v111: نتائج خاطئة يبلّغ عنها سجل المرضى
+_fl = {"t": 0.0}
+
+
+def flags_get(db):
+    try:
+        v = json.loads(_get(db, "ledger_flags", "[]") or "[]")
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
+def flags_pull(db):
+    """يجلب البلاغات المفتوحة من السحابة ويحفظها محلياً (جرس الـLIS يقرأها). يرجع (ok, عدد الجديد)."""
+    c = cfg(db)
+    if not (c["enabled"] and c["url"].startswith("https://") and c["key"]):
+        return False, 0
+    code, j = _request(c["url"] + "/api/lis/flags", c["key"], None, 20)
+    if code != 200 or not isinstance(j, dict) or not j.get("ok"):
+        return False, 0
+    items = []
+    for x in (j.get("items") or [])[:200]:
+        if not isinstance(x, dict) or not re.match(r"^v\d+$", str(x.get("lisId") or "")):
+            continue
+        it = {k: str(x.get(k) or "")[:300] for k in ("id", "lisId", "name", "test", "reason", "by")}
+        try:
+            it["at"] = int(x.get("at") or 0)
+        except (TypeError, ValueError):
+            it["at"] = 0
+        items.append(it)
+    old = {f.get("id") for f in flags_get(db)}
+    _set(db, "ledger_flags", json.dumps(items, ensure_ascii=False))
+    db.commit()
+    return True, len([f for f in items if f["id"] not in old])
+
+
+def flags_fix(db, fid, note=""):
+    """المستخدم صحّح النتيجة بالـLIS: نغلق البلاغ بالسحابة ثم نعيد إرسال النتيجة المصححة (بوابة + سجل)."""
+    c = cfg(db)
+    fl = [f for f in flags_get(db) if f.get("id") == fid]
+    if not fl:
+        return False, "البلاغ غير موجود (حدّث الصفحة)."
+    code, j = _request(c["url"] + "/api/lis/flags-done", c["key"], {"ids": [fid], "note": str(note or "")[:200]}, 25)
+    if code != 200:
+        return False, _explain(code, j)
+    rest = [x for x in flags_get(db) if x.get("id") != fid]
+    _set(db, "ledger_flags", json.dumps(rest, ensure_ascii=False))
+    db.commit()
+    vid = int(fl[0]["lisId"][1:])
+
+    def _push():
+        d2 = _db()
+        try:
+            try:
+                import cloud_sync
+                if cloud_sync.get_cfg(d2).get("enabled"):
+                    cloud_sync.sync_visit(d2, vid, force=True)
+            except Exception:
+                pass
+            try:
+                with _lock:
+                    sync(d2)
+            except Exception:
+                pass
+        finally:
+            d2.close()
+    threading.Thread(target=_push, name="flag-resend", daemon=True).start()
+    return True, "أُعيد إرسال النتيجة المصححة للسجل ✓"
+
+
+_BELL = r"""<script id="lis-flag-bell">(function(){try{
+if(window.top!==window.self||document.getElementById("lis-fb"))return;
+var btn=document.createElement("button");btn.id="lis-fb";btn.type="button";btn.title="نتائج خاطئة بلّغ عنها سجل المرضى";
+btn.style.cssText="position:fixed;bottom:14px;right:16px;z-index:99991;display:none;align-items:center;gap:6px;background:#dc2626;color:#fff;border:0;border-radius:22px;padding:8px 14px;font:700 13px Tahoma,sans-serif;cursor:pointer;box-shadow:0 6px 18px rgba(220,38,38,.45)";
+var pan=document.createElement("div");pan.id="lis-fp";pan.setAttribute("dir","rtl");
+pan.style.cssText="position:fixed;bottom:60px;right:16px;z-index:99992;display:none;width:min(420px,94vw);max-height:70vh;overflow:auto;background:#fff;color:#111;border:1px solid #cbd5e1;border-radius:14px;box-shadow:0 18px 44px rgba(0,0,0,.3);padding:10px;font:13px Tahoma,sans-serif";
+var last=-1,ctx=null;
+function beep(){try{ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();[880,660,880].forEach(function(f,i){var o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=f;o.connect(g);g.connect(ctx.destination);g.gain.setValueAtTime(.2,ctx.currentTime+i*.2);g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+i*.2+.18);o.start(ctx.currentTime+i*.2);o.stop(ctx.currentTime+i*.2+.2)})}catch(e){}}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function fmt(t){try{return new Date(t).toLocaleString("ar-IQ")}catch(e){return""}}
+function draw(items){
+ btn.style.display=items.length?"flex":"none";
+ btn.textContent="\uD83D\uDD14 "+items.length+" \u0646\u062A\u064A\u062C\u0629 \u062E\u0627\u0637\u0626\u0629";
+ if(!items.length)pan.style.display="none";
+ pan.innerHTML='<div style="font-weight:800;margin-bottom:6px">\u26A0 \u0646\u062A\u0627\u0626\u062C \u0628\u0644\u0651\u063A \u0639\u0646\u0647\u0627 \u0633\u062C\u0644 \u0627\u0644\u0645\u0631\u0636\u0649</div>'+items.map(function(f){
+  return '<div style="border:1px solid #fecaca;background:#fff7f7;border-radius:10px;padding:8px 10px;margin-top:6px"><b>'+esc(f.name)+'</b>'+(f.test?' \u2014 '+esc(f.test):'')+'<div style="color:#b91c1c;margin:3px 0">\u0627\u0644\u062E\u0637\u0623: '+esc(f.reason)+'</div><div style="color:#64748b;font-size:12px">\u0645\u0646: '+esc(f.by)+' \u2014 '+fmt(f.at)+'</div><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><a href="/front-desk/visits/'+esc(String(f.lisId).slice(1))+'/results" style="background:#0f766e;color:#fff;border-radius:8px;padding:5px 10px;text-decoration:none">\u0641\u062A\u062D \u0627\u0644\u0646\u062A\u064A\u062C\u0629 \u0644\u0644\u062A\u0639\u062F\u064A\u0644</a><button data-fix="'+esc(f.id)+'" style="background:#fff;border:1px solid #0f766e;color:#0f766e;border-radius:8px;padding:5px 10px;cursor:pointer">\u2714 \u062A\u0645 \u0627\u0644\u062A\u0635\u062D\u064A\u062D \u2014 \u0623\u0639\u062F \u0627\u0644\u0625\u0631\u0633\u0627\u0644</button></div></div>'}).join("");
+ if(last>=0&&items.length>last)beep();
+ last=items.length}
+function load(){fetch("/ledger/flags.json?refresh=1",{cache:"no-store"}).then(function(r){return r.json()}).then(function(j){draw(j.items||[])}).catch(function(){})}
+btn.addEventListener("click",function(){pan.style.display=pan.style.display==="block"?"none":"block"});
+pan.addEventListener("click",function(e){var b=e.target.closest("button[data-fix]");if(!b)return;if(!confirm("\u0647\u0644 \u0635\u062D\u0651\u062D\u062A \u0627\u0644\u0646\u062A\u064A\u062C\u0629 \u0648\u062D\u0641\u0638\u062A\u0647\u0627\u061F \u0633\u064F\u064A\u0639\u0627\u062F \u0625\u0631\u0633\u0627\u0644\u0647\u0627 \u0644\u0644\u0633\u062C\u0644."))return;b.disabled=true;fetch("/ledger/flags/fix",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:b.getAttribute("data-fix")})}).then(function(r){return r.json()}).then(function(j){alert(j.message||"");load()}).catch(function(){b.disabled=false;alert("\u062A\u0639\u0630\u0651\u0631 \u0627\u0644\u0627\u062A\u0635\u0627\u0644")})});
+function mount(){document.body.appendChild(btn);document.body.appendChild(pan);load();setInterval(load,30000)}
+if(document.body)mount();else document.addEventListener("DOMContentLoaded",mount);
+}catch(e){}})();</script>"""
 
 
 def start():
@@ -1522,7 +1623,7 @@ def install(app, helpers=None):
             if u and not u.lower().startswith("https://"):
                 return jsonify(ok=False, message="الرابط لازم يبدأ بـ https://"), 400
             _set(db, "ledger_url", u)
-            k = re.sub(r"[^A-Za-z0-9_.\-]", "", d.get("key") or "")   # يحذف BOM/مسافات/اقتباس/أي حرف غير مفتاح
+            k = re.sub(r"[^\x21-\x7e]|[\"']", "", d.get("key") or "")   # يحذف BOM/مسافات/اقتباس/أي حرف غير مفتاح
             if k:
                 _set(db, "ledger_key", k[:200])
             _set(db, "ledger_enabled", "1" if d.get("enabled") else "0")
@@ -1676,6 +1777,34 @@ def install(app, helpers=None):
             label, detail = "☁ ربط السجل", "اضغط لإعداد الربط مع السجل السحابي"
         return jsonify(enabled=en, color=col, label=label, detail=detail)
 
+    @bp.route("/ledger/flags.json")
+    def flags_json():
+        if not allowed():
+            return jsonify(ok=False, items=[]), 401
+        db = _db()
+        try:
+            if request.args.get("refresh") == "1" and time.time() - _fl["t"] > 25:
+                _fl["t"] = time.time()
+                try:
+                    flags_pull(db)
+                except Exception:
+                    pass
+            return jsonify(ok=True, items=flags_get(db))
+        finally:
+            db.close()
+
+    @bp.route("/ledger/flags/fix", methods=["POST"])
+    def flags_fix_route():
+        if not allowed():
+            return jsonify(ok=False, message="سجّل الدخول أولاً."), 401
+        d = request.get_json(silent=True) or {}
+        db = _db()
+        try:
+            ok, msg = flags_fix(db, str(d.get("id") or ""), str(d.get("note") or ""))
+            return jsonify(ok=ok, message=msg)
+        finally:
+            db.close()
+
     @app.after_request
     def _inject(resp):
         try:
@@ -1683,7 +1812,7 @@ def install(app, helpers=None):
                     and request.method == "GET" and not request.path.startswith(("/ledger", "/ai/assistant", "/api/"))):
                 b = resp.get_data(as_text=True)
                 if "</body>" in b and "lis-ledger-badge" not in b:
-                    resp.set_data(b.replace("</body>", _BADGE + "</body>", 1))
+                    resp.set_data(b.replace("</body>", _BADGE + _BELL + "</body>", 1))
         except Exception:
             pass
         return resp

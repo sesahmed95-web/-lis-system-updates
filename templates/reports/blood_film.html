@@ -46,7 +46,7 @@
 {% set L = [] %}
 {% for lbl, key in left %}
   {% set val = params.get(key, '') %}
-  {% if key == 'NRBC' %}{% set un = ((units.get(key) or '/100wbc') if val != '' else '') %}{% else %}{% set un = (units.get(key) or '%') %}{% endif %}
+  {% if key == 'NRBC' %}{% set un = ((units.get(key) or '/100 WBC') if val != '' else '') %}{% else %}{% set un = (units.get(key) or '%') %}{% endif %}
   {% if (lbl|lower) not in _hid %}{% set _ = L.append({'label': lbl ~ ' :', 'val': val, 'unit': un, 'ex': false}) %}{% endif %}
 {% endfor %}
 {% if not fr %}{% for lbl, key in left_extra %}{% if params.get(key) and (lbl|lower) not in _hid %}{% set _ = L.append({'label': lbl ~ ' :', 'val': params.get(key), 'unit': (units.get(key) or '%'), 'ex': false}) %}{% endif %}{% endfor %}{% endif %}
@@ -57,14 +57,14 @@
                ('Metamyelocytes :', 'Metamyelocytes', units.get('Metamyelocytes') or '%'),
                ('Myelocytes :', 'Myelocytes', units.get('Myelocytes') or '%'),
                ('Promyelocytes :', 'Promyelocytes', units.get('Promyelocytes') or '%'),
-               ('NRBCs :', 'NRBC', units.get('NRBC') or '/100wbc'),
+               ('NRBCs :', 'NRBC', units.get('NRBC') or '/100 WBC'),
                ('Blast :', 'Blast', units.get('Blast') or '%'),
                ("Coomb's test :", "Coomb's test", '')] %}
 {% else %}
 {% set rdef = [("Retic count :", 'Reticulocyte count', units.get('Reticulocyte count') or '%'),
                ("Corrected retic count:", 'Corrected Retic count', units.get('Corrected Retic count') or '%'),
                ("Coomb's test :", "Coomb's test", ''),
-               ("NRBCs:", 'NRBC', units.get('NRBC') or '/100wbc')] %}
+               ("NRBCs:", 'NRBC', units.get('NRBC') or '/100 WBC')] %}
 {% endif %}
 {% set R = [] %}
 {% for lbl, key, un in rdef %}
@@ -111,39 +111,39 @@
   table.bf-box.bf-fr td.u { font-weight:700; }
 </style>
 <table class="bf-box{{ ' bf-fr' if fr else '' }}">
-  <tr>
+  <tr data-grp="cbc">
     {% if 'wbc count' not in _hid %}{{ labtd('WBC Count:', sm, edit, false, 'l', 'width:23%', rn=rn) }}<td class="v" style="width:15%">{{ wbc }}</td><td class="u">{{ un(u_wbc) }}</td>
     {% else %}<td class="l" style="width:23%"></td><td class="v" style="width:15%"></td><td class="u"></td>{% endif %}
     {% if 'hb' not in _hid %}{{ labtd('Hb:', sm, edit, false, 'l', 'width:22%', rn=rn) }}<td class="v" style="width:13%">{{ hb }}</td><td class="u">{{ un(u_hb) }}</td>
     {% else %}<td class="l" style="width:22%"></td><td class="v" style="width:13%"></td><td class="u"></td>{% endif %}
   </tr>
-  <tr>
+  <tr data-grp="cbc">
     {% if 'platelet count' not in _hid %}{{ labtd('Platelet count:', sm, edit, rn=rn) }}<td class="v">{{ plt }}</td><td class="u">{{ un(u_plt) }}</td>
     {% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
     {% if 'hct' not in _hid %}{{ labtd('HCT:', sm, edit, rn=rn) }}<td class="v">{{ hct }}</td><td class="u">{{ un(u_hct) }}</td>
     {% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
   </tr>
-  {% if 'differential leucocyte count' not in _hid %}<tr>{{ labtd('Differential Leucocyte Count:', sm, edit, false, 'sec', '', 6, rn=rn) }}</tr>{% endif %}
+  {% if 'differential leucocyte count' not in _hid %}<tr data-grp="diff">{{ labtd('Differential Leucocyte Count:', sm, edit, false, 'sec', '', 6, rn=rn) }}</tr>{% endif %}
   {% for i in range(nrows) %}
-  <tr>
+  <tr data-grp="diff">
     {% if i < L|length %}{{ labtd(L[i].label, sm, edit, L[i].ex, rn=rn) }}<td class="v">{{ L[i].val }}</td><td class="u">{{ un(L[i].unit) }}</td>
     {% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
     {% if i < R|length %}{{ labtd(R[i].label, sm, edit, R[i].ex, rn=rn) }}<td class="v">{{ R[i].val }}</td><td class="u">{{ un(R[i].unit) }}</td>
     {% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
   </tr>
   {% endfor %}
-  {% if fr and 'blood film morphology' not in _hid %}<tr>{{ labtd('Blood film morphology', sm, edit, false, 'sec', '', 6, rn=rn) }}</tr>{% endif %}
-  {% if 'rbc' not in _hid %}<tr>{{ labtd('RBC:', sm, edit, false, 'cap', '', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'RBC_desc', params.get('RBC_desc', ''), style='flex:1') }}</td></tr>{% endif %}
-  {% if 'wbc' not in _hid %}<tr>{{ labtd('WBC:', sm, edit, false, 'cap', '', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'WBC_desc', params.get('WBC_desc', ''), style='flex:1') }}</td></tr>{% endif %}
-  {% if 'platelet' not in _hid %}<tr>{{ labtd('Platelet:', sm, edit, false, 'cap', '', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'Platelets_desc', params.get('Platelets_desc', ''), style='flex:1') }}</td></tr>{% endif %}
-  {% if 'conclusion' not in _hid %}<tr class="concl">{{ labtd('Conclusion:', sm, edit, false, 'cap', 'background:transparent', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'Conclusion', params.get('Conclusion', ''), conclusion=True, style='flex:1') }}</td></tr>{% endif %}
+  {% if fr and 'blood film morphology' not in _hid %}<tr data-grp="morph">{{ labtd('Blood film morphology', sm, edit, false, 'sec', '', 6, rn=rn) }}</tr>{% endif %}
+  {% if 'rbc' not in _hid %}<tr data-grp="morph">{{ labtd('RBC:', sm, edit, false, 'cap', '', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'RBC_desc', params.get('RBC_desc', ''), style='flex:1') }}</td></tr>{% endif %}
+  {% if 'wbc' not in _hid %}<tr data-grp="morph">{{ labtd('WBC:', sm, edit, false, 'cap', '', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'WBC_desc', params.get('WBC_desc', ''), style='flex:1') }}</td></tr>{% endif %}
+  {% if 'platelet' not in _hid %}<tr data-grp="morph">{{ labtd('Platelet:', sm, edit, false, 'cap', '', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'Platelets_desc', params.get('Platelets_desc', ''), style='flex:1') }}</td></tr>{% endif %}
+  {% if 'conclusion' not in _hid %}<tr class="concl" data-grp="morph">{{ labtd('Conclusion:', sm, edit, false, 'cap', 'background:transparent', 1, rn=rn) }}<td colspan="5">{{ rich_note(order_test_id, 'Conclusion', params.get('Conclusion', ''), conclusion=True, style='flex:1') }}</td></tr>{% endif %}
   {% if fr %}
   {# v33: Retic count + Corrected retic count أسفل Conclusion (تظهر بالتقرير فقط لو فيها قيمة، وبالمعاينة دائماً للتعديل) #}
   {% set _rv = params.get('Reticulocyte count', '') %}{% set _cv = params.get('Corrected Retic count', '') %}
   {% set _show_rt = ((_rv != '' or _cv != '') or edit) %}
   {% set _hr = ('retic count' in _hid) %}{% set _hc = ('corrected retic count' in _hid) %}
   {% if _show_rt and not (_hr and _hc) %}
-  <tr>
+  <tr data-grp="retic">
     {% if not _hr %}{{ labtd('Retic count :', sm, edit, false, 'l', '', 1, rn=rn) }}<td class="v">{{ _rv }}</td><td class="u">{{ units.get('Reticulocyte count') or '%' }}</td>{% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
     {% if not _hc %}{{ labtd('Corrected retic count:', sm, edit, false, 'l', '', 1, rn=rn) }}<td class="v">{{ _cv }}</td><td class="u">{{ units.get('Corrected Retic count') or '%' }}</td>{% else %}<td class="l"></td><td class="v"></td><td class="u"></td>{% endif %}
   </tr>
@@ -229,7 +229,7 @@ window.addEventListener('load', function () {
   </tr>
   <tr>
     <td class="field-name">Basophils :</td><td class="pct-val">{{ params.get('Basophils', '') }}</td><td class="unit-val">{{ units.get('Basophils') or '%' }}</td>
-    <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">{{ units.get('NRBC') or '/100wbc' }}</td>
+    <td class="field-name">NRBC :</td><td class="pct-val">{{ params.get('NRBC', '') }}</td><td class="unit-val">{{ units.get('NRBC') or '/100 WBC' }}</td>
   </tr>
   <tr>
     <td class="field-name">{% if params.get('Reactive lymphocytes') %}Reactive lymphocytes{% else %}Atypical lymphocytes{% endif %} :</td>

@@ -1419,10 +1419,12 @@ def _inject_sky_table_headers(resp):
 
 
 # --- v64: زر الإغلاق بصفحات الطباعة ما يبقى ميّت لو المتصفح رفض window.close() ---
-_LIS_CLOSE_SHIM = (b'<script id="lis-close-shim">(function(){var c=window.close.bind(window);'
+_LIS_CLOSE_SHIM = (b'<script id="lis-close-shim">(function(){var c=window.close.bind(window),busy=0;'
+                   b'window.addEventListener("beforeprint",function(){busy=1;window.__lisPrintBusy=1;});'
+                   b'window.addEventListener("afterprint",function(){setTimeout(function(){busy=0;window.__lisPrintBusy=0;},1500);});'
                    b'window.close=function(){try{c();}catch(e){}'
-                   b'setTimeout(function(){if(window.closed)return;'
-                   b'var r=document.referrer;window.location.href=(r&&r.indexOf(window.location.origin)===0)?r:"/";},400);};})();</script>')
+                   b'setTimeout(function(){if(window.closed||busy||window.__lisPrintBusy)return;'
+                   b'var r=document.referrer;window.location.href=(r&&r.indexOf(window.location.origin)===0&&r!==location.href)?r:"/";},1200);};})();</script>')
 
 
 @app.after_request
@@ -3779,14 +3781,378 @@ def patient_edit(patient_id):
     return render_template("front_desk/patient_form.html", patient=patient, requires_gate=requires_gate)
 
 
-def _check_delete_password(db, password):
-    """كلمة مرور الحذف (من الإعدادات): أي موظف (استقبال/مختبر/مسؤول) يحذف مريض/زيارة بشرط إدخالها."""
-    stored = get_setting(db, "delete_password_hash", "")
-    if not stored:
+# ======================================================================================================
+# الرقم السري الموحّد للحذف/التعديل — مصدر واحد مشترك مع السجل السحابي (worker.js)
+# السبب الجذري القديم: الـLIS يخزّنه SHA-256 بدون ملح داخل lis.db، والسحابة تخزّنه بملح عشوائي بمستند منفصل،
+# بلا أي مزامنة بينهما، وبلا توحيد للأرقام العربية/اللاتينية، فكان كل برنامج يرفض رقم الآخر.
+# الصيغة الآن بالبرنامجين: hash = SHA-256( normalize(pin) + salt ) ، والأحدث (changedAt) يفوز عند المزامنة.
+# ======================================================================================================
+import hashlib as _dp_hl
+import secrets as _dp_sec
+import urllib.request as _dp_ur
+import unicodedata as _dp_ud
+
+_DP_DIGITS = {ord(a): b for a, b in zip("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")}
+_DP_STRIP = re.compile("[\\s\u200b-\u200f\u202a-\u202e\ufeff]")
+_DP_FAILS = {}      # user -> [timestamps]  (حماية من التخمين: 5 محاولات / 15 دقيقة)
+
+
+def _delpin_norm(p):
+    """نفس normPin بالـworker: NFKC + أرقام عربية/فارسية → لاتينية + حذف المسافات والرموز المخفية."""
+    t = _dp_ud.normalize("NFKC", str(p if p is not None else "")).translate(_DP_DIGITS)
+    return _DP_STRIP.sub("", t)
+
+
+def _delpin_hash(pin, salt):
+    return _dp_hl.sha256((_delpin_norm(pin) + salt).encode("utf-8")).hexdigest()
+
+
+def _delpin_cloud(db, method, path, body=None, timeout=6):
+    """يتصل بالسجل السحابي بمفتاح LIS_KEY. يرجع dict أو None إن لم يُضبط الربط/انقطع الانترنت (العمل المحلي لا يتعطل)."""
+    try:
+        u = (get_setting(db, "ledger_url", "") or "").strip().rstrip("/")
+        k = (get_setting(db, "ledger_key", "") or "").strip()
+        if not (u.startswith("https://") and k):
+            return None
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = _dp_ur.Request(u + path, data=data, method=method,
+                             headers={"x-lis-key": k, "content-type": "application/json", "user-agent": "LIS-delpin/1"})
+        with _dp_ur.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:
+        return None
+
+
+def _delpin_local(db):
+    return {"salt": get_setting(db, "delete_pin_salt", ""), "hash": get_setting(db, "delete_pin_hash", ""),
+            "at": int(float(get_setting(db, "delete_pin_at", "0") or 0))}
+
+
+def _delpin_store(db, salt, hsh, at, plain_for_legacy=None):
+    set_setting(db, "delete_pin_salt", salt)
+    set_setting(db, "delete_pin_hash", hsh)
+    set_setting(db, "delete_pin_at", str(int(at)))
+    # مفتاح قديم يبقى موجوداً فقط لأن الواجهات القديمة تفحص «هل ضُبطت كلمة الحذف»؛ لا يُستعمل بالتحقق بعد الآن
+    set_setting(db, "delete_password_hash", hsh)
+    db.commit()
+
+
+def _delpin_sync(db):
+    """يسحب من السحابة إن كانت أحدث، أو يدفع المحلي إن كان أحدث/السحابة فارغة. أفضل جهد (best-effort)."""
+    loc = _delpin_local(db)
+    cl = _delpin_cloud(db, "GET", "/api/lis/delpin")
+    if not cl or not cl.get("ok"):
+        return False
+    if cl.get("hasPin") and int(cl.get("changedAt") or 0) > loc["at"]:
+        _delpin_store(db, cl["salt"], cl["hash"], int(cl["changedAt"]))
+        return True
+    if loc["hash"] and loc["at"] > int(cl.get("changedAt") or 0):
+        _delpin_cloud(db, "POST", "/api/lis/delpin", {"salt": loc["salt"], "hash": loc["hash"], "changedAt": loc["at"], "by": "lis"})
+    return True
+
+
+def _delpin_set(db, pin, by="lis"):
+    pin = _delpin_norm(pin)
+    salt = _dp_sec.token_hex(16)
+    at = int(time.time() * 1000)
+    hsh = _delpin_hash(pin, salt)
+    _delpin_store(db, salt, hsh, at)
+    r = _delpin_cloud(db, "POST", "/api/lis/delpin", {"salt": salt, "hash": hsh, "changedAt": at, "by": by})
+    return bool(r and r.get("ok"))      # False = تم الحفظ محلياً وسيُزامَن عند عودة الاتصال
+
+
+def _delpin_audit(db, what, ok):
+    """سجل (من / متى / ماذا): محلياً بجدول audit_logs + يُرسل للسحابة (أفضل جهد)."""
+    who = ""
+    try:
+        r = db.execute("SELECT username FROM users WHERE id=?", (session.get("user_id"),)).fetchone()
+        who = (r["username"] if r else "") or ""
+    except Exception:
+        pass
+    try:
+        log_action("DeleteEditCheck", "delete_pin", 0, "%s | %s | %s" % (what, "OK" if ok else "FAIL", who))
+    except Exception:
+        pass
+    try:
+        item = {"who": who, "what": what, "ok": bool(ok), "ts": datetime.now().isoformat(timespec="seconds")}
+        threading.Thread(target=_delpin_cloud, args=(db, "POST", "/api/lis/delaudit", {"items": [item]}), daemon=True).start()
+    except Exception:
+        pass
+
+
+def _check_delete_password(db, password, what="delete"):
+    """كلمة مرور الحذف/التعديل: الصيغة الموحّدة (ملح + توحيد) المتزامنة مع السحابة. تقبل القديم (SHA-256 بلا ملح) وتحوّله تلقائياً."""
+    uid = session.get("user_id") or 0
+    now = time.time()
+    fails = [t for t in _DP_FAILS.get(uid, []) if now - t < 900]
+    if len(fails) >= 5:
+        return False, "محاولات كثيرة خاطئة. انتظر 15 دقيقة."
+    try:
+        _delpin_sync(db)
+    except Exception:
+        pass
+    loc = _delpin_local(db)
+    legacy = get_setting(db, "delete_password_hash", "")
+    raw = password or ""
+    if not loc["hash"] and not legacy:
         return False, "لم تُضبط كلمة مرور الحذف بعد — اضبطها من الإعدادات (بطاقة «كلمة مرور الحذف»)."
-    if hash_password(password or "") != stored:
+    ok = False
+    if loc["hash"] and loc["salt"]:
+        ok = _delpin_hash(raw, loc["salt"]) == loc["hash"]
+    elif legacy:                                  # ترقية من الصيغة القديمة بدون ملح
+        if hash_password(raw) == legacy or hash_password(_delpin_norm(raw)) == legacy:
+            ok = True
+            _delpin_set(db, raw, by="migrate")
+    _delpin_audit(db, what, ok)
+    if not ok:
+        fails.append(now)
+        _DP_FAILS[uid] = fails
         return False, "كلمة مرور الحذف غير صحيحة."
+    _DP_FAILS.pop(uid, None)
     return True, None
+
+
+@app.route("/api/delpin/status")
+@login_required
+def api_delpin_status():
+    db = get_db()
+    _delpin_sync(db)
+    loc = _delpin_local(db)
+    return jsonify(ok=True, has_pin=bool(loc["hash"]), changed_at=loc["at"],
+                   cloud=bool(_delpin_cloud(db, "GET", "/api/lis/ping")))
+
+
+@app.route("/api/delpin/set", methods=["POST"])
+@login_required
+def api_delpin_set():
+    """إنشاء (أول مرة) أو تغيير (يتطلب القديمة). المدير فقط."""
+    db = get_db()
+    if session.get("role") != "admin":
+        return jsonify(ok=False, error="للمدير فقط"), 403
+    d = request.get_json(silent=True) or {}
+    new = _delpin_norm(d.get("new"))
+    if len(new) < 4 or len(new) > 40:
+        return jsonify(ok=False, error="كلمة السر من 4 إلى 40 خانة"), 400
+    _delpin_sync(db)
+    if _delpin_local(db)["hash"] or get_setting(db, "delete_password_hash", ""):
+        ok, err = _check_delete_password(db, d.get("old"), "change-pin")
+        if not ok:
+            return jsonify(ok=False, error=err), 403
+    synced = _delpin_set(db, new, by="lis")
+    _delpin_audit(db, "pin-changed", True)
+    return jsonify(ok=True, synced=synced)
+
+
+@app.route("/api/delpin/recover", methods=["POST"])
+@login_required
+def api_delpin_recover():
+    """استرجاع عند النسيان: المدير يثبت هويته بكلمة مرور حسابه (تسجيل الدخول) ثم يضع رقماً جديداً."""
+    db = get_db()
+    d = request.get_json(silent=True) or {}
+    u = db.execute("SELECT * FROM users WHERE id=?", (session.get("user_id"),)).fetchone()
+    if not u or u["role"] != "admin" or u["password_hash"] != hash_password(d.get("admin_password") or ""):
+        _delpin_audit(db, "pin-recover", False)
+        return jsonify(ok=False, error="كلمة مرور حساب المدير غير صحيحة"), 403
+    new = _delpin_norm(d.get("new"))
+    if len(new) < 4 or len(new) > 40:
+        return jsonify(ok=False, error="كلمة السر من 4 إلى 40 خانة"), 400
+    synced = _delpin_set(db, new, by="lis-recover")
+    _delpin_audit(db, "pin-recovered", True)
+    return jsonify(ok=True, synced=synced)
+
+
+@app.route("/api/delpin/audit")
+@roles_required("admin")
+def api_delpin_audit():
+    db = get_db()
+    rows = db.execute("SELECT a.created_at, a.details, u.username FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id "
+                      "WHERE a.entity='delete_pin' OR a.action IN ('Delete','UpdateDeletePassword') "
+                      "ORDER BY a.id DESC LIMIT 300").fetchall()
+    return jsonify(ok=True, items=[{"at": r["created_at"], "who": r["username"], "what": r["details"]} for r in rows])
+
+
+# ======================================================================================================
+# v112 — حماية «التعديل» بنفس الرقم السري الموحّد (كان الحذف فقط محمياً)
+# يغطي: تعديل المريض، تعديل الزيارة (+سعر تحليل/حذف تحليل)، تعديل الباراميتر (وحدة/نسبة نتيجة، اسم، سعر، المدى المرجعي، تعديل سريع للتحليل).
+# بدون تعديل القوالب: الصفحات العادية تعرض نافذة إدخال الرقم تعيد إرسال نفس الطلب؛ طلبات fetch تُجاب 403 والسكربت المحقون يسأل ثم يعيد المحاولة.
+# بعد إدخال صحيح تُفتح «نافذة تعديل» للجلسة (الإعداد edit_unlock_minutes، الافتراضي 10 دقائق؛ 0 = اسأل بكل عملية).
+# كل محاولة (نجحت/فشلت) تُسجَّل من/متى/ماذا. إن لم يُضبط رقم سري أصلاً لا يُمنع أحد (حتى لا يُقفل العمل).
+# ======================================================================================================
+import html as _eg_html
+from flask import Response
+
+_EDIT_GATE_RULES = [(re.compile(x), n) for x, n in (
+    (r"^/front-desk/patients/\d+/edit$", "edit-patient"),
+    (r"^/front-desk/visits/\d+/edit$", "edit-visit"),
+    (r"^/front-desk/visits/\d+/order-tests/\d+/price$", "edit-visit-test-price"),
+    (r"^/front-desk/visits/\d+/remove-test/\d+$", "edit-visit-remove-test"),
+    (r"^/api/order-tests/\d+/param-edit$", "edit-result-parameter"),
+    (r"^/api/test-parameters/\d+/(set-price|rename)$", "edit-parameter"),
+    (r"^/master/parameters/\d+/rename$", "edit-parameter-name"),
+    (r"^/master/reference-ranges/\d+/edit$", "edit-reference-range"),
+    (r"^/api/tests/\d+/quick-edit$", "edit-test"),
+)]
+
+
+def _edit_gate_rule(path):
+    for rx, name in _EDIT_GATE_RULES:
+        if rx.match(path):
+            return name
+    return None
+
+
+def _edit_gate_unlock_minutes(db):
+    try:
+        return max(0, min(240, int(get_setting(db, "edit_unlock_minutes", "10") or 10)))
+    except (TypeError, ValueError):
+        return 10
+
+
+@app.before_request
+def _edit_gate_before():
+    if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
+        return None
+    if not (session.get("designer_id") or "interface" in session):
+        return None                                   # غير مسجّل: دع صفحة الدخول تتصرف
+    what = _edit_gate_rule(request.path)
+    if not what:
+        return None
+    db = get_db()
+    if not (_delpin_local(db)["hash"] or get_setting(db, "delete_password_hash", "")):
+        try:
+            _delpin_sync(db)                          # ربما الرقم مضبوط بالسحابة
+        except Exception:
+            pass
+        if not (_delpin_local(db)["hash"] or get_setting(db, "delete_password_hash", "")):
+            return None                               # لا رقم سري مضبوط: لا نقفل العمل
+    if session.get("edit_unlocked_until", 0) > time.time():
+        return None
+    body = request.get_json(silent=True) if request.is_json else None
+    pin = (request.headers.get("X-Edit-Pin") or request.form.get("edit_pin")
+           or (body.get("edit_pin") if isinstance(body, dict) else None))
+    err = "هذه العملية (تعديل) محمية. أدخل كلمة سر التعديل."
+    if pin:
+        ok, e2 = _check_delete_password(db, pin, what)
+        if ok:
+            mins = _edit_gate_unlock_minutes(db)
+            if mins > 0:
+                session["edit_unlocked_until"] = time.time() + mins * 60
+            return None
+        err = (e2 or err).replace("كلمة مرور الحذف", "كلمة سر الحذف/التعديل")
+    nav = request.headers.get("Sec-Fetch-Mode") == "navigate" or (
+        "Sec-Fetch-Mode" not in request.headers and "text/html" in (request.headers.get("Accept") or "")
+        and not request.is_json and request.headers.get("X-Requested-With") != "XMLHttpRequest")
+    if not nav:
+        return jsonify(ok=False, error="edit_pin_required", message=err), 403
+    has_file = any(f and f.filename for f in request.files.values())
+    hidden = "".join('<input type="hidden" name="%s" value="%s">' % (_eg_html.escape(k), _eg_html.escape(v))
+                     for k, vs in request.form.lists() if k != "edit_pin" for v in vs)
+    note = ""
+    if has_file:
+        note = "<p class='m'>هذا النموذج فيه ملف مرفق: بعد إدخال الرقم ارجع واضغط «حفظ» مرة ثانية.</p>"
+        mins = max(1, _edit_gate_unlock_minutes(db))
+        hidden = '<input type="hidden" name="_unlock_only" value="1">'
+    page = ("<!doctype html><html lang='ar' dir='rtl'><head><meta charset='utf-8'><title>كلمة سر التعديل</title><style>"
+            "body{font-family:Tahoma,Arial;background:#F1F5F9;display:flex;justify-content:center;padding:40px 12px}"
+            ".b{background:#fff;border-radius:14px;padding:22px;max-width:380px;width:100%%;box-shadow:0 8px 30px rgba(0,0,0,.12)}"
+            "input[type=password]{width:100%%;padding:10px;border:1px solid #CBD5E1;border-radius:9px;font-size:16px;box-sizing:border-box;margin:8px 0 12px}"
+            "button{border:0;border-radius:9px;padding:10px 18px;font:700 14px Tahoma;cursor:pointer;color:#fff;background:#205072}"
+            "a{margin-inline-start:12px;color:#64748B}.e{color:#B91C1C;font-size:13px}.m{color:#64748B;font-size:13px}</style></head><body>"
+            "<form class='b' method='post' action='%s'><h3 style='margin-top:0'>🔒 كلمة سر التعديل</h3>"
+            "<div class='e'>%s</div>%s%s<input type='password' name='edit_pin' autofocus autocomplete='off' placeholder='كلمة السر'>"
+            "<button type='submit'>تأكيد وتنفيذ</button><a href='javascript:history.back()'>إلغاء</a></form></body></html>"
+            % (_eg_html.escape(request.full_path.rstrip("?")), _eg_html.escape(err), note, hidden))
+    return Response(page, status=403, mimetype="text/html")
+
+
+_EDIT_GATE_JS = r"""<script id="lis-edit-gate-js">(function(){if(window.__lisEditGate)return;window.__lisEditGate=1;var of=window.fetch;if(!of)return;
+function ask(msg){return new Promise(function(res){var v=document.createElement('div');v.style.cssText='position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;font-family:Tahoma,Arial';v.setAttribute('dir','rtl');
+var b=document.createElement('div');b.style.cssText='background:#fff;border-radius:14px;padding:20px;max-width:360px;width:92%;box-shadow:0 10px 40px rgba(0,0,0,.3)';
+var h=document.createElement('div');h.style.cssText='font-weight:800;margin-bottom:6px';h.textContent='🔒 كلمة سر التعديل';var m=document.createElement('div');m.style.cssText='color:#B91C1C;font-size:13px;margin-bottom:8px';m.textContent=msg||'';
+var i=document.createElement('input');i.type='password';i.autocomplete='off';i.style.cssText='width:100%;box-sizing:border-box;padding:10px;border:1px solid #CBD5E1;border-radius:9px;font-size:16px;margin-bottom:12px';
+var ok=document.createElement('button');ok.textContent='تأكيد';ok.style.cssText='border:0;border-radius:9px;padding:9px 18px;background:#205072;color:#fff;font-weight:700;cursor:pointer';var no=document.createElement('button');no.textContent='إلغاء';no.style.cssText='border:0;background:none;color:#64748B;cursor:pointer;margin-inline-start:10px';
+function done(x){v.remove();res(x)}ok.onclick=function(){done(i.value)};no.onclick=function(){done(null)};i.onkeydown=function(e){if(e.key==='Enter')done(i.value);if(e.key==='Escape')done(null)};
+b.appendChild(h);b.appendChild(m);b.appendChild(i);b.appendChild(ok);b.appendChild(no);v.appendChild(b);document.body.appendChild(v);i.focus()})}
+window.fetch=function(input,init){var args=arguments;return of.apply(this,args).then(function(res){if(res.status!==403)return res;
+return res.clone().json().then(function(j){if(!j||j.error!=='edit_pin_required')return res;
+return ask(j.message).then(function(pin){if(!pin)return res;var i2=Object.assign({},init||{});var h=new Headers(i2.headers||(input&&input.headers)||{});h.set('X-Edit-Pin',pin);i2.headers=h;
+var url=(typeof input==='string')?input:(input&&input.url)||String(input);if(!i2.method&&input&&input.method)i2.method=input.method;i2.credentials=i2.credentials||'same-origin';return of.call(window,url,i2)})}).catch(function(){return res})})}})();</script>"""
+
+
+@app.after_request
+def _edit_gate_inject(resp):
+    try:
+        if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        data = resp.get_data()
+        if b"lis-edit-gate-js" in data or b"</body>" not in data or "/print" in request.path or request.path.startswith("/reports/print"):
+            return resp
+        head, _, tail = data.rpartition(b"</body>")
+        resp.set_data(head + _EDIT_GATE_JS.encode("utf-8") + b"</body>" + tail)
+    except Exception:
+        pass
+    return resp
+
+
+# ---- v112: مسار حفظ الـPDF الفعلي (المجلد المضبوط + هل يقبل الكتابة + مسار الملف الفعلي لكل زيارة)
+def _pdf_dir_status(db):
+    d = _get_pdf_archive_dir(db)
+    if not d:
+        return {"dir": "", "writable": False, "error": "تعذّر إنشاء/الوصول لمجلد الأرشيف — اختر مجلداً من إعدادات الأرشيف."}
+    try:
+        t = os.path.join(d, ".lis_write_test")
+        with open(t, "w") as f:
+            f.write("x")
+        os.remove(t)
+        return {"dir": os.path.abspath(d), "writable": True, "error": ""}
+    except OSError as e:
+        return {"dir": os.path.abspath(d), "writable": False, "error": "المجلد لا يقبل الكتابة: %s" % e}
+
+
+@app.route("/api/pdf-archive/info")
+@login_required
+def api_pdf_archive_info():
+    db = get_db()
+    st = _pdf_dir_status(db)
+    out = dict(ok=True, **st)
+    try:
+        vid = int(request.args.get("visit_id", "0"))
+    except ValueError:
+        vid = 0
+    if vid:
+        _v90_fix_saved_reports(db)
+        row = get_saved_report(db, vid)
+        path = row["pdf_path"] if row and row["pdf_path"] else ""
+        out.update(path=os.path.abspath(path) if path else "", exists=bool(path and os.path.exists(path)),
+                   size_kb=(os.path.getsize(path) // 1024) if path and os.path.exists(path) else 0)
+    return jsonify(out)
+
+
+@app.after_request
+def _pdf_path_inject(resp):
+    """صفحة «أرشيف PDF»: شريط يعرض المجلد الفعلي (أو تحذير إن لم يقبل الكتابة) + عند الضغط على «فتح/تحميل» PDF يظهر المسار الكامل للملف."""
+    try:
+        if resp.status_code != 200 or resp.mimetype != "text/html" or resp.direct_passthrough:
+            return resp
+        if request.path != "/reports/archive":
+            return resp
+        data = resp.get_data()
+        if b"lis-pdf-path-js" in data or b"</body>" not in data:
+            return resp
+        st = _pdf_dir_status(get_db())
+        js = ('<script id="lis-pdf-path-js">(function(){var S=%s;var bar=document.createElement("div");bar.setAttribute("dir","rtl");'
+              'bar.style.cssText="margin:8px 16px;padding:9px 12px;border-radius:10px;font:13px Tahoma,Arial;background:"+(S.writable?"#ECFDF5":"#FEF2F2")+";color:"+(S.writable?"#065F46":"#991B1B");'
+              'bar.textContent=S.writable?("📁 مجلد حفظ ملفات PDF على هذا الجهاز: "+S.dir):("⚠ "+S.error+(S.dir?(" ("+S.dir+")"):""));'
+              'var host=document.querySelector("main,.content,.main,body");host.insertBefore(bar,host.firstChild);'
+              'function toast(t){var x=document.createElement("div");x.setAttribute("dir","rtl");x.style.cssText="position:fixed;bottom:16px;inset-inline:16px;z-index:2147483000;background:#14213D;color:#fff;padding:10px 14px;border-radius:9px;text-align:center;font:13px Tahoma,Arial";x.textContent=t;document.body.appendChild(x);setTimeout(function(){x.remove()},9000)}'
+              'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a,button");if(!a)return;var s=(a.getAttribute("href")||"")+" "+(a.getAttribute("onclick")||"")+" "+(a.dataset?JSON.stringify(a.dataset):"");var m=s.match(/archive\\/(\\d+)\\/open/);if(!m)return;'
+              'setTimeout(function(){fetch("/api/pdf-archive/info?visit_id="+m[1],{credentials:"same-origin"}).then(function(r){return r.json()}).then(function(j){toast(j.exists?("📄 مسار الملف: "+j.path+" ("+j.size_kb+" KB)"):("⚠ الملف غير موجود بعد في: "+(j.path||j.dir)))}).catch(function(){})},1200)},true)})();</script>'
+              % json.dumps(st, ensure_ascii=False))
+        head, _, tail = data.rpartition(b"</body>")
+        resp.set_data(head + js.encode("utf-8") + b"</body>" + tail)
+    except Exception:
+        pass
+    return resp
 
 
 @app.route("/api/delete/visit/<int:visit_id>", methods=["POST"])
@@ -4511,8 +4877,9 @@ def _serve_pdf_or_html(html_content, prefix):
         pdf_path = pdf_export.make_temp_pdf_path(_safe_pdf_name_part(prefix))
         _v86_html_to_pdf(html_content, request.url_root, pdf_path)
         if os.path.exists(pdf_path):
-            return send_file(pdf_path, mimetype="application/pdf", as_attachment=False,
-                             download_name=os.path.basename(pdf_path))
+            _dl = request.args.get("dl") == "1"     # v107: dl=1 → تنزيل/حفظ باسم المريض
+            return send_file(pdf_path, mimetype="application/pdf", as_attachment=_dl,
+                             download_name=(_safe_pdf_name_part(prefix) + ".pdf") if _dl else os.path.basename(pdf_path))
     except Exception:
         _v74_log_exc("pdf_export failed (_serve_pdf_or_html)")
     return _v74_printable_html(html_content)
@@ -8281,10 +8648,10 @@ def accounts_search_export_pdf():
 _CLOSE_BTN_RE = re.compile(r'onclick="\s*window\.close\(\)\s*;?\s*"')
 _SMART_CLOSE_JS = (
     "<script>window.lisSmartClose=function(){try{window.close();}catch(e){}"
-    "setTimeout(function(){var ref=document.referrer,same=false;"
+    "setTimeout(function(){if(window.__lisPrintBusy)return;var ref=document.referrer,same=false;"
     "try{same=!!ref&&new URL(ref).origin===location.origin&&ref!==location.href;}catch(e){}"
     "location.href=same?ref:'/front-desk/visits';"
-    "},300);};</script>"
+    "},1200);};</script>"
 )
 
 
@@ -14565,18 +14932,20 @@ def app_settings():
         # -- خله فاضي كل مرة إذا ما تريد تغييرها).
         # ------------------------------------------------------------
         if request.form.get("delete_password_form") is not None:
-            cur_hash = get_setting(db, "delete_password_hash", "")
-            if cur_hash and hash_password(request.form.get("current_delete_password", "")) != cur_hash:
+            # الإنشاء/التغيير بالصيغة الموحّدة المتزامنة مع السحابة (انظر _delpin_*). الأرقام العربية تُقبل.
+            has_pin = bool(_delpin_local(db)["hash"] or get_setting(db, "delete_password_hash", ""))
+            newp = _delpin_norm(request.form.get("new_delete_password", ""))
+            ok_cur, err_cur = (True, None)
+            if has_pin:
+                ok_cur, err_cur = _check_delete_password(db, request.form.get("current_delete_password", ""), "change-pin")
+            if not ok_cur:
                 flash("كلمة مرور الحذف الحالية غير صحيحة — لم تتغيّر.")
+            elif not (4 <= len(newp) <= 40):
+                flash("اكتب كلمة المرور الجديدة (من 4 إلى 40 خانة).")
             else:
-                newp = request.form.get("new_delete_password", "")
-                if not newp:
-                    flash("اكتب كلمة المرور الجديدة.")
-                else:
-                    set_setting(db, "delete_password_hash", hash_password(newp))
-                    db.commit()
-                    log_action("UpdateDeletePassword", "settings", 0)
-                    flash("تم حفظ كلمة مرور الحذف.")
+                synced = _delpin_set(db, newp, by="lis")
+                log_action("UpdateDeletePassword", "settings", 0)
+                flash("تم حفظ كلمة مرور الحذف" + ("" if synced else " (محلياً — ستُزامَن مع السحابة عند توفر الاتصال)") + ".")
             return redirect(url_for("app_settings"))
 
         if request.form.get("interface_passwords_form") is not None:
@@ -17562,7 +17931,7 @@ def pdf_archive_open_external(visit_id):
     if not path:
         return jsonify({"ok": False, "error": "تعذّر إيجاد/توليد ملف الـPDF لهذه الزيارة. " + (_V88_ARCHIVE_ERR.get(visit_id) or "")[:250]})
     _v88_launch_pdf(path)   # يشتغل بخيط منفصل حتى يرجع الرد فورًا ولا ينتظر برنامج الـPDF يقلع
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "path": os.path.abspath(path), "dir": os.path.dirname(os.path.abspath(path))})
 
 
 
@@ -17955,6 +18324,67 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     # أماكن متعددة: لو ضاع واحد (إعادة تنصيب/استبدال القاعدة/تنظيف) يبقى غيره، ويرجع المفتاح تلقائياً للقاعدة.
     _KEYF = ("key", "provider", "model", "enabled", "vision_provider", "vision_model", "vision_key")
 
+    # ---- تشفير مفاتيح الذكاء المحفوظة خارج القاعدة (DPAPI على ويندوز، وبديل HMAC-stream على غيره) ----
+    def _kb_machine_secret():
+        import hashlib, platform
+        seed = "|".join([os.environ.get("COMPUTERNAME", ""), platform.node(), os.environ.get("PROCESSOR_IDENTIFIER", ""), "LabSystem-ai-v1"])
+        return hashlib.sha256(seed.encode("utf-8")).digest()
+
+    def _kb_dpapi(data, protect):
+        import ctypes
+        from ctypes import wintypes
+        class _B(ctypes.Structure):
+            _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+        buf = ctypes.create_string_buffer(data, len(data))
+        bi = _B(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
+        bo = _B()
+        c32 = ctypes.windll.crypt32
+        if protect:
+            ok = c32.CryptProtectData(ctypes.byref(bi), None, None, None, None, 0x4, ctypes.byref(bo))   # 0x4 = ربط بالجهاز (أي مستخدم)
+        else:
+            ok = c32.CryptUnprotectData(ctypes.byref(bi), None, None, None, None, 0x4, ctypes.byref(bo))
+        if not ok:
+            raise OSError("dpapi")
+        try:
+            return ctypes.string_at(bo.pbData, bo.cbData)
+        finally:
+            ctypes.windll.kernel32.LocalFree(bo.pbData)
+
+    def _kb_stream(data, nonce):
+        import hmac, hashlib
+        key, out, i = _kb_machine_secret(), bytearray(), 0
+        while len(out) < len(data):
+            out += hmac.new(key, nonce + i.to_bytes(4, "big"), hashlib.sha256).digest()
+            i += 1
+        return bytes(a ^ b for a, b in zip(data, out))
+
+    def _kb_enc(txt):
+        if not txt:
+            return ""
+        import base64
+        raw = txt.encode("utf-8")
+        if os.name == "nt":
+            try:
+                return "dp1:" + base64.b64encode(_kb_dpapi(raw, True)).decode("ascii")
+            except Exception:
+                pass
+        nonce = os.urandom(12)
+        return "xs1:" + base64.b64encode(nonce + _kb_stream(raw, nonce)).decode("ascii")
+
+    def _kb_dec(val):
+        if not val or not isinstance(val, str):
+            return val or ""
+        import base64
+        try:
+            if val.startswith("dp1:"):
+                return _kb_dpapi(base64.b64decode(val[4:]), False).decode("utf-8")
+            if val.startswith("xs1:"):
+                b = base64.b64decode(val[4:])
+                return _kb_stream(b[12:], b[:12]).decode("utf-8")
+        except Exception:
+            return ""
+        return val      # نسخة قديمة غير مشفّرة (تُرقّى للتشفير عند أول كتابة)
+
     def _key_backup_paths():
         out = []
         for env in ("APPDATA", "LOCALAPPDATA", "PROGRAMDATA"):
@@ -17985,6 +18415,13 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
                 continue
             if not isinstance(d, dict):
                 continue
+            legacy = any(isinstance(d.get(k), str) and d.get(k) and not d.get(k).startswith(("dp1:", "xs1:")) for k in ("key", "vision_key"))
+            for k in ("key", "vision_key"):
+                if k in d:
+                    d[k] = _kb_dec(d.get(k))
+            if legacy:
+                try: _key_backup_write(d)       # ترقية نسخة قديمة نصّية إلى مشفّرة
+                except Exception: pass
             if d.get("key") or d.get("vision_key"):
                 return d
             if not first:
@@ -17993,6 +18430,9 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
 
     def _key_backup_write(d):
         d = {k: d.get(k) for k in _KEYF if k in d}
+        for _sk in ("key", "vision_key"):
+            if d.get(_sk):
+                d[_sk] = _kb_enc(d[_sk])
         for p in _key_backup_paths():
             try:
                 os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -20468,6 +20908,17 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     try:
         import ledger_sync
         ledger_sync.install(app, dict(delete_visit=_delete_visit_cascade, next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no, ensure_partner=_ensure_partner_labs, unique_code=unique_test_code, portal_collect=_portal_collect))
+        try:   # v106: lis_wipe
+            import lis_wipe
+            lis_wipe.install(dict(delete_visit=_delete_visit_cascade, log_action=log_action))
+        except Exception as _e106:
+            print('lis_wipe not loaded:', _e106)
+        try:   # v112: استيراد الأسماء من Excel/CSV بعد المسح (اختياري) + شريط الاختيار (استيراد / ابدأ فارغاً)
+            import lis_names
+            lis_names.install(app, dict(check_pin=_check_delete_password, log_action=log_action, get_db=get_db,
+                                        login_required=login_required, set_setting=set_setting, get_setting=get_setting))
+        except Exception as _e112:
+            print('lis_names not loaded:', _e112)
     except Exception as _le:
         print("ledger_sync not loaded:", _le)
     # كتالوج التحاليل الجاهز: يُثبَّت تلقائياً مرة واحدة لكل جهاز (يضيف الناقص فقط؛ الأسعار 0 ويحددها العميل)
@@ -20620,6 +21071,15 @@ def api_save_results_scale():
 
 lab_styles.register(app, get_db=get_db, get_setting=get_setting, set_setting=set_setting,
                     roles_required=roles_required, log_action=lambda *a, **k: log_action(*a, **k))
+
+# v108: تنسيق الخط/الحجم/اللون من داخل التقرير + قائمة الوحدات لمحرّر المصمم (ملف جديد lab_fmt.py)
+try:
+    import lab_fmt
+    lab_fmt.register(app, get_db=get_db, get_setting=get_setting, set_setting=set_setting,
+                     roles_required=roles_required, login_required=login_required,
+                     log_action=lambda *a, **k: log_action(*a, **k))
+except Exception as _fmt_e:
+    print("lab_fmt not loaded:", _fmt_e)
 
 
 # =====================================================================================
@@ -21256,7 +21716,7 @@ except Exception as _v97_e:
 def _v95_apply_links(db, data):
     done = []
     lu = str(data.get("ledger_url") or "").strip().rstrip("/")
-    lk = re.sub(r"[^A-Za-z0-9_.\-]", "", str(data.get("ledger_key") or ""))
+    lk = re.sub(r"[^\x21-\x7e]|[\"']", "", str(data.get("ledger_key") or ""))
     if lu.lower().startswith("https://") and lk:
         set_setting(db, "ledger_url", lu)
         set_setting(db, "ledger_key", lk[:200])
@@ -21360,6 +21820,17 @@ if __name__ == "__main__":
     init_db()
     ensure_blank_report_test()
     _startup_mark("انتهى init_db")
+    # v108: وحدة NRBC تصير "/100 WBC" (مرة واحدة فقط؛ لا تكتب فوق وحدة عدّلها المشرف يدوياً بعد ذلك)
+    try:
+        _db_n = get_db()
+        if get_setting(_db_n, "nrbc_unit_v108", "") != "1":
+            _db_n.execute("UPDATE test_parameters SET unit='/100 WBC' WHERE UPPER(name) LIKE 'NRBC%' AND "
+                          "REPLACE(LOWER(COALESCE(unit,'')),' ','') IN ('','/100wbc','100/wbc','/100wbcs','%')")
+            set_setting(_db_n, "nrbc_unit_v108", "1")
+            _db_n.commit()
+        _db_n.close()
+    except Exception as _e_n:
+        print("nrbc unit migration:", _e_n)
     write_pending_preset_logo(UPLOAD_DIR)   # شعار العميل القادم من portal_preset.json (إن وُجد)
     cloud_sync.start_worker()
     astm_host.start_listener_if_enabled()

@@ -58,6 +58,7 @@
             <button type="button" class="btn small secondary" onclick="ceOpen('{{ url_for('print_combined_panel', visit_id=v.visit_id) }}?auto=1')">🧾 طباعة اللوحة المجمّعة</button>
             <a class="btn small secondary" target="_blank" href="{{ url_for('labels_center', visit_id=v.visit_id) }}" title="باركودات إضافية: أنابيب/طلب/تحاليل خارجية">🏷 باركودات</a>
             <button type="button" class="btn small secondary" onclick="ceOpen('{{ url_for('print_visit_full_report', visit_id=v.visit_id) }}?autoprint=1')">🖨 طباعة كل النتائج</button>
+            <a class="btn small secondary" href="{{ url_for('report_pdf_visit', visit_id=v.visit_id) }}?dl=1" title="حفظ كل نتائج المريض كملف PDF على هذا الجهاز (مجلد التنزيلات)" onclick="ceToast('جاري إنشاء الـPDF… سيُحفظ في مجلد التنزيلات (Downloads)')">💾 حفظ PDF</a>
             {% if v.phone %}<button type="button" class="btn small" onclick="ceSendVisit({{ v.visit_id }}, 'combined', this)">📱 إرسال الكل (ملف واحد)</button>
             <button type="button" class="btn small secondary" onclick="ceSendVisit({{ v.visit_id }}, 'separate', this)">📱 إرسال (ملفات منفصلة)</button>
             {% else %}<span class="muted" style="font-size:12px;">لا يوجد رقم واتساب</span>{% endif %}
@@ -72,7 +73,25 @@
 </div>
 <div id="ceToast" class="ce-toast"></div>
 <script>
-  function ceOpen(url) { var w = null; try { w = window.open(url + (url.indexOf('?') >= 0 ? '&' : '?') + '_ts=' + Date.now(), '_blank'); } catch (e) {} if (!w) location.href = url; }
+  // v107: الطباعة عبر iframe مخفي بنفس الصفحة — لا نافذة منبثقة (كانت تومض وتُغلق/تنتقل قبل ظهور نافذة الطباعة).
+  // نحذف auto/autoprint من الرابط لأن الاستدعاء من هنا هو الذي يطبع (حتى لا تُطبع الصفحة مرتين).
+  function ceOpen(url) {
+    var u = url.replace(/([?&])(auto|autoprint)=1(&|$)/, function (m, a, w, c) { return c === '&' ? a : ''; });
+    u += (u.indexOf('?') >= 0 ? '&' : '?') + '_ts=' + Date.now();
+    var f = document.createElement('iframe');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    var fired = false;
+    f.onload = function () {
+      if (fired) return; fired = true;
+      setTimeout(function () {
+        try { f.contentWindow.focus(); f.contentWindow.print(); }
+        catch (e) { ceToast('تعذّر فتح نافذة الطباعة — استعمل زر «💾 PDF» ثم اطبع الملف.', true); }
+        setTimeout(function () { try { f.remove(); } catch (e) {} }, 120000);
+      }, 600);
+    };
+    f.src = u; document.body.appendChild(f);
+    ceToast('جاري تجهيز الطباعة…');
+  }
   function ceToast(msg, err) { var el = document.getElementById('ceToast'); el.textContent = msg; el.className = 'ce-toast' + (err ? ' err' : ''); el.style.display = 'block'; clearTimeout(window._ceT); window._ceT = setTimeout(function () { el.style.display = 'none'; }, 6000); }
   function cePost(url, body, btn) {
     var old = btn.textContent; btn.disabled = true; btn.textContent = '⏳';

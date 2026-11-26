@@ -1,0 +1,72 @@
+{# v108: شريط تنسيق من داخل التقرير (معاينة التصميم فقط). اضغط أي خانة ← اختر الحجم/الخط/اللون ← طبّق على الباراميتر أو المجموعة أو كل التقرير. #}
+<style>
+  #lisFmtBar { position:fixed; bottom:0; left:0; right:0; z-index:99999; background:#0f172a; color:#fff; padding:8px 12px; font:13px Tahoma, Arial, sans-serif; direction:rtl; display:flex; flex-wrap:wrap; gap:8px; align-items:center; box-shadow:0 -4px 16px rgba(0,0,0,.3); }
+  #lisFmtBar input, #lisFmtBar select { font:13px Tahoma, Arial, sans-serif; padding:3px 6px; border-radius:6px; border:1px solid #64748b; }
+  #lisFmtBar input[type=number] { width:62px; } #lisFmtBar input[type=color] { width:42px; height:28px; padding:0; }
+  #lisFmtBar button { font:12.5px Tahoma, Arial, sans-serif; padding:5px 10px; border-radius:8px; border:1px solid #475569; background:#1e293b; color:#fff; cursor:pointer; }
+  #lisFmtBar button.pri { background:#0e7490; border-color:#0e7490; } #lisFmtBar button.dan { background:#7f1d1d; border-color:#7f1d1d; }
+  #lisFmtBar b.sel { color:#fde68a; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:bottom; }
+  td.lis-fmt-pick { outline:3px solid #f59e0b !important; outline-offset:-3px; }
+  @media print { #lisFmtBar { display:none !important; } td.lis-fmt-pick { outline:none !important; } }
+</style>
+<div id="lisFmtBar" class="rs-np">
+  <span>🎨 التنسيق — اضغط أي خانة بالتقرير: <b class="sel" id="lfSel">(لم يُحدَّد)</b></span>
+  <label>الحجم <input type="number" id="lfSize" min="8" max="40" placeholder="px"></label>
+  <label>الخط <select id="lfFam"><option value="">(كما هو)</option></select></label>
+  <label>اللون <input type="color" id="lfCol" value="#000000"></label>
+  <label><input type="checkbox" id="lfUseCol"> استخدم اللون</label>
+  <label title="يطبّق على اسم الباراميتر فقط (بدون النتيجة والوحدة)"><input type="checkbox" id="lfLbl"> الاسم فقط</label>
+  <button class="pri" id="lfP">على الباراميتر</button>
+  <button class="pri" id="lfG">على المجموعة <span id="lfGn"></span></button>
+  <button class="pri" id="lfA">على كل التقرير</button>
+  <button class="dan" id="lfR1" title="إلغاء تنسيق المحدد">↩ مسح تنسيق المحدد</button>
+  <button class="dan" id="lfRA" title="إلغاء كل التنسيقات المحفوظة">↩ مسح الكل</button>
+  <span id="lfMsg" style="color:#86efac"></span>
+</div>
+<script>
+(function () {
+  var bar = document.getElementById('lisFmtBar'); if (!bar) return;
+  var sel = { nm: '', grp: '', td: null };
+  var $ = function (id) { return document.getElementById(id); };
+  var GRPN = { cbc: 'CBC', diff: 'Differential', morph: 'Blood film morphology', retic: 'Retic' };
+  fetch('/api/report-fmt', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
+    (j.fonts || []).forEach(function (f) { var o = document.createElement('option'); o.value = f; o.textContent = f; $('lfFam').appendChild(o); });
+  }).catch(function () {});
+  function labelCell(td) {
+    var c = td;
+    while (c && !(c.getAttribute && c.getAttribute('data-nm'))) c = c.previousElementSibling;
+    return c;
+  }
+  document.addEventListener('click', function (e) {
+    if (bar.contains(e.target)) return;
+    var td = e.target.closest('#rptResults td'); if (!td) return;
+    if (e.target.closest('button, input, select, textarea, a, [contenteditable]')) return;
+    var lc = labelCell(td); if (!lc) { $('lfSel').textContent = '(خانة بلا اسم — استعمل «كل التقرير»)'; sel.nm = ''; return; }
+    if (sel.td) sel.td.classList.remove('lis-fmt-pick');
+    sel.td = lc; lc.classList.add('lis-fmt-pick');
+    sel.nm = (lc.getAttribute('data-nm') || '').trim().toLowerCase();
+    var tr = lc.closest('tr'); sel.grp = tr ? (tr.getAttribute('data-grp') || '') : '';
+    $('lfSel').textContent = lc.getAttribute('data-nm');
+    $('lfGn').textContent = sel.grp ? '(' + (GRPN[sel.grp] || sel.grp) + ')' : '';
+    var cs = window.getComputedStyle(lc); $('lfSize').value = Math.round(parseFloat(cs.fontSize) || 13);
+  }, true);
+  function send(body) {
+    body.size = $('lfSize').value || null; body.family = $('lfFam').value || null;
+    body.color = $('lfUseCol').checked ? $('lfCol').value : null; body.lbl = $('lfLbl').checked ? 1 : 0;
+    return post(body);
+  }
+  function post(body) {
+    $('lfMsg').textContent = '…';
+    return fetch('/api/report-fmt', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, error: 'HTTP ' + r.status }; }); })
+      .then(function (j) { if (j && j.ok) { $('lfMsg').textContent = 'تم ✓'; setTimeout(function () { location.reload(); }, 350); } else { $('lfMsg').style.color = '#fca5a5'; $('lfMsg').textContent = (j && j.error) || 'تعذّر الحفظ (يلزم صلاحية مدير)'; } })
+      .catch(function () { $('lfMsg').style.color = '#fca5a5'; $('lfMsg').textContent = 'تعذّر الاتصال'; });
+  }
+  function need(k) { if (!sel[k]) { $('lfMsg').style.color = '#fca5a5'; $('lfMsg').textContent = k === 'nm' ? 'اضغط خانة باراميتر أولاً' : 'هذا الصف بلا مجموعة'; return false; } return true; }
+  $('lfP').onclick = function () { if (need('nm')) send({ scope: 'p', key: sel.nm }); };
+  $('lfG').onclick = function () { if (need('grp')) send({ scope: 'grp', key: sel.grp }); };
+  $('lfA').onclick = function () { send({ scope: 'all' }); };
+  $('lfR1').onclick = function () { if (need('nm')) post({ scope: 'p', key: sel.nm, reset: 1 }); };
+  $('lfRA').onclick = function () { if (confirm('مسح كل تنسيقات الخط/اللون المحفوظة والرجوع للافتراضي؟')) post({ reset_all: 1 }); };
+})();
+</script>

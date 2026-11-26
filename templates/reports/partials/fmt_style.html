@@ -1,0 +1,29 @@
+{# v109: تنسيق الخط/الحجم/اللون المحفوظ (يُنشأ من lab_fmt.py) — يدخل بكل تقرير مفرد، ويُنسخ مع جسمه عند الدمج.
+   السكربت أدناه يضع data-nm (اسم الباراميتر = أول خلية بالصف) و data-grp (القسم = آخر صف عنوان) على جداول أي تقرير
+   لم يضعها بنفسه (urine/stool/coagulation/fluid/cbc/...)، فيعمل التنسيق لكل باراميتر/مجموعة بكل القوالب. #}
+{% if report_fmt_css is defined %}<style class="lis-fmt-css">{{ report_fmt_css() }}</style>
+<script>
+(function () {
+  var root = document.querySelectorAll('#rptResults'); if (!root.length) return;
+  function clean(t) { return String(t || '').replace(/\s+/g, ' ').replace(/[:：]\s*$/, '').replace(/[^\w .,'()\/+\-%\u0600-\u06FF]/g, '').trim().slice(0, 60); }
+  function slug(t) { return clean(t).toLowerCase().replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'sec'; }
+  for (var r = 0; r < root.length; r++) {
+    var tables = root[r].querySelectorAll('table');
+    for (var t = 0; t < tables.length; t++) {
+      var tb = tables[t]; if (tb.__lisTag) continue; tb.__lisTag = 1;
+      var rows = tb.rows, grp = 'main';
+      for (var i = 0; i < rows.length; i++) {
+        var tr = rows[i]; if (tr.closest('table') !== tb) continue;
+        if (tr.hasAttribute('data-grp') || tr.querySelector('td[data-nm]')) { grp = tr.getAttribute('data-grp') || grp; continue; }
+        var cells = tr.cells; if (!cells.length) continue;
+        var first = cells[0], txt = clean(first.textContent);
+        if (first.tagName === 'TH' && cells.length > 1) continue;                    // صف ترويسة أعمدة (Test / Result / Unit)
+        var isHead = (cells.length === 1 || (first.colSpan || 1) >= 2) && txt && (!first.querySelector('input,select,textarea'));
+        if (isHead) { grp = 'h-' + slug(txt); }
+        tr.setAttribute('data-grp', grp);
+        if (txt && !first.hasAttribute('data-nm')) first.setAttribute('data-nm', txt);
+      }
+    }
+  }
+})();
+</script>{% endif %}
