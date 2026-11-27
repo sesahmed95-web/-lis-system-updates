@@ -292,6 +292,14 @@
 </div>
 
 <div class="card" id="portalCard">
+<style>
+  /* v127b: ترتيب حقول البوابة — النص الشارح ما يطلع برا البطاقة */
+  #portalCard .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px 18px; align-items:start; }
+  #portalCard .form-field { display:block; min-width:0; }
+  #portalCard .form-field > label { display:block; min-width:0; margin:0 0 6px; }
+  #portalCard .form-field > .muted, #portalCard .form-field label .muted { display:block; flex-basis:auto; width:auto; max-width:100%; white-space:normal; overflow-wrap:anywhere; margin-top:4px; }
+  #portalCard input[type=text], #portalCard input[type=password], #portalCard select, #portalCard textarea { max-width:100%; box-sizing:border-box; }
+</style>
   <h3>📱 بوابة النتائج (QR للمريض)</h3>
   <p class="muted">
     يُطبع QR خاص لكل مريض (غير باركود القناني). المريض يمسحه بموبايله فتظهر "قيد التحضير + الوقت المتوقع"، وتظهر

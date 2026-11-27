@@ -2157,3 +2157,5 @@
     time.sleep(1.5)
 
 [2026-11-27T13:01:27] SLOW 15.1s POST /ai/api/test? (lis_ai.ai_test)
+[2026-11-27T14:29:36] SLOW 3.4s POST /designer/update/check-now? (designer_update_check_now)
+[2026-11-27T14:38:39] SLOW 2.4s POST /designer/update/check-now? (designer_update_check_now)
