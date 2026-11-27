@@ -1606,8 +1606,16 @@ def inject_globals():
         # لأي ترخيص عادي (حتى لو كان له تاريخ انتهاء بعد سنة مثلاً).
         if lic["status"] == "active" and lic.get("is_trial") and lic.get("days_left") is not None:
             license_banner = f"متبقي {lic['days_left']} يوم على انتهاء الفترة التجريبية"
+    # v119: تنسيق (نوع/حجم/لون...) اسم التحليل والنتيجة بالتقارير — يُضبط من تصميم التقارير
+    try:
+        rs_name_style = _load_text_style_setting(db, "rs_name_style")
+        rs_res_style = _load_text_style_setting(db, "rs_res_style")
+        rs_name_css, rs_res_css = text_style_css(rs_name_style), text_style_css(rs_res_style)
+    except Exception:  # noqa: BLE001
+        rs_name_style, rs_res_style, rs_name_css, rs_res_css = {}, {}, "", ""
     db.close()
-    return dict(t=lambda key: t(lang, key), lang=lang, ui_3d=ui_3d,
+    return dict(rs_name_style=rs_name_style, rs_res_style=rs_res_style, rs_name_css=rs_name_css, rs_res_css=rs_res_css,
+                t=lambda key: t(lang, key), lang=lang, ui_3d=ui_3d,
                 current_user=session.get("full_name") or ("المصمم" if session.get("designer_id") else None),
                 current_role=session.get("role") or ("designer" if session.get("designer_id") else None),
                 brand_name=brand_name, logo_url=logo_url,
@@ -7324,16 +7332,78 @@ _COMMON_TEST_ABBR = [
     ("glycosylated", "HbA1c"), ("blood film", "BF"), ("reticulocyte", "Retic"), ("erythrocyte sedimentation", "ESR"),
     ("blood urea", "B.Urea"), ("serum creatinine", "S.Creat"), ("creatinine", "Creat"), ("uric acid", "U.A"),
     ("total bilirubin", "T.Bil"), ("direct bilirubin", "D.Bil"), ("alkaline phosphatase", "ALP"),
-    ("prothrombin time", "PT"), ("partial thromboplastin", "PTT"), ("bleeding time", "BT"), ("clotting time", "CT"),
+    ("prothrombin time", "PT"), ("activated partial thromboplastin", "APTT"), ("partial thromboplastin", "PTT"), ("bleeding time", "BT"), ("clotting time", "CT"),
     ("thyroid stimulating", "TSH"), ("vitamin d", "Vit.D"), ("vitamin b12", "B12"), ("c-reactive", "CRP"),
     ("rheumatoid factor", "RF"), ("blood group", "ABO"), ("bone marrow aspirat", "BMA"),
     ("hepatitis b surface", "HBsAg"), ("hiv", "HIV"), ("widal", "Widal"), ("h. pylori", "H.pylori"),
 ]
 
 
+def _names_mode(scope):
+    """v119: اسم التحليل «short» (مختصر، الافتراضي) أو «full» (كامل) — scope: reports (التقارير) / daily (ورقة العمل اليومية).
+    الإعداد المحفوظ: test_names_mode_<scope> (يُضبط من تصميم التقارير)."""
+    try:
+        v = (get_setting(get_db(), "test_names_mode_" + scope, "short") or "short").strip().lower()
+    except Exception:  # noqa: BLE001
+        v = "short"
+    return "full" if v == "full" else "short"
+
+
+def _load_text_style_setting(db, key):
+    """تنسيق نصي محفوظ كـJSON بالإعدادات (نفس شكل sanitize_text_style)؛ فاضي = الافتراضي."""
+    try:
+        raw = json.loads(get_setting(db, key, "") or "{}")
+        return sanitize_text_style(raw if isinstance(raw, dict) else {})
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _apply_accounts_names_mode(db, result):
+    """v119: أسماء التحاليل بصفحة بحث الحسابات (وتصديرها PDF/Excel) مختصرة أو كاملة حسب الإعداد test_names_mode_accounts."""
+    if not result or _names_mode("accounts") != "short":
+        return result
+    try:
+        sn = {r["name"]: (r["short_name"] or "") for r in db.execute("SELECT name, short_name FROM test_definitions").fetchall()}
+    except Exception:  # noqa: BLE001
+        return result
+    for key in ("rows", "by_test_month", "by_test_total", "patient_rows"):
+        for r in result.get(key) or []:
+            if isinstance(r, dict) and r.get("test_name"):
+                r["test_name"] = _short_test_name(r["test_name"], sn.get(r["test_name"], ""))
+    return result
+
+
+_SHORT_NAME_SKIP = ("creatinine", "semen", "hiv")   # مفاتيح عامة جداً: لا نختصر بها بالتقارير (تخطئ مثل Creatinine Clearance)
+
+
+def _short_test_name(name, short_name=None):
+    """مختصر التحليل بالتقارير: الاختصار اليدوي test_definitions.short_name إن وُجد، ثم الجدول المتعارف عليه،
+    وإلا الاسم الكامل (لا نخترع أحرفاً أولى بالتقارير)."""
+    sn = (short_name or "").strip()
+    if sn:
+        return sn
+    low = (name or "").lower()
+    for key, ab in _COMMON_TEST_ABBR:
+        if key in _SHORT_NAME_SKIP:
+            continue
+        if key in low:
+            return ab
+    return name or ""
+
+
+def _td_short_name(db, test_def_id):
+    try:
+        r = db.execute("SELECT short_name FROM test_definitions WHERE id=?", (test_def_id,)).fetchone()
+        return (r["short_name"] if r else "") or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _abbr_test(name, short_name=None, code=None):
     """اسم التحليل المختصر لعمود "التحاليل" بالتقرير اليومي: short_name إن وُجد، وإلا المختصر المتعارف عليه
     (جدول أعلاه)، وإلا كود التحليل لو قصير، وإلا الأحرف الأولى من الاسم."""
+    if _names_mode("daily") == "full":
+        return name or ""
     sn = (short_name or "").strip()
     if sn:
         return sn
@@ -8500,14 +8570,14 @@ def _accounts_search_run(db, args):
         doctor_name = (args.get("doctor_name") or "").strip()
         if not doctor_name:
             return search_kind, date_from, date_to, None
-        result = acs.run_doctor_search(db, doctor_name, date_from, date_to, test_ids)
+        result = _apply_accounts_names_mode(db, acs.run_doctor_search(db, doctor_name, date_from, date_to, test_ids))
         return search_kind, date_from, date_to, result
 
     if search_kind == "lab":
         lab_name = (args.get("lab_name") or "").strip()
         if not lab_name:
             return search_kind, date_from, date_to, None
-        result = acs.run_lab_search(db, lab_name, date_from, date_to, test_ids)
+        result = _apply_accounts_names_mode(db, acs.run_lab_search(db, lab_name, date_from, date_to, test_ids))
         return search_kind, date_from, date_to, result
 
     if search_kind == "referral":
@@ -8516,7 +8586,7 @@ def _accounts_search_run(db, args):
         return search_kind, date_from, date_to, result
 
     mode = args.get("result_mode", "counts")  # counts | names
-    result = acs.run_basic_search(db, date_from, date_to, test_ids, mode)
+    result = _apply_accounts_names_mode(db, acs.run_basic_search(db, date_from, date_to, test_ids, mode))
     result["mode"] = mode
     return search_kind, date_from, date_to, result
 
@@ -10144,7 +10214,12 @@ def _build_panel_rows_for_ot(db, ot, visit, merged_by_test_def, ctx=None):
                     range2_display = f"{round(rng['low'] * factor, 2)} - {round(rng['high'] * factor, 2)}"
             except (TypeError, ValueError):
                 value2 = unit2 = range2_display = None
-        display_name = resolve_label(p) if multi_param else ot["test_name"]
+        if multi_param:
+            display_name = resolve_label(p)
+        elif _names_mode("reports") == "short":
+            display_name = _short_test_name(ot["test_name"], _td_short_name(db, ot["test_definition_id"]))
+        else:
+            display_name = ot["test_name"]
         previous_display = None
         for m in merged_by_test_def.get(ot["test_definition_id"], []):
             prev_val = m["results"].get(p["name"])
@@ -10291,6 +10366,36 @@ def _heading_css_ctx(cfg, dept_names):
             "dept_css_map": {n: head + text_style_css(per[n]) for n in dept_names if n in per}}
 
 
+_MERGED_TITLE_FACTORY = "biochemistry, hormones & vitamins report"
+
+
+def _auto_merged_title(cfg_title, dept_names):
+    """v119: عنوان التقرير الشامل كان نفس النص الثابت (Biochemistry, Hormones & Vitamins Report)
+    يتكرر بكل تقرير حتى لو التحليل تخثر/دم/بول. الآن:
+      - إذا الأدمن كتب عنواناً خاصاً بمصمم التقارير ← يبقى كما كتبه.
+      - إذا فارغ أو بقي على النص الافتراضي القديم ← يُبنى من أقسام التقرير الفعلية
+        (Hematology Report / Biochemistry & Hormones Report ...)."""
+    t = " ".join(str(cfg_title or "").replace("&amp;", "&").split())
+    if t and t.lower() != _MERGED_TITLE_FACTORY:
+        return cfg_title
+    names, seen = [], set()
+    for d in dept_names or []:
+        n = " ".join(str(d or "").split())
+        for suf in (" Tests", " Test", " Panel"):
+            if n.lower().endswith(suf.lower()):
+                n = n[: -len(suf)].strip()
+        if n and n.lower() not in seen:
+            seen.add(n.lower())
+            names.append(n)
+    if not names:
+        return ""
+    if len(names) > 3:
+        return "Laboratory Report"
+    if len(names) == 1:
+        return f"{names[0]} Report"
+    return ", ".join(names[:-1]) + " & " + names[-1] + " Report"
+
+
 def _form_text_style(prefix):
     return sanitize_text_style({k: request.form.get(f"{prefix}_{k}") for k in ("color", "font", "size", "case", "bold", "italic")})
 
@@ -10403,7 +10508,8 @@ def _print_combined_panel_core(visit_id):
             hl = hist_all.get(p["name"])
             if not hl:
                 continue
-            pname = resolve_label(p) if multi_param_prev else td_row["name"]
+            pname = resolve_label(p) if multi_param_prev else (
+                _short_test_name(td_row["name"], _td_short_name(db, test_def_id)) if _names_mode("reports") == "short" else td_row["name"])
             _ex, _note, _nkey = _row_extras_and_note(row_ctx, test_def_id, p["name"])
             prev_rows.append({
                 "name": pname, "result": None, "unit": p["unit"] or "", "range_display": "",
@@ -10497,7 +10603,8 @@ def _print_combined_panel_core(visit_id):
         "reports/combined_panel.html",
         patient_name_en=_panel_name_en, sample_time=_panel_time, number_of=_panel_number_of,
         panel_groups=panel_groups, logo_url=logo_url, from_other_lab=from_other_lab, other_lab_visit_id=visit["id"],
-        show_dept_headings=show_dept_headings, all_rows=all_rows, merged_title=layout_cfg["merged_title"],
+        show_dept_headings=show_dept_headings, all_rows=all_rows,
+        merged_title=_auto_merged_title(layout_cfg["merged_title"], [g["department"] for g in panel_groups]),
         **_heading_css_ctx(layout_cfg, [g["department"] for g in panel_groups]),
         sample_no=(visit["sample_no"] if "sample_no" in visit.keys() else "") or "",
         layout_view=_view, note_visit_id=visit_id,
@@ -16061,6 +16168,8 @@ def report_designer():
         selected_parameters=ordered_selected_params, selected_template=selected_template,
         selected_rows_by_param=selected_rows_by_param,
         result_layout=get_result_layout(db), result_label_defaults=RESULT_LABEL_DEFAULTS,
+        names_mode_reports=_names_mode("reports"), names_mode_daily=_names_mode("daily"), names_mode_accounts=_names_mode("accounts"),
+        tname_style=_load_text_style_setting(db, "rs_name_style"), tres_style=_load_text_style_setting(db, "rs_res_style"),
         merged_exclude_default=", ".join(MERGED_EXCLUDE_DEFAULT),
         result_extra_values=get_extra_col_values(db),
         heading_dept_names=[r[0] for r in db.execute(
@@ -16422,6 +16531,12 @@ def save_result_style_settings():
     cfg["dept_styles"] = _ds
     cfg["merged_exclude"] = (request.form.get("merged_exclude") or "").strip()[:2000]
     cfg["show_prev_visit_line"] = 1 if request.form.get("show_prev_visit_line") else 0
+    for _sc in ("reports", "daily", "accounts"):      # v119: مختصر/كامل لاسم التحليل
+        _nv = request.form.get("names_mode_" + _sc)
+        if _nv in ("short", "full"):
+            set_setting(db, "test_names_mode_" + _sc, _nv)
+    for _sk, _pf in (("rs_name_style", "tname"), ("rs_res_style", "tres")):     # v119: نوع/حجم/لون اسم التحليل والنتيجة
+        set_setting(db, _sk, json.dumps(_form_text_style(_pf), ensure_ascii=False))
     save_result_layout(db, cfg)
     log_action("SaveResultStyle", "settings", 0, cfg["style"])
     flash("تم حفظ أسلوب جدول النتائج (يُطبّق على كل التقارير).")

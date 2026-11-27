@@ -453,8 +453,36 @@ def sync(db, days=None, force=False):
     return r
 
 
+def _letterhead_payload(db):
+    """v123: ترويسة أسماء الأطباء كما تُطبع بتقارير الـLIS (نفس الأطباء بنفس الترتيب اليدوي + إعدادات الخط وموضع الشعار) لتُطبع بسجل المرضى بنفس الشكل."""
+    try:
+        from database import get_letterhead_doctors, get_setting
+        docs = []
+        for d in get_letterhead_doctors(db):
+            def f(k):
+                try:
+                    return d[k]
+                except Exception:
+                    return None
+            fs = f("font_size")
+            docs.append({"title": (f("title") or "الدكتور"), "name": (f("name") or ""),
+                         "degree_ar": (f("degree_ar") or ""), "degree_en": (f("degree_en") or ""),
+                         "font_size": int(fs) if str(fs or "").isdigit() else 0})
+        if not docs:
+            return None
+        try:
+            fsz = int(float(get_setting(db, "letterhead_font_size", "14") or 14))
+        except Exception:
+            fsz = 14
+        return {"doctors": docs[:12], "fs": fsz,
+                "fam": str(get_setting(db, "letterhead_font_family", "Segoe UI, Tahoma, Arial, sans-serif") or ""),
+                "logoPos": str(get_setting(db, "logo_position", "right") or "right")}
+    except Exception:
+        return None
+
+
 def _push_rates(db, c):
-    """أجور الأطباء الفاحصين (لكل طبيب ولكل تحليل) إلى السحابة ليحسب السجل نفس الأجور. فشلها لا يوقف المزامنة."""
+    """أجور الأطباء الفاحصين (لكل طبيب ولكل تحليل) + ترويسة الأطباء إلى السحابة ليحسب السجل نفس الأجور ويطبع نفس الترويسة. فشلها لا يوقف المزامنة."""
     try:
         keys = _keys_by_tid(db)
         rates = {}
@@ -462,10 +490,14 @@ def _push_rates(db, c):
             d = rates.setdefault(r["doctor_name"], {})
             for k in keys.get(r["tid"], []):
                 d[k] = float(r["rate"])
-        h = hashlib.sha1(json.dumps(rates, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+        lh = _letterhead_payload(db)
+        h = hashlib.sha1(json.dumps([rates, lh], ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
         if h == _get(db, "ledger_rates_hash", ""):
             return
-        code, j = _request(c["url"] + "/api/lis/accounts", c["key"], {"docRates": rates}, 30)
+        body = {"docRates": rates}
+        if lh:
+            body["letterhead"] = lh   # Worker قديم يتجاهل هذا المفتاح؛ المحدَّث يحفظه بـsettings/acct
+        code, j = _request(c["url"] + "/api/lis/accounts", c["key"], body, 30)
         if code == 200 and j.get("ok"):
             _set(db, "ledger_rates_hash", h)
             db.commit()
@@ -1055,6 +1087,26 @@ def _apply_cloud(db, vid, C, base, L):
 _ix_cache = {}
 
 
+def _after_results_applied(db, vid):
+    """v126: بعد أن يطبّق الـLIS نتائج كتبها سجل المرضى:
+    - النتيجة مكتملة  → يُرفع PDF النهائي للسحابة فوراً (بدون ضغط أي زر وبدون انتظار الفحص الدوري). السحابة لا تحصل على النهائي إلا من هنا/من الـLIS.
+    - غير مكتملة     → تُحدَّث «المسودة» بنفس الدورة (drafts_push).
+    لا يرمي أخطاء (أي فشل يُسجَّل بحالة المزامنة ويعيد الفحص الدوري المحاولة)."""
+    try:
+        coll = _H.get("portal_collect")
+        data = coll(db, vid) if coll else None
+        if data and _expected_code(data) == "r":
+            if _st_get(vid)[1]:
+                return                                  # رابط ملغى (revoke): لا نرفعه
+            ok, msg = _push_visit(db, vid)
+            if not ok:
+                _st["imp_err"] = "رفع PDF النهائي: " + _redact(msg)
+            return
+        _DR["t"] = 0.0                                  # غير مكتملة: حدّث المسودة بأول فرصة
+    except Exception as e:
+        _st["imp_err"] = "رفع PDF بعد نتائج السجل: " + _redact(e)
+
+
 def apply_cloud_edits(db):
     """يقارن كل صف مربوط بالسحابة مع الزيارة: إذا عدّل العميل بالسجل ولم يتغير شيء بالـLIS → يطبَّق على الـLIS.
     إذا تعدّل الاثنان معاً يغلب الـLIS (ويُرفع للسجل). يرجع عدد الزيارات المعدّلة."""
@@ -1096,6 +1148,7 @@ def apply_cloud_edits(db):
                 days_cache.pop(vr["d"], None)
                 days_cache[vr["d"]] = {r["lisId"]: r for r in collect_day(db, vr["d"])}
                 Lrow = days_cache[vr["d"]].get(it["lisId"]) or Lrow
+                _after_results_applied(db, vid)          # v126: اكتملت → ارفع PDF النهائي فوراً (تلقائي)
         except Exception as e:
             try:
                 db.rollback()

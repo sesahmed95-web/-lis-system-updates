@@ -38,6 +38,9 @@
        الرقم بـStyle B compact)، بدل ما يكون كل ستايل إله قيمة ثابتة
        منفصلة بالكود. القيمة بالبكسل، تُقرأ من view.colors.unit_gap. */
     --rs-unit-gap: {{ view.unit_gap or '6' }}px;
+    /* v119: حجم خط اسم التحليل والنتيجة من إعدادات الأدمن (test_name_font_size / result_value_font_size) */
+    --rs-name-size: {{ ((rs_name_style or {}).get('size') or test_name_font_size or 16)|int }}px;
+    --rs-res-size: {{ ((rs_res_style or {}).get('size') or result_value_font_size or 16)|int }}px;
     /* v61: تحكم بالمسافات — بين الصفوف/التحاليل (row_gap) وبين أسطر المدى الطبيعي (line_gap) */
     --rs-row-gap: {{ view.row_gap if view.row_gap is not none else 8 }}px;
     --rs-line-gap: {{ view.line_gap if view.line_gap is not none else 2 }}px;
@@ -46,6 +49,11 @@
     --rs-band-text: {{ c.head_text or '#0B3B5C' }};
   }
   .rs-scope { direction: ltr; text-align: left; }
+  {# v119: تنسيق اسم التحليل والنتيجة من تصميم التقارير (نوع/حجم/لون/...) #}
+  {% if rs_name_css %}.rs-scope .rs-bg-name, .rs-scope .rs-a-table td.rs-a-first, .rs-scope .rs-r3-table .rs-r3-name, .rs-scope .rs-bc-name { {{ rs_name_css }} }{% endif %}
+  {% if rs_res_css %}.rs-scope .rs-bg-val.rs-cur, .rs-scope .rs-bg-val.rs-cur .rs-num, .rs-scope .rs-a-table .rs-a-res, .rs-scope .rs-a-table .rs-a-res .rs-num,
+  .rs-scope .rs-r2-table .rs-r2-res, .rs-scope .rs-r2-table .rs-r2-res .rs-num, .rs-scope .rs-r3-table .rs-r3-res, .rs-scope .rs-r3-table .rs-r3-res .rs-num,
+  .rs-scope .rs-bc-vals .rs-num { {{ rs_res_css }} }{% endif %}
   .rs-num { font-family: Arial, Helvetica, sans-serif; font-weight: 700; }
   .rs-flag { font-size: 0.7em; font-weight: bold; margin-inline-start: 5px; }
   .rs-unit { color: #475569; padding-inline-start: var(--rs-unit-gap); }
@@ -75,12 +83,14 @@
   .rs-bg-head { display: grid; gap: 10px; margin-bottom: 6px; font-weight: 700; }
   .rs-bg-head > div { border-bottom: 1.5px solid #111827; padding-bottom: 4px; text-align: center; }
   .rs-bg-head > div.rs-bg-first { text-align: left; }
-  .rs-bg-block { border-bottom: 1px dashed var(--rs-line); padding: var(--rs-row-gap) 0; }
+  .rs-bg-block { border-bottom: 1px dashed var(--rs-line); padding: var(--rs-row-gap) 0; container-type: inline-size; }  /* v119: لحساب حجم اسم التحليل نسبةً لعرض الصفحة (cqw) */
   .rs-bg-block:last-child { border-bottom: none; }
   .rs-bg-row { display: grid; gap: 10px; align-items: baseline; }
-  .rs-bg-name { font-weight: 700; color: var(--rs-name); white-space: nowrap; padding-inline-end: 12px; }  /* v115: اسم التحليل بسطر واحد */
+  .rs-bg-name { font-weight: 700; color: var(--rs-name); white-space: nowrap; padding-inline-end: 12px; font-size: var(--rs-name-size); min-width: 0; }  /* v115/v119: اسم التحليل بسطر واحد ولا يلتصق بالنتيجة */
   .rs-bg-lab { font-weight: 700; color: var(--rs-label); }
   .rs-bg-val { display: flex; justify-content: center; align-items: baseline; gap: var(--rs-unit-gap); text-align: center; }
+  .rs-bg-val { font-size: var(--rs-res-size); }
+  .rs-bg-prevrow .rs-bg-val { font-size: inherit; }
   .rs-bg-val .rs-unit { padding-inline-start: 0; }
   .rs-bg-val .rs-num { color: #111827; }
   .rs-bg-val.rs-cur .rs-num { color: var(--rs-result); }
@@ -310,7 +320,7 @@
 {# ---------------------------- Style B grid (image 1) ---------------------------- #}
 {% elif style in ('b_grid', 'r1') %}
   {% set _ml = (rows|map(attribute='name')|map('string')|map('length')|list + [12])|max %}
-  {% set tpl = ['minmax(min(' ~ (_ml * 0.62)|round(1) ~ 'em, 46%), 1.5fr)'] %}
+  {% set tpl = ['minmax(min(' ~ (_ml * 0.62)|round(1) ~ 'em, 56%), 1.5fr)'] %}
   {% for e in ex.test %}{% if tpl.append('minmax(0,.6fr)') %}{% endif %}{% endfor %}
   {% if tpl.append('minmax(0,1fr)') %}{% endif %}
   {% for e in ex.conv %}{% if tpl.append('minmax(0,.6fr)') %}{% endif %}{% endfor %}
@@ -330,7 +340,7 @@
   {% set auto_color = AUTO_FLAG_COLORS.get(row.flag) if (auto_flag_color_enabled and not row.color and row.flag) else none %}
   <div class="rs-bg-block"{% if row.page_break_before %} style="page-break-before: always; break-before: page;"{% endif %}>
     <div class="rs-bg-row" style="{{ gt }}">
-      <div class="rs-bg-name" style="{% if row.color %}color:{{ row.color }};{% endif %}">{{ row.name }}</div>
+      <div class="rs-bg-name" style="{% if row.color %}color:{{ row.color }};{% endif %}font-size:min(var(--rs-name-size), calc(52cqw / {{ (([row.name|string|length, 14]|max) * 0.56)|round(2) }}));">{{ row.name }}</div>
       {% for e in ex.test %}<div class="rs-bg-extra">{{ (row.extras or {}).get(e.id, '') }}</div>{% endfor %}
       <div class="rs-bg-val rs-cur">
         {% if row.result not in (none, '') %}<div>{{ cur_val(row, auto_color) }}</div>{% else %}<div></div>{% endif %}

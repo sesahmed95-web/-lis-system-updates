@@ -259,6 +259,27 @@
       <input type="text" name="merged_title" value="{{ rl.merged_title }}" dir="auto" style="width:100%;">
     </div>
     <div class="form-field">
+      <label>اسم التحليل بالتقارير</label>
+      <select name="names_mode_reports">
+        <option value="short" {{ 'selected' if names_mode_reports != 'full' }}>مختصر (APTT، CBC …) — حسب «الاختصار» المضبوط للتحليل</option>
+        <option value="full" {{ 'selected' if names_mode_reports == 'full' }}>الاسم الكامل</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>اسم التحليل بالحسابات (بحث وتصدير)</label>
+      <select name="names_mode_accounts">
+        <option value="short" {{ 'selected' if names_mode_accounts != 'full' }}>مختصر</option>
+        <option value="full" {{ 'selected' if names_mode_accounts == 'full' }}>الاسم الكامل</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>اسم التحليل بورقة العمل اليومية (التقرير اليومي)</label>
+      <select name="names_mode_daily">
+        <option value="short" {{ 'selected' if names_mode_daily != 'full' }}>مختصر</option>
+        <option value="full" {{ 'selected' if names_mode_daily == 'full' }}>الاسم الكامل</option>
+      </select>
+    </div>
+    <div class="form-field">
       <label>عناوين الأقسام (BIOCHEMISTRY / HORMONES ...) فوق التحاليل</label>
       <select name="dept_headings">
         <option value="auto" {{ 'selected' if rl.dept_headings == 'auto' }}>تلقائي (Style A تظهر، Style B لا)</option>
@@ -299,7 +320,7 @@
     </tr>
     {% endmacro %}
     <div class="form-field" style="border:1px solid #CBD5E1; border-radius:8px; padding:10px 12px; margin:10px 0;">
-      <label style="font-weight:700;">🎨 تنسيق عنوان اللوحة وعناوين الأقسام (BIOCHEMISTRY / VITAMINS / ...)</label>
+      <label style="font-weight:700;">🎨 تنسيق الخطوط: عنوان التقرير، عناوين الأقسام، اسم التحليل، ونتيجة التحليل</label>
       <p class="muted" style="font-size:0.8em; margin:4px 0 8px;">اللون والخط والحجم والأحرف (كبيرة/صغيرة) والمضخّم والمائل. الفارغ = الشكل الافتراضي. تنسيق «كل عناوين الأقسام» يُطبَّق على الجميع، وتنسيق قسم معيّن يتغلّب عليه. لإخفاء عنوان اللوحة امسح نصه بالحقل أعلاه، ولإخفاء عناوين الأقسام اختر «لا تعرض عناوين».</p>
       <div style="overflow-x:auto;">
       <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
@@ -308,6 +329,8 @@
         </tr></thead>
         <tbody>
           {{ ts_row('title', 'عنوان اللوحة (فوق)', rl.title_style or {}) }}
+          {{ ts_row('tname', 'اسم التحليل (بصفوف النتائج)', tname_style or {}) }}
+          {{ ts_row('tres', 'نتيجة التحليل (القيمة والوحدة)', tres_style or {}) }}
           {{ ts_row('head', 'كل عناوين الأقسام', rl.head_style or {}) }}
           {% for n in heading_dept_names %}
           {{ ts_row('ds_' ~ loop.index0, 'قسم: ' ~ n, (rl.dept_styles or {}).get(n, {}), hidden_name=n) }}
