@@ -239,8 +239,8 @@
      فيزيائيًا لعمود القيمة، مو مجرد محاذاة نص) أو range_position='below'
      (يرجع المدى الطبيعي لسطر مستقل تحت اسم التحليل بالتصميم القديم) —
      تُقرأ من rows_json لكل صف عبر مصمم التقرير. */
-  .lt-table { direction: ltr; --lt-cols: 1fr 130px 130px; }
-  .lt-table.no-si { --lt-cols: 1fr 150px; }
+  .lt-table { direction: ltr; --lt-cols: minmax(max-content, 1fr) 130px 130px; }
+  .lt-table.no-si { --lt-cols: minmax(max-content, 1fr) 150px; }
   .lt-head {
     display: grid; grid-template-columns: var(--lt-cols); gap: 10px;
     border-bottom: 2px solid #26529C; padding-bottom: 6px; margin-bottom: 6px;
@@ -259,7 +259,7 @@
   .lt-row.lt-flip > .lt-name { order: 3; text-align: right; }
   .lt-row.lt-flip > .lt-val { order: 1; }
   .lt-row.lt-flip > .lt-val2 { order: 2; }
-  .lt-name-row .lt-name { font-weight: bold; font-size: {{ test_name_font_size|default(16) }}px; color: #14213D; }
+  .lt-name-row .lt-name { white-space: nowrap; padding-inline-end: 12px; font-weight: bold; font-size: {{ test_name_font_size|default(16) }}px; color: #14213D; }
   .lt-val, .lt-val2 { color: #1F3B7A; font-weight: bold; white-space: nowrap; font-size: {{ result_value_font_size|default(16) }}px; }
   .lt-val .unit, .lt-val2 .unit { color: #14213D; font-weight: normal; margin-left: 10px; }
   .lt-prev-row .lt-name { font-size: 0.88em; }

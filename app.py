@@ -20907,7 +20907,7 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     # ربط «سجل المرضى السحابي» (ledger_sync.py): صفحة /ledger + مزامنة تلقائية. اختياري: أي خطأ لا يوقف البرنامج.
     try:
         import ledger_sync
-        ledger_sync.install(app, dict(delete_visit=_delete_visit_cascade, next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no, ensure_partner=_ensure_partner_labs, unique_code=unique_test_code, portal_collect=_portal_collect))
+        ledger_sync.install(app, dict(delete_visit=_delete_visit_cascade, next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no, ensure_partner=_ensure_partner_labs, unique_code=unique_test_code, portal_collect=_portal_collect, save_results=save_order_test_results, post_save=_post_save_background))
         try:   # v106: lis_wipe
             import lis_wipe
             lis_wipe.install(dict(delete_visit=_delete_visit_cascade, log_action=log_action))

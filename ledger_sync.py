@@ -7,6 +7,7 @@
 - لا يغيّر أي شيء بقاعدة المختبر (قراءة فقط) عدا مفاتيح إعداداته بجدول settings.
 - الفشل (بدون إنترنت/خطأ) لا يوقف البرنامج: يعيد المحاولة بالدورة التالية.
 """
+import base64
 import hashlib
 import json
 import os
@@ -267,6 +268,45 @@ def _set_test_doctors(db, vid, want, default):
         pass
 
 
+def _results_payload(db, vid):
+    """v116: قيم النتائج المكتملة لزيارة (لتظهر بسجل المرضى كاملة دون إعادة كتابتها).
+    يرجع (results[{t,v}], note, done). t = اسم الباراميتر؛ وللتحليل ذي نتيجة واحدة نضيف أيضاً باسم التحليل."""
+    out, notes, any_done = [], [], False
+    try:
+        ots = db.execute(
+            "SELECT ot.id, ot.status, td.name AS tname FROM orders o JOIN order_tests ot ON ot.order_id=o.id "
+            "JOIN test_definitions td ON td.id=ot.test_definition_id WHERE o.visit_id=? "
+            "AND COALESCE(ot.status,'') IN ('Completed','Verified') ORDER BY ot.id", (vid,)).fetchall()
+    except Exception:
+        return [], "", False
+    for ot in ots:
+        try:
+            rs = db.execute(
+                "SELECT tp.name AS pname, r.value_numeric AS vn, r.value_text AS vt FROM results r "
+                "JOIN test_parameters tp ON tp.id=r.test_parameter_id WHERE r.order_test_id=? ORDER BY tp.id", (ot["id"],)).fetchall()
+        except Exception:
+            continue
+        vals = []
+        for r in rs:
+            v = (r["vt"] or "").strip() if r["vt"] not in (None, "") else ("" if r["vn"] is None else str(r["vn"]).rstrip("0").rstrip(".") if "." in str(r["vn"]) else str(r["vn"]))
+            if v != "":
+                vals.append((r["pname"], v))
+        if not vals:
+            continue
+        any_done = True
+        for n, v in vals:
+            out.append({"t": n, "v": v})
+        if len(vals) == 1 and vals[0][0] != ot["tname"]:
+            out.append({"t": ot["tname"], "v": vals[0][1]})
+        try:
+            nt = db.execute("SELECT comment FROM lis_result_notes WHERE order_test_id=?", (ot["id"],)).fetchone()
+            if nt and (nt["comment"] or "").strip():
+                notes.append(nt["comment"].strip())
+        except Exception:
+            pass
+    return out, "\n".join(notes), any_done
+
+
 def collect_day(db, day):
     """صفوف يوم واحد بصيغة السجل السحابي."""
     _ensure_cols(db)
@@ -313,6 +353,8 @@ def collect_day(db, day):
             "expNote": (v["expenses_note"] or "").strip(),
             "sentTests": _sent_str(db, v["id"]),
             "testDoctors": _td_payload(db, v["id"], _kb),
+            **dict(zip(("results", "resultNote", "resDone"), _results_payload(db, v["id"]))),
+            "resApplied": _num(_get(db, "ledger_resapplied_v%d" % v["id"], "0")) or 0,
         })
     return rows
 
@@ -804,6 +846,115 @@ def _same(a, b):
     return ka == kb and {_nt(t) for t in a["tests"]} == {_nt(t) for t in b["tests"]}
 
 
+_NAME_STOP = {"count", "test", "level", "total", "blood", "cell", "cells", "the", "of", "and"}
+
+
+def _aliases(x):
+    x = (x or "").lower().strip()
+    out = set()
+
+    def clean(t):
+        return " ".join(w for w in re.sub(r"[^a-z0-9\u0600-\u06ff ]+", " ", t).split() if w not in _NAME_STOP)
+    for m in re.findall(r"\(([^)]*)\)", x):
+        if clean(m):
+            out.add(clean(m))
+    for c in (clean(re.sub(r"\([^)]*\)", " ", x)), clean(x)):
+        if c:
+            out.add(c)
+    return out
+
+
+def _pick_param(plist, name):
+    """يطابق اسم باراميتر سجل المرضى مع باراميترات تحليل LIS: مطابقة تامة، ثم تطابق أسماء بديلة (Hb ↔ Hemoglobin (Hb)) بشرط أن يكون فريداً."""
+    n = _nt(name)
+    if not n:
+        return None
+    low = str(name or "").strip().lower()
+    for p in plist:                                   # مطابقة حرفية أولاً (Neutrophils % ≠ Neutrophils #)
+        if str(p["name"] or "").strip().lower() == low:
+            return p
+    same = [p for p in plist if _nt(p["name"]) == n]
+    if len(same) == 1:
+        return same[0]
+    a = _aliases(name)
+    hit = [p for p in plist if a & _aliases(p["name"])]
+    return hit[0] if len(hit) == 1 else None
+
+
+def _apply_cloud_results(db, vid, it):
+    """v118: قيم كتبها سجل المرضى -> تُحفظ بالـLIS كنتيجة فعلية بنفس دالة حفظ النتائج الأصلية (flag + result_history).
+    يرجع (عدد القيم المحفوظة, قائمة غير المطابَقة)."""
+    save = _H.get("save_results")
+    if not save:
+        raise RuntimeError("save_results helper missing")
+    res = [x for x in (it.get("results") or []) if isinstance(x, dict) and str(x.get("v", "")).strip() != "" and str(x.get("t", "")).strip() != ""]
+    if not res:
+        return 0, []
+    idx = _test_index(db)
+    ots = db.execute(
+        "SELECT ot.*, td.name AS test_name, td.code AS test_code, p.id AS patient_id, p.gender, p.age, p.age_unit, "
+        "v.id AS visit_id, v.registration_number FROM order_tests ot JOIN test_definitions td ON td.id=ot.test_definition_id "
+        "JOIN orders o ON o.id=ot.order_id JOIN visits v ON v.id=o.visit_id JOIN patients p ON p.id=v.patient_id "
+        "WHERE v.id=? AND COALESCE(ot.status,'') NOT IN ('Cancelled','Canceled','Rejected') ORDER BY ot.id", (vid,)).fetchall()
+    params = {o["id"]: db.execute("SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
+                                  (o["test_definition_id"],)).fetchall() for o in ots}
+
+    def find(t):
+        t = str(t).strip()
+        if "|" in t:
+            canon, comp = t.split("|", 1)
+            tid = _match_test(idx, canon)
+            for o in ots:
+                if (tid and o["test_definition_id"] == tid) or _nt(o["test_name"]) == _nt(canon):
+                    p = _pick_param(params[o["id"]], comp)
+                    if p:
+                        return o, p
+            t = comp                      # اسم لوحة مختلف عن الـLIS: نبحث بالمكوّن وحده
+        for o in ots:
+            p = next((q for q in params[o["id"]] if _nt(q["name"]) == _nt(t)), None)
+            if p:
+                return o, p
+        tid = _match_test(idx, t)
+        for o in ots:
+            if (tid and o["test_definition_id"] == tid) or _nt(o["test_name"]) == _nt(t):
+                if len(params[o["id"]]) == 1:
+                    return o, params[o["id"]][0]
+        for o in ots:
+            p = _pick_param(params[o["id"]], t)
+            if p:
+                return o, p
+        return None
+
+    forms, unmatched, seen = {}, [], set()
+    for x in res:
+        f = find(x["t"])
+        if not f:
+            unmatched.append(str(x["t"]))
+            continue
+        o, p = f
+        if (o["id"], p["id"]) in seen:
+            continue
+        seen.add((o["id"], p["id"]))
+        forms.setdefault(o["id"], {})["param_%d" % p["id"]] = str(x["v"]).strip()
+    n = 0
+    for o in ots:
+        form = forms.get(o["id"])
+        if not form:
+            continue
+        save(db, o, params[o["id"]], form, None, patient_id=o["patient_id"])
+        if (o["status"] or "") != "Verified":
+            db.execute("UPDATE order_tests SET status='Completed' WHERE id=?", (o["id"],))
+        n += len(form)
+    db.commit()
+    try:
+        ps = _H.get("post_save")
+        if ps and forms:
+            ps(vid, list(forms.keys()))
+    except Exception:
+        pass
+    return n, unmatched
+
+
 def _apply_cloud(db, vid, C, base, L):
     """يطبّق تعديل السجل (C) على زيارة LIS: بيانات المريض + الدكتور/المختبر + إضافة/إلغاء تحاليل + تحديث الفاتورة."""
     H = _H
@@ -931,6 +1082,26 @@ def apply_cloud_edits(db):
         Lrow = days_cache[vr["d"]].get(it["lisId"])
         if not Lrow:
             continue
+        # v118: نتائج كتبها سجل المرضى (resAt = وقت الحفظ بالسجل) ولم يطبّقها الـLIS بعد
+        try:
+            ra = int(it.get("resAt") or 0)
+            if ra and ra > int(it.get("resApplied") or 0) and ra > int(_num(_get(db, "ledger_resapplied_" + it["lisId"], "0")) or 0):
+                cnt, bad = _apply_cloud_results(db, vid, it)
+                _set(db, "ledger_resapplied_" + it["lisId"], str(ra))
+                db.commit()
+                _st["res_applied"] = _st.get("res_applied", 0) + cnt
+                if bad:
+                    _st["imp_err"] = "نتائج من السجل: لم تُطابَق %d (%s) — أسماؤها تختلف عن باراميترات الـLIS" % (len(bad), "، ".join(bad[:6]))
+                n += 1
+                days_cache.pop(vr["d"], None)
+                days_cache[vr["d"]] = {r["lisId"]: r for r in collect_day(db, vr["d"])}
+                Lrow = days_cache[vr["d"]].get(it["lisId"]) or Lrow
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            _st["imp_err"] = "نتائج من السجل: " + _redact(e)
         _ix = _ix_cache.setdefault("i", _test_index(db))
         Cs, Ls = _state(it, _ix), _state(Lrow, _ix)
         bkey = "ledger_base_" + it["lisId"]
@@ -1367,6 +1538,71 @@ def portal_guard(db, force=False):
         _PG_LOCK.release()
 
 
+_DR = {"t": 0.0, "ok": 0, "fail": 0, "err": ""}
+
+
+def drafts_push(db, force=False):
+    """v118: مسودة PDF بتصميم الـLIS للمرضى غير المكتملين (فارغة أو جزئية) لتظهر بسجل المرضى للطباعة/الحفظ."""
+    c = cfg(db)
+    if not (c["enabled"] and c["url"].startswith("https://") and c["key"]):
+        return "ربط السجل غير مفعّل."
+    if _get(db, "ledger_drafts", "1") != "1" and not force:
+        return "المسودات معطّلة."
+    if time.time() - _DR["t"] < 120 and not force:
+        return ""
+    _DR["t"] = time.time()
+    try:
+        import cloud_sync
+        maker = getattr(cloud_sync, "_pdf_maker", None)
+    except Exception:
+        maker = None
+    coll = _H.get("portal_collect")
+    if not maker or not coll:
+        return "مولّد PDF غير متاح."
+    cut = (date.today() - timedelta(days=max(2, min(14, c["back"])))).isoformat()
+    vids = [r["id"] for r in db.execute(
+        "SELECT v.id FROM visits v WHERE substr(v.created_at,1,10)>=? AND COALESCE(v.status,'') NOT IN ('Cancelled','Canceled') "
+        "AND EXISTS (SELECT 1 FROM orders o JOIN order_tests ot ON ot.order_id=o.id WHERE o.visit_id=v.id) ORDER BY v.id DESC LIMIT 150", (cut,)).fetchall()]
+    cand = {}
+    for vid in vids:
+        try:
+            data = coll(db, vid)
+            if not data or _expected_code(data) == "r":
+                continue
+            if not [t for t in data.get("tests", []) if t.get("status") not in ("Cancelled", "Canceled", "Rejected")]:
+                continue
+            cand["v%d" % vid] = portal_state_hash(data)
+        except Exception:
+            continue
+    if not cand:
+        return ""
+    try:
+        code, j = _request(c["url"] + "/api/lis/draft-have", c["key"], {"ids": list(cand)}, 25)
+    except Exception:
+        return ""
+    if code != 200 or not j.get("ok"):
+        return ""
+    have = j.get("have") or {}
+    todo = [k for k, h in cand.items() if have.get(k) != h][:(12 if force else 3)]
+    done = 0
+    for k in todo:
+        try:
+            pdf = maker(int(k[1:]))
+            if not pdf or pdf[:4] != b"%PDF":
+                raise RuntimeError("لم يُولَّد PDF")
+            code, j = _request(c["url"] + "/api/lis/draft-pdf", c["key"],
+                               {"lisId": k, "hash": cand[k], "pdf_b64": base64.b64encode(pdf).decode("ascii")}, 90)
+            if code == 200 and j.get("ok"):
+                done += 1
+                _DR["ok"] += 1
+            else:
+                raise RuntimeError("السحابة رفضت (%s)" % code)
+        except Exception as e:
+            _DR["fail"] += 1
+            _DR["err"] = "%s: %s" % (k, _redact(e))[:200]
+    return "مسودات: رُفع %d" % done if done else ""
+
+
 def _loop():
     time.sleep(20)
     while True:
@@ -1398,6 +1634,10 @@ def _loop():
                             pass
                         try:
                             portal_guard(db)               # v102: ضمان رفع النتائج للسحابة (خارج قفل المزامنة)
+                        except Exception:
+                            pass
+                        try:
+                            drafts_push(db)                # v118: مسودة PDF للمرضى غير المكتملين
                         except Exception:
                             pass
                         try:
@@ -1668,6 +1908,7 @@ def install(app, helpers=None):
             d2 = _db()
             try:
                 portal_guard(d2, force=True)
+                drafts_push(d2, force=True)
             except Exception as e:
                 _pg["last"], _pg["last_t"] = "خطأ: %s" % e, time.time()
             finally:
@@ -1681,7 +1922,9 @@ def install(app, helpers=None):
             return jsonify(ok=False, message="سجّل الدخول أولاً."), 401
         cnt, size = archive_stats()
         last = _pg["last"] + (time.strftime(" (%H:%M:%S)", time.localtime(_pg["last_t"])) if _pg["last_t"] else "")
-        return jsonify(ok=True, message="نسخ PDF محلية: %d ملف (%.1f ميغابايت)\nآخر فحص: %s" % (cnt, size / 1048576.0, last or "—"))
+        dr = "\nمسودات PDF (للمرضى غير المكتملين): رُفع %d، فشل %d%s\nقيم من سجل المرضى طُبّقت بالـLIS: %d" % (
+            _DR["ok"], _DR["fail"], (" — " + _DR["err"]) if _DR["err"] else "", _st.get("res_applied", 0))
+        return jsonify(ok=True, message="نسخ PDF محلية: %d ملف (%.1f ميغابايت)\nآخر فحص: %s" % (cnt, size / 1048576.0, last or "—") + dr)
 
     @bp.route("/ledger/pending", methods=["POST"])
     def pend():

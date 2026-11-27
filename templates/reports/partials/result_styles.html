@@ -59,7 +59,7 @@
     border-bottom: 1.5px solid #111827; font-size: .96em; }
   .rs-a-table th.rs-a-first { text-align: left; }
   .rs-a-table td { padding: calc(var(--rs-row-gap) / 4) 6px; text-align: center; vertical-align: top; }
-  .rs-a-table td.rs-a-first { text-align: left; font-weight: bold; color: var(--rs-name); }
+  .rs-a-table td.rs-a-first { text-align: left; font-weight: bold; color: var(--rs-name); white-space: nowrap; padding-inline-end: 12px; }
   .rs-a-table tr.rs-a-main td { border-top: 1px solid #E5E7EB; }
   .rs-a-table tr.rs-a-main:first-of-type td { border-top: none; }
   .rs-a-table .rs-a-res { color: var(--rs-result); }
@@ -78,7 +78,7 @@
   .rs-bg-block { border-bottom: 1px dashed var(--rs-line); padding: var(--rs-row-gap) 0; }
   .rs-bg-block:last-child { border-bottom: none; }
   .rs-bg-row { display: grid; gap: 10px; align-items: baseline; }
-  .rs-bg-name { font-weight: 700; color: var(--rs-name); }
+  .rs-bg-name { font-weight: 700; color: var(--rs-name); white-space: nowrap; padding-inline-end: 12px; }  /* v115: اسم التحليل بسطر واحد */
   .rs-bg-lab { font-weight: 700; color: var(--rs-label); }
   .rs-bg-val { display: flex; justify-content: center; align-items: baseline; gap: var(--rs-unit-gap); text-align: center; }
   .rs-bg-val .rs-unit { padding-inline-start: 0; }
@@ -95,7 +95,7 @@
   /* ---------- Style B compact ---------- */
   .rs-bc-block { padding: calc(var(--rs-row-gap) * 1.125) 0; border-bottom: 1px solid #E5E7EB; }
   .rs-bc-top { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-  .rs-bc-name { font-weight: 700; font-size: 1.05em; color: var(--rs-name); }
+  .rs-bc-name { font-weight: 700; font-size: 1.05em; color: var(--rs-name); white-space: nowrap; }
   .rs-bc-vals { display: flex; gap: 16px; align-items: baseline; }
   .rs-bc-vals .rs-num { color: var(--rs-result); }
   .rs-bc-extra { font-size: .88em; color: #334155; margin-inline-start: auto; margin-inline-end: 14px; }
@@ -121,7 +121,7 @@
   .rs-r2-table th { background: var(--rs-band-bg); color: var(--rs-band-text); padding: 7px 8px; text-align: center; font-weight: 600; }
   .rs-r2-table th.rs-r2-first { text-align: left; }
   .rs-r2-table td { padding: calc(var(--rs-row-gap) * .6) 8px; text-align: center; vertical-align: top; border-bottom: 1px solid #E5E7EB; }
-  .rs-r2-table td.rs-r2-first { text-align: left; font-weight: 600; color: var(--rs-name); }
+  .rs-r2-table td.rs-r2-first { text-align: left; font-weight: 600; color: var(--rs-name); white-space: nowrap; padding-inline-end: 12px; }
   .rs-r2-table .rs-r2-res .rs-num { color: var(--rs-result); }
   .rs-r2-table .rs-r2-unit { color: #475569; }
   .rs-r2-table .rs-r2-rng div + div { margin-top: var(--rs-line-gap); }
@@ -135,7 +135,7 @@
   .rs-r3-table th.rs-r3-first { text-align: left; }
   .rs-r3-table td { padding: calc(var(--rs-row-gap) * .6) 8px; vertical-align: top; border-bottom: 1px solid #E5E7EB; text-align: center; }
   .rs-r3-table td.rs-r3-first { text-align: left; }
-  .rs-r3-table .rs-r3-name { font-weight: 600; color: var(--rs-name); }
+  .rs-r3-table .rs-r3-name { font-weight: 600; color: var(--rs-name); white-space: nowrap; }
   .rs-r3-table .rs-r3-sub { color: #64748B; font-size: .86em; margin-top: var(--rs-line-gap); }
   .rs-r3-table .rs-r3-band td { background: #EAF6FD; color: var(--rs-band-text); font-weight: 600; text-align: left; padding: 5px 8px; }
   .rs-r3-table .rs-r3-res .rs-num { color: var(--rs-result); }
@@ -309,7 +309,8 @@
 
 {# ---------------------------- Style B grid (image 1) ---------------------------- #}
 {% elif style in ('b_grid', 'r1') %}
-  {% set tpl = ['minmax(0,1fr)'] %}
+  {% set _ml = (rows|map(attribute='name')|map('string')|map('length')|list + [12])|max %}
+  {% set tpl = ['minmax(min(' ~ (_ml * 0.62)|round(1) ~ 'em, 46%), 1.5fr)'] %}
   {% for e in ex.test %}{% if tpl.append('minmax(0,.6fr)') %}{% endif %}{% endfor %}
   {% if tpl.append('minmax(0,1fr)') %}{% endif %}
   {% for e in ex.conv %}{% if tpl.append('minmax(0,.6fr)') %}{% endif %}{% endfor %}
