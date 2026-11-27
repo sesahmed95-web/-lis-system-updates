@@ -22,9 +22,10 @@
     inset: 0;
     background:
       {%- if dashboard_bg_url %}
-      url("{{ dashboard_bg_url }}") {{ dashboard_bg_position }} / {{ dashboard_bg_size_css|default("cover") }} no-repeat,
-      {%- endif %}
+      url("{{ dashboard_bg_url }}") {{ dashboard_bg_position }} / {{ dashboard_bg_size_css|default("cover") }} no-repeat;
+      {%- else %}
       linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #0f172a 100%);
+      {%- endif %}
     filter: blur({{ dashboard_bg_blur|default(2) }}px) brightness({{ dashboard_bg_brightness|default(100) }}%);
     transform: scale(1.03); /* يمنع ظهور حواف الـ blur */
     z-index: 0;
@@ -39,12 +40,20 @@
   html.dark .dash-hero::before {
     background:
       {%- if dashboard_bg_url %}
-      url("{{ dashboard_bg_url }}") {{ dashboard_bg_position }} / {{ dashboard_bg_size_css|default("cover") }} no-repeat,
-      {%- endif %}
+      url("{{ dashboard_bg_url }}") {{ dashboard_bg_position }} / {{ dashboard_bg_size_css|default("cover") }} no-repeat;
+      {%- else %}
       linear-gradient(135deg, #0b1220 0%, #131c2e 55%, #0b1220 100%);
+      {%- endif %}
   }
   html.dark .dash-hero::after {
     background: rgba({{ dashboard_overlay_rgb|default('10,16,28') }}, {{ (((dashboard_bg_overlay_opacity|default(62)|int) / 100) + 0.10) if ((dashboard_bg_overlay_opacity|default(62)|int) / 100) + 0.10 <= 1 else 1 }});
+  }
+  /* طبقة تعبئة: نفس الصورة مكبّرة ومموّهة خلف الصورة الأصلية، حتى لا تظهر أشرطة رمادية/داكنة
+     على الجانبين عندما تكون الصورة مربعة (شعار) وحجمها "احتواء". */
+  .dash-hero-fill {
+    position: absolute; inset: -40px; z-index: -1;
+    background: url("{{ dashboard_bg_url|default('') }}") center / cover no-repeat;
+    filter: blur(30px) brightness({{ dashboard_bg_brightness|default(100) }}%);
   }
   .dash-hero-content {
     position: relative;
@@ -139,6 +148,7 @@
 
 <!-- شاشة الترحيب: الترحيب، بعده التاريخ، وبالأخير الساعة -->
 <div class="dash-hero">
+  {% if dashboard_bg_url and (dashboard_bg_size_css|default("cover")) != "cover" %}<div class="dash-hero-fill"></div>{% endif %}
   <div class="dash-hero-content">
     <div class="dash-welcome">{{ 'مرحباً' if lang=='ar' else 'Welcome' }}, <b>{{ current_user }}</b></div>
     <div class="dash-date" id="dashDate">&nbsp;</div>

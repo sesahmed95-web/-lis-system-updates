@@ -1,0 +1,980 @@
+{% extends "base.html" %}
+{% block page_title %}{{ t('settings') }}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:640px;">
+  <h3>{{ t('branding') }}</h3>
+  <form method="POST" enctype="multipart/form-data">
+    <div class="form-field">
+      <label>{{ t('app_name_en_label') }}</label>
+      <input type="text" name="app_name" value="{{ current.app_name }}" placeholder="e.g. Al-Karama LIS">
+    </div>
+    <div class="form-field">
+      <label>{{ t('app_name_ar_label') }}</label>
+      <input type="text" name="app_name_ar" value="{{ current.app_name_ar }}" placeholder="مثال: نظام مختبر الكرامة">
+    </div>
+
+    <div class="form-field">
+      <label>عنوان المختبر</label>
+      <input type="text" name="lab_address" value="{{ current.lab_address }}" placeholder="مثال: بغداد - الكرادة - شارع كذا">
+    </div>
+    <div class="form-field">
+      <label>هاتف المختبر</label>
+      <input type="text" name="lab_phone" value="{{ current.lab_phone }}" placeholder="مثال: 07701234567" dir="ltr">
+    </div>
+
+    <div class="form-field">
+      <label>إيميل المختبر (يظهر أسفل تقارير Hb Electrophoresis والبلانك)</label>
+      <input type="text" name="lab_email" value="{{ current.lab_email }}" placeholder="example@yahoo.com" dir="ltr">
+    </div>
+
+    <div class="form-field">
+      <label>{{ t('current_logo') }}</label>
+      {% if logo_url %}
+        <img src="{{ logo_url }}" alt="logo" style="max-height:70px; max-width:200px; object-fit:contain; border:1px solid var(--border); border-radius:8px; padding:6px; background:#fff;">
+      {% else %}
+        <span class="muted">{{ t('no_logo') }}</span>
+      {% endif %}
+    </div>
+
+    <div class="form-field">
+      <label>{{ t('upload_logo') }}</label>
+      <input type="file" name="logo" accept=".png,.jpg,.jpeg,.gif,.svg,.webp">
+      <span class="muted">PNG / JPG / GIF / SVG / WEBP</span>
+    </div>
+
+    <div class="form-field">
+      <label>موضع الشعار بترويسة التقرير المطبوع</label>
+      <select name="logo_position">
+        <option value="right" {{ 'selected' if current.logo_position == 'right' }}>يمين (الافتراضي)</option>
+        <option value="center" {{ 'selected' if current.logo_position == 'center' }}>وسط</option>
+        <option value="left" {{ 'selected' if current.logo_position == 'left' }}>يسار</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>🎨 ستايل ترويسة التقرير (الشعار + اسم المختبر + الأطباء وشهاداتهم)</label>
+      <select name="report_header_style">
+        <option value="default" {{ 'selected' if current.report_header_style == 'default' }}>الحالي (الافتراضي — لم يتغيّر)</option>
+        <option value="h1" {{ 'selected' if current.report_header_style == 'h1' }}>H1 — الشعار والاسم فوق، والأطباء بشبكة 3 أعمدة</option>
+        <option value="h2" {{ 'selected' if current.report_header_style == 'h2' }}>H2 — الأطباء بعمودين، والشعار والاسم بالجهة الثانية</option>
+        <option value="h3" {{ 'selected' if current.report_header_style == 'h3' }}>H3 — الشعار والاسم بالمنتصف، والأطباء بصف واحد</option>
+        <option value="h4" {{ 'selected' if current.report_header_style == 'h4' }}>H4 — شريط مبسّط وسطر صغير للأطباء</option>
+      </select>
+      <span class="muted" style="display:block; margin-top:4px;">يختار لكل عميل ستايله، وينحفظ بقاعدته. «الحالي» هو التصميم المعتمد حاليًا (بدون أي تغيير).</span>
+      <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:6px; align-items:center;">
+        <label style="font-weight:normal;">لون الخطوط/الشريط: <input type="color" name="report_header_accent" value="{{ current.report_header_accent }}"></label>
+        <label style="font-weight:normal;">سطر تحت اسم المختبر (اختياري): <input type="text" name="report_header_subtitle" value="{{ current.report_header_subtitle }}" maxlength="120" style="width:320px;"></label>
+      </div>
+    </div>
+    <div class="form-field">
+      <label>حجم الشعار (عرضه بالبكسل) — القيمة الافتراضية 100</label>
+      <input type="number" name="logo_width" min="30" max="300" value="{{ current.logo_width }}" style="width:120px;">
+    </div>
+
+    <div class="form-field">
+      <label>🖼️ خلفية شاشة الترحيب (Dashboard)</label>
+      <span class="muted" style="display:block; margin-bottom:8px;">
+        اختر أي صورة (مختبر، مبنى...) — البرنامج يظبطها تلقائياً (يقصّها لتملأ
+        الشاشة، يعتّمها، يموّهها بنفس الدرجة دائماً) حتى تنسجم مع تصميم
+        البرنامج بغض النظر عن حجمها أو ألوانها الأصلية. تظهر فقط بشاشة
+        الترحيب بعد تسجيل الدخول، مو خلف باقي الصفحات. اتركها فاضية للرجوع
+        للخلفية المتدرّجة الافتراضية.
+      </span>
+      {% if dashboard_bg_url %}
+        <img src="{{ dashboard_bg_url }}" alt="dashboard background preview"
+             style="max-height:90px; max-width:220px; object-fit:cover; border:1px solid var(--border); border-radius:8px; padding:4px; display:block; margin-bottom:8px;">
+        <label class="checkbox-item">
+          <input type="checkbox" name="remove_dashboard_bg" value="1">
+          إزالة الصورة الحالية والرجوع للخلفية الافتراضية
+        </label>
+      {% endif %}
+      <input type="file" name="dashboard_bg" accept=".png,.jpg,.jpeg,.webp" style="margin-top:8px;">
+      <span class="muted">PNG / JPG / WEBP</span>
+      <hr style="margin:14px 0;">
+      <div class="form-field">
+        <label>تعتيم الطبقة فوق الخلفية (%) — كلما زادت زاد التعتيم، الافتراضي 62</label>
+        <input type="number" name="dashboard_bg_overlay_opacity" min="0" max="100"
+               value="{{ current.dashboard_bg_overlay_opacity }}" style="width:120px;">
+      </div>
+      <div class="form-field">
+        <label>ضبابية الخلفية (px) — 0 = بدون ضبابية إطلاقاً، الافتراضي 2</label>
+        <input type="number" name="dashboard_bg_blur" min="0" max="20"
+               value="{{ current.dashboard_bg_blur }}" style="width:120px;">
+      </div>
+      <div class="form-field">
+        <label>موضع الصورة (أي جزء منها يبقى بمنتصف الشاشة عند القص)</label>
+        <select name="dashboard_bg_position">
+          <option value="top" {{ 'selected' if current.dashboard_bg_position == 'top' }}>الأعلى</option>
+          <option value="center" {{ 'selected' if current.dashboard_bg_position == 'center' }}>الوسط (الافتراضي)</option>
+          <option value="bottom" {{ 'selected' if current.dashboard_bg_position == 'bottom' }}>الأسفل</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>🔎 حجم الصورة بشاشة الترحيب</label>
+        <select name="dashboard_bg_size_mode" id="dashBgSizeMode" onchange="document.getElementById('dashBgSizeCustom').style.display = this.value === 'custom' ? 'block' : 'none';">
+          <option value="cover" {{ 'selected' if current.dashboard_bg_size_mode == 'cover' }}>تملأ الشاشة (قد تُقصّ) — الافتراضي</option>
+          <option value="contain" {{ 'selected' if current.dashboard_bg_size_mode == 'contain' }}>تظهر كاملة بدون قص</option>
+          <option value="custom" {{ 'selected' if current.dashboard_bg_size_mode == 'custom' }}>حجم مخصّص (نسبة من عرض الشاشة)</option>
+        </select>
+        <div id="dashBgSizeCustom" style="margin-top:8px; display:{{ 'block' if current.dashboard_bg_size_mode == 'custom' else 'none' }};">
+          <input type="number" name="dashboard_bg_size_percent" min="5" max="400"
+                 value="{{ current.dashboard_bg_size_percent }}" style="width:120px;"> %
+          <span class="muted">100 = بعرض الشاشة كاملة، 50 = نصف العرض، 200 = ضعف العرض (تكبير). الارتفاع يتبع النسبة تلقائيًا.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-field">
+      <label>🎨 لون الواجهة الرئيسي (الشريط الجانبي، العناوين، الأزرار...)</label>
+      <input type="color" name="theme_primary_color" value="{{ current.theme_primary_color }}" style="width:70px; height:38px; padding:2px;">
+      <span class="muted">يطبّق تلقائيًا على أي عنصر بالبرنامج يستخدم لون "Primary" الموحّد.</span>
+    </div>
+    <div class="form-field">
+      <label>🎨 لون خلفية الصفحات (خلف البطاقات بكل الصفحات، مو شاشة الترحيب)</label>
+      <input type="color" name="theme_page_bg_color" value="{{ current.theme_page_bg_color }}" style="width:70px; height:38px; padding:2px;">
+    </div>
+
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>دكتور المختبر الفاحص</h3>
+  <p class="muted">
+    إدارة أسماء دكاترة المختبر الفاحص، ألقابهم، شهاداتهم (عربي/انكليزي)، ترتيب ظهورهم
+    بترويسة كل تقرير مطبوع، وهل يظهر كل واحد منهم بالترويسة أصلاً أو فقط بقائمة اختيار
+    الفاحص عند تسجيل الزيارات.
+  </p>
+  <a class="btn" style="display:inline-block;" href="{{ url_for('examining_doctors_manage') }}">✏️ إدارة قائمة الدكاترة وشهاداتهم</a>
+  <a class="btn small secondary" style="margin-top:10px; display:inline-block;" href="{{ url_for('examining_doctor_rates_list') }}">💰 تحديد أجور دكتور المختبر الفاحص</a>
+  <p class="muted" style="margin-top:10px;">
+    ملاحظة: نفس هذي الشاشة تقدر تضيف فيها أي شخص إله ظهور بترويسة التقرير —
+    مو بالضرورة دكتور — مثلاً كيميائي اختصاصي أو بايولوجي ممارس. اكتب اسمه
+    باللقب المناسب (بدل "الدكتور") بحقل "اللقب"، وشهادته بحقلي الشهادة، وفعّل
+    "إظهار بترويسة التقرير المطبوع" — يظهر تلقائيًا بجانب باقي الأسماء بكل
+    التقارير، بغض النظر هل هو دكتور فاحص فعليًا أو لا.
+  </p>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🔤 تنسيق أسماء وشهادات الدكاترة بالترويسة</h3>
+  <p class="muted">
+    يتحكم هذا بحجم ونوع الخط لكل أسماء وألقاب وشهادات الدكاترة (والأشخاص
+    الآخرين المضافين لنفس الترويسة) بكل التقارير المطبوعة دفعة وحدة — إعداد
+    عام واحد ينطبق على الجميع.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>حجم الخط (بكسل) — القيمة الافتراضية 14</label>
+      <input type="number" name="letterhead_font_size" min="8" max="30" value="{{ current.letterhead_font_size }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>نوع الخط</label>
+      <select name="letterhead_font_family">
+        <option value="Segoe UI, Tahoma, Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Segoe UI, Tahoma, Arial, sans-serif' }}>Segoe UI (افتراضي)</option>
+        <option value="Tahoma, Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Tahoma, Arial, sans-serif' }}>Tahoma</option>
+        <option value="Arial, sans-serif" {{ 'selected' if current.letterhead_font_family == 'Arial, sans-serif' }}>Arial</option>
+        <option value="'Times New Roman', serif" {{ 'selected' if current.letterhead_font_family == "'Times New Roman', serif" }}>Times New Roman</option>
+        <option value="'Traditional Arabic', Tahoma, serif" {{ 'selected' if current.letterhead_font_family == "'Traditional Arabic', Tahoma, serif" }}>Traditional Arabic</option>
+      </select>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🔠 حجم خط أسماء التحاليل والنتائج</h3>
+  <p class="muted">
+    يتحكم هذا بحجم خط اسم كل تحليل (Test) وحجم خط النتيجة نفسها بكل التقارير
+    المطبوعة دفعة وحدة — منفصل تمامًا عن حجم خط ترويسة الدكاترة أعلاه.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>حجم خط اسم التحليل (بكسل) — القيمة الافتراضية 16</label>
+      <input type="number" name="test_name_font_size" min="8" max="30" value="{{ current.test_name_font_size }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>حجم خط النتيجة (بكسل) — القيمة الافتراضية 16</label>
+      <input type="number" name="result_value_font_size" min="8" max="30" value="{{ current.result_value_font_size }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:900px;" id="resultsScaleCard">
+  <h3>📄 حجم خط كل النتائج (مع مراعاة ورقة A4)</h3>
+  <p class="muted">
+    مقياس واحد يكبّر/يصغّر <b>كل نتائج التقرير</b> (اسم التحليل، القيمة، الوحدة، المدى الطبيعي، الملاحظات) دفعة وحدة وفوق حجمي الخط أعلاه،
+    بدون ما تتأثر الترويسة وبيانات المريض. المعاينة على اليمين ترسم صفحة A4 حقيقية النسبة وتخبرك كم صف نتائج يكفي.
+    الملاءمة التلقائية تصغّر النتائج لحد أدنى تختاره لتبقى بصفحة A4 واحدة، ولا تكبّر أبداً فوق المقياس.
+  </p>
+  <div style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start;">
+    <form method="POST" style="flex:1 1 320px; min-width:280px;">
+      <input type="hidden" name="results_scale_present" value="1">
+      <div class="form-field">
+        <label>مقياس خط النتائج (%) — الافتراضي 100</label>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <input type="range" id="rsRange" min="60" max="150" step="5" value="{{ current.results_font_scale }}" style="flex:1;">
+          <input type="number" id="rsNum" name="results_font_scale" min="60" max="150" value="{{ current.results_font_scale }}" style="width:90px;">
+        </div>
+      </div>
+      <div class="form-field">
+        <label style="display:flex; gap:8px; align-items:center; cursor:pointer;">
+          <input type="checkbox" id="rsAuto" name="results_autofit_a4" value="1" {{ 'checked' if current.results_autofit_a4 == '1' }}>
+          ملاءمة تلقائية لصفحة A4 واحدة (تصغير النتائج عند الحاجة)
+        </label>
+      </div>
+      <div class="form-field">
+        <label>أقل حد للتصغير التلقائي (%) — الافتراضي 70</label>
+        <input type="number" name="results_autofit_min" min="50" max="100" value="{{ current.results_autofit_min }}" style="width:120px;">
+      </div>
+      <button class="btn" type="submit">{{ t('save_settings') }}</button>
+      <p class="muted" style="font-size:.82em; margin-top:10px;">
+        تقدر تجرّب الحجم مباشرة من شريط معاينة أي تقرير (A− / A+ و«📄 ملاءمة A4») ثم «💾 افتراضي».
+      </p>
+    </form>
+    <div style="flex:0 0 auto; text-align:center;">
+      <div id="rsA4Box" style="position:relative; width:300px; height:424px; background:#fff; border:1px solid #94A3B8; box-shadow:0 2px 10px rgba(0,0,0,.18); overflow:hidden; direction:ltr;">
+        <div style="position:absolute; left:0; right:0; top:0; height:98px; background:repeating-linear-gradient(45deg,#F1F5F9,#F1F5F9 6px,#E2E8F0 6px,#E2E8F0 12px); color:#64748B; font:11px Tahoma; display:flex; align-items:center; justify-content:center;">الترويسة + بيانات المريض</div>
+        <div id="rsRows" style="position:absolute; left:11px; right:11px; top:98px; bottom:34px; overflow:hidden;"></div>
+        <div style="position:absolute; left:0; right:0; bottom:0; height:34px; background:#F1F5F9; color:#64748B; font:11px Tahoma; display:flex; align-items:center; justify-content:center;">العنوان / التذييل</div>
+      </div>
+      <div id="rsInfo" style="margin-top:8px; font-weight:bold; color:#26529C;"></div>
+      <div class="muted" style="font-size:.8em;">تقدير تقريبي لصف نتائج واحد السطر</div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    var rng = document.getElementById('rsRange'), num = document.getElementById('rsNum'), box = document.getElementById('rsRows'), info = document.getElementById('rsInfo');
+    function val(name, d) { var e = document.querySelector('[name="' + name + '"]'); var v = e ? parseFloat(e.value) : NaN; return isNaN(v) ? d : v; }
+    function draw() {
+      var sc = Math.max(60, Math.min(150, parseFloat(num.value) || 100)) / 100;
+      var font = val('result_value_font_size', 16), pad = val('report_row_pad', 7);
+      var rowPx = (font * 1.3 + pad * 2 + 1) * sc;                 // ارتفاع الصف الحقيقي بالبكسل (96dpi)
+      var K = 300 / (210 / 25.4 * 96);                              // معامل تصغير الصفحة الحقيقية لعرض 300px
+      var availPx = (297 - 10 - 22) * 96 / 25.4 - 98 / K - 34 / K;  // ارتفاع منطقة النتائج بالصفحة الحقيقية
+      var n = Math.floor(availPx / rowPx), total = Math.ceil(box.clientHeight / (rowPx * K)) + 1;
+      box.innerHTML = '';
+      for (var i = 0; i < total; i++) {
+        var r = document.createElement('div');
+        r.style.cssText = 'height:' + (rowPx * K) + 'px; border-bottom:1px solid #CBD5E1; display:flex; align-items:center; gap:4px;';
+        var a = document.createElement('i'); a.style.cssText = 'flex:2; height:' + Math.max(2, font * sc * K * .7) + 'px; background:#1F3B7A; opacity:.75; border-radius:2px;';
+        var b = document.createElement('i'); b.style.cssText = 'flex:1; height:' + Math.max(2, font * sc * K * .7) + 'px; background:#0F766E; opacity:.75; border-radius:2px;';
+        r.appendChild(a); r.appendChild(b); box.appendChild(r);
+      }
+      info.textContent = '≈ ' + n + ' صف نتائج بصفحة A4' + (sc !== 1 ? ' (عند ' + Math.round(sc * 100) + '%)' : '');
+    }
+    rng.addEventListener('input', function () { num.value = rng.value; draw(); });
+    num.addEventListener('input', function () { rng.value = num.value; draw(); });
+    ['result_value_font_size', 'report_row_pad'].forEach(function (n) { var e = document.querySelector('[name="' + n + '"]'); if (e) e.addEventListener('input', draw); });
+    draw();
+  })();
+  </script>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>حجم جدول النتائج بالتقارير المطبوعة</h3>
+  <p class="muted">
+    يتحكم هذا بارتفاع صفوف جدول النتائج (Test / Result / Control / Unit...) وعرض أعمدته
+    بكل التقارير المطبوعة دفعة وحدة — قلّل الرقم لتصغير الجدول وتقريب الأعمدة من بعضها،
+    أو كبّره لتوسيعه. القيم بالبكسل.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ارتفاع الصف (بكسل) — القيمة الافتراضية 7</label>
+      <input type="number" name="report_row_pad" min="2" max="30" value="{{ current.report_row_pad }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>عرض العمود (بكسل) — القيمة الافتراضية 12</label>
+      <input type="number" name="report_col_pad" min="2" max="40" value="{{ current.report_col_pad }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" id="portalCard">
+  <h3>📱 بوابة النتائج (QR للمريض)</h3>
+  <p class="muted">
+    يُطبع QR خاص لكل مريض (غير باركود القناني). المريض يمسحه بموبايله فتظهر "قيد التحضير + الوقت المتوقع"، وتظهر
+    النتائج تلقائيًا بعد اكتمال التحاليل. البرنامج يرسل للبوابة بالخلفية (يلزم إنترنت بجهاز المختبر)، وإذا انقطع
+    الإنترنت يعيد المحاولة تلقائيًا ولا تضيع نتيجة.
+  </p>
+  <div id="portalLocalHelp" class="muted" style="background:#F0F9FF;border:1px solid #BAE6FD;border-radius:8px;padding:10px 12px;margin-bottom:10px;line-height:1.9;">
+    <b>تشغيل البوابة المدمجة (مرة وحدة):</b><br>
+    1) البرنامج يشغّل بوابة صغيرة على المنفذ <b dir="ltr">9091</b> (محلية فقط، فيها صفحة النتيجة وملف PDF لا غير).<br>
+    2) لازم رابط https عام يشير لها. الأسهل مجانًا: ثبّت <b>Tailscale</b> على جهاز المختبر، ثم افتح CMD واكتب:
+    <code dir="ltr">tailscale funnel --bg 9091</code> فيعطيك رابطًا ثابتًا مثل <span dir="ltr">https://lab-pc.xxxx.ts.net</span>. الصقه بالحقل أدناه.<br>
+    3) اضغط حفظ ثم 🔌 اختبار الاتصال. جهاز المختبر لازم يبقى شغّال ومتصل بالإنترنت حتى يفتح المريض الرابط.
+  </div>
+  <form method="POST">
+    <input type="hidden" name="portal_settings" value="1">
+    <div class="form-field">
+      <label style="display:flex; gap:6px; align-items:center;">
+        <input type="checkbox" name="portal_enabled" {{ 'checked' if current.portal_enabled }}> تفعيل بوابة النتائج
+      </label>
+    </div>
+    <div class="form-grid">
+      <div class="form-field"><label>طريقة النشر</label>
+        <select name="portal_mode" id="portalMode" onchange="portalModeChanged()">
+          <option value="local" {{ 'selected' if current.portal_mode == 'local' }}>مدمجة بالبرنامج (بدون Render ولا GitHub) — موصى بها</option>
+          <option value="remote" {{ 'selected' if current.portal_mode == 'remote' }}>سحابي (remote) — بوابة Cloudflare Worker أو Render</option>
+        </select></div>
+      <div class="form-field"><label>رابط البوابة العام (https://...)</label>
+        <input type="text" name="portal_url" dir="ltr" placeholder="https://lab-pc.tail1234.ts.net" value="{{ current.portal_url }}"></div>
+      <div class="form-field" id="portalKeyField"><label>المفتاح السري (API_SECRET_KEY) — للطريقة الخارجية فقط {% if current.portal_key_set %}<span class="muted">— محفوظ، اتركه فاضي للإبقاء عليه</span>{% endif %}</label>
+        <input type="password" name="portal_api_key" dir="ltr" autocomplete="new-password" placeholder="{{ '••••••••' if current.portal_key_set else 'الصق المفتاح السري الخاص ببوابة هذا العميل (API_SECRET_KEY)' }}"></div>
+      <div class="form-field"><label>مدة بقاء رابط المريض (أيام)</label>
+        <input type="number" name="portal_retention_days" min="1" max="365" value="{{ current.portal_retention_days }}" style="width:120px;">
+        <span class="muted">بعدها يُحذف الرابط من البوابة؛ ملف PDF اللي نزّله المريض يبقى عنده.</span></div>
+      <div class="form-field"><label>الوقت المتوقع الافتراضي (بالساعات)</label>
+        <input type="number" name="portal_default_hours" min="0" max="240" step="0.5" value="{{ current.portal_default_hours }}" style="width:120px;"></div>
+      <div class="form-field"><label>تظهر النتائج للمريض عندما تكون الحالة</label>
+        <select name="portal_ready_when">
+          <option value="completed" {{ 'selected' if current.portal_ready_when == 'completed' }}>مكتملة (Completed أو Verified)</option>
+          <option value="verified" {{ 'selected' if current.portal_ready_when == 'verified' }}>معتمدة فقط (Verified)</option>
+        </select></div>
+    </div>
+    <div class="form-field"><label style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+      <input type="checkbox" name="portal_pdf_enabled" value="1" {{ 'checked' if current.portal_pdf_enabled }}>
+      إرفاق نسخة PDF (بنفس تصميم تقارير المختبر) لتنزيلها من موبايل المريض وإرسالها لطبيبه</label>
+      <span class="muted">تحتاج وحدة pdf_export الموجودة عندك (نفس اللي تستخدمه الأرشفة). لو فشلت يبقى عرض النتائج بالصفحة شغّال.</span></div>
+    <div class="form-field"><label>وقت مخصص لتحاليل معيّنة (سطر لكل تحليل: كود=ساعات — مثل FBS=1)</label>
+      <textarea name="portal_tat_overrides" rows="3" dir="ltr" placeholder="FBS=1&#10;HBA1C=24">{{ current.portal_tat_overrides }}</textarea></div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <button class="btn" type="submit">{{ t('save_settings') }}</button>
+      <button class="btn secondary" type="button" onclick="portalTest(this)">🔌 اختبار الاتصال</button>
+      <span id="portalTestMsg" class="muted"></span>
+    </div>
+  </form>
+  <script>
+    function portalModeChanged() {
+      var remote = document.getElementById('portalMode').value === 'remote';
+      document.getElementById('portalKeyField').style.display = remote ? '' : 'none';
+      document.getElementById('portalLocalHelp').style.display = remote ? 'none' : '';
+    }
+    document.addEventListener('DOMContentLoaded', portalModeChanged);
+    function portalTest(btn) {
+      var m = document.getElementById('portalTestMsg'); m.textContent = '... جاري الاختبار (قد يستغرق دقيقة إذا كانت البوابة نائمة)';
+      btn.disabled = true;
+      fetch("{{ url_for('api_portal_test') }}", {method: 'POST'}).then(function (r) { return r.json(); })
+        .then(function (d) { m.textContent = d.message; }).catch(function () { m.textContent = 'تعذر الاختبار'; })
+        .finally(function () { btn.disabled = false; });
+    }
+  </script>
+  <p class="muted" style="font-size:12px;">⚠️ احفظ الإعدادات أولاً ثم اضغط اختبار الاتصال.</p>
+</div>
+
+<div class="card" id="sampleNoCard">
+  <h3>🧪 رقم العينة (Sample No.)</h3>
+  <p class="muted">
+    يظهر كحقل بصفحة "زيارة جديدة" (قابل للتعديل يدويًا) ويُطبع بخانة Sample No. بالتقارير.
+    التسلسل يبدأ من جديد (1) حسب فترة التصفير اللي تختارها. الرقم التالي هسه:
+    <b class="mono">{{ current.sample_no_next }}</b>
+  </p>
+  <form method="POST">
+    <input type="hidden" name="sample_no_settings" value="1">
+    <div class="form-grid">
+      <div class="form-field"><label>يبدأ التسلسل من جديد</label>
+        <select name="sample_no_reset">
+          {% for v, t in [('daily','كل يوم'),('monthly','كل شهر'),('yearly','كل سنة'),('never','أبدًا (تسلسل مستمر)')] %}
+          <option value="{{ v }}" {{ 'selected' if current.sample_no_reset == v }}>{{ t }}</option>{% endfor %}
+        </select></div>
+      <div class="form-field"><label>جزء التاريخ بالرقم</label>
+        <select name="sample_no_date_part">
+          {% for v, t in [('none','بدون'),('yymmdd','سنة+شهر+يوم (260928)'),('yymm','سنة+شهر (2609)'),('yy','سنة (26)')] %}
+          <option value="{{ v }}" {{ 'selected' if current.sample_no_date_part == v }}>{{ t }}</option>{% endfor %}
+        </select></div>
+      <div class="form-field"><label>بادئة (اختياري، مثل S-)</label>
+        <input type="text" name="sample_no_prefix" maxlength="10" value="{{ current.sample_no_prefix }}"></div>
+      <div class="form-field"><label>عدد خانات التسلسل (3 = 001)</label>
+        <input type="number" name="sample_no_padding" min="1" max="8" value="{{ current.sample_no_padding }}" style="width:100px;"></div>
+    </div>
+    <button class="btn" type="submit">حفظ إعدادات رقم العينة</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>📏 تباعد صندوق معلومات المريض</h3>
+  <p class="muted">
+    يتحكم هذا بالمسافة بين ترويسة الدكاترة (أعلى الصفحة) وصندوق معلومات
+    المريض (Patient Name, Sample No...الخ)، وبمدى قرب قيمة كل حقل من
+    تسميته (مثلاً "Patient Name:" قريبة من الاسم بدل مسافة فاضية طويلة) —
+    بكل التقارير المطبوعة دفعة وحدة.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>المسافة فوق صندوق المعلومات (بكسل) — القيمة الافتراضية 4</label>
+      <input type="number" name="patient_info_top_gap" min="-20" max="150" value="{{ current.patient_info_top_gap }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>عرض عمود تسمية الحقل (بكسل) — قلّله لتقريب القيمة من التسمية — القيمة الافتراضية 108</label>
+      <input type="number" name="patient_info_label_width" min="20" max="400" value="{{ current.patient_info_label_width }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>المسافة بين كل سطر وسطر بصندوق المعلومات نفسه (بكسل) — القيمة الافتراضية 3 (تقدر تدخل رقم سالب لتقريب الأسطر أكثر من الحد الطبيعي)</label>
+      <input type="number" name="patient_info_row_gap" min="-10" max="80" value="{{ current.patient_info_row_gap }}" style="width:120px;">
+    </div>
+    <div class="form-field">
+      <label>المسافة بين الجانب الأيمن والأيسر لصندوق المعلومات (بكسل) — القيمة الافتراضية 36</label>
+      <input type="number" name="patient_info_col_gap" min="0" max="400" value="{{ current.patient_info_col_gap }}" style="width:120px;">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>➖ نمط الخط تحت عناوين التقارير</h3>
+  <p class="muted">
+    يتحكم بشكل الخط تحت عنوان كل تقرير (Coagulation Tests, Lipid Profile...الخ)
+    بكل التقارير المطبوعة دفعة وحدة. لو استمرت مشاكل عرض بصرية بالخط
+    (تقطّع، نقاط بمنتصف الكلمة...) رغم كل التصحيحات، جرّب "بدون خط" هنا
+    كحل مباشر بدل انتظار تصحيح لكل حالة على حدة.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>نمط الخط</label>
+      <select name="report_underline_style">
+        <option value="solid" {{ 'selected' if current.report_underline_style == 'solid' }}>متصل (افتراضي)</option>
+        <option value="dashed" {{ 'selected' if current.report_underline_style == 'dashed' }}>متقطّع (Dashed)</option>
+        <option value="none" {{ 'selected' if current.report_underline_style == 'none' }}>بدون خط إطلاقًا</option>
+      </select>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🗂️ ترتيب أقسام اللوحة المجمّعة</h3>
+  <p class="muted">
+    لما تُطبع أكثر من تحليل سوا بورقة وحدة لنفس المريض، الأقسام (زي
+    Biochemical Test, Hormones, Vitamins...) تترتب أبجديًا افتراضيًا. اكتب
+    أسماء الأقسام هنا كل اسم بسطر مستقل بالترتيب اللي تريده — أي قسم غير
+    مذكور هنا يظهر بعدها بترتيبه الأبجدي الاعتيادي. اترك الحقل فاضي للرجوع
+    للترتيب الأبجدي بالكامل.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ترتيب الأقسام (سطر لكل قسم)</label>
+      <textarea name="combined_panel_group_order" rows="5" style="width:100%; direction:ltr;" placeholder="Hormones&#10;Vitamins&#10;Biochemical Test">{{ current.combined_panel_group_order }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🧪 ترتيب التحاليل بشاشة إدخال النتائج</h3>
+  <p class="muted">
+    شاشة "Results Entry" تعرض التحاليل حسب ترتيب طلبها بالزيارة افتراضيًا،
+    وهذا يختلف من زيارة لزيارة. اكتب هنا اسم كل تحليل بالضبط كما يظهر
+    بالشاشة (نفس النص اللي فوق كل بطاقة تحليل، مثلاً "HbA1c (BioChemstry)")،
+    كل اسم بسطر مستقل، بالترتيب الثابت اللي تريده — ينطبق على كل الزيارات
+    دايماً بغض النظر عن التحاليل المطلوبة أو ترتيب طلبها الفعلي. أي تحليل
+    بالزيارة غير مذكور بالقائمة هنا يظهر بعد كل المذكورين. اترك الحقل فاضي
+    للرجوع لترتيب الطلب الأصلي.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>ترتيب التحاليل (سطر لكل تحليل، بنفس الاسم بالضبط)</label>
+      <textarea name="results_entry_test_order" rows="8" style="width:100%; direction:ltr;" placeholder="HbA1c (BioChemstry)&#10;Triglycerides (BioChemstry)&#10;Total PSA (Hormones)&#10;Vitamin D3 Total (Hormones)&#10;Erythrocyte Sedimentation Rate (ESR) (Hematology)">{{ current.results_entry_test_order }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>📱 إرسال النتائج عبر واتساب</h3>
+  <p class="muted">
+    كود الدولة يُستخدم لتحويل أرقام الهواتف المحلية (اللي تبدأ بصفر) لصيغة
+    دولية عند الإرسال عبر واتساب — مثلاً 964 للعراق. أول مرة استخدام
+    للإرسال تحتاج مسح رمز QR من نفس واتساب المختبر — راجع ملف الشرح
+    المرفق مع البرنامج.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>كود الدولة</label>
+      <input type="text" name="whatsapp_country_code" value="{{ current.whatsapp_country_code }}" style="width:120px;" dir="ltr">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🗄️ أرشيف PDF الدائم</h3>
+  <p class="muted">
+    مجلد ثابت على هذا الجهاز (أو مجلد مشترك بالشبكة) تُحفظ فيه تلقائيًا نسخة
+    PDF من نتائج كل زيارة فور اكتمالها، حتى تقدر ترجع لها لاحقًا من صفحة
+    "أرشيف PDF" أو تفتّش عنها يدويًا من خارج البرنامج. يكفي تحدده مرة وحدة —
+    إذا تركته فاضي، الأرشفة التلقائية تبقى معطّلة.
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>مسار مجلد الأرشفة</label>
+      <input type="text" name="pdf_archive_dir" value="{{ current.pdf_archive_dir }}"
+             placeholder="مثال: D:\LabArchive\Reports" style="width:100%;" dir="ltr">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🔤 تصحيحات ترجمة أسماء المرضى (عربي → إنكليزي)</h3>
+  <p class="muted">
+    البرنامج يترجم الاسم العربي تلقائيًا (اقتراح أولي قابل للتعديل يدويًا
+    وقت التسجيل). العربي ما يكتب الحركات القصيرة (الفتحة/الضمة/الكسرة)،
+    فبعض الأسماء ممكن تطلع الترجمة التلقائية لها غير دقيقة رغم أن البرنامج
+    عنده قاموس جاهز لأشهر الأسماء. لو شفت اسم طلعت ترجمته غلط، أضيفه هنا
+    وراح تصير هي الترجمة الثابتة له من الحين — سطر لكل اسم بالضبط بصيغة
+    "الاسم بالعربي=الترجمة الصحيحة بالإنكليزي".
+  </p>
+  <form method="POST">
+    <div class="form-field">
+      <label>تصحيحات الأسماء (سطر لكل اسم)</label>
+      <textarea name="name_translit_overrides" rows="6" style="width:100%; direction:ltr;" placeholder="سمر=Samar&#10;نور=Noor&#10;زهراء=Zahraa">{{ current.name_translit_overrides }}</textarea>
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>🆓 تحليل مجاني (بدون أجر لدكتور المختبر الفاحص)</h3>
+  <p class="muted">
+    هذه كلمة المرور اللي يطلبها زر "🆓 جعله مجاني" بصفحة Orders — يستخدمها
+    فقط الأشخاص المخوّلين بالدخول للمختبر. التحليل نفسه يبقى يُطبع ويُحفظ
+    بالتقرير كالمعتاد، بس ما يُحتسب ضمن أجر الفاحص بصفحات الحسابات.
+  </p>
+  <p class="muted" style="color:#c62828;">
+    ⚠️ حماية إضافية: أي تعديل بهذه البطاقة (كلمة المرور أعلاه، أو الاسم
+    المسموح، أو تغيير يوزر/باسوورد هذا التعديل نفسه) يحتاج أولاً يوزر
+    وباسوورد خاصين بهذا التعديل بالذات (مختلفين عن يوزر دخولك العادي
+    للبرنامج). أول مرة تُترك فاضية، اكتب يوزر وباسوورد جديدين بالأسفل
+    وينحفظون تلقائيًا كصلاحية التعديل من الآن فصاعدًا.
+  </p>
+  <form method="POST">
+    <input type="hidden" name="fee_waiver_form" value="1">
+    <div class="form-field">
+      <label>يوزر التعديل الحالي</label>
+      <input type="text" name="gate_username" placeholder="يوزر التعديل" dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>باسوورد التعديل الحالي</label>
+      <input type="password" name="gate_password" placeholder="باسوورد التعديل" dir="ltr">
+    </div>
+    <hr>
+    <div class="form-field">
+      <label>الاسم المسموح له باستخدام الزر (عرض فقط)</label>
+      <input type="text" name="waiver_authorized_name" value="{{ current.fee_waiver_authorized_name }}" placeholder="مثلاً: د. فلان الفلاني">
+    </div>
+    <div class="form-field">
+      <label>كلمة مرور زر "تحليل مجاني" (اتركه فاضي لعدم التغيير)</label>
+      <input type="password" name="waiver_password" placeholder="كلمة مرور جديدة" dir="ltr">
+    </div>
+    <hr>
+    <p class="muted">لتغيير يوزر/باسوورد هذا التعديل نفسه لاحقًا (اختياري):</p>
+    <div class="form-field">
+      <label>يوزر جديد لهذا التعديل</label>
+      <input type="text" name="new_gate_username" placeholder="اتركه فاضي لعدم التغيير" dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>باسوورد جديد لهذا التعديل</label>
+      <input type="password" name="new_gate_password" placeholder="اتركه فاضي لعدم التغيير" dir="ltr">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>🗑 كلمة مرور الحذف (مريض / زيارة)</h3>
+  <p class="muted">أي موظف (استقبال، مختبر، مسؤول) يقدر يحذف مريض أو زيارة من صفحات البرنامج، لكن لازم يكتب هذي الكلمة. حذف المريض يحذف معه كل زياراته ونتائجه وفواتيره. إذا كانت محفوظة مسبقًا اكتب الحالية أولاً.</p>
+  <form method="POST">
+    <input type="hidden" name="delete_password_form" value="1">
+    <div class="form-field"><label>كلمة مرور الحذف الحالية (إن وُجدت)</label>
+      <input type="password" name="current_delete_password" dir="ltr" autocomplete="off"></div>
+    <div class="form-field"><label>كلمة مرور الحذف الجديدة</label>
+      <input type="password" name="new_delete_password" dir="ltr" autocomplete="off"></div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>🔀 كلمات مرور واجهتي الدخول (استقبال / مختبر)</h3>
+  <p class="muted">
+    تُسأل هذي الكلمة فقط وقت الدخول أو التبديل لتلك الواجهة تحديدًا (من زر
+    "🔀" بأعلى أي صفحة) — تتحكم بأي أقسام تظهر بالقائمة الجانبية فقط، وما
+    تغيّر صلاحيات اليوزر الفعلية. اختيار "الاثنين معًا" ما يحتاج كلمة مرور
+    إطلاقًا لأنه أوسع خيار. اترك أي حقل فاضي حتى لا تتغيّر كلمة مروره
+    الحالية.
+  </p>
+  <form method="POST">
+    <input type="hidden" name="interface_passwords_form" value="1">
+    <div class="form-field">
+      <label>كلمة مرور واجهة "استقبال" (اتركه فاضي لعدم التغيير)</label>
+      <input type="password" name="interface_reception_password" placeholder="كلمة مرور جديدة" dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>كلمة مرور واجهة "مختبر" (اتركه فاضي لعدم التغيير)</label>
+      <input type="password" name="interface_lab_password" placeholder="كلمة مرور جديدة" dir="ltr">
+    </div>
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>🏠 الشاشة الرئيسية (Reception / Laboratory / To-Gather)</h3>
+  <p class="muted">
+    هذي الشاشة اللي تفتح أول ما تشغّل البرنامج، قبل تسجيل الدخول — فيها
+    العنوان وثلاث بطاقات (استقبال/مختبر/الاثنين معًا). لو ما رفعت صورة
+    لبطاقة معيّنة، تظهر أيقونة افتراضية بدلها.
+  </p>
+  <form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="landing_page_form" value="1">
+    <div class="form-field">
+      <label>عنوان الشاشة الرئيسية (عربي)</label>
+      <input type="text" name="landing_title" value="{{ current.landing_title }}" placeholder="نظام الإدارة المتكامل">
+    </div>
+    <div class="form-field">
+      <label>عنوان فرعي بالانكليزي (اختياري -- يظهر تحت العنوان العربي)</label>
+      <input type="text" name="landing_title_en" value="{{ current.landing_title_en }}" placeholder="Integrated Management System" dir="ltr">
+    </div>
+    <div class="form-field">
+      <label>🎨 لون التدرّج الأول (الخلفية)</label>
+      <input type="color" name="landing_gradient_color1" value="{{ current.landing_gradient_color1 }}" style="width:70px; height:38px; padding:2px;">
+    </div>
+    <div class="form-field">
+      <label>🎨 لون التدرّج الثاني (الخلفية)</label>
+      <input type="color" name="landing_gradient_color2" value="{{ current.landing_gradient_color2 }}" style="width:70px; height:38px; padding:2px;">
+    </div>
+    <hr style="margin:14px 0;">
+    <div class="form-field">
+      <label>🖼️ صورة خلفية/بانر الشاشة الرئيسية (اختياري)</label>
+      <p class="muted" style="margin:2px 0 8px;">
+        لو رفعت صورة هنا، تظهر بدل التدرّج اللوني وحده (التدرّج يبقى محفوظ
+        ويُستخدم تلقائيًا إذا حذفت الصورة). اختر تحت وين تنحط بالضبط.
+      </p>
+      {% if current.landing_bg_image_path %}
+        <img src="{{ url_for('static', filename=current.landing_bg_image_path) }}" alt="landing background preview"
+             style="max-height:90px; max-width:220px; object-fit:cover; border:1px solid var(--border); border-radius:8px; padding:4px; display:block; margin-bottom:8px;">
+        <label class="checkbox-item">
+          <input type="checkbox" name="remove_landing_bg_image" value="1">
+          إزالة الصورة والرجوع للتدرّج اللوني فقط
+        </label>
+      {% endif %}
+      <input type="file" name="landing_bg_image" accept=".png,.jpg,.jpeg,.webp">
+    </div>
+    <div class="form-field">
+      <label>موضع الصورة بالنسبة للبطاقات الثلاث</label>
+      <select name="landing_bg_position">
+        <option value="background" {{ 'selected' if current.landing_bg_position == 'background' }}>خلف البطاقات (خلفية كاملة للشاشة)</option>
+        <option value="banner" {{ 'selected' if current.landing_bg_position == 'banner' }}>فوق البطاقات (بانر/شعار بحجم محدد)</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>تعتيم الخلفية فوق الصورة (0-100) -- الافتراضي 55 (يُستخدم فقط بوضع "خلف البطاقات")</label>
+      <input type="number" name="landing_bg_overlay_opacity" min="0" max="100" value="{{ current.landing_bg_overlay_opacity }}" style="width:100px;">
+    </div>
+    <div class="form-field">
+      <label>شكل صورة البانر (يُستخدم فقط بوضع "فوق البطاقات")</label>
+      <select name="landing_bg_shape">
+        <option value="rectangle" {{ 'selected' if current.landing_bg_shape == 'rectangle' }}>مستطيلة (الافتراضي)</option>
+        <option value="square" {{ 'selected' if current.landing_bg_shape == 'square' }}>مربعة</option>
+        <option value="circle" {{ 'selected' if current.landing_bg_shape == 'circle' }}>دائرية</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>ارتفاع صورة البانر بالبكسل (60-400) -- الافتراضي 160 (يُستخدم فقط بوضع "فوق البطاقات")</label>
+      <input type="number" name="landing_bg_banner_size" min="60" max="400" value="{{ current.landing_bg_banner_size }}" style="width:100px;">
+    </div>
+    <hr style="margin:14px 0;">
+    <div class="form-field">
+      <label>🏷️ شعار المختبر (اختياري ومستقل تمامًا عن الصورة أعلاه)</label>
+      <p class="muted" style="margin:2px 0 8px;">
+        لو رفعت شعار هنا، يظهر فوق العنوان دائمًا -- سواء رفعت صورة خلفية/بانر
+        أو لأ، وبغض النظر عن العنوان العربي والانكليزي اللي فوق.
+      </p>
+      {% if current.landing_bglogo_image_path %}
+        <img src="{{ url_for('static', filename=current.landing_bglogo_image_path) }}" alt="landing logo preview"
+             style="max-height:70px; max-width:160px; object-fit:contain; border:1px solid var(--border); border-radius:8px; padding:4px; display:block; margin-bottom:8px;">
+        <label class="checkbox-item">
+          <input type="checkbox" name="remove_landing_bglogo_image" value="1">
+          إزالة الشعار
+        </label>
+      {% endif %}
+      <input type="file" name="landing_bglogo_image" accept=".png,.jpg,.jpeg,.webp">
+    </div>
+    <div class="form-field">
+      <label>أقصى ارتفاع للشعار بالبكسل (30-300) -- الافتراضي 90</label>
+      <input type="number" name="landing_bg_logo_size" min="30" max="300" value="{{ current.landing_bg_logo_size }}" style="width:100px;">
+    </div>
+    <hr style="margin:14px 0;">
+    <div class="form-field">
+      <label>🖼️ شكل صور البطاقات الثلاث</label>
+      <select name="landing_image_shape">
+        <option value="square" {{ 'selected' if current.landing_image_shape == 'square' }}>مربعة (الافتراضي)</option>
+        <option value="circle" {{ 'selected' if current.landing_image_shape == 'circle' }}>دائرية</option>
+        <option value="rectangle" {{ 'selected' if current.landing_image_shape == 'rectangle' }}>مستطيلة</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>موضع الصورة بالنسبة للبطاقة</label>
+      <select name="landing_image_position">
+        <option value="top" {{ 'selected' if current.landing_image_position == 'top' }}>أعلى البطاقة (الافتراضي)</option>
+        <option value="background" {{ 'selected' if current.landing_image_position == 'background' }}>خلفية كاملة للبطاقة</option>
+        <option value="side" {{ 'selected' if current.landing_image_position == 'side' }}>جنب الاسم (أفقي)</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>وضوح الصورة (10-100) — الافتراضي 100 (وضوح كامل)</label>
+      <input type="number" name="landing_image_opacity" min="10" max="100" value="{{ current.landing_image_opacity }}" style="width:100px;">
+    </div>
+    <hr style="margin:14px 0;">
+    {% for key, label in [('reception', 'صورة بطاقة Reception'), ('lab', 'صورة بطاقة Laboratory'), ('together', 'صورة بطاقة To-Gather')] %}
+    <div class="form-field">
+      <label>{{ label }}</label>
+      {% set current_path = current['landing_' + key + '_image_path'] %}
+      {% if current_path %}
+        <img src="{{ url_for('static', filename=current_path) }}" alt="{{ key }} preview"
+             style="max-height:70px; max-width:140px; object-fit:contain; border:1px solid var(--border); border-radius:8px; padding:4px; display:block; margin-bottom:8px;">
+        <label class="checkbox-item">
+          <input type="checkbox" name="remove_landing_{{ key }}_image" value="1">
+          إزالة الصورة والرجوع للأيقونة الافتراضية
+        </label>
+      {% endif %}
+      <input type="file" name="landing_{{ key }}_image" accept=".png,.jpg,.jpeg,.webp">
+    </div>
+    {% endfor %}
+    <button class="btn" type="submit">{{ t('save_settings') }}</button>
+  </form>
+</div>
+
+<div class="card" id="navLabelsCard" style="max-width:640px;">
+  <h3>🧭 أسماء الشريط الجانبي</h3>
+  <p class="muted">غيّري اسم أي قسم أو رابط بالشريط الجانبي (يمكنك إبقاء الإيموجي أو حذفه). الحقل الفارغ أو المساوي للاسم الأصلي = يبقى الاسم الأصلي. التغيير يشمل كل الصفحات، ولا يغيّر عمل الروابط. زر Enter ينقلك للحقل التالي.</p>
+  <div id="navLabelsBody"></div>
+  <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <button type="button" class="btn" id="navLabelsSave" data-enter-click>💾 حفظ الأسماء</button>
+    <button type="button" class="btn secondary" id="navLabelsReset">↩️ الأسماء الأصلية</button>
+    <span id="navLabelsMsg" class="muted"></span>
+  </div>
+</div>
+<script>
+(function () {
+  var body = document.getElementById('navLabelsBody'), msg = document.getElementById('navLabelsMsg');
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function build() {
+    var seen = {}, h = '';
+    document.querySelectorAll('.sidebar .nav-group').forEach(function (g) {
+      var t = g.querySelector('.nav-group-toggle'), links = g.querySelectorAll('a.nav-link');
+      h += '<div style="margin:10px 0 4px;padding:8px;border:1px solid var(--border,#ddd);border-radius:8px;">';
+      if (t) {
+        var s = t.querySelector('span'), def = s.dataset.default || s.textContent.trim();
+        h += '<label style="font-weight:700;font-size:13px;">القسم: <span class="muted">' + esc(def) + '</span></label><br>' +
+             '<input type="text" data-kind="groups" data-key="' + esc(t.dataset.group) + '" data-def="' + esc(def) + '" value="' + esc(s.textContent.trim() === def ? '' : s.textContent.trim()) + '" placeholder="' + esc(def) + '" style="width:100%;max-width:420px;margin-bottom:6px;">';
+      }
+      links.forEach(function (a) {
+        var p = a.getAttribute('href') || ''; if (!p || seen[p]) return; seen[p] = 1;
+        var def = a.dataset.default || a.textContent.replace(/\s+/g, ' ').trim(), cur = a.textContent.replace(/\s+/g, ' ').trim();
+        h += '<div style="display:flex;gap:8px;align-items:center;margin:3px 0 3px 18px;"><span class="muted" style="min-width:170px;font-size:12px;">' + esc(def) + '</span>' +
+             '<input type="text" data-kind="links" data-key="' + esc(p) + '" data-def="' + esc(def) + '" value="' + esc(cur === def ? '' : cur) + '" placeholder="' + esc(def) + '" style="flex:1;max-width:320px;"></div>';
+      });
+      h += '</div>';
+    });
+    body.innerHTML = h;
+  }
+  function collect() {
+    var m = { groups: {}, links: {} };
+    body.querySelectorAll('input[data-kind]').forEach(function (i) {
+      var v = i.value.trim(); if (v && v !== i.dataset.def) m[i.dataset.kind][i.dataset.key] = v;
+    });
+    return m;
+  }
+  function save(m, done) {
+    msg.textContent = 'جاري الحفظ…';
+    fetch('/api/nav-labels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(m) })
+      .then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.ok) { msg.style.color = '#b00020'; msg.textContent = d.error || 'فشل الحفظ'; return; }
+        window.lisApplyNavLabels(m); msg.style.color = '#0a7a3b'; msg.textContent = 'تم الحفظ ✓'; if (done) done();
+      }).catch(function () { msg.style.color = '#b00020'; msg.textContent = 'تعذر الاتصال بالبرنامج'; });
+  }
+  document.getElementById('navLabelsSave').onclick = function () { save(collect()); };
+  document.getElementById('navLabelsReset').onclick = function () {
+    if (!confirm('الرجوع لكل الأسماء الأصلية للشريط الجانبي؟')) return;
+    save({ groups: {}, links: {} }, build);
+  };
+  // الشريط الجانبي تُطبَّق عليه الأسماء المحفوظة بسكربت base.html (بنهاية الصفحة) — ننتظر تحميل الصفحة قبل بناء القائمة
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build); else build();
+})();
+</script>
+
+{# ===== تبويبات الإعدادات: تقلّل التمرير الطويل. الكروت نفسها ونماذجها ما تغيّرت — فقط تُعرض مجموعة وحدة كل مرة ===== #}
+<style>
+  .st-grid { display:grid; grid-template-columns:280px minmax(0,1fr); gap:18px; align-items:start; }
+  .st-side { position:sticky; top:8px; background:var(--card-bg,#fff); border:1px solid var(--border,#e2e8f0); border-radius:14px; padding:12px; }
+  .st-side input[type=search] { width:100%; margin-bottom:8px; box-sizing:border-box; }
+  .st-side button.st-item { display:flex; width:100%; align-items:center; gap:8px; text-align:start; padding:10px 12px; margin:2px 0; border:0; border-radius:10px; background:transparent; cursor:pointer; font:inherit; color:inherit; }
+  .st-side button.st-item:hover { background:rgba(32,80,114,.08); }
+  .st-side button.st-item.on { background:var(--primary,#205072); color:#fff; }
+  .st-side .st-dot { margin-inline-start:auto; width:9px; height:9px; border-radius:50%; background:#f59e0b; display:none; }
+  .st-side .st-item.dirty .st-dot { display:inline-block; }
+  .st-panel > .card { max-width:none !important; width:auto !important; }
+  .st-panel .card .form-field { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .st-panel .card .form-field > label { min-width:230px; margin:0; }
+  .st-panel .card .form-field > .muted, .st-panel .card .form-field > textarea { flex-basis:100%; }
+  .st-panel.st-grouped form > button[type=submit], .st-panel.st-grouped form > .btn[type=submit] { display:none; }
+  .st-foot { position:sticky; bottom:0; z-index:40; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
+             background:var(--card-bg,#fff); border-top:1px solid var(--border,#e2e8f0); padding:10px 14px; border-radius:12px; margin-top:10px; }
+  .st-foot .st-state { color:#64748b; font-size:13px; } .st-foot .st-state.bad { color:#b45309; font-weight:700; } .st-foot .st-state.ok { color:#166534; font-weight:700; }
+  @media (max-width:900px) { .st-grid { grid-template-columns:1fr; } .st-side { position:static; } }
+</style>
+<script>
+(function () {
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.content > .card'));
+  if (cards.length < 4) return;
+  var TABS = [
+    ['identity', '🏢', 'الهوية والمختبر'], ['layout', '🖨️', 'شكل التقارير المطبوعة'], ['screens', '📋', 'شاشات العمل والترتيب'],
+    ['msg', '📱', 'الواتساب والأرشيف والبوابة'], ['security', '🔐', 'كلمات المرور والصلاحيات'], ['free', '🆓', 'التحاليل المجانية والأجور'],
+    ['translit', '🔤', 'الترجمة وترقيم العينات'], ['home', '🏠', 'الشاشة الرئيسية'], ['nav', '🧭', 'أسماء الشريط الجانبي'], ['other', '…', 'أخرى']];
+  function groupOf(c) {
+    var t = ((c.querySelector('h3') || {}).textContent || '');
+    if (c.id === 'navLabelsCard') return 'nav';
+    if (/مجاني/.test(t)) return 'free';
+    if (/كلمة مرور|كلمات مرور/.test(t)) return 'security';
+    if (/الشاشة الرئيسية/.test(t)) return 'home';
+    if (/بوابة|واتساب|أرشيف/.test(t)) return 'msg';
+    if (/ترتيب/.test(t)) return 'screens';
+    if (/ترجمة|رقم العينة/.test(t)) return 'translit';
+    if (/تنسيق|حجم|تباعد|نمط الخط/.test(t)) return 'layout';
+    if (c.querySelector('[name="app_name"]') || /الفاحص|الدكاترة|ترويسة/.test(t)) return 'identity';
+    return 'other';
+  }
+  cards.forEach(function (c) { c.dataset.tabGroup = groupOf(c); });
+  var present = TABS.filter(function (t) { return cards.some(function (c) { return c.dataset.tabGroup === t[0]; }); });
+  var grid = document.createElement('div'); grid.className = 'st-grid';
+  var side = document.createElement('div'); side.className = 'st-side';
+  var panel = document.createElement('div'); panel.className = 'st-panel st-grouped';
+  side.innerHTML = '<input type="search" id="stSearch" placeholder="🔎 بحث بالإعدادات…" autocomplete="off">' +
+    present.map(function (t) { return '<button type="button" class="st-item" data-tab="' + t[0] + '"><span>' + t[1] + '</span><span>' + t[2] + '</span><i class="st-dot"></i></button>'; }).join('');
+  cards[0].parentNode.insertBefore(grid, cards[0]);
+  grid.appendChild(side); grid.appendChild(panel);
+  cards.forEach(function (c) { panel.appendChild(c); });
+  var foot = document.createElement('div'); foot.className = 'st-foot';
+  foot.innerHTML = '<button type="button" class="btn" id="stSave"></button><span class="st-state" id="stState"></span>';
+  panel.appendChild(foot);
+  var cur = 'identity', saving = false;
+  function nameOf(tab) { var t = present.filter(function (x) { return x[0] === tab; })[0]; return t ? t[2] : ''; }
+  function formsOf(tab) { var out = []; cards.forEach(function (c) { if (c.dataset.tabGroup === tab) c.querySelectorAll('form').forEach(function (f) { out.push(f); }); }); return out; }
+  function dirtyOf(tab) { return formsOf(tab).filter(function (f) { return f.dataset.dirty === '1'; }); }
+  function refresh() {
+    present.forEach(function (t) { var b = side.querySelector('[data-tab="' + t[0] + '"]'); b.classList.toggle('dirty', dirtyOf(t[0]).length > 0); });
+    var has = formsOf(cur).length > 0, d = dirtyOf(cur).length, st = document.getElementById('stState'), sv = document.getElementById('stSave');
+    foot.style.display = has ? '' : 'none';
+    sv.textContent = '💾 حفظ إعدادات «' + nameOf(cur) + '»';
+    st.className = 'st-state' + (d ? ' bad' : ''); if (!saving) st.textContent = d ? 'التعديلات الحالية بهذا القسم غير محفوظة' : 'لا توجد تعديلات غير محفوظة';
+  }
+  function show(tab, q) {
+    q = (q || '').trim().toLowerCase(); cur = tab;
+    cards.forEach(function (c) { var inTab = c.dataset.tabGroup === tab; c.style.display = (q ? c.textContent.toLowerCase().indexOf(q) !== -1 : inTab) ? '' : 'none'; });
+    side.querySelectorAll('[data-tab]').forEach(function (b) { b.classList.toggle('on', !q && b.dataset.tab === tab); });
+    try { localStorage.setItem('lis-settings-tab', tab); } catch (e) {}
+    refresh();
+  }
+  panel.addEventListener('input', function (e) { var f = e.target.closest && e.target.closest('form'); if (f) { f.dataset.dirty = '1'; refresh(); } });
+  panel.addEventListener('change', function (e) { var f = e.target.closest && e.target.closest('form'); if (f) { f.dataset.dirty = '1'; refresh(); } });
+  document.getElementById('stSave').addEventListener('click', function () {
+    var list = dirtyOf(cur), st = document.getElementById('stState');
+    if (!list.length) { st.className = 'st-state'; st.textContent = 'لا توجد تعديلات لحفظها'; return; }
+    saving = true; st.className = 'st-state'; st.textContent = 'جاري الحفظ…';
+    var chain = Promise.resolve(), bad = 0;
+    list.forEach(function (f) {
+      chain = chain.then(function () {
+        return fetch(f.getAttribute('action') || location.href, { method: 'POST', body: new FormData(f), credentials: 'same-origin' })
+          .then(function (r) { if (!r.ok) bad++; else f.dataset.dirty = ''; }).catch(function () { bad++; });
+      });
+    });
+    chain.then(function () {
+      saving = false;
+      refresh();
+      if (bad) { st.className = 'st-state bad'; st.textContent = 'تعذّر حفظ ' + bad + ' من التعديلات — حاول مرة ثانية'; return; }
+      st.className = 'st-state ok'; st.textContent = 'تم الحفظ ✓';
+      setTimeout(function () { location.reload(); }, 700);
+    });
+  });
+  var saved = 'identity'; try { saved = localStorage.getItem('lis-settings-tab') || saved; } catch (e) {}
+  if (!present.some(function (t) { return t[0] === saved; })) saved = present[0][0];
+  side.addEventListener('click', function (e) { var b = e.target.closest('[data-tab]'); if (b) { document.getElementById('stSearch').value = ''; saved = b.dataset.tab; show(saved, ''); } });
+  document.getElementById('stSearch').addEventListener('input', function () { show(saved, this.value); });
+  show(saved, '');
+})();
+</script>
+<style>
+  .st-bar { position:sticky; top:0; z-index:20; background:var(--card-bg,#fff); border:1px solid var(--border,#E2E8F0); border-radius:14px; padding:10px 12px; margin-bottom:14px; box-shadow:0 2px 10px rgba(15,23,42,.06); }
+  .st-bar .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .st-search { flex:1; min-width:200px; padding:9px 12px; border:1px solid #CBD5E1; border-radius:10px; font:inherit; }
+  .st-chip { border:0; background:#EEF2F7; color:inherit; padding:8px 14px; border-radius:999px; cursor:pointer; font:inherit; white-space:nowrap; }
+  .st-chip.on { background:var(--primary,#205072); color:#fff; }
+  .st-chip small { opacity:.7; margin-inline-start:4px; }
+  .st-wrap { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:14px; align-items:start; }
+  .st-wrap > .card { max-width:none !important; margin:0 !important; padding:0 !important; overflow:hidden; }
+  .st-wrap > .card > h3 { margin:0 !important; padding:13px 16px; cursor:pointer; display:flex; align-items:center; gap:8px; background:rgba(32,80,114,.05); border-bottom:1px solid transparent; font-size:1.05em; }
+  .st-wrap > .card > h3::after { content:"▾"; margin-inline-start:auto; opacity:.55; transition:transform .15s; }
+  .st-wrap > .card.st-closed > h3::after { transform:rotate(90deg); }
+  .st-wrap > .card:not(.st-closed) > h3 { border-bottom-color:#E2E8F0; }
+  .st-wrap > .card > :not(h3) { margin-inline:16px; }
+  .st-wrap > .card > h3 + * { margin-top:14px; }
+  .st-wrap > .card > :last-child { margin-bottom:16px; }
+  .st-wrap > .card.st-closed > :not(h3) { display:none !important; }
+  .st-wrap > .card.st-full { grid-column:1 / -1; }
+  .st-empty { display:none; text-align:center; padding:30px; color:#64748b; }
+</style>
+<script>
+(function () {
+  var cards = [].slice.call(document.querySelectorAll('.page-content > .card, main .card, .content > .card'));
+  // نجمع البطاقات اللي هي أبناء مباشرين لنفس الحاوية (بطاقات الإعدادات الرئيسية فقط)
+  var first = document.querySelector('.card > h3');
+  if (!first) return;
+  var host = first.parentNode.parentNode;
+  cards = [].slice.call(host.children).filter(function (c) { return c.classList && c.classList.contains('card') && c.querySelector(':scope > h3'); });
+  if (cards.length < 4) return;
+  var GROUPS = [
+    ['🏷️ الهوية والترويسة', /branding|الهوية|دكتور المختبر|الدكاترة|ترويسة|الشاشة الرئيسية|أسماء الشريط|Branding/i],
+    ['📄 شكل التقارير', /خط|حجم|تباعد|نمط|جدول النتائج|عناوين التقارير/],
+    ['🧪 العمل بالمختبر', /رقم العينة|ترتيب|تحليل مجاني|ترجمة أسماء|اللوحة/],
+    ['📤 المشاركة والأرشيف', /بوابة|واتساب|أرشيف|PDF|QR/],
+    ['🔐 الأمان', /كلمة مرور|كلمات مرور|الحذف/]
+  ];
+  function groupOf(c) {
+    var t = c.querySelector(':scope > h3').textContent;
+    for (var i = 0; i < GROUPS.length; i++) if (GROUPS[i][1].test(t)) return i;
+    return GROUPS.length;   // أخرى
+  }
+  var names = GROUPS.map(function (g) { return g[0]; }).concat(['⚙️ أخرى']);
+  var wrap = document.createElement('div'); wrap.className = 'st-wrap';
+  host.insertBefore(wrap, cards[0]);
+  cards.forEach(function (c) { c.dataset.g = groupOf(c); wrap.appendChild(c); c.classList.add('st-closed');
+    if (c.querySelector('form') && c.querySelectorAll('input,select,textarea').length > 12) c.classList.add('st-full');
+    c.querySelector(':scope > h3').addEventListener('click', function () { c.classList.toggle('st-closed'); }); });
+  var bar = document.createElement('div'); bar.className = 'st-bar';
+  bar.innerHTML = '<div class="row"><input class="st-search" type="search" placeholder="🔎 ابحث بالإعدادات (مثلاً: واتساب، خط، كلمة مرور…)"></div><div class="row st-chips" style="margin-top:8px;"></div>';
+  host.insertBefore(bar, wrap);
+  var empty = document.createElement('div'); empty.className = 'st-empty'; empty.textContent = 'لا توجد إعدادات مطابقة.'; host.insertBefore(empty, wrap.nextSibling);
+  var chips = bar.querySelector('.st-chips'), search = bar.querySelector('.st-search'), cur = -1;
+  function count(g) { return cards.filter(function (c) { return g < 0 || +c.dataset.g === g; }).length; }
+  var opts = [[-1, '📚 الكل']].concat(names.map(function (n, i) { return [i, n]; })).filter(function (o) { return o[0] < 0 || count(o[0]); });
+  opts.forEach(function (o) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'st-chip'; b.innerHTML = o[1] + '<small>' + count(o[0]) + '</small>';
+    b.onclick = function () { cur = o[0]; try { localStorage.setItem('st_group', cur); } catch (e) {} render(); }; b.dataset.g = o[0]; chips.appendChild(b);
+  });
+  function render() {
+    var q = search.value.trim().toLowerCase(), shown = 0;
+    cards.forEach(function (c) {
+      var ok = (cur < 0 || +c.dataset.g === cur) && (!q || c.textContent.toLowerCase().indexOf(q) >= 0);
+      c.style.display = ok ? '' : 'none'; if (ok) { shown++; if (q) c.classList.remove('st-closed'); }
+    });
+    [].forEach.call(chips.children, function (b) { b.classList.toggle('on', +b.dataset.g === cur); });
+    empty.style.display = shown ? 'none' : 'block';
+  }
+  search.addEventListener('input', render);
+  try { var sv = localStorage.getItem('st_group'); if (sv !== null && opts.some(function (o) { return String(o[0]) === sv; })) cur = +sv; } catch (e) {}
+  render();
+  if (location.hash && document.querySelector(location.hash)) { var t = document.querySelector(location.hash); var cc = t.closest('.card'); if (cc) { cur = -1; cc.classList.remove('st-closed'); render(); cc.scrollIntoView(); } }
+})();
+</script>
+{% include "_enter_nav.html" ignore missing %}
+{% endblock %}

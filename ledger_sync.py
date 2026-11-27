@@ -1879,6 +1879,70 @@ li();lp();
 </script></body></html>'''
 
 
+# ------------------------------------------------------------------ v126: تقرير فارغ
+def _blank_btn(page_html):
+    """يضيف زر «طباعة تقرير فارغ» بجانب أزرار الزيارة (قبل زر التقرير الشامل) بأي صفحة فيها رابط print/full-report. أي فشل = لا شي."""
+    try:
+        m = re.search(r"/front-desk/visits/(\d+)/print/full-report", page_html)
+        if not m or "lisBlankBtn" in page_html:
+            return ""
+        return ("<script>(function(){try{if(document.getElementById('lisBlankBtn'))return;var vid=%s;"
+                "var el=document.querySelector('a[href*=\"/print/full-report\"],[onclick*=\"/print/full-report\"],[data-href*=\"/print/full-report\"]');"
+                "if(!el)return;var b=document.createElement('a');b.id='lisBlankBtn';b.className=el.className;b.href='/front-desk/visits/'+vid+'/print/blank-report';"
+                "b.target='_blank';b.style.cssText=el.style.cssText;b.textContent='\\uD83D\\uDCC4 \\u0637\\u0628\\u0627\\u0639\\u0629 \\u062A\\u0642\\u0631\\u064A\\u0631 \\u0641\\u0627\\u0631\\u063A';"
+                "el.parentNode.insertBefore(b,el);}catch(e){}})();</script>") % m.group(1)
+    except Exception:
+        return ""
+
+
+_BLANK_TPL = """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>Blank Report</title>
+<style>
+ body{margin:0;background:#e5e7eb;font-family:'Times New Roman','Segoe UI',Tahoma,Arial,sans-serif}
+ .bar{position:sticky;top:0;background:#0f172a;color:#fff;padding:8px 12px;display:flex;gap:10px;align-items:center;z-index:5}
+ .bar b{flex:1}.bar button{background:#15803d;color:#fff;border:0;border-radius:8px;padding:7px 16px;font:inherit;cursor:pointer}
+ .page{width:210mm;min-height:297mm;box-sizing:border-box;margin:12px auto;background:#fff;padding:10mm;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+ .hd{display:flex;direction:ltr;align-items:center;gap:10px;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:10px}
+ .hd .lg{flex:0 0 auto}.hd .lg img{width:{{ logo_width or 100 }}px;height:auto}
+ .hd .lg.l{order:-1}
+ .hd .nm{flex:1;text-align:center;direction:rtl}
+ .nm h1{margin:0 0 2px;font-size:22px;color:{{ report_header_accent or '#26529C' }}}
+ .nm .sub{font-size:13px;color:#444}
+ .docs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 2px;margin-bottom:8px;font-family:{{ letterhead_font_family }}}
+ .docs .c{text-align:center;line-height:1.4;font-size:{{ letterhead_font_size or 14 }}px}
+ .docs .t{color:#7A1F1F;font-weight:700}.docs .n{color:#1F3B7A;font-weight:700}.docs .d{color:#1F3B7A}.docs .e{color:#1F3B7A;font-style:italic}
+ table.info{width:100%;border-collapse:collapse;margin:8px 0;font-size:15px}
+ table.info td{border:1px solid #333;padding:5px 8px}
+ table.info td.k{font-weight:700;width:15%;background:#f3f4f6}
+ .ttl{text-align:center;font-size:22px;font-weight:700;text-decoration:underline;margin:14px 0}
+ .body{min-height:440px;border:1px dashed #94a3b8;padding:8px;outline:none;font-size:15px;line-height:1.8}
+ [contenteditable]:focus{background:#fffbe6}
+ @page{size:A4;margin:10mm}
+ @media print{body{background:#fff}.bar{display:none}.page{margin:0;box-shadow:none;width:auto;min-height:0;padding:0}.body{border:0}[contenteditable]:focus{background:none}}
+</style></head><body>
+<div class="bar no-print"><b>تقرير فارغ — اضغط على أي نص (بيانات المريض أو المساحة البيضاء) لتعديله ثم اطبع</b><button onclick="window.print()">🖨 طباعة</button></div>
+<div class="page">
+ <div class="hd">
+  {% if logo_url and logo_position != 'none' %}<div class="lg {{ 'l' if logo_position == 'left' else '' }}"><img src="{{ logo_url }}" alt=""></div>{% endif %}
+  <div class="nm"><h1>{{ lab_name_ar or brand_name }}</h1>
+   {% if report_header_subtitle %}<div class="sub">{{ report_header_subtitle }}</div>{% endif %}
+   <div class="sub">{{ lab_address }} {% if lab_phone %} — {{ lab_phone }}{% endif %}</div></div>
+ </div>
+ {% if letterhead_doctors %}<div class="docs">
+  {% for d in letterhead_doctors %}<div class="c" style="{% if d['font_size'] %}font-size:{{ d['font_size'] }}px{% endif %}"><div class="t">{{ d['title'] or 'الدكتور' }}</div><div class="n">{{ d['name'] }}</div>
+   {% if d['degree_ar'] %}<div class="d">{{ (d['degree_ar'] or '')|e|replace('\\n','<br>'|safe) }}</div>{% endif %}
+   {% if d['degree_en'] %}<div class="e">{{ (d['degree_en'] or '')|e|replace('\\n','<br>'|safe) }}</div>{% endif %}</div>{% endfor %}
+ </div>{% endif %}
+ <table class="info">
+  <tr><td class="k">Patient Name</td><td contenteditable="true">{{ info.name }}</td><td class="k">Patient No.</td><td contenteditable="true">{{ info.reg }}</td></tr>
+  <tr><td class="k">Age</td><td contenteditable="true">{{ info.age }}</td><td class="k">Sample Date</td><td contenteditable="true">{{ info.date }}</td></tr>
+  <tr><td class="k">Sex</td><td contenteditable="true">{{ info.sex }}</td><td class="k">Sample Time</td><td contenteditable="true">{{ info.time }}</td></tr>
+  <tr><td class="k">Consultant</td><td contenteditable="true">{{ info.ref }}</td><td class="k">Sample No.</td><td contenteditable="true">{{ info.sample }}</td></tr>
+ </table>
+ <div class="ttl" contenteditable="true">Laboratory Report</div>
+ <div class="body" contenteditable="true" dir="auto"><br></div>
+</div></body></html>"""
+
+
 def install(app, helpers=None):
     if helpers:
         _H.update(helpers)
@@ -2101,6 +2165,31 @@ def install(app, helpers=None):
         finally:
             db.close()
 
+    # ---- v126: تقرير فارغ (ترويسة المختبر + الشعار + أسماء الأطباء + بيانات المريض) قابل للتعديل ثم الطباعة
+    @bp.route("/front-desk/visits/<int:visit_id>/print/blank-report")
+    def blank_report(visit_id):
+        if not allowed():
+            return Response("<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;padding:20px'>سجّل الدخول من الشاشة الرئيسية أولاً.</body>", 401, mimetype="text/html")
+        from flask import render_template_string
+        db = _db()
+        try:
+            v = db.execute(
+                "SELECT v.id, v.registration_number, v.sample_no, v.created_at, p.full_name, p.gender, p.age, p.age_unit, "
+                "(SELECT name FROM referral_centers rc WHERE rc.id=v.referral_center_id) AS center, "
+                "(SELECT full_name FROM doctors d WHERE d.id=v.doctor_id) AS doctor "
+                "FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.id=?", (visit_id,)).fetchone()
+            if not v:
+                return Response("الزيارة غير موجودة", 404)
+            au = {"years": "Years", "year": "Years", "months": "Months", "days": "Days"}
+            age = ("%s %s" % (v["age"], au.get(str(v["age_unit"] or "").lower(), v["age_unit"] or ""))).strip() if v["age"] not in (None, "") else ""
+            dt = str(v["created_at"] or "")
+            info = {"name": v["full_name"] or "", "age": age, "sex": v["gender"] or "", "reg": v["registration_number"] or "",
+                    "sample": v["sample_no"] or "", "date": ("%s/%s/%s" % (dt[8:10], dt[5:7], dt[0:4])) if len(dt) >= 10 else "",
+                    "time": dt[11:16], "ref": (v["doctor"] or v["center"] or "")}
+        finally:
+            db.close()
+        return Response(render_template_string(_BLANK_TPL, info=info), mimetype="text/html")
+
     @app.after_request
     def _inject(resp):
         try:
@@ -2108,7 +2197,7 @@ def install(app, helpers=None):
                     and request.method == "GET" and not request.path.startswith(("/ledger", "/ai/assistant", "/api/"))):
                 b = resp.get_data(as_text=True)
                 if "</body>" in b and "lis-ledger-badge" not in b:
-                    resp.set_data(b.replace("</body>", _BADGE + _BELL + "</body>", 1))
+                    resp.set_data(b.replace("</body>", _BADGE + _BELL + _blank_btn(b) + "</body>", 1))
         except Exception:
             pass
         return resp

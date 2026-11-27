@@ -21023,6 +21023,11 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
     try:
         import ledger_sync
         ledger_sync.install(app, dict(delete_visit=_delete_visit_cascade, next_reg=next_registration_number, doctor=find_or_create_doctor, center=find_or_create_referral_center, price=get_test_price, sample_no=resolve_visit_sample_no, ensure_partner=_ensure_partner_labs, unique_code=unique_test_code, portal_collect=_portal_collect, save_results=save_order_test_results, post_save=_post_save_background))
+        try:   # v120: client_config
+            import lis_client_config
+            lis_client_config.install(app, dict(get_db=get_db, get_setting=get_setting, set_setting=set_setting, login_required=login_required, log_action=log_action))
+        except Exception as _e120:
+            print('lis_client_config not loaded:', _e120)
         try:   # v106: lis_wipe
             import lis_wipe
             lis_wipe.install(dict(delete_visit=_delete_visit_cascade, log_action=log_action))
@@ -21842,6 +21847,18 @@ def _v95_apply_links(db, data):
     if pu.lower().startswith("http") and pk:
         _v93_save_portal(db, pu, pk)
         done.append("بوابة النتائج")
+    # v127: ai links — مفتاح المساعد الذكي (ومفتاح قراءة الصور اختياري)
+    ak = re.sub(r"[^\x21-\x7e]|[\"']", "", str(data.get("ai_key") or ""))[:200]
+    avk = re.sub(r"[^\x21-\x7e]|[\"']", "", str(data.get("ai_vision_key") or ""))[:200]
+    if ak:
+        set_setting(db, "ai_api_key", ak)
+        ap = str(data.get("ai_provider") or "gemini")
+        set_setting(db, "ai_provider", ap if ap in ("gemini", "groq", "anthropic") else "gemini")
+        set_setting(db, "ai_enabled", "1")
+        done.append("المساعد الذكي")
+    if avk:
+        set_setting(db, "ai_vision_key", avk)
+        done.append("قراءة الصور")
     db.commit()
     try:
         cloud_sync.trigger()
@@ -21872,11 +21889,14 @@ code{background:#eef2f6;padding:2px 6px;border-radius:5px;direction:ltr;display:
 <label>مفتاح الربط LIS_KEY (لكل عميل مفتاح مختلف)</label><input name="ledger_key" autocomplete="off" value="{{lk}}">
 <label>رابط بوابة النتائج</label><input name="portal_url" value="{{pu}}">
 <label>مفتاح بوابة النتائج</label><input name="portal_key" autocomplete="off" value="{{pk}}">
+<label>مفتاح المساعد الذكي (Gemini API key)</label><input name="ai_key" autocomplete="off" value="{{ak}}">
+<input type="hidden" name="ai_provider" value="gemini">
+<label>مفتاح قراءة الصور (اختياري — اتركه فاضي إذا نفس المزوّد)</label><input name="ai_vision_key" autocomplete="off" value="{{avk}}">
 <button type="button" class="g" onclick="fillMine()">تعبئة من الإعدادات المحفوظة بهذا الجهاز</button><button type="submit">تنزيل links_&lt;HWID&gt;.json</button></form>
 <p class="m">ملاحظة: بوابة النتائج لها Worker/Render ومفتاح مستقل عن السجل السحابي؛ لا تستعمل LIS_KEY هناك. إذا مفتاح البوابة ضاع من هذا الجهاز: ادخل لوحة Render/Cloudflare الخاصة بالبوابة وانسخ المفتاح (أو ولّد مفتاحاً جديداً هناك) ثم الصقه هنا.</p>
 <p class="m"><a href="/">رجوع للشاشة الرئيسية</a></p></div>
 <script>function fillMine(){fetch('/designer/client-link/mine',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){
-var f=document.forms[0];f.ledger_url.value=j.ledger_url||'';f.ledger_key.value=j.ledger_key||'';f.portal_url.value=j.portal_url||'';f.portal_key.value=j.portal_key||'';})}</script></body></html>"""
+var f=document.forms[0];f.ledger_url.value=j.ledger_url||'';f.ledger_key.value=j.ledger_key||'';f.portal_url.value=j.portal_url||'';f.portal_key.value=j.portal_key||'';f.ai_key.value=j.ai_key||'';f.ai_vision_key.value=j.ai_vision_key||'';})}</script></body></html>"""
 
 
 @app.route("/designer/client-link", methods=["GET", "POST"])
@@ -21888,9 +21908,14 @@ def v95_client_link():
     hw = re.sub(r"[^A-Za-z0-9_-]", "", (f.get("hw") or "")).upper()
     lu, lk = (f.get("ledger_url") or "").strip().rstrip("/"), (f.get("ledger_key") or "").strip()
     pu, pk = (f.get("portal_url") or "").strip().rstrip("/"), (f.get("portal_key") or "").strip()
+    ak, avk = (f.get("ai_key") or "").strip(), (f.get("ai_vision_key") or "").strip()  # v127
     err = ""
     if request.method == "POST":
         data = {}
+        if ak:
+            data.update(ai_key=ak, ai_provider=(f.get("ai_provider") or "gemini"))
+        if avk:
+            data.update(ai_vision_key=avk)
         if lu and lk:
             if not lu.lower().startswith("https://"):
                 err = "رابط السجل لازم يبدأ بـ https://"
@@ -21902,7 +21927,7 @@ def v95_client_link():
         if not hw:
             err = "اكتب معرّف جهاز العميل"
         elif not data:
-            err = "أدخل (رابط + مفتاح) للسجل أو للبوابة (أو للاثنين)"
+            err = "أدخل (رابط + مفتاح) للسجل أو للبوابة، أو مفتاح المساعد الذكي"
         if not err:
             try:
                 created = datetime.now().isoformat(timespec="seconds")
@@ -21913,7 +21938,7 @@ def v95_client_link():
                                 headers={"Content-Disposition": "attachment; filename=links_%s.json" % hw})
             except Exception as e:  # noqa: BLE001
                 err = "تعذّر التوقيع: %s" % e
-    return _v93_rts(_V95_LINK_HTML, err=err, hw=hw, lu=lu, lk=lk, pu=pu, pk=pk)
+    return _v93_rts(_V95_LINK_HTML, err=err, hw=hw, lu=lu, lk=lk, pu=pu, pk=pk, ak=ak, avk=avk)
 
 
 @app.route("/designer/client-link/mine")
@@ -21922,7 +21947,8 @@ def v95_client_link_mine():
         return jsonify(error="designer only"), 403
     db = get_db()
     return jsonify(ledger_url=get_setting(db, "ledger_url", "") or "", ledger_key=get_setting(db, "ledger_key", "") or "",
-                   portal_url=get_setting(db, "portal_url", "") or "", portal_key=get_setting(db, "portal_api_key", "") or "")
+                   portal_url=get_setting(db, "portal_url", "") or "", portal_key=get_setting(db, "portal_api_key", "") or "",
+                   ai_key=get_setting(db, "ai_api_key", "") or "", ai_vision_key=get_setting(db, "ai_vision_key", "") or "")
 # ===================== end v95 =====================
 
 
