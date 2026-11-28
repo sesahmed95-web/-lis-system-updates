@@ -677,8 +677,15 @@ def incoming(db, days=14):
             tid = _match_test(idx, t)
             (ok if tid else bad).append(t)
         it["matched"], it["unmatched"] = ok, bad
-        if _get(db, "ledger_imp_%s|%s" % (it.get("date"), it.get("rowId"))):
-            continue        # مستورد سابقاً (ننتظر تثبيته بالسحابة)
+        _mk_key = "ledger_imp_%s|%s" % (it.get("date"), it.get("rowId"))
+        _mk = _get(db, _mk_key)
+        if _mk:
+            _m = re.fullmatch(r"v(\d+)", str(_mk))
+            if _m and not db.execute("SELECT 1 FROM visits WHERE id=?", (int(_m.group(1)),)).fetchone():
+                _set(db, _mk_key, "")       # v129: زيارته انمسحت من الـLIS (مثلاً مسح الأسماء) ← يُستورد من جديد
+                db.commit()
+            else:
+                continue        # مستورد سابقاً (ننتظر تثبيته بالسحابة)
         items.append(it)
     if days <= 30:
         _st["incoming"] = len(items)
@@ -698,6 +705,12 @@ def import_item(db, date_s, row_id, user_id=None, branch_id=None, _items=None, _
     c = cfg(db)
     key = "ledger_imp_%s|%s" % (date_s, row_id)
     prev = _get(db, key)
+    if prev:
+        _m0 = re.fullmatch(r"v(\d+)", str(prev))
+        if _m0 and not db.execute("SELECT 1 FROM visits WHERE id=?", (int(_m0.group(1)),)).fetchone():
+            _set(db, key, "")               # v129: الزيارة القديمة محذوفة ← لا نعتبره «مستورداً سابقاً»
+            db.commit()
+            prev = ""
     if prev:
         reg = ""
         m = re.fullmatch(r"v(\d+)", prev)
@@ -1501,6 +1514,7 @@ def portal_guard(db, force=False):
                 continue
             portal_mark_revoked(vid, False)     # طلب صريح من المستخدم = رفع الإلغاء
             ok, msg = _push_visit(db, vid)
+            _note_add(db, vid, ok, "" if ok else msg)
             if ok:
                 done.append(x)
                 n["resend"] += 1
@@ -1589,6 +1603,23 @@ def portal_guard(db, force=False):
         return msg
     finally:
         _PG_LOCK.release()
+
+
+# ------------------------------------------------------------------ v129: إشعار «سجل المرضى طلب إعادة رفع نتيجة»
+def _note_add(db, vid, ok, msg=""):
+    try:
+        r = db.execute("SELECT p.full_name AS n FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.id=?", (vid,)).fetchone()
+        name = (r["n"] if r else "") or ("زيارة رقم %d" % vid)
+        try:
+            lst = json.loads(_get(db, "ledger_notes", "[]") or "[]")
+        except Exception:
+            lst = []
+        lst = [x for x in lst if isinstance(x, dict)][-29:]
+        lst.append({"at": int(time.time() * 1000), "name": str(name)[:80], "ok": bool(ok), "msg": str(msg or "")[:120]})
+        _set(db, "ledger_notes", json.dumps(lst, ensure_ascii=False))
+        db.commit()
+    except Exception:
+        pass
 
 
 _DR = {"t": 0.0, "ok": 0, "fail": 0, "err": ""}
@@ -1774,6 +1805,27 @@ def flags_fix(db, fid, note=""):
     return True, "أُعيد إرسال النتيجة المصححة للسجل ✓"
 
 
+_NOTES = r"""<script id="lis-notes-js">(function(){try{
+if(window.top!==window.self||document.getElementById("lis-notes"))return;
+var box=document.createElement("div");box.id="lis-notes";box.setAttribute("dir","rtl");
+box.style.cssText="position:fixed;top:14px;left:14px;z-index:99993;display:flex;flex-direction:column;gap:8px;max-width:min(380px,92vw)";
+var seen=0,ctx=null;try{seen=+localStorage.getItem("lisNotesSeen")||0}catch(e){}
+if(!seen)seen=Date.now()-600000;
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function fmt(t){try{return new Date(t).toLocaleTimeString("ar-IQ")}catch(e){return""}}
+function beep(){try{ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();[660,880].forEach(function(f,i){var o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=f;o.connect(g);g.connect(ctx.destination);g.gain.setValueAtTime(.15,ctx.currentTime+i*.18);g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+i*.18+.16);o.start(ctx.currentTime+i*.18);o.stop(ctx.currentTime+i*.18+.18)})}catch(e){}}
+function show(n){var d=document.createElement("div");
+d.style.cssText="background:#eff6ff;border:1px solid #93c5fd;color:#1e3a8a;border-radius:12px;padding:10px 12px;font:13px Tahoma,sans-serif;box-shadow:0 8px 22px rgba(0,0,0,.2);cursor:pointer";
+d.innerHTML='<b>\uD83D\uDCE4 سجل المرضى طلب إعادة رفع نتيجة</b><div style="margin:2px 0">'+esc(n.name)+'</div><div style="color:'+(n.ok?"#15803d":"#b91c1c")+'">'+(n.ok?"تم رفعها للسحابة ✓":"تعذّر الرفع: "+esc(n.msg))+'</div><div style="font-size:11px;color:#64748b">'+fmt(n.at)+'</div>';
+d.onclick=function(){d.remove()};box.appendChild(d);setTimeout(function(){if(d.parentNode)d.remove()},25000)}
+function load(){fetch("/ledger/notes.json",{cache:"no-store"}).then(function(r){return r.json()}).then(function(j){
+var its=(j.items||[]).filter(function(n){return n.at>seen});if(!its.length)return;
+its.forEach(show);beep();seen=Math.max.apply(null,its.map(function(n){return n.at}));try{localStorage.setItem("lisNotesSeen",String(seen))}catch(e){}}).catch(function(){})}
+function mount(){document.body.appendChild(box);load();setInterval(load,20000)}
+if(document.body)mount();else document.addEventListener("DOMContentLoaded",mount);
+}catch(e){}})();</script>"""
+
+
 _BELL = r"""<script id="lis-flag-bell">(function(){try{
 if(window.top!==window.self||document.getElementById("lis-fb"))return;
 var btn=document.createElement("button");btn.id="lis-fb";btn.type="button";btn.title="نتائج خاطئة بلّغ عنها سجل المرضى";
@@ -1879,6 +1931,74 @@ li();lp();
 </script></body></html>'''
 
 
+
+# ------------------------------------------------------------------ v137: حاسبة INR بلوحة إدخال النتائج
+_INR_JS = r"""<script id="lis-inr-js">(function(){try{
+var all=[].slice.call(document.querySelectorAll('[data-param-name]'));
+if(!all.length||window.__lisInr)return;window.__lisInr=1;
+function nm(s){return (s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+var CTL={ptcontrol:1,mnpt:1,ptcontrolmnpt:1,controlpt:1,ptmnpt:1};
+var groups={};
+all.forEach(function(el){var m=(el.name||'').match(/^(ot\d+)_/);if(!m)return;(groups[m[1]]=groups[m[1]]||[]).push(el);});
+var cfg={isi:'',mnpt:''},bars=[];
+function post(u,b){return fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(b)}).then(function(r){return r.json();});}
+var saveT=null;function saveCfg(){clearTimeout(saveT);saveT=setTimeout(function(){post('/api/inr-settings',cfg).catch(function(){});},600);}
+function num(v){v=parseFloat(String(v==null?'':v).replace(',','.'));return isNaN(v)?null:v;}
+Object.keys(groups).forEach(function(k){
+ var g=groups[k],pt=null,ctl=null,inr=null,combo=null,has=false;
+ g.forEach(function(el){var n=nm(el.getAttribute('data-param-name'));
+  if(n==='pt')pt=el;else if(CTL[n])ctl=el;else if(n==='inr')inr=el;else if(n==='ptinr'||n==='inrpt'||n==='prothrombintime')combo=el;});
+ if(!(pt||inr||combo))return;
+ var anchor=(inr||pt||combo);var host=anchor.closest('.form-field')||anchor.parentNode;
+ var bar=document.createElement('div');bar.className='lis-inr-bar';bar.dir='rtl';
+ bar.style.cssText='margin:6px 0;padding:8px 10px;border:1px solid #93c5fd;background:#eff6ff;border-radius:10px;font-size:13px;display:flex;flex-wrap:wrap;gap:8px;align-items:center';
+ var ready=!!(pt&&inr);
+ if(ready){
+  bar.innerHTML='<b>INR</b> = (PT ÷ Control)<sup>ISI</sup> &nbsp; <label>ISI للكت: <input type="text" class="i-isi" dir="ltr" style="width:70px" placeholder="1.1"></label>'
+   +(ctl?'':' <label>Control (MNPT): <input type="text" class="i-mn" dir="ltr" style="width:70px" placeholder="13"></label>')
+   +' <span class="i-out" dir="ltr" style="font-weight:700;color:#0f172a"></span>'
+   +' <button type="button" class="i-re btn small secondary" style="padding:2px 8px;font-size:11px">↻ إعادة الحساب التلقائي</button>'
+   +' <span class="muted" style="font-size:11px">تقدر تكتب INR يدوياً — ما ينكتب فوق تعديلك</span>';
+ }else{
+  bar.innerHTML='<b>INR</b> — هذا التحليل ما عنده حقول PT و INR منفصلة. <button type="button" class="i-mk btn small secondary" style="padding:2px 10px">➕ إنشاء حقول PT / PT Control / INR</button> <span class="i-msg"></span>';
+ }
+ host.parentNode.insertBefore(bar,host);
+ var st={manual:0};
+ if(!ready){
+  bar.querySelector('.i-mk').onclick=function(){
+   var m=(anchor.name||'').match(/^ot(\\d+)_/);if(!m)return;
+   if(!confirm('سيتم إنشاء/إعادة تسمية حقول هذا التحليل (PT, PT Control, INR) وإعادة تحميل الصفحة. المتابعة؟'))return;
+   post('/api/inr-create',{ot_id:parseInt(m[1],10)}).then(function(r){
+    if(r&&r.ok)location.reload();else bar.querySelector('.i-msg').textContent=(r&&r.error)||'فشل';
+   }).catch(function(){bar.querySelector('.i-msg').textContent='فشل الاتصال';});
+  };
+  return;
+ }
+ var iIsi=bar.querySelector('.i-isi'),iMn=bar.querySelector('.i-mn'),out=bar.querySelector('.i-out');
+ bars.push({isi:iIsi,mn:iMn});
+ if(inr.value!=='')st.manual=1;
+ function calc(){
+  var p=num(pt.value),c=ctl?num(ctl.value):num(iMn&&iMn.value),i=num(iIsi.value),v=null;
+  if(p&&c&&i&&p>0&&c>0&&i>0)v=Math.pow(p/c,i);
+  out.textContent=(v===null)?'':('المحسوب: '+v.toFixed(2));
+  if(v!==null&&!st.manual&&inr.value!==v.toFixed(2)){inr.value=v.toFixed(2);inr.dispatchEvent(new Event('input',{bubbles:true}));}
+  return v;
+ }
+ function later(){setTimeout(calc,30);}
+ pt.addEventListener('input',later);if(ctl)ctl.addEventListener('input',later);
+ inr.addEventListener('input',function(e){if(!e.isTrusted)return;if(inr.value.trim()==='')st.manual=0;else st.manual=1;later();});
+ iIsi.addEventListener('input',function(){cfg.isi=iIsi.value.trim().replace(',','.');bars.forEach(function(b){if(b.isi!==iIsi)b.isi.value=iIsi.value;});saveCfg();later();});
+ if(iMn)iMn.addEventListener('input',function(){cfg.mnpt=iMn.value.trim().replace(',','.');saveCfg();later();});
+ bar.querySelector('.i-re').onclick=function(){st.manual=0;inr.value='';var v=calc();if(v===null)out.textContent='أدخل PT و ISI أولاً';};
+ bar._calc=calc;
+});
+fetch('/api/inr-settings',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(c){
+ cfg.isi=c.isi||'';cfg.mnpt=c.mnpt||'';
+ bars.forEach(function(b){if(b.isi)b.isi.value=cfg.isi;if(b.mn)b.mn.value=cfg.mnpt;});
+ setTimeout(function(){[].forEach.call(document.querySelectorAll('.lis-inr-bar'),function(b){if(b._calc)b._calc();});},120);
+}).catch(function(){});
+}catch(e){}})();</script>"""
+
 # ------------------------------------------------------------------ v126: تقرير فارغ
 def _blank_btn(page_html):
     """يضيف زر «طباعة تقرير فارغ» بجانب أزرار الزيارة (قبل زر التقرير الشامل) بأي صفحة فيها رابط print/full-report. أي فشل = لا شي."""
@@ -1899,7 +2019,27 @@ _BLANK_TPL = """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="ut
 <style>
  body{margin:0;background:#e5e7eb;font-family:'Times New Roman','Segoe UI',Tahoma,Arial,sans-serif}
  .bar{position:sticky;top:0;background:#0f172a;color:#fff;padding:8px 12px;display:flex;gap:10px;align-items:center;z-index:5}
- .bar b{flex:1}.bar button{background:#15803d;color:#fff;border:0;border-radius:8px;padding:7px 16px;font:inherit;cursor:pointer}
+ .bar b{flex:1;font-size:14px}.bar button{background:#15803d;color:#fff;border:0;border-radius:8px;padding:7px 16px;font:inherit;cursor:pointer}
+ .bar button.o{background:#334155}
+ .pnl{background:#fff;border-bottom:1px solid #94a3b8;padding:10px 14px;font:13px Tahoma,Arial;display:none;direction:rtl}
+ .pnl.on{display:block}
+ .pnl .grp{margin-bottom:8px}.pnl .grp>b{display:block;margin-bottom:4px;color:#0f172a}
+ .pnl label{display:inline-block;margin:2px 12px 2px 0;white-space:nowrap}
+ .pnl input[type=number]{width:60px}
+ .pnl button{background:#1d4ed8;color:#fff;border:0;border-radius:7px;padding:5px 12px;font:inherit;cursor:pointer;margin-left:6px}
+ .pnl button.o{background:#64748b}
+ /* v140: أنماط الترويسة */
+ .st-compact .hd{padding-bottom:4px;margin-bottom:6px;border-bottom-width:1px}
+ .st-compact .nm h1{font-size:17px}.st-compact .nm .sub{font-size:11px}
+ .st-compact .info{grid-template-columns:repeat(4,1fr);font-size:13px}.st-compact .info .k{width:auto;padding:3px 5px}.st-compact .info .v{padding:3px 5px}.st-compact .info .cell{min-height:24px;flex-direction:column}
+ .st-word .hd{display:block;position:relative;border:0;text-align:center;direction:rtl;padding-bottom:2px;margin-bottom:4px;min-height:54px}
+ .st-word .hd{min-height:104px}.st-word .hd .lg img{max-height:100px;width:auto}.st-word .hd .lg{position:absolute;top:0;left:0}.st-word.lp-right .hd .lg{left:auto;right:0}.st-word.lp-center .hd .lg{position:static;text-align:center;margin-bottom:4px}
+ .st-word .nm h1{display:inline-block;border:1.5px solid #6b8fcf;border-radius:10px;padding:6px 26px;background:linear-gradient(#fff,#dbe7fb);box-shadow:0 2px 4px rgba(0,0,0,.25);font-size:19px}
+ .st-word #hdwrap{border-bottom:2px dashed #333;padding-bottom:6px;margin-bottom:6px}
+ .st-word .info{grid-template-columns:1fr 1fr}
+ .st-logo .hd{justify-content:center;border-bottom:0}.st-logo .hd .lg img{width:150px}
+ .lp-center .hd{flex-direction:column;justify-content:center}.lp-center .hd .lg{order:-1;text-align:center}
+ .lp-right .hd .lg{order:0}
  .page{width:210mm;min-height:297mm;box-sizing:border-box;margin:12px auto;background:#fff;padding:10mm;box-shadow:0 6px 24px rgba(0,0,0,.25)}
  .hd{display:flex;direction:ltr;align-items:center;gap:10px;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:10px}
  .hd .lg{flex:0 0 auto}.hd .lg img{width:{{ logo_width or 100 }}px;height:auto}
@@ -1910,37 +2050,161 @@ _BLANK_TPL = """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="ut
  .docs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 2px;margin-bottom:8px;font-family:{{ letterhead_font_family }}}
  .docs .c{text-align:center;line-height:1.4;font-size:{{ letterhead_font_size or 14 }}px}
  .docs .t{color:#7A1F1F;font-weight:700}.docs .n{color:#1F3B7A;font-weight:700}.docs .d{color:#1F3B7A}.docs .e{color:#1F3B7A;font-style:italic}
- table.info{width:100%;border-collapse:collapse;margin:8px 0;font-size:15px}
- table.info td{border:1px solid #333;padding:5px 8px}
- table.info td.k{font-weight:700;width:15%;background:#f3f4f6}
+ .info{display:grid;grid-template-columns:1fr 1fr;margin:8px 0;font-size:15px;direction:ltr;border-top:1px solid #333;border-left:1px solid #333}
+ .info .cell{display:flex;border-right:1px solid #333;border-bottom:1px solid #333;min-height:30px}
+ .info .k{font-weight:700;background:#f3f4f6;padding:5px 8px;width:38%;box-sizing:border-box;text-align:left}
+ .info .v{flex:1;padding:5px 8px;text-align:left;unicode-bidi:plaintext;direction:ltr}
+ .info .v.ar{direction:rtl;text-align:right}
  .ttl{text-align:center;font-size:22px;font-weight:700;text-decoration:underline;margin:14px 0}
  .body{min-height:440px;border:1px dashed #94a3b8;padding:8px;outline:none;font-size:15px;line-height:1.8}
  [contenteditable]:focus{background:#fffbe6}
  @page{size:A4;margin:10mm}
- @media print{body{background:#fff}.bar{display:none}.page{margin:0;box-shadow:none;width:auto;min-height:0;padding:0}.body{border:0}[contenteditable]:focus{background:none}}
+ @media print{body{background:#fff}.bar,.pnl{display:none!important}.page{margin:0;box-shadow:none;width:auto;min-height:0;padding:0}.body{border:0}[contenteditable]:focus{background:none}}
 </style></head><body>
-<div class="bar no-print"><b>تقرير فارغ — اضغط على أي نص (بيانات المريض أو المساحة البيضاء) لتعديله ثم اطبع</b><button onclick="window.print()">🖨 طباعة</button></div>
-<div class="page">
- <div class="hd">
-  {% if logo_url and logo_position != 'none' %}<div class="lg {{ 'l' if logo_position == 'left' else '' }}"><img src="{{ logo_url }}" alt=""></div>{% endif %}
-  <div class="nm"><h1>{{ lab_name_ar or brand_name }}</h1>
-   {% if report_header_subtitle %}<div class="sub">{{ report_header_subtitle }}</div>{% endif %}
-   <div class="sub">{{ lab_address }} {% if lab_phone %} — {{ lab_phone }}{% endif %}</div></div>
+<div class="bar no-print"><b>تقرير فارغ — اضغط على أي نص لتعديله، ومن «ترويسة التقرير» احذف أي جزء ثم اطبع</b>
+ <button class="o" id="bTog" type="button">⚙ ترويسة التقرير</button><button onclick="window.print()">🖨 طباعة</button></div>
+<div class="pnl no-print" id="pnl">
+ <div class="grp"><b>أجزاء الترويسة (شيل العلامة لحذف الجزء من الطباعة)</b><span id="gHd"></span></div>
+ <div class="grp"><b>بيانات المريض</b><span id="gInfo"></span></div>
+ <div class="grp"><b>شكل الترويسة</b><label>النمط <select id="sSty"><option value="classic">كلاسيك (شعار + اسم + أطباء)</option><option value="compact">مضغوط (شعار + اسم + بيانات بصف)</option><option value="word">مثل ورقة الوورد (لافتة + أطباء + بيانات)</option><option value="logo">الشعار + بيانات المريض فقط</option><option value="patient">بيانات المريض فقط (بدون ترويسة)</option></select></label> <label>مكان الشعار <select id="sLp"><option value="left">يسار</option><option value="right">يمين</option><option value="center">وسط</option></select></label> <label>حجم الشعار (px، 0 = الأصلي) <input type="number" id="nLw" min="0" max="400" step="10"></label> <span style="color:#64748b">اختيار النمط يضبط الأجزاء المحذوفة؛ بعدها شيل/ضع العلامات كما تريد.</span></div>
+ <div class="grp"><label>حجم الترويسة % <input type="number" id="nScale" min="40" max="130" step="5"></label>
+  <label>مسافة فارغة من الأعلى (مم) <input type="number" id="nTop" min="0" max="80" step="1"></label>
+  <label>شعار مختلف لهذا التقرير <input type="file" id="fLogo" accept="image/*"></label><button type="button" class="o" id="bLogoX">إلغاء الشعار المخصص</button>
+  <button type="button" id="bSave">💾 حفظ كإعداد افتراضي</button><button type="button" class="o" id="bAll">إظهار الكل</button><span id="sMsg" style="color:#15803d"></span></div>
+</div>
+<div class="page" id="pg"><div id="hdwrap">
+ <div class="hd" id="hd">
+  <div class="lg {{ 'l' if logo_position != 'right' else '' }}" data-k="logo" data-l="الشعار"><img id="lgi" src="{{ logo_url if (logo_url and logo_position != 'none') else '' }}" alt=""></div>
+  <div class="nm" id="nm"><h1 data-k="lab" data-l="اسم المختبر" contenteditable="true">{{ lab_name_ar or brand_name }}</h1>
+   {% if report_header_subtitle %}<div class="sub" data-k="sub" data-l="العنوان الفرعي" contenteditable="true">{{ report_header_subtitle }}</div>{% endif %}
+   <div class="sub" data-k="addr" data-l="العنوان والهاتف" contenteditable="true">{{ lab_address }} {% if lab_phone %} — {{ lab_phone }}{% endif %}</div></div>
  </div>
- {% if letterhead_doctors %}<div class="docs">
-  {% for d in letterhead_doctors %}<div class="c" style="{% if d['font_size'] %}font-size:{{ d['font_size'] }}px{% endif %}"><div class="t">{{ d['title'] or 'الدكتور' }}</div><div class="n">{{ d['name'] }}</div>
+ {% if letterhead_doctors %}<div class="docs" id="docs">
+  {% for d in letterhead_doctors %}<div class="c" data-k="d{{ loop.index0 }}" data-l="د. {{ d['name'] }}" contenteditable="true" style="{% if d['font_size'] %}font-size:{{ d['font_size'] }}px{% endif %}"><div class="t">{{ d['title'] or 'الدكتور' }}</div><div class="n">{{ d['name'] }}</div>
    {% if d['degree_ar'] %}<div class="d">{{ (d['degree_ar'] or '')|e|replace('\\n','<br>'|safe) }}</div>{% endif %}
    {% if d['degree_en'] %}<div class="e">{{ (d['degree_en'] or '')|e|replace('\\n','<br>'|safe) }}</div>{% endif %}</div>{% endfor %}
  </div>{% endif %}
- <table class="info">
-  <tr><td class="k">Patient Name</td><td contenteditable="true">{{ info.name }}</td><td class="k">Patient No.</td><td contenteditable="true">{{ info.reg }}</td></tr>
-  <tr><td class="k">Age</td><td contenteditable="true">{{ info.age }}</td><td class="k">Sample Date</td><td contenteditable="true">{{ info.date }}</td></tr>
-  <tr><td class="k">Sex</td><td contenteditable="true">{{ info.sex }}</td><td class="k">Sample Time</td><td contenteditable="true">{{ info.time }}</td></tr>
-  <tr><td class="k">Consultant</td><td contenteditable="true">{{ info.ref }}</td><td class="k">Sample No.</td><td contenteditable="true">{{ info.sample }}</td></tr>
- </table>
- <div class="ttl" contenteditable="true">Laboratory Report</div>
+</div>
+ <div class="info" id="info" dir="ltr">
+  <div class="cell" data-k="name_ar" data-l="الاسم بالعربي"><div class="k" contenteditable="true">اسم المريض</div><div class="v ar" contenteditable="true">{{ info.name }}</div></div>
+  <div class="cell" data-k="name_en" data-l="Patient Name (EN)"><div class="k" contenteditable="true">Patient Name</div><div class="v" contenteditable="true">{{ info.name_en }}</div></div>
+  <div class="cell" data-k="age" data-l="العمر"><div class="k" contenteditable="true">Age</div><div class="v" contenteditable="true">{{ info.age }}</div></div>
+  <div class="cell" data-k="sex" data-l="الجنس"><div class="k" contenteditable="true">Sex</div><div class="v" contenteditable="true">{{ info.sex }}</div></div>
+  <div class="cell" data-k="date" data-l="التاريخ"><div class="k" contenteditable="true">Sample Date</div><div class="v" contenteditable="true">{{ info.date }}</div></div>
+  <div class="cell" data-k="time" data-l="الوقت"><div class="k" contenteditable="true">Sample Time</div><div class="v" contenteditable="true">{{ info.time }}</div></div>
+  <div class="cell" data-k="ref" data-l="الدكتور / Consultant"><div class="k" contenteditable="true">Consultant</div><div class="v" contenteditable="true">{{ info.ref }}</div></div>
+  <div class="cell" data-k="reg" data-l="رقم المريض"><div class="k" contenteditable="true">Patient No.</div><div class="v" contenteditable="true">{{ info.reg }}</div></div>
+  <div class="cell" data-k="sample" data-l="رقم العينة"><div class="k" contenteditable="true">Sample No.</div><div class="v" contenteditable="true">{{ info.sample }}</div></div>
+ </div>
+ <div class="ttl" contenteditable="true" data-k="ttl" data-l="عنوان «Laboratory Report»">Laboratory Report</div>
  <div class="body" contenteditable="true" dir="auto"><br></div>
-</div></body></html>"""
+</div>
+<script>
+(function(){
+var CFG={{ cfg_json|safe }};
+var els=[].slice.call(document.querySelectorAll('[data-k]'));
+CFG.logo=CFG.logo||'';var lgi=document.getElementById('lgi'),ORIG=lgi?(lgi.getAttribute('src')||''):'';
+function hasLogo(){return !!(CFG.logo||ORIG);}
+function isHid(k){return CFG.hide.indexOf(k)>=0||(k==='logo'&&!hasLogo());}
+function vis(ids){return ids.some(function(k){return !isHid(k);});}
+var PRESET={classic:{hide:['ttl']},compact:{hide:['ttl','sub','addr','d0','d1','d2','d3','d4','d5']},word:{hide:['ttl']},logo:{hide:['ttl','lab','sub','addr','d0','d1','d2','d3','d4','d5']},patient:{hide:['ttl','logo','lab','sub','addr','d0','d1','d2','d3','d4','d5']}};
+function applyCls(){var pg=document.getElementById('pg');pg.className='page st-'+(CFG.style||'classic')+' lp-'+(CFG.lpos||'left');if(lgi)lgi.style.width=(CFG.lw>0)?(CFG.lw+'px'):'';var lg=document.querySelector('.hd .lg');if(lg)lg.classList.toggle('l',(CFG.lpos||'left')==='left');}
+function apply(){
+  applyCls();
+  if(lgi)lgi.src=CFG.logo||ORIG;
+  els.forEach(function(e){e.style.display=isHid(e.getAttribute('data-k'))?'none':'';});
+  var hd=document.getElementById('hd'),nm=document.getElementById('nm'),docs=document.getElementById('docs'),info=document.getElementById('info');
+  var hk=els.filter(function(e){return hd.contains(e);}).map(function(e){return e.getAttribute('data-k');});
+  if(hd)hd.style.display=vis(hk)?'':'none';
+  if(nm){var nk=els.filter(function(e){return nm.contains(e);}).map(function(e){return e.getAttribute('data-k');});nm.style.display=vis(nk)?'':'none';}
+  if(docs){var dk=els.filter(function(e){return docs.contains(e);}).map(function(e){return e.getAttribute('data-k');});docs.style.display=vis(dk)?'':'none';}
+  var ik=els.filter(function(e){return info.contains(e);}).map(function(e){return e.getAttribute('data-k');});
+  info.style.display=vis(ik)?'':'none';
+  document.getElementById('hdwrap').style.zoom=(CFG.scale/100);
+  document.getElementById('hdwrap').style.paddingTop=CFG.top+'mm';
+}
+function build(){
+  var gH=document.getElementById('gHd'),gI=document.getElementById('gInfo');
+  els.forEach(function(e){
+    var k=e.getAttribute('data-k'),lb=document.createElement('label'),cb=document.createElement('input');
+    cb.type='checkbox';cb.checked=CFG.hide.indexOf(k)<0;
+    cb.onchange=function(){var i=CFG.hide.indexOf(k);if(cb.checked){if(i>=0)CFG.hide.splice(i,1);}else if(i<0)CFG.hide.push(k);apply();};
+    lb.appendChild(cb);lb.appendChild(document.createTextNode(' '+(e.getAttribute('data-l')||k)));
+    (document.getElementById('info').contains(e)?gI:gH).appendChild(lb);
+  });
+  var ns=document.getElementById('nScale'),nt=document.getElementById('nTop');ns.value=CFG.scale;nt.value=CFG.top;
+  var ss=document.getElementById('sSty'),sl=document.getElementById('sLp'),nw=document.getElementById('nLw');ss.value=CFG.style||'classic';sl.value=CFG.lpos||'left';nw.value=CFG.lw||0;
+  ss.onchange=function(){CFG.style=ss.value;CFG.hide=(PRESET[ss.value]||PRESET.classic).hide.slice();document.getElementById('gHd').innerHTML='';document.getElementById('gInfo').innerHTML='';build();apply();};
+  sl.onchange=function(){CFG.lpos=sl.value;apply();};
+  nw.oninput=function(){CFG.lw=Math.max(0,Math.min(400,parseInt(nw.value)||0));apply();};
+  ns.oninput=function(){CFG.scale=Math.max(40,Math.min(130,parseInt(ns.value)||100));apply();};
+  nt.oninput=function(){CFG.top=Math.max(0,Math.min(80,parseInt(nt.value)||0));apply();};
+  document.getElementById('bAll').onclick=function(){CFG.logo='';CFG.hide=[];CFG.scale=100;CFG.top=0;CFG.style='classic';CFG.lpos='left';CFG.lw=0;gH.innerHTML='';gI.innerHTML='';build();apply();};
+  document.getElementById('bSave').onclick=function(){
+    fetch('/api/blank-report-cfg',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(CFG)})
+    .then(function(r){return r.json()}).then(function(j){var m=document.getElementById('sMsg');m.textContent=j.ok?' تم الحفظ — يُستعمل كل مرة':' تعذّر الحفظ';setTimeout(function(){m.textContent='';},3000);});
+  };
+}
+document.getElementById('fLogo').onchange=function(){
+  var f=this.files[0];if(!f)return;var rd=new FileReader();
+  rd.onload=function(){var im=new Image();im.onload=function(){
+    var w=Math.min(500,im.width),h=Math.round(im.height*w/im.width),c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(im,0,0,w,h);
+    var u=c.toDataURL('image/png');if(u.length>600000)u=c.toDataURL('image/jpeg',0.85);
+    CFG.logo=u;var i=CFG.hide.indexOf('logo');if(i>=0)CFG.hide.splice(i,1);apply();
+    var gh=document.getElementById('gHd');gh.innerHTML='';document.getElementById('gInfo').innerHTML='';build();};im.src=rd.result;};
+  rd.readAsDataURL(f);};
+document.getElementById('bLogoX').onclick=function(){CFG.logo='';apply();};
+document.getElementById('bTog').onclick=function(){document.getElementById('pnl').classList.toggle('on');};
+build();apply();
+})();
+</script></body></html>"""
+
+
+_BLANK_DEFAULT = {"hide": ["ttl"], "scale": 100, "top": 0, "style": "classic", "lpos": "left", "lw": 0}
+
+
+def _blank_logo(x):
+    """شعار مخصص للتقرير الفارغ كـdata URL صورة فقط وبحجم محدود؛ غير ذلك = لا شعار مخصص."""
+    x = x if isinstance(x, str) else ""
+    return x if re.match(r"^data:image/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$", x) and len(x) <= 700000 else ""
+
+
+def _blank_cfg(db):
+    """إعداد التقرير الفارغ المحفوظ: أجزاء محذوفة + حجم الترويسة + مسافة علوية. أي خلل = الافتراضي."""
+    import json as _j
+    try:
+        raw = _get(db, "blank_report_cfg", "")
+        if not raw:
+            return {"hide": list(_BLANK_DEFAULT["hide"]), "scale": 100, "top": 0, "logo": "", "style": "classic", "lpos": "left", "lw": 0}
+        d = _j.loads(raw)
+        hide = [str(x) for x in (d.get("hide") or []) if re.fullmatch(r"[a-z_0-9]{1,20}", str(x))][:40]
+        return {"hide": hide, "scale": max(40, min(130, int(d.get("scale", 100)))), "top": max(0, min(80, int(d.get("top", 0)))),
+                "logo": _blank_logo(d.get("logo")),
+                "style": d.get("style") if d.get("style") in ("classic", "compact", "word", "logo", "patient") else "classic",
+                "lpos": d.get("lpos") if d.get("lpos") in ("left", "right", "center") else "left",
+                "lw": max(0, min(400, int(d.get("lw", 0) or 0)))}
+    except Exception:
+        return dict(_BLANK_DEFAULT)
+
+
+# ------------------------------------------------------------------ v138: أزرار صفحة «زيارة جديدة»
+_NV_JS = r"""<script id="lis-nv-btns">(function(){try{
+var pn=document.querySelector('[name="patient_name"]');var f=pn&&pn.form;if(!f||document.getElementById('lisNvBar'))return;
+function v(n){var e=f.querySelector('[name="'+n+'"]');return e?(e.value||'').trim():'';}
+function age(){var a=v('age');if(a)return a;var b=v('birth_date');if(b){var y=parseInt(b.slice(0,4));if(y>1900)return String(new Date().getFullYear()-y);}return '';}
+var bar=document.createElement('div');bar.id='lisNvBar';bar.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;direction:rtl';
+function mk(t,c){var b=document.createElement('button');b.type='button';b.textContent=t;b.style.cssText='padding:8px 14px;border-radius:9px;border:1px solid '+c+';background:#fff;color:'+c+';font:600 14px Tahoma;cursor:pointer';return b;}
+var bb=mk('\uD83D\uDCC4 \u0637\u0628\u0627\u0639\u0629 \u062A\u0642\u0631\u064A\u0631 \u0641\u0627\u0631\u063A','#15803d');
+var bi=mk('\uD83D\uDCF7 \u0645\u0631\u064A\u0636 \u062C\u062F\u064A\u062F \u0645\u0646 \u0635\u0648\u0631\u0629 \u0646\u062A\u064A\u062C\u0629','#1d4ed8');
+function missing(){var m=[];if(!v('patient_name'))m.push('\u0627\u0633\u0645 \u0627\u0644\u0645\u0631\u064A\u0636');if(!age())m.push('\u0627\u0644\u0639\u0645\u0631');if(!v('gender'))m.push('\u0627\u0644\u062C\u0646\u0633');return m;}
+function refresh(){var ok=missing().length===0;bb.style.opacity=ok?'1':'.45';bb.style.background=ok?'#f0fdf4':'#fff';}
+f.addEventListener('input',refresh);f.addEventListener('change',refresh);setInterval(refresh,1500);refresh();
+bb.onclick=function(){var m=missing();if(m.length){alert('\u0623\u0643\u0645\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0631\u064A\u0636 \u0623\u0648\u0644\u0627\u064B: '+m.join('\u060C '));return;}
+ var p=new URLSearchParams({name:v('patient_name'),name_en:v('patient_name_en'),age:age(),age_unit:v('age_unit')||'Years',sex:v('gender'),ref:v('doctor_name')});
+ window.open('/front-desk/print/blank-report?'+p.toString(),'_blank');};
+bi.onclick=function(){window.open('/front-desk/import-image','_blank');};
+bar.appendChild(bb);bar.appendChild(bi);f.parentNode.insertBefore(bar,f);
+}catch(e){}})();</script>"""
 
 
 def install(app, helpers=None):
@@ -2137,6 +2401,20 @@ def install(app, helpers=None):
             label, detail = "☁ ربط السجل", "اضغط لإعداد الربط مع السجل السحابي"
         return jsonify(enabled=en, color=col, label=label, detail=detail)
 
+    @bp.route("/ledger/notes.json")
+    def notes_json():
+        if not allowed():
+            return jsonify(ok=False, items=[]), 401
+        db = _db()
+        try:
+            try:
+                lst = json.loads(_get(db, "ledger_notes", "[]") or "[]")
+            except Exception:
+                lst = []
+            return jsonify(ok=True, items=[x for x in lst if isinstance(x, dict)][-30:])
+        finally:
+            db.close()
+
     @bp.route("/ledger/flags.json")
     def flags_json():
         if not allowed():
@@ -2165,16 +2443,29 @@ def install(app, helpers=None):
         finally:
             db.close()
 
-    # ---- v126: تقرير فارغ (ترويسة المختبر + الشعار + أسماء الأطباء + بيانات المريض) قابل للتعديل ثم الطباعة
-    @bp.route("/front-desk/visits/<int:visit_id>/print/blank-report")
-    def blank_report(visit_id):
-        if not allowed():
-            return Response("<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;padding:20px'>سجّل الدخول من الشاشة الرئيسية أولاً.</body>", 401, mimetype="text/html")
+    # ---- v126/v138: تقرير فارغ (ترويسة المختبر + الشعار + أسماء الأطباء + بيانات المريض) قابل للتعديل ثم الطباعة
+    # v138: كل جزء بالترويسة وبيانات المريض يُحذف بعلامة (يُحفظ كإعداد افتراضي)، مع حجم الترويسة ومسافة علوية،
+    # ويشتغل أيضاً من صفحة «زيارة جديدة» قبل حفظ الزيارة (/front-desk/print/blank-report?name=..&age=..).
+    def _blank_render(info):
+        import json as _j
         from flask import render_template_string
         db = _db()
         try:
+            c_ = _blank_cfg(db)
+        finally:
+            db.close()
+        return Response(render_template_string(_BLANK_TPL, info=info, cfg_json=_j.dumps(c_).replace("</", "<\\/")), mimetype="text/html")
+
+    _NOAUTH = "<meta charset=utf-8><body dir=rtl style='font-family:Tahoma;padding:20px'>سجّل الدخول من الشاشة الرئيسية أولاً.</body>"
+
+    @bp.route("/front-desk/visits/<int:visit_id>/print/blank-report")
+    def blank_report(visit_id):
+        if not allowed():
+            return Response(_NOAUTH, 401, mimetype="text/html")
+        db = _db()
+        try:
             v = db.execute(
-                "SELECT v.id, v.registration_number, v.sample_no, v.created_at, p.full_name, p.gender, p.age, p.age_unit, "
+                "SELECT v.id, v.registration_number, v.sample_no, v.created_at, p.full_name, p.full_name_en, p.gender, p.age, p.age_unit, "
                 "(SELECT name FROM referral_centers rc WHERE rc.id=v.referral_center_id) AS center, "
                 "(SELECT full_name FROM doctors d WHERE d.id=v.doctor_id) AS doctor "
                 "FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.id=?", (visit_id,)).fetchone()
@@ -2183,12 +2474,89 @@ def install(app, helpers=None):
             au = {"years": "Years", "year": "Years", "months": "Months", "days": "Days"}
             age = ("%s %s" % (v["age"], au.get(str(v["age_unit"] or "").lower(), v["age_unit"] or ""))).strip() if v["age"] not in (None, "") else ""
             dt = str(v["created_at"] or "")
-            info = {"name": v["full_name"] or "", "age": age, "sex": v["gender"] or "", "reg": v["registration_number"] or "",
-                    "sample": v["sample_no"] or "", "date": ("%s/%s/%s" % (dt[8:10], dt[5:7], dt[0:4])) if len(dt) >= 10 else "",
+            info = {"name": v["full_name"] or "", "name_en": v["full_name_en"] or "", "age": age, "sex": v["gender"] or "",
+                    "reg": v["registration_number"] or "", "sample": v["sample_no"] or "",
+                    "date": ("%s/%s/%s" % (dt[8:10], dt[5:7], dt[0:4])) if len(dt) >= 10 else "",
                     "time": dt[11:16], "ref": (v["doctor"] or v["center"] or "")}
         finally:
             db.close()
-        return Response(render_template_string(_BLANK_TPL, info=info), mimetype="text/html")
+        return _blank_render(info)
+
+    @bp.route("/front-desk/print/blank-report")
+    def blank_report_new():
+        if not allowed():
+            return Response(_NOAUTH, 401, mimetype="text/html")
+        from datetime import datetime as _dt
+        g = lambda k, n=120: (request.args.get(k) or "").strip()[:n]
+        au = {"years": "Years", "year": "Years", "months": "Months", "days": "Days"}
+        a_ = g("age", 6)
+        age = ("%s %s" % (a_, au.get(g("age_unit", 10).lower(), "Years"))).strip() if a_ else ""
+        now = _dt.now()
+        info = {"name": g("name"), "name_en": g("name_en"), "age": age, "sex": g("sex", 10), "reg": "", "sample": "",
+                "date": now.strftime("%d/%m/%Y"), "time": now.strftime("%H:%M"), "ref": g("ref")}
+        return _blank_render(info)
+
+    @bp.route("/api/blank-report-cfg", methods=["POST"])
+    def blank_report_cfg_save():
+        if not allowed():
+            return jsonify(ok=False, error="login"), 401
+        import json as _j
+        d = request.get_json(silent=True) or {}
+        db = _db()
+        try:
+            _set(db, "blank_report_cfg", _j.dumps({"hide": d.get("hide") or [], "scale": d.get("scale", 100), "top": d.get("top", 0), "logo": _blank_logo(d.get("logo")), "style": d.get("style"), "lpos": d.get("lpos"), "lw": d.get("lw", 0)}))
+            db.commit()
+            return jsonify(ok=True, cfg=_blank_cfg(db))
+        finally:
+            db.close()
+
+    @bp.route("/api/inr-settings", methods=["GET", "POST"])
+    def inr_settings():
+        if not allowed():
+            return jsonify(ok=False, error="login"), 401
+        db = _db()
+        try:
+            if request.method == "POST":
+                d = request.get_json(silent=True) or {}
+                for k, f in (("inr_isi", "isi"), ("inr_mnpt", "mnpt")):
+                    if f in d:
+                        v = re.sub(r"[^0-9.]", "", str(d.get(f) or "").replace(",", "."))[:10]
+                        _set(db, k, v)
+                db.commit()
+            return jsonify(ok=True, isi=_get(db, "inr_isi", ""), mnpt=_get(db, "inr_mnpt", ""))
+        finally:
+            db.close()
+
+    @bp.route("/api/inr-create", methods=["POST"])
+    def inr_create():
+        if not allowed():
+            return jsonify(ok=False, error="login"), 401
+        d = request.get_json(silent=True) or {}
+        db = _db()
+        try:
+            ot = db.execute("SELECT test_definition_id FROM order_tests WHERE id=?", (int(d.get("ot_id") or 0),)).fetchone()
+            if not ot:
+                return jsonify(ok=False, error="التحليل غير موجود")
+            tid = ot["test_definition_id"]
+            nm = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
+            rows = db.execute("SELECT id, name FROM test_parameters WHERE test_definition_id=?", (tid,)).fetchall()
+            names = {nm(r["name"]): r for r in rows}
+            if "pt" not in names:
+                cand = [r for r in rows if nm(r["name"]) in ("ptinr", "inrpt", "prothrombintime", "pt")]
+                if cand:
+                    db.execute("UPDATE test_parameters SET name='PT', unit=CASE WHEN COALESCE(unit,'')='' THEN 'sec' ELSE unit END WHERE id=?", (cand[0]["id"],))
+                else:
+                    db.execute("INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, 'PT', 'sec', 'Numeric')", (tid,))
+            if not any(k in names for k in ("ptcontrol", "mnpt", "controlpt", "ptmnpt", "ptcontrolmnpt")):
+                db.execute("INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, 'PT Control', 'sec', 'Numeric')", (tid,))
+            if "inr" not in names:
+                db.execute("INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, 'INR', '', 'Numeric')", (tid,))
+            db.commit()
+            return jsonify(ok=True)
+        except Exception as e:
+            return jsonify(ok=False, error=str(e)[:120])
+        finally:
+            db.close()
 
     @app.after_request
     def _inject(resp):
@@ -2197,7 +2565,7 @@ def install(app, helpers=None):
                     and request.method == "GET" and not request.path.startswith(("/ledger", "/ai/assistant", "/api/"))):
                 b = resp.get_data(as_text=True)
                 if "</body>" in b and "lis-ledger-badge" not in b:
-                    resp.set_data(b.replace("</body>", _BADGE + _BELL + _blank_btn(b) + "</body>", 1))
+                    resp.set_data(b.replace("</body>", _BADGE + _BELL + _NOTES + _blank_btn(b) + (_NV_JS if request.path == "/front-desk/new-visit" else "") + (_INR_JS if "data-param-name" in b else "") + "</body>", 1))
         except Exception:
             pass
         return resp

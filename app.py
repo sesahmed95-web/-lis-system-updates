@@ -9784,6 +9784,28 @@ def get_ordered_parameters(db, ot):
     return _all
 
 
+def _v133_ensure_default_param(db, ot):
+    """v133: تحليل بلا أي باراميتر (مثلاً اسم كتبه الموظف بزيارة جديدة) كان يظهر بلا خانة نتيجة.
+    نضيف له تلقائياً باراميتر واحد باسم التحليل (رقم أو نص حر) ليقدر العميل يكتب النتيجة حتى بدون تصميم تقرير.
+    لا يمس التحاليل ذات القوالب الخاصة (REPORT_TEMPLATE_MAP)."""
+    try:
+        td = db.execute("SELECT id, code, name FROM test_definitions WHERE id=?", (ot["test_definition_id"],)).fetchone()
+        if not td or str(td["code"] or "").upper() in REPORT_TEMPLATE_MAP:
+            return False
+        if db.execute("SELECT 1 FROM test_parameters WHERE test_definition_id=? LIMIT 1", (td["id"],)).fetchone():
+            return False
+        try:
+            db.execute("INSERT INTO test_parameters (test_definition_id, name, unit, result_type, sort_order) VALUES (?, ?, '', 'Numeric', 1)",
+                       (td["id"], td["name"]))
+        except Exception:
+            db.execute("INSERT INTO test_parameters (test_definition_id, name, unit, result_type) VALUES (?, ?, '', 'Numeric')",
+                       (td["id"], td["name"]))
+        db.commit()
+        return True
+    except Exception:
+        return False
+
+
 def _get_ordered_parameters_raw(db, ot):
     """يرجّع بارامترات order_test هذا — كلها إذا طُلب التحليل كامل
     (السلوك الافتراضي)، أو بس البارامترات المحدَّدة فعليًا لو استُخدم سهم
@@ -9795,6 +9817,11 @@ def _get_ordered_parameters_raw(db, ot):
         "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
         (ot["test_definition_id"],),
     ).fetchall()
+    if not all_params and _v133_ensure_default_param(db, ot):      # v133
+        all_params = db.execute(
+            "SELECT * FROM test_parameters WHERE test_definition_id=? ORDER BY sort_order, id",
+            (ot["test_definition_id"],),
+        ).fetchall()
     selected_raw = ot["selected_param_ids"] if "selected_param_ids" in ot.keys() else None
     if not selected_raw:
         return all_params
@@ -11537,6 +11564,44 @@ def api_add_test_parameter():
 # ويحدد المدى الطبيعي (مدى واحد للجنسين أو مختلف للذكور/الإناث، أو نص مثل Negative).
 # يُضاف لتعريف التحليل نفسه (يظهر لكل المرضى لاحقًا) وتُعاد ترقيم sort_order للباراميترات
 # بحيث تبقى بنفس ترتيبها القديم والجديد بالمكان المطلوب.
+@app.route("/api/result-style", methods=["GET", "POST"])
+@login_required
+def api_result_style_v134():
+    """v134: العميل يختار أسلوب جدول النتائج (يسري على كل التقارير) من لوحة إدخال النتائج بنفسه."""
+    db = get_db()
+    cfg = get_result_layout(db)
+    if request.method == "GET":
+        return jsonify(ok=True, style=cfg.get("style"), styles=list(RESULT_STYLES))
+    st = str((request.get_json(silent=True) or {}).get("style") or "").strip()
+    if st not in RESULT_STYLES:
+        return jsonify(ok=False, error="أسلوب غير صالح"), 400
+    cfg["style"] = st
+    save_result_layout(db, cfg)
+    log_action("SetResultStyle", "settings", 0, st)
+    return jsonify(ok=True, style=st)
+
+
+@app.route("/api/test-definitions/<int:tdid>/rename", methods=["POST"])
+@login_required
+def api_rename_test_definition_v133(tdid):
+    """v133: تعديل اسم التحليل (أو مختصره) من لوحة إدخال النتائج — يسري على كل المرضى (الحاليين والقادمين)."""
+    db = get_db()
+    td = db.execute("SELECT id, name, code FROM test_definitions WHERE id=?", (tdid,)).fetchone()
+    if not td:
+        return jsonify({"ok": False, "error": "التحليل غير موجود"}), 404
+    name = re.sub(r"\s+", " ", str((request.get_json(silent=True) or {}).get("name") or "")).strip()[:120]
+    if not name:
+        return jsonify({"ok": False, "error": "اكتب الاسم أو المختصر"}), 400
+    old = td["name"]
+    db.execute("UPDATE test_definitions SET name=? WHERE id=?", (name, tdid))
+    ps = db.execute("SELECT id, name FROM test_parameters WHERE test_definition_id=?", (tdid,)).fetchall()
+    if len(ps) == 1 and str(ps[0]["name"] or "").strip() == str(old or "").strip():
+        db.execute("UPDATE test_parameters SET name=? WHERE id=?", (name, ps[0]["id"]))    # تحليل بخانة واحدة باسمه
+    db.commit()
+    log_action("RenameTest", "test_definitions", tdid, "%s -> %s" % (old, name))
+    return jsonify({"ok": True, "name": name})
+
+
 @app.route("/api/test-definitions/<int:tdid>/add-parameter", methods=["POST"])
 @roles_required("supervisor")
 def api_add_parameter_with_ranges(tdid):
@@ -21018,6 +21083,371 @@ def _lis_ai_register(app, get_db, get_setting, set_setting):
         print("LIS-PLUS not loaded:", _pe)
     # ===== LIS-PLUS END =====
 
+    # ===== v138: مريض جديد من صورة نتيجة (ورقة وورد/جهاز) =====
+    # الصفحة /front-desk/import-image: ترفع صورة ← الذكاء يقرأ بيانات المريض والقيم ← تراجع وتعدّل ← حفظ.
+    # الحفظ يستدعي نفس مسار «زيارة جديدة» ثم نفس مسار «إدخال النتائج» داخلياً، فيمر كل شي بنفس المنطق
+    # (سجل المرضى، الفاتورة، الأعلام، المزامنة) بدون كود حفظ مكرر.
+    def _v138_norm(x):
+        return re.sub(r"[^a-z0-9%#]", "", str(x or "").lower())
+
+    def _v138_auth():
+        return _allowed() or bool(session.get("user_id"))
+
+    def _v138_params(db, tid):
+        return db.execute("SELECT id, name, result_type FROM test_parameters WHERE test_definition_id=? "
+                          "ORDER BY sort_order, id", (tid,)).fetchall()
+
+    def _v138_find_test(db, title):
+        t = _v138_norm(title)
+        if len(t) < 2:
+            return None
+        rows = db.execute("SELECT id, name, code, COALESCE(short_name,'') AS sn FROM test_definitions WHERE is_active=1").fetchall()
+        for r_ in rows:
+            if t in (_v138_norm(r_["name"]), _v138_norm(r_["code"]), _v138_norm(r_["sn"])):
+                return r_["id"]
+        for r_ in rows:
+            n_ = _v138_norm(r_["name"])
+            if len(t) >= 3 and (n_.startswith(t) or t.startswith(n_) and len(n_) >= 3):
+                return r_["id"]
+        return None
+
+    def _v138_match(params, pairs):
+        """يطابق (label,value) المقروءة مع أسماء حقول التحليل. يرجّع ({param_id: value}, [pairs غير مطابقة])."""
+        cand = []
+        for p_ in pairs or []:
+            if isinstance(p_, dict):
+                k_, v_ = _v138_norm(p_.get("label")), str(p_.get("value") or "").strip()
+                if k_ and v_:
+                    cand.append([k_, v_, str(p_.get("label") or "").strip(), False])
+        vals = {}
+        for prm in params:
+            n_ = _v138_norm(prm["name"])
+            if not n_:
+                continue
+            hit = None
+            for c_ in cand:
+                if not c_[3] and c_[0] == n_:
+                    hit = c_
+                    break
+            if hit is None and len(n_) >= 3:
+                for c_ in cand:
+                    if not c_[3] and len(c_[0]) >= 3 and (c_[0].startswith(n_) or n_.startswith(c_[0])):
+                        hit = c_
+                        break
+            if hit is not None:
+                hit[3] = True
+                v_ = hit[1]
+                if str(prm["result_type"] or "").lower() != "text":
+                    m_ = re.search(r"-?\d+(?:\.\d+)?", v_)
+                    v_ = m_.group(0) if m_ else v_
+                vals[prm["id"]] = v_
+        return vals, [{"label": c_[2], "value": c_[1]} for c_ in cand if not c_[3]]
+
+    def _v138_params_payload(db, tid, pairs):
+        params = _v138_params(db, tid)
+        vals, rest = _v138_match(params, pairs)
+        return ([{"id": p_["id"], "name": p_["name"], "text": str(p_["result_type"] or "").lower() == "text",
+                  "value": vals.get(p_["id"], "")} for p_ in params], rest)
+
+    @bp.route("/ai/api/import-tests")
+    def v138_import_tests():
+        if not _v138_auth():
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        db = get_db()
+        rows = db.execute("SELECT id, name FROM test_definitions WHERE is_active=1 ORDER BY name LIMIT 800").fetchall()
+        return jsonify(ok=True, tests=[{"id": r_["id"], "name": r_["name"]} for r_ in rows])
+
+    @bp.route("/ai/api/import-match", methods=["POST"])
+    def v138_import_match():
+        if not _v138_auth():
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        d = request.get_json(silent=True) or {}
+        try:
+            tid = int(d.get("tid"))
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error="اختر التحليل."), 400
+        params, rest = _v138_params_payload(get_db(), tid, d.get("pairs") or [])
+        return jsonify(ok=True, params=params, unmatched=rest)
+
+    @bp.route("/ai/api/import-extract", methods=["POST"])
+    def v138_import_extract():
+        if not _v138_auth():
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        cfg = _cfg()
+        if not cfg["enabled"]:
+            return jsonify(ok=False, error="المساعد الذكي متوقف من الإعدادات."), 403
+        if not cfg["key"] and not cfg.get("vkey"):
+            return jsonify(ok=False, error="أدخل مفتاح الذكاء الصناعي أولاً من إعدادات الذكاء."), 200
+        f_ = request.files.get("image")
+        if not f_:
+            return jsonify(ok=False, error="ما وصلت صورة."), 400
+        try:
+            from PIL import Image
+            import io, base64
+            from PIL import ImageOps
+            im = Image.open(f_.stream)
+            try:
+                im = ImageOps.exif_transpose(im)      # v140: صور الموبايل المقلوبة تُعدَّل حسب EXIF
+            except Exception:
+                pass
+            im = im.convert("RGB")
+            try:
+                _rot0 = int(request.form.get("rot") or 0) % 360
+            except ValueError:
+                _rot0 = 0
+            if _rot0:
+                im = im.rotate(-_rot0, expand=True)     # تدوير يدوي من الصفحة (باتجاه عقارب الساعة)
+            im.thumbnail((2000, 2000))
+        except Exception as exc:
+            return jsonify(ok=False, error="تعذّر قراءة ملف الصورة: %s" % exc), 400
+
+        def _v140_b64(img):
+            _b = io.BytesIO()
+            img.save(_b, "JPEG", quality=90)
+            return base64.b64encode(_b.getvalue()).decode()
+        prompt = (
+            "This is a photo or screenshot of a laboratory report. Return ONLY one JSON object, no explanation, in this exact shape: "
+            '{"patient":{"name_ar":"","name_en":"","sex":"Male or Female or empty","age":"","age_unit":"Years or Months or Days",'
+            '"date":"DD/MM/YYYY","doctor":""},"test_title":"","pairs":[{"label":"","value":""}]}. '
+            "patient.name_ar = the patient name written in Arabic exactly as printed (next to the Arabic word for patient name). "
+            "patient.doctor = the doctor/consultant name printed in the header fields. "
+            "test_title = the report title (for example Blood Film, CBC). "
+            "pairs = every labelled value in the body of the report, in reading order. label exactly as printed, without the colon, "
+            "units or percent sign; value as printed (numbers only without unit or percent sign; for text findings copy the full text, "
+            "using \\n between lines; for a Conclusion list join its bullet lines with \\n). Skip labels that have no value. "
+            "Do not guess and do not invent anything that is not visible. "
+            "The photo may be rotated by 90/180 degrees or taken at an angle: read it anyway. "
+            "If it is a printout from a hematology analyzer (tables of WBC, RBC, HGB, HCT, MCV, MCH, MCHC, PLT, MPV, LY, MO, NE, EO, BA, LY#, MO#, NE#, EO#, BA#, RDW, RDW-SD) "
+            "set test_title to CBC and take ONLY the Result column (ignore the Low, High, Flags and Units columns, ignore histograms); "
+            "keep the '#' in absolute-count labels (for example NE#) so they are different from the percent rows (NE). "
+            "For analyzer printouts: name_en = First Name + Last Name as printed; name_ar = the Arabic patient name if it is written anywhere on the sheet (header line after the Arabic words for patient name); "
+            "sex and age as printed (for example 'Male', '32 Years')."
+        )
+        data = {}
+        _tries = [0] if (im.width <= im.height) else [0, 90, 270]    # صورة أفقية: غالباً ورقة مقلوبة → جرّب التدوير تلقائياً
+        for _ri, _rr in enumerate(_tries):
+            _img = im if _rr == 0 else im.rotate(-_rr, expand=True)
+            try:
+                txt = _call_ai_vision(cfg, prompt, _v140_b64(_img))
+            except _AIErr as e:
+                return jsonify(ok=False, error=str(e))
+            m = re.search(r"\{.*\}", txt, re.S)
+            try:
+                data = json.loads(m.group(0)) if m else {}
+            except Exception:
+                data = {}
+            _np = len([x for x in (data.get("pairs") or []) if isinstance(x, dict) and str(x.get("value") or "").strip()]) if isinstance(data, dict) else 0
+            if _np >= 3:
+                break
+        if not isinstance(data, dict) or not data:
+            return jsonify(ok=False, error="ما قدرت أقرأ الصورة. جرّب صورة أوضح، أو استعمل زر التدوير ↻ ثم أعد القراءة.")
+        # v140: ورقة جهاز CBC بلا عنوان تقرير: إذا القيم المقروءة تخص CBC نعتبر العنوان CBC
+        if not str(data.get("test_title") or "").strip():
+            _cbcset = {"wbc", "wbcs", "rbc", "hgb", "hb", "hct", "mcv", "mch", "mchc", "plt", "mpv", "rdw", "rdwsd"}
+            _lab = {_v138_norm(p_.get("label")) for p_ in (data.get("pairs") or []) if isinstance(p_, dict)}
+            if len(_lab & _cbcset) >= 5:
+                data["test_title"] = "CBC"
+        pat = data.get("patient") if isinstance(data.get("patient"), dict) else {}
+        pairs = data.get("pairs") if isinstance(data.get("pairs"), list) else []
+        db = get_db()
+        sx = str(pat.get("sex") or "").strip().lower()
+        pat_out = {"name_ar": str(pat.get("name_ar") or "").strip()[:120], "name_en": str(pat.get("name_en") or "").strip()[:120],
+                   "sex": "Male" if sx.startswith("m") else ("Female" if sx.startswith("f") else ""),
+                   "age": re.sub(r"[^0-9.]", "", str(pat.get("age") or ""))[:6],
+                   "age_unit": {"months": "Months", "month": "Months", "days": "Days", "day": "Days"}.get(str(pat.get("age_unit") or "").strip().lower(), "Years"),
+                   "date": str(pat.get("date") or "").strip()[:10], "doctor": str(pat.get("doctor") or "").strip()[:80]}
+        title = str(data.get("test_title") or "").strip()[:80]
+        tid = _v138_find_test(db, title)
+        params, rest = (_v138_params_payload(db, tid, pairs) if tid else ([], [{"label": str(p_.get("label") or ""), "value": str(p_.get("value") or "")} for p_ in pairs if isinstance(p_, dict) and str(p_.get("value") or "").strip()]))
+        existing = []
+        nm = pat_out["name_ar"] or pat_out["name_en"]
+        if nm:
+            for r_ in db.execute("SELECT id, full_name, age FROM patients WHERE full_name=? OR full_name_en=? ORDER BY id DESC LIMIT 5", (nm, nm)).fetchall():
+                existing.append({"id": r_["id"], "name": r_["full_name"], "age": r_["age"]})
+        return jsonify(ok=True, patient=pat_out, test_title=title, tid=tid, pairs=pairs, params=params, unmatched=rest, existing=existing)
+
+    @bp.route("/ai/api/import-create", methods=["POST"])
+    def v138_import_create():
+        if not _v138_auth():
+            return jsonify(ok=False, error="سجّل الدخول أولاً."), 401
+        d = request.get_json(silent=True) or {}
+        name = str(d.get("name_ar") or d.get("name_en") or "").strip()
+        try:
+            tid = int(d.get("tid"))
+        except (TypeError, ValueError):
+            tid = 0
+        if not name:
+            return jsonify(ok=False, error="اكتب اسم المريض."), 400
+        if not tid:
+            return jsonify(ok=False, error="اختر التحليل."), 400
+        form = {"patient_name": name, "patient_name_en": str(d.get("name_en") or "").strip(),
+                "gender": str(d.get("gender") or ""), "age": str(d.get("age") or ""),
+                "age_unit": str(d.get("age_unit") or "Years"), "doctor_name": str(d.get("doctor") or "").strip(),
+                "sample_collected": "1", "tests": [str(tid)]}
+        if d.get("existing_patient_id"):
+            form["existing_patient_id"] = str(d.get("existing_patient_id"))
+        if d.get("free"):
+            form["price_override_%s" % tid] = "0"
+        c = app.test_client()
+        with c.session_transaction() as s_:
+            s_.update(dict(session))
+        r1 = c.post("/front-desk/new-visit", data=form, headers={"X-LIS-Ajax": "1"})
+        j1 = r1.get_json(silent=True) or {}
+        if not j1.get("ok"):
+            return jsonify(ok=False, error=j1.get("error") or ("تعذّر إنشاء الزيارة (رمز %s)." % r1.status_code))
+        vid = j1.get("visit_id")
+        db = get_db()
+        ot = db.execute("SELECT ot.id FROM order_tests ot JOIN orders o ON o.id=ot.order_id "
+                        "WHERE o.visit_id=? AND ot.test_definition_id=? ORDER BY ot.id LIMIT 1", (vid, tid)).fetchone()
+        if not ot:
+            return jsonify(ok=False, error="أُنشئت الزيارة لكن ما لقيت التحليل بها.", visit_id=vid)
+        data = {"shown_ot_ids": str(ot["id"])}
+        for pid, val in (d.get("values") or {}).items():
+            if str(pid).isdigit() and str(val).strip():
+                data["ot%s_param_%s" % (ot["id"], pid)] = str(val).strip()
+        saved = False
+        if len(data) > 1:
+            r2 = c.post("/front-desk/visits/%s/results" % vid, data=data, headers={"X-Requested-With": "fetch"})
+            j2 = r2.get_json(silent=True) or {}
+            saved = bool(j2.get("saved"))
+            if not j2.get("ok"):
+                return jsonify(ok=False, error=j2.get("error") or "أُنشئت الزيارة لكن تعذّر حفظ النتائج.", visit_id=vid,
+                               results_url="/front-desk/visits/%s/results" % vid)
+        try:
+            print_url = url_for("print_report", order_test_id=ot["id"])
+        except Exception:
+            print_url = ""
+        return jsonify(ok=True, visit_id=vid, saved=saved, results_url="/front-desk/visits/%s/results" % vid, print_url=print_url)
+
+    @bp.route("/front-desk/import-image")
+    def v138_import_page():
+        if not _v138_auth():
+            return redirect("/")
+        return Response(_V138_PAGE, mimetype="text/html")
+
+    _V138_PAGE = r"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>مريض جديد من صورة نتيجة</title>
+<style>
+body{margin:0;background:#f1f5f9;font-family:Tahoma,Arial,sans-serif;color:#0f172a}
+.w{max-width:980px;margin:18px auto;padding:0 12px}
+h1{font-size:20px;margin:0 0 12px}
+.card{background:#fff;border:1px solid #cbd5e1;border-radius:12px;padding:14px;margin-bottom:12px}
+.drop{border:2px dashed #94a3b8;border-radius:12px;min-height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#475569;text-align:center;padding:10px}
+.drop.on{background:#eff6ff;border-color:#2563eb}
+.drop img{max-width:100%;max-height:260px}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+label{font-size:13px;color:#334155;display:block}
+input,select,textarea{width:100%;box-sizing:border-box;padding:8px;border:1px solid #94a3b8;border-radius:8px;font:14px Tahoma;margin-top:3px}
+textarea{min-height:60px;resize:vertical}
+button{padding:9px 16px;border-radius:9px;border:1px solid #1d4ed8;background:#1d4ed8;color:#fff;font:600 14px Tahoma;cursor:pointer}
+button.s{background:#fff;color:#1d4ed8}
+.msg{margin:8px 0;font-size:14px}.err{color:#b91c1c}.ok{color:#15803d}
+.pr{display:grid;grid-template-columns:200px 1fr;gap:8px;align-items:start;margin-bottom:6px}
+.pr b{font-size:13px;padding-top:9px;direction:ltr;text-align:left}
+.un{font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:8px;margin-top:8px;direction:ltr;text-align:left}
+</style></head><body><div class="w">
+<h1>مريض جديد من صورة نتيجة</h1>
+<div class="card">
+ <div class="drop" id="drop"><div id="dtxt">اسحب الصورة هنا، أو الصقها (Ctrl+V)، أو اختر ملفاً</div><img id="pv" style="display:none" alt="">
+ <button type="button" class="s" id="pick">📁 اختيار صورة</button><input type="file" id="fi" accept="image/*" style="display:none">
+ <div id="rotbar" style="display:none;gap:8px"><button type="button" class="s" id="rotR">↻ تدوير 90° وإعادة القراءة</button><button type="button" class="s" id="rotL">↺ عكس الاتجاه</button></div></div>
+ <div class="msg" id="st"></div>
+</div>
+<div class="card" id="frm" style="display:none">
+ <div class="g">
+  <label>الاسم بالعربي<input id="nar"></label>
+  <label>Patient name (EN)<input id="nen" dir="ltr"></label>
+  <label>الجنس<select id="sex"><option value="">—</option><option>Male</option><option>Female</option></select></label>
+  <label>العمر<input id="age" dir="ltr"></label>
+  <label>وحدة العمر<select id="au"><option>Years</option><option>Months</option><option>Days</option></select></label>
+  <label>الدكتور<input id="doc"></label>
+  <label>التحليل<select id="tsel"></select></label>
+ </div>
+ <div id="ex" class="msg" style="display:none"></div>
+ <h3 style="font-size:15px;margin:14px 0 8px">النتائج (راجعها وعدّلها)</h3>
+ <div id="prm"></div><div id="un" class="un" style="display:none"></div>
+ <label style="margin-top:10px"><input type="checkbox" id="free" style="width:auto"> بدون حساب: لا يُحسب مبلغ مالي على هذه الزيارة (سعر التحليل 0). اتركه غير مفعّل لو تريد السعر العادي</label>
+ <div class="msg" style="font-size:12px;color:#64748b">ملاحظة: تاريخ الزيارة يكون وقت الحفظ. إذا التحليل يتطلب تحليلاً آخر (مثل CBC لـ Blood film) يُضاف تلقائياً بدون قيم.</div>
+ <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+  <button type="button" id="b1">💾 حفظ وفتح النتائج</button>
+  <button type="button" class="s" id="b2">🖨 حفظ وفتح التقرير للطباعة</button>
+ </div>
+ <div class="msg" id="st2"></div>
+</div></div>
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)};
+var PAIRS=[], EXID=null, CURF=null, ROT=0;
+function st(t,c){var e=$('st');e.className='msg '+(c||'');e.textContent=t||'';}
+function st2(t,c){var e=$('st2');e.className='msg '+(c||'');e.textContent=t||'';}
+$('pick').onclick=function(){$('fi').click();};
+$('rotR').onclick=function(){if(CURF){ROT=(ROT+90)%360;go(CURF,true);}};$('rotL').onclick=function(){if(CURF){ROT=(ROT+270)%360;go(CURF,true);}};
+$('fi').onchange=function(){if(this.files[0])go(this.files[0]);};
+var dp=$('drop');
+dp.addEventListener('dragover',function(e){e.preventDefault();dp.classList.add('on');});
+dp.addEventListener('dragleave',function(){dp.classList.remove('on');});
+dp.addEventListener('drop',function(e){e.preventDefault();dp.classList.remove('on');var f=e.dataTransfer.files[0];if(f)go(f);});
+document.addEventListener('paste',function(e){var it=(e.clipboardData||{}).items||[];for(var i=0;i<it.length;i++){if(it[i].type.indexOf('image')===0){go(it[i].getAsFile());break;}}});
+function tests(sel){
+  return fetch('/ai/api/import-tests',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){
+    var s=$('tsel');s.innerHTML='<option value="">— اختر التحليل —</option>';
+    (j.tests||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;s.appendChild(o);});
+    if(sel)s.value=sel;});
+}
+function render(params,un){
+  var box=$('prm');box.innerHTML='';
+  params.forEach(function(p){
+    var row=document.createElement('div');row.className='pr';
+    var b=document.createElement('b');b.textContent=p.name;
+    var inp=document.createElement(p.text?'textarea':'input');inp.value=p.value||'';inp.dataset.pid=p.id;if(!p.text)inp.dir='ltr';
+    row.appendChild(b);row.appendChild(inp);box.appendChild(row);});
+  if(!params.length){box.innerHTML='<div class="msg">اختر التحليل لتظهر حقوله.</div>';}
+  var u=$('un');
+  if(un&&un.length){u.style.display='block';u.textContent='قيم مقروءة لم تتطابق مع حقل: '+un.map(function(x){return x.label+' = '+x.value}).join(' | ');}else{u.style.display='none';}
+}
+function go(f,keepRot){
+  if(!keepRot)ROT=0;CURF=f;
+  st('جاري قراءة الصورة…');$('frm').style.display='none';
+  var rd=new FileReader();rd.onload=function(){$('pv').src=rd.result;$('pv').style.display='block';$('pv').style.transform='rotate('+ROT+'deg)';$('dtxt').style.display='none';$('rotbar').style.display='flex';};rd.readAsDataURL(f);
+  var fd=new FormData();fd.append('image',f,f.name||'result.png');fd.append('rot',String(ROT));
+  fetch('/ai/api/import-extract',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){
+    if(!j.ok){st(j.error||'تعذّرت القراءة','err');return;}
+    st('تمت القراءة. راجع البيانات قبل الحفظ.','ok');
+    var p=j.patient;PAIRS=j.pairs||[];EXID=null;
+    $('nar').value=p.name_ar;$('nen').value=p.name_en;$('sex').value=p.sex;$('age').value=p.age;$('au').value=p.age_unit;$('doc').value=p.doctor;
+    $('frm').style.display='block';
+    var ex=$('ex');ex.innerHTML='';ex.style.display='none';
+    if(j.existing&&j.existing.length){
+      ex.style.display='block';ex.innerHTML='<b>يوجد مريض بنفس الاسم:</b> ';
+      var sel=document.createElement('select');sel.style.width='auto';
+      sel.innerHTML='<option value="">إنشاء مريض جديد</option>'+j.existing.map(function(e){return '<option value="'+e.id+'">استعمل: '+e.name+(e.age?' ('+e.age+')':'')+'</option>'}).join('');
+      sel.onchange=function(){EXID=sel.value||null;};ex.appendChild(sel);}
+    tests(j.tid).then(function(){render(j.params||[],j.unmatched||[]);});
+  }).catch(function(){st('تعذّر الاتصال بالبرنامج.','err');});
+}
+$('tsel').onchange=function(){
+  if(!this.value){render([],[]);return;}
+  fetch('/ai/api/import-match',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({tid:this.value,pairs:PAIRS})})
+  .then(function(r){return r.json()}).then(function(j){if(j.ok)render(j.params,j.unmatched);else st2(j.error,'err');});
+};
+function save(doPrint){
+  var vals={};document.querySelectorAll('#prm [data-pid]').forEach(function(e){if(e.value.trim())vals[e.dataset.pid]=e.value.trim();});
+  var body={name_ar:$('nar').value.trim(),name_en:$('nen').value.trim(),gender:$('sex').value,age:$('age').value.trim(),age_unit:$('au').value,
+    doctor:$('doc').value.trim(),tid:$('tsel').value,values:vals,free:$('free').checked,existing_patient_id:EXID};
+  if(!body.name_ar&&!body.name_en){st2('اكتب اسم المريض.','err');return;}
+  if(!body.tid){st2('اختر التحليل.','err');return;}
+  st2('جاري الحفظ…');$('b1').disabled=$('b2').disabled=true;
+  fetch('/ai/api/import-create',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+  .then(function(r){return r.json()}).then(function(j){
+    $('b1').disabled=$('b2').disabled=false;
+    if(!j.ok){st2(j.error||'تعذّر الحفظ','err');return;}
+    st2('تم الحفظ. المريض صار بالـLIS وبسجل المرضى.','ok');
+    window.location.href=(doPrint&&j.print_url)?j.print_url:j.results_url;
+  }).catch(function(){$('b1').disabled=$('b2').disabled=false;st2('تعذّر الاتصال بالبرنامج.','err');});
+}
+$('b1').onclick=function(){save(false)};$('b2').onclick=function(){save(true)};
+})();
+</script></body></html>"""
+
     app.register_blueprint(bp)
     # ربط «سجل المرضى السحابي» (ledger_sync.py): صفحة /ledger + مزامنة تلقائية. اختياري: أي خطأ لا يوقف البرنامج.
     try:
@@ -21859,6 +22289,16 @@ def _v95_apply_links(db, data):
     if avk:
         set_setting(db, "ai_vision_key", avk)
         done.append("قراءة الصور")
+    # v134: أسلوب جدول النتائج (يدفعه المصمم مع ملف الربط؛ العميل يقدر يغيّره بعدها بنفسه من لوحة الإدخال)
+    rs_ = str(data.get("result_style") or "").strip()
+    if rs_ in RESULT_STYLES:
+        try:
+            _cfg = get_result_layout(db)
+            _cfg["style"] = rs_
+            save_result_layout(db, _cfg)
+            done.append("أسلوب جدول النتائج")
+        except Exception:
+            pass
     db.commit()
     try:
         cloud_sync.trigger()
@@ -21884,19 +22324,115 @@ code{background:#eef2f6;padding:2px 6px;border-radius:5px;direction:ltr;display:
 3) اضغط «تنزيل». 4) ضع الملف <code>links_&lt;HWID&gt;.json</code> بنفس مكان <code>update.json</code>: بمجلد <code>updates</code> بمستودع GitHub، و/أو بمجلد <code>lab-ledger-cloud\\public\\updates</code> ثم شغّل <code>نشر-التحديث.bat</code>.
 العميل يلتقطه تلقائياً (خلال دقائق من فتح البرنامج، ثم كل 6 ساعات، أو فوراً بزر «تحقق من تحديث الآن»). الملف موقّع بمفتاح تحديثاتك ومشفّر لجهاز هذا العميل فقط، فلا ينفع لجهاز ثاني.</p>
 <form method="post">
-<label>معرّف جهاز العميل (HWID)</label><input name="hw" required value="{{hw}}">
+<label>معرّف جهاز العميل (HWID)</label><input name="hw" required value="{{hw}}" id="hwIn" autocomplete="off"><div id="lkst" class="m" style="min-height:22px"></div>
 <label>رابط السجل السحابي (https://…)</label><input name="ledger_url" value="{{lu}}">
 <label>مفتاح الربط LIS_KEY (لكل عميل مفتاح مختلف)</label><input name="ledger_key" autocomplete="off" value="{{lk}}">
 <label>رابط بوابة النتائج</label><input name="portal_url" value="{{pu}}">
 <label>مفتاح بوابة النتائج</label><input name="portal_key" autocomplete="off" value="{{pk}}">
 <label>مفتاح المساعد الذكي (Gemini API key)</label><input name="ai_key" autocomplete="off" value="{{ak}}">
 <input type="hidden" name="ai_provider" value="gemini">
+<label>أسلوب جدول النتائج عند العميل (اختياري — اتركه «بدون تغيير» حتى لا تمس إعداده)</label>
+<select name="result_style" style="width:100%;padding:9px 10px;border:1px solid #CBD5E1;border-radius:9px;font:14px Tahoma"><option value="">بدون تغيير</option><option value="a1">Style A — set 1</option><option value="a2">Style A — set 2</option><option value="b_grid">Style B — Conventional/SI grid</option><option value="b_compact">Style B — compact</option><option value="r1">R1</option><option value="r2">R2</option><option value="r3">R3</option></select>
 <label>مفتاح قراءة الصور (اختياري — اتركه فاضي إذا نفس المزوّد)</label><input name="ai_vision_key" autocomplete="off" value="{{avk}}">
 <button type="button" class="g" onclick="fillMine()">تعبئة من الإعدادات المحفوظة بهذا الجهاز</button><button type="submit">تنزيل links_&lt;HWID&gt;.json</button></form>
 <p class="m">ملاحظة: بوابة النتائج لها Worker/Render ومفتاح مستقل عن السجل السحابي؛ لا تستعمل LIS_KEY هناك. إذا مفتاح البوابة ضاع من هذا الجهاز: ادخل لوحة Render/Cloudflare الخاصة بالبوابة وانسخ المفتاح (أو ولّد مفتاحاً جديداً هناك) ثم الصقه هنا.</p>
+<details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">🔑 مخزن مفاتيح المساعد الذكي (يُوزَّع تلقائياً على كل HWID جديد)</summary>
+<p class="m">الصق مفاتيح Gemini، مفتاح بكل سطر. عند كتابة HWID لعميل جديد يُعبَّأ له مفتاح غير مستعمل تلقائياً، ويُحفظ له (نفس العميل يرجع له نفس المفتاح دائماً). المستعمل الآن: <b>{{pool_used}}</b> من <b>{{pool_total}}</b>.</p>
+<textarea id="poolTa" rows="5" style="width:100%;direction:ltr;font:13px monospace;box-sizing:border-box" placeholder="AIza...&#10;AIza...">{{pool_text}}</textarea>
+<button type="button" class="g" onclick="savePool()">حفظ المخزن</button> <span id="poolMsg" class="m"></span></details>
 <p class="m"><a href="/">رجوع للشاشة الرئيسية</a></p></div>
 <script>function fillMine(){fetch('/designer/client-link/mine',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){
-var f=document.forms[0];f.ledger_url.value=j.ledger_url||'';f.ledger_key.value=j.ledger_key||'';f.portal_url.value=j.portal_url||'';f.portal_key.value=j.portal_key||'';f.ai_key.value=j.ai_key||'';f.ai_vision_key.value=j.ai_vision_key||'';})}</script></body></html>"""
+var f=document.forms[0];f.ledger_url.value=j.ledger_url||'';f.ledger_key.value=j.ledger_key||'';f.portal_url.value=j.portal_url||'';f.portal_key.value=j.portal_key||'';f.ai_key.value=j.ai_key||'';f.ai_vision_key.value=j.ai_vision_key||'';})}
+var _lkT=null;
+function lkLookup(){var f=document.forms[0],hw=(f.hw.value||'').replace(/[^A-Za-z0-9_-]/g,'').toUpperCase(),st=document.getElementById('lkst');
+if(hw.length<8){st.textContent='';return}
+st.textContent='...جاري جلب بيانات هذا العميل';
+fetch('/designer/client-link/lookup?hw='+encodeURIComponent(hw),{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){
+if(j.error){st.textContent=j.error;return}
+['ledger_url','ledger_key','portal_url','portal_key','ai_key','ai_vision_key'].forEach(function(k){if(j[k]){f[k].value=j[k]}});
+var m=[];if(j.saved)m.push('✅ بيانات العميل المحفوظة سابقاً عُبّئت');
+if(j.ai_from_pool)m.push('🔑 مفتاح المساعد: جديد من المخزن (يُحفظ عند التنزيل)');else if(j.ai_key)m.push('🔑 مفتاح المساعد الخاص بهذا العميل');
+if(!j.ai_key)m.push('⚠️ لا يوجد مفتاح مساعد لهذا العميل ولا مفتاح حر بالمخزن — أضف مفاتيح للمخزن أدناه');
+st.textContent=m.join(' · ')||'عميل جديد: عبّي الحقول ثم نزّل الملف (تُحفظ له للمرة القادمة)';
+}).catch(function(){st.textContent='تعذّر جلب بيانات العميل'})}
+document.getElementById('hwIn').addEventListener('input',function(){clearTimeout(_lkT);_lkT=setTimeout(lkLookup,450)});
+function savePool(){fetch('/designer/client-link/pool',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:document.getElementById('poolTa').value})}).then(function(r){return r.json()}).then(function(j){document.getElementById('poolMsg').textContent=j.ok?('تم الحفظ ✓ ('+j.total+' مفتاح، الحر: '+j.free+')'):(j.error||'فشل')})}
+if(document.getElementById('hwIn').value)lkLookup();</script></body></html>"""
+
+
+def _v133_clink_get(db, hw):
+    try:
+        return json.loads(get_setting(db, "clink_" + hw, "") or "{}") or {}
+    except Exception:
+        return {}
+
+
+def _v133_clink_pool(db):
+    keys = []
+    for ln in str(get_setting(db, "clink_ai_pool", "") or "").splitlines():
+        k = re.sub(r"[^\x21-\x7e]|[\"']", "", ln.strip())
+        if k and k not in keys:
+            keys.append(k)
+    used = set()
+    try:
+        idx = json.loads(get_setting(db, "clink_index", "") or "[]")
+    except Exception:
+        idx = []
+    for h in idx:
+        k = (_v133_clink_get(db, h) or {}).get("ai_key")
+        if k:
+            used.add(k)
+    return keys, used
+
+
+def _v133_clink_save(db, hw, rec):
+    old = _v133_clink_get(db, hw)
+    old.update({k: v for k, v in rec.items() if v})
+    old["updated"] = datetime.now().isoformat(timespec="seconds")
+    set_setting(db, "clink_" + hw, json.dumps(old, ensure_ascii=False))
+    try:
+        idx = json.loads(get_setting(db, "clink_index", "") or "[]")
+    except Exception:
+        idx = []
+    if hw not in idx:
+        idx.append(hw)
+        set_setting(db, "clink_index", json.dumps(idx))
+    db.commit()
+
+
+@app.route("/designer/client-link/lookup")
+def v133_client_link_lookup():
+    """يرجّع المحفوظ لهذا الـHWID (ومفتاح مساعد من المخزن إن كان عميلاً جديداً) — لتعبئة الصفحة تلقائياً."""
+    if not session.get("designer_id"):
+        return jsonify(error="designer only"), 403
+    db = get_db()
+    hw = re.sub(r"[^A-Za-z0-9_-]", "", request.args.get("hw") or "").upper()
+    if len(hw) < 8:
+        return jsonify(error="HWID قصير")
+    rec = _v133_clink_get(db, hw)
+    out = {k: rec.get(k, "") for k in ("ledger_url", "ledger_key", "portal_url", "portal_key", "ai_key", "ai_vision_key")}
+    out["saved"] = bool(rec)
+    if not out["ledger_url"]:
+        out["ledger_url"] = get_setting(db, "ledger_url", "") or ""
+    if not out["portal_url"]:
+        out["portal_url"] = get_setting(db, "portal_url", "") or ""
+    if not out["ai_key"]:
+        keys, used = _v133_clink_pool(db)
+        free = [k for k in keys if k not in used]
+        if free:
+            out["ai_key"], out["ai_from_pool"] = free[0], True
+    return jsonify(out)
+
+
+@app.route("/designer/client-link/pool", methods=["POST"])
+def v133_client_link_pool():
+    if not session.get("designer_id"):
+        return jsonify(ok=False, error="designer only"), 403
+    db = get_db()
+    set_setting(db, "clink_ai_pool", str((request.get_json(silent=True) or {}).get("text") or "")[:20000])
+    db.commit()
+    keys, used = _v133_clink_pool(db)
+    return jsonify(ok=True, total=len(keys), free=len([k for k in keys if k not in used]))
 
 
 @app.route("/designer/client-link", methods=["GET", "POST"])
@@ -21916,6 +22452,8 @@ def v95_client_link():
             data.update(ai_key=ak, ai_provider=(f.get("ai_provider") or "gemini"))
         if avk:
             data.update(ai_vision_key=avk)
+        if (f.get("result_style") or "") in RESULT_STYLES:
+            data.update(result_style=f.get("result_style"))
         if lu and lk:
             if not lu.lower().startswith("https://"):
                 err = "رابط السجل لازم يبدأ بـ https://"
@@ -21933,12 +22471,18 @@ def v95_client_link():
                 created = datetime.now().isoformat(timespec="seconds")
                 payload = {"created": created, "links": lab_updater.seal_links(hw, created, data)}
                 env = {"created": created, "sig": _cfg_sign(db, created, payload), "payload": payload}
+                try:
+                    _v133_clink_save(db, hw, dict(ledger_url=lu, ledger_key=lk, portal_url=pu, portal_key=pk, ai_key=ak, ai_vision_key=avk))
+                except Exception:
+                    pass
                 log_action("ClientLink", "settings", 0, hw)
                 return Response(_v93_json.dumps(env, ensure_ascii=False, indent=1), mimetype="application/json",
                                 headers={"Content-Disposition": "attachment; filename=links_%s.json" % hw})
             except Exception as e:  # noqa: BLE001
                 err = "تعذّر التوقيع: %s" % e
-    return _v93_rts(_V95_LINK_HTML, err=err, hw=hw, lu=lu, lk=lk, pu=pu, pk=pk, ak=ak, avk=avk)
+    _pk, _pu = _v133_clink_pool(db)
+    return _v93_rts(_V95_LINK_HTML, err=err, hw=hw, lu=lu, lk=lk, pu=pu, pk=pk, ak=ak, avk=avk,
+                    pool_text=get_setting(db, "clink_ai_pool", "") or "", pool_total=len(_pk), pool_used=len([k for k in _pk if k in _pu]))
 
 
 @app.route("/designer/client-link/mine")

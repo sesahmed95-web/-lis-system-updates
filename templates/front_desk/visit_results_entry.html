@@ -7,6 +7,13 @@
   <a class="btn small secondary" href="{{ url_for('results_list') }}">{{ t('back') }}</a>
   <button type="button" class="btn small danger" data-n="{{ visit['patient_name']|e }} #{{ visit['registration_number'] }}"
      onclick="lisDelete('visit', {{ visit['id'] }}, this.dataset.n, function(){ location.href='{{ url_for('results_list') }}'; })">🗑 حذف المريض/الزيارة</button>
+  <button type="button" class="btn small secondary"
+     onclick="lisRs.open()"
+     title="اختيار أسلوب جدول النتائج للتقارير (يسري على كل المرضى)">🎨 أسلوب التقارير</button>
+  <button type="button" class="btn small secondary" style="border-color:#1d4ed8;color:#1d4ed8;"
+     onclick="window.open('/front-desk/import-image', '_blank')"
+     title="مريض ما عنده بيانات بالـLIS: ارفع صورة نتيجته (مطبوعة بالوورد مثلاً) فتُقرأ بياناته ونتائجه ويُنشأ له زيارة وتحليل ويظهر بسجل المرضى">📷 مريض جديد من صورة نتيجة</button>
+  <button type="button" class="btn small secondary" 
   <button type="button" class="btn small secondary print-link" id="printAllLink"
      onclick="lisTopPrintBtn('{{ url_for('print_visit_full_report', visit_id=visit['id']) }}?autoprint=1', 'طباعة النتائج المكتملة')"
      title="كل التحاليل المكتملة بصفحة وحدة وبنافذة طباعة وحدة (نفس تصميم كل تقرير)">🖨 طباعة النتائج المكتملة</button>
@@ -844,6 +851,8 @@
         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
           <button type="submit" class="btn small" title="حفظ كل نتائج هذه الصفحة (كل التحاليل الظاهرة، مو هذا التحليل بس)">💾 {{ t('save') }}</button>
           <button type="button" class="btn small secondary" onclick="lisPrintOne({{ ot['id'] }})" title="طباعة تقرير هذا التحليل (يحفظ النتيجة تلقائياً + نسخة PDF بالأرشيف). تعديل نتيجة مكتملة يحتاج مسؤول/مشرف، أما الطباعة بدون تعديل فمتاحة للجميع">🖨️</button>
+          <button type="button" class="btn small secondary" onclick="window.open('{{ url_for('print_report', order_test_id=ot['id']) }}', '_blank')" title="يفتح معاينة تقرير هذا التحليل — فيها شريط «✏️ تعديل التصميم» لتغيير الأسلوب وحجم الباراميترات وعناوين التقرير">🎨 تصميم</button>
+          {% if ot['status'] != 'Verified' %}<button type="button" class="btn small secondary" onclick="lisRenameTestOpen({{ ot['id'] }})" title="تعديل اسم التحليل أو كتابة مختصره (بين قوسين) — يسري على كل المرضى الحاليين والقادمين">✏️ اسم/مختصر</button>{% endif %}
           {% if ot['status'] != 'Verified' %}<button type="button" class="btn small secondary" onclick="lisAddParamOpen({{ ot['id'] }})" title="إضافة حقل جديد لهذا التقرير بمكان تختاره مع نسبه الطبيعية">➕ حقل</button>{% endif %}
           {% if ot['status'] != 'Verified' %}<button type="button" class="btn small secondary" onclick="lisDelParamOpen({{ ot['id'] }})" data-hidden='{{ box.hidden_params|tojson }}' id="lisDelBtn_{{ ot['id'] }}" title="حذف باراميتر (أو أكثر) من تقرير هذا المريض — تختاره من قائمة">🗑 حذف باراميتر{% if box.hidden_params %} ({{ box.hidden_params|length }}){% endif %}</button>{% endif %}
           <span class="badge badge-{{ ot['status'] }}">{{ ot['status'] }}</span>
@@ -2141,6 +2150,88 @@
 </script>
 
 <script>
+/* ===== v134: 🎨 اختيار أسلوب جدول النتائج من لوحة الإدخال ===== */
+window.lisRs = (function () {
+  var NAMES = { a1: 'Style A — set 1', a2: 'Style A — set 2', b_grid: 'Style B — Conventional / SI', b_compact: 'Style B — compact', r1: 'R1', r2: 'R2', r3: 'R3' };
+  function open() {
+    fetch('/api/result-style').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) { alert('تعذّر قراءة الأسلوب'); return; }
+      var ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:99998;display:flex;align-items:center;justify-content:center;padding:16px;';
+      var opts = d.styles.map(function (s) { return '<label style="display:flex;gap:8px;align-items:center;padding:6px 4px;cursor:pointer;"><input type="radio" name="lisRsPick" value="' + s + '"' + (s === d.style ? ' checked' : '') + '> ' + (NAMES[s] || s) + '</label>'; }).join('');
+      ov.innerHTML = '<div style="background:#fff;border-radius:12px;padding:18px 20px;width:min(420px,96vw);direction:rtl;box-shadow:0 10px 40px rgba(0,0,0,.3);"><h3 style="margin:0 0 4px;">🎨 أسلوب جدول النتائج</h3>' +
+        '<div class="muted" style="font-size:12px;margin-bottom:8px;">يسري على تقارير كل المرضى. لمعاينته: بعد الحفظ اضغط 🎨 تصميم أو 🖨 على أي تحليل.</div>' + opts +
+        '<div class="rs-err" style="color:#B91C1C;font-size:13px;min-height:18px;"></div><div style="display:flex;gap:8px;margin-top:6px;"><button type="button" class="btn rs-ok">حفظ</button><button type="button" class="btn secondary rs-cancel">إلغاء</button></div></div>';
+      document.body.appendChild(ov);
+      ov.querySelector('.rs-cancel').onclick = function () { ov.remove(); };
+      ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+      ov.querySelector('.rs-ok').onclick = function () {
+        var v = (ov.querySelector('input[name=lisRsPick]:checked') || {}).value; if (!v) return;
+        fetch('/api/result-style', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ style: v }) })
+          .then(function (r) { return r.json(); }).then(function (j) {
+            if (j.ok) { ov.remove(); alert('تم حفظ الأسلوب ✓'); } else ov.querySelector('.rs-err').textContent = j.error || 'تعذّر الحفظ';
+          }).catch(function () { ov.querySelector('.rs-err').textContent = 'تعذّر الاتصال بالسيرفر'; });
+      };
+    }).catch(function () { alert('تعذّر الاتصال بالسيرفر'); });
+  }
+  return { open: open };
+})();
+</script>
+
+<script>
+/* ===== v133: ✏️ تعديل اسم التحليل / مختصره من لوحة الإدخال (يسري على كل المرضى) ===== */
+(function () {
+  var STASH_KEY = 'lisStash_{{ visit['id'] }}';
+  function stash() {
+    var data = {};
+    document.querySelectorAll('#visitResultsForm input[name^="ot"], #visitResultsForm textarea[name^="ot"]').forEach(function (el) {
+      if (/^ot\d+_(param_\d+|analyzer)$/.test(el.name) && el.value !== el.defaultValue) data[el.name] = el.value;
+    });
+    try { sessionStorage.setItem(STASH_KEY, JSON.stringify(data)); } catch (e) {}
+  }
+  window.lisRenameTestOpen = function (otId) {
+    var box = document.getElementById('rbox_' + otId); if (!box) return;
+    var tdid = box.getAttribute('data-tdid'), cur = ((box.querySelector('h4') || {}).textContent || '').trim();
+    var m = cur.match(/^(.*?)\s*\(([^()]+)\)\s*$/), full = m ? m[1] : cur, abbr = m ? m[2] : '';
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:99998;display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML = '<div style="background:#fff;border-radius:12px;padding:18px 20px;width:min(480px,96vw);direction:rtl;box-shadow:0 10px 40px rgba(0,0,0,.3);">' +
+      '<h3 style="margin:0 0 4px;">✏️ اسم التحليل / المختصر</h3><div class="muted" style="font-size:12px;margin-bottom:10px;">يسري على كل المرضى (الحاليين والقادمين) الذين لهم هذا التحليل.</div>' +
+      '<label style="font-size:13px;">الاسم الكامل (اختياري إذا تكتفي بالمختصر)</label><input type="text" class="rn-full" dir="ltr" style="width:100%;text-align:left;margin-bottom:8px;">' +
+      '<label style="font-size:13px;">المختصر</label><input type="text" class="rn-abbr" dir="ltr" style="width:100%;text-align:left;margin-bottom:8px;" placeholder="مثال: FT4">' +
+      '<label style="font-size:13px;">طريقة الظهور</label><select class="rn-mode" style="width:100%;margin-bottom:8px;"><option value="both">الاسم الكامل (المختصر)</option><option value="abbr">المختصر فقط</option><option value="full">الاسم الكامل فقط</option></select>' +
+      '<div style="font-size:13px;">سيظهر هكذا: <b class="rn-prev" dir="ltr"></b></div><div class="rn-err" style="color:#B91C1C;font-size:13px;min-height:18px;margin-top:4px;"></div>' +
+      '<div style="display:flex;gap:8px;margin-top:8px;"><button type="button" class="btn rn-ok">حفظ</button><button type="button" class="btn secondary rn-cancel">إلغاء</button></div></div>';
+    document.body.appendChild(ov);
+    var q = function (c) { return ov.querySelector(c); };
+    q('.rn-full').value = full; q('.rn-abbr').value = abbr; q('.rn-mode').value = abbr ? 'both' : 'full';
+    function val() {
+      var f = q('.rn-full').value.trim(), a = q('.rn-abbr').value.trim(), md = q('.rn-mode').value;
+      if (md === 'abbr') return a || f;
+      if (md === 'both') return (f && a) ? (f + ' (' + a + ')') : (f || a);
+      return f || a;
+    }
+    function prev() { q('.rn-prev').textContent = val(); }
+    q('.rn-abbr').addEventListener('input', function () { if (q('.rn-mode').value === 'full' && q('.rn-full').value.trim() && this.value.trim()) q('.rn-mode').value = 'both'; });
+    ['input', 'change'].forEach(function (ev) { ov.addEventListener(ev, prev); }); prev();
+    function close() { ov.remove(); }
+    q('.rn-cancel').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    q('.rn-ok').onclick = function () {
+      var nm = val(); if (!nm) { q('.rn-err').textContent = 'اكتب الاسم أو المختصر.'; return; }
+      q('.rn-ok').disabled = true;
+      fetch('/api/test-definitions/' + tdid + '/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nm }) })
+        .then(function (r) { return r.json(); }).then(function (d) {
+          q('.rn-ok').disabled = false;
+          if (!d.ok) { q('.rn-err').textContent = d.error || 'تعذّر الحفظ'; return; }
+          stash(); window.location.reload();
+        }).catch(function () { q('.rn-ok').disabled = false; q('.rn-err').textContent = 'تعذّر الاتصال بالسيرفر'; });
+    };
+    setTimeout(function () { q('.rn-abbr').focus(); }, 30);
+  };
+})();
+</script>
+
+<script>
 /* ===== 📎 صورة/لقطة نتيجة الجهاز + ملاحظة التقرير (Hb Electrophoresis، CBC...) ===== */
 (function () {
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -2156,7 +2247,9 @@
       '<div class="lm-dev muted" style="margin-top:6px;font-size:.9em;"></div>' +
       '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
         '<select class="lm-mode"><option value="paper">ورقة / وصل مطبوع من الجهاز (تنظيف + قص)</option><option value="screen">لقطة شاشة الجهاز</option></select>' +
-        '<input type="file" class="lm-file" accept="image/*">' +
+        '<label class="btn small lm-pick" style="cursor:pointer;margin:0;">📁 اختر صورة<input type="file" class="lm-file" accept="image/*,.jpg,.jpeg,.png,.webp,.bmp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;"></label>' +
+        '<button type="button" class="btn small secondary lm-paste" title="الصق لقطة شاشة/صورة منسوخة (أو اضغط Ctrl+V داخل هذا المربع)">📋 لصق صورة</button>' +
+        '<span class="lm-fname muted" style="font-size:12px;"></span>' +
         '<button type="button" class="btn small lm-up">⬆ رفع</button>' +
         '<button type="button" class="btn small secondary lm-ai" style="display:none;" title="يقرأ القيم من الصورة ويعبّيها للمراجعة — ما يحفظ شي">🤖 قراءة القيم من الصورة</button>' +
         '<span class="lm-msg" style="font-size:12px;"></span>' +
@@ -2179,6 +2272,38 @@
       bar.insertBefore(b, bar.firstChild);
     })();
     var msg = function (t, bad) { var e = q('.lm-msg'); e.textContent = t || ''; e.style.color = bad ? '#b00020' : '#0a7a3b'; };
+    /* v133: اختيار الصورة صار زر واضح + رفع تلقائي بعد الاختيار + لصق من الحافظة (Ctrl+V) + سحب وإفلات — لأن نافذة اختيار الملف قد لا تفتح ببعض أجهزة العملاء */
+    var _picked = null;
+    function setPicked(file) { _picked = file; q('.lm-fname').textContent = file ? file.name : ''; }
+    q('.lm-file').addEventListener('change', function () { if (this.files && this.files[0]) { setPicked(this.files[0]); setTimeout(function () { q('.lm-up').click(); }, 50); } });
+    function fromClipboardItems(items) {
+      for (var i = 0; i < (items || []).length; i++) { if (items[i].type && items[i].type.indexOf('image/') === 0) { var f = items[i].getAsFile ? items[i].getAsFile() : null; if (f) return f; } }
+      return null;
+    }
+    function takeImage(f) {
+      if (!f) return false;
+      if (!f.name || f.name === 'image.png') { try { f = new File([f], 'pasted_' + Date.now() + '.png', { type: f.type || 'image/png' }); } catch (e) {} }
+      setPicked(f); setTimeout(function () { q('.lm-up').click(); }, 50); return true;
+    }
+    box.tabIndex = 0;
+    box.addEventListener('paste', function (e) { var f = fromClipboardItems(e.clipboardData && e.clipboardData.items); if (f) { e.preventDefault(); takeImage(f); } });
+    ['dragover', 'dragenter'].forEach(function (ev) { box.addEventListener(ev, function (e) { e.preventDefault(); box.style.background = 'rgba(15,118,110,.15)'; }); });
+    box.addEventListener('dragleave', function () { box.style.background = ''; });
+    box.addEventListener('drop', function (e) {
+      e.preventDefault(); box.style.background = '';
+      var fl = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (fl && /^image\//.test(fl.type || 'image/')) takeImage(fl);
+    });
+    q('.lm-paste').onclick = function () {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        navigator.clipboard.read().then(function (items) {
+          for (var i = 0; i < items.length; i++) for (var j = 0; j < items[i].types.length; j++) if (items[i].types[j].indexOf('image/') === 0) {
+            return items[i].getType(items[i].types[j]).then(function (b) { takeImage(new File([b], 'pasted_' + Date.now() + '.png', { type: b.type })); });
+          }
+          msg('ما لقيت صورة بالحافظة — انسخ الصورة (أو خذ لقطة شاشة Win+Shift+S) ثم اضغط Ctrl+V داخل هذا المربع.', true);
+        }).catch(function () { box.focus(); msg('اضغط Ctrl+V الآن داخل هذا المربع للصق الصورة.', true); });
+      } else { box.focus(); msg('اضغط Ctrl+V الآن داخل هذا المربع للصق الصورة.', true); }
+    };
     var firstImg = null;
     function render(d) {
       var th = q('.lm-thumbs'); th.innerHTML = '';
@@ -2204,13 +2329,13 @@
       q('.lm-dev').innerHTML = 'للكتابة بالجهاز: <b dir="ltr">' + esc(d.name_en || '(لا يوجد اسم إنكليزي — أضفه بملف المريض)') + '</b> · العمر: <b>' + esc(d.age == null ? '—' : d.age + ' ' + d.age_unit) + '</b>';
     }).catch(function () {});
     q('.lm-up').onclick = function () {
-      var f = q('.lm-file').files[0];
-      if (!f) { msg('اختر صورة أولاً.', true); return; }
+      var f = (q('.lm-file').files && q('.lm-file').files[0]) || _picked;
+      if (!f) { msg('اختر صورة أولاً (زر «اختر صورة»، أو الصق لقطة بـ Ctrl+V، أو اسحبها هنا).', true); return; }
       var fd = new FormData(); fd.append('file', f); fd.append('mode', q('.lm-mode').value);
       msg('جاري الرفع والتنظيف…');
       fetch('/api/order-tests/' + id + '/media', { method: 'POST', body: fd }).then(function (r) { return r.json(); }).then(function (d) {
         if (!d.ok) { msg(d.error || 'فشل الرفع', true); return; }
-        q('.lm-file').value = ''; msg('تم ✓'); load(); if (window.__hbAuto) window.__hbAuto(id);
+        q('.lm-file').value = ''; _picked = null; q('.lm-fname').textContent = ''; msg('تم ✓'); load(); if (window.__hbAuto) window.__hbAuto(id);
         /* غير Hb: اقرأ القيم تلقائياً وعبّها أمام كل باراميتر (للمراجعة، لا يحفظ) */
         if (!(window.__hbAutoMap && window.__hbAutoMap[id]) && document.querySelector('[name^="ot' + id + '_param_"]')) {
           setTimeout(function () { try { if (q('.lm-ai').style.display !== 'none') q('.lm-ai').click(); } catch (e) {} }, 900);
